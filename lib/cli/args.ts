@@ -9,6 +9,9 @@ export type WorkflowCommand =
   | "final-review"
   | "readiness";
 
+export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof thinkingLevels)[number];
+
 export type CliOptions = {
   command: WorkflowCommand;
   issue: string;
@@ -16,6 +19,7 @@ export type CliOptions = {
   outDir: string;
   repo?: string;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -54,6 +58,7 @@ Options:
   --cwd <path>           Repository working directory. Defaults to current directory.
   --out <path>           Runs directory. Defaults to .roark/runs.
   --model <provider/id>  Optional Pi model override, e.g. anthropic/claude-sonnet-4-5.
+  --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for do. Defaults to 1.
   --fix-pass <n>         Pass number for standalone fix/final-review.
   --force                Re-run phases even if their markdown artifact already exists.
@@ -90,6 +95,7 @@ export function parseArgs(argv: string[]): CliOptions | { help: true } {
     else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
     else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--max-fix-passes") {
       options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
       maxFixPassesProvided = true;
@@ -122,4 +128,9 @@ function parsePositiveInteger(value: string, flag: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer.`);
   return parsed;
+}
+
+function parseThinkingLevel(value: string, flag: string): ThinkingLevel {
+  if ((thinkingLevels as readonly string[]).includes(value)) return value as ThinkingLevel;
+  throw new Error(`${flag} must be one of: ${thinkingLevels.join(", ")}. Got '${value}'.`);
 }

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { CliOptions } from "../cli/args.ts";
+import type { CliOptions, ThinkingLevel } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
 
 export type StaticArtifactName =
@@ -27,6 +27,7 @@ export type WorkflowContext = {
   issueNumber: string;
   repo?: string;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -68,6 +69,7 @@ export function createWorkflowContext(options: CliOptions): WorkflowContext {
     issueNumber: parsed.issueNumber,
     repo: parsed.repo,
     model: options.model,
+    thinkingLevel: options.thinkingLevel,
     force: options.force,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,

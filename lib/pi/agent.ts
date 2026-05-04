@@ -13,6 +13,7 @@ const readOnlyTools = ["read", "bash", "grep", "find", "ls"];
 const writableTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 export async function runPiAgent(options: AgentRunRequest): Promise<string> {
+  console.log(`thinking: ${options.thinkingLevel}`);
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const model = options.model ? resolveModel(modelRegistry, options.model) : undefined;
@@ -40,7 +41,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     authStorage,
     modelRegistry,
     model,
-    thinkingLevel: "xhigh",
+    thinkingLevel: options.thinkingLevel,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(options.cwd),
     settingsManager,
