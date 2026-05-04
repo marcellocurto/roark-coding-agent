@@ -2,10 +2,19 @@
   "name": "roark-coding-agent",
   "module": "index.ts",
   "type": "module",
-  "devDependencies": {
-    "@types/bun": "latest"
+  "bin": {
+    "roark-coding-agent": "./index.ts"
   },
-  "peerDependencies": {
-    "typescript": "^5"
+  "scripts": {
+    "start": "bun run index.ts",
+    "agent": "bun run index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.72.1"
   }
 }
