@@ -1,13 +1,14 @@
 {
   "name": "roark-coding-agent",
-  "module": "index.ts",
+  "module": "roark-coding-agent.ts",
   "type": "module",
   "bin": {
-    "roark-coding-agent": "./index.ts"
+    "roark-coding-agent": "./roark-coding-agent.ts"
   },
   "scripts": {
-    "start": "bun run index.ts",
-    "agent": "bun run index.ts",
+    "start": "bun run roark-coding-agent.ts",
+    "agent": "bun run roark-coding-agent.ts",
+    "do": "bun run roark-coding-agent.ts do",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
