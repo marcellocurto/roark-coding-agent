@@ -1,10 +1,19 @@
+import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { claimGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues } from "../github/issue.ts";
+import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
 import { createClaimPlan } from "./claim.ts";
+import { formatFailureComment, markIssueFailed } from "./failure.ts";
+import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { createIssueWorktree, createWorktreePlan } from "./worktree.ts";
-import { selectEligibleIssues } from "./selection.ts";
+import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
+import {
+  runVerification,
+  writeVerificationArtifact,
+  type VerificationResult,
+} from "./verification.ts";
 
 const discoveryFetchLimit = 100;
 
@@ -63,10 +72,81 @@ export async function runAutoDiscovery(options: AutoCliOptions): Promise<void> {
     await createIssueWorktree({ cwd: options.cwd, plan: worktreePlan });
 
     console.log(`- Running full workflow in ${worktreePlan.worktreePathRelative}`);
-    await runFullWorkflow(createAutorunWorkflowContext(issue, worktreePlan, options));
+    const workflowContext = createAutorunWorkflowContext(issue, worktreePlan, options);
+    await runFullWorkflow(workflowContext);
+
+    await runPublishGate({
+      options,
+      issue,
+      worktreePath: worktreePlan.worktreePath,
+      workflowContext,
+    });
   }
 
   console.log("\nAuto workflow complete.");
+}
+
+async function runPublishGate(input: {
+  options: AutoCliOptions;
+  issue: AutorunIssueCandidate;
+  worktreePath: string;
+  workflowContext: WorkflowContext;
+}): Promise<void> {
+  const { options, issue, worktreePath, workflowContext } = input;
+
+  const readinessMarkdown = await readReadinessArtifact(workflowContext);
+  const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
+
+  let verification: VerificationResult | undefined;
+  if (readinessStatus === "ready-for-pr") {
+    verification = await runVerification({ command: options.verifyCommand, cwd: worktreePath });
+    await writeVerificationArtifact(workflowContext, verification);
+  }
+
+  const decision = decidePublish({ readinessStatus, verification });
+
+  if (decision.publish) {
+    console.log("\nReady to publish (publish step not yet implemented).");
+    return;
+  }
+
+  await handleNonPublish({ options, issue, workflowContext, decision });
+}
+
+async function readReadinessArtifact(context: WorkflowContext): Promise<string | undefined> {
+  try {
+    return await readArtifact(context, "readiness");
+  } catch {
+    return undefined;
+  }
+}
+
+async function handleNonPublish(input: {
+  options: AutoCliOptions;
+  issue: AutorunIssueCandidate;
+  workflowContext: WorkflowContext;
+  decision: Extract<PublishGateDecision, { publish: false }>;
+}): Promise<void> {
+  const { options, issue, workflowContext, decision } = input;
+  const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
+
+  console.log(`\nNot publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
+  console.log(`Artifact: ${artifactPath}`);
+
+  const comment = formatFailureComment({
+    issueNumber: issue.number,
+    phase: decision.phase,
+    reason: decision.reason,
+    artifactPath,
+  });
+
+  await markIssueFailed({
+    cwd: options.cwd,
+    repo: options.repo,
+    issueNumber: issue.number,
+    label: options.failureLabel,
+    comment,
+  });
 }
 
 async function resolveAssignee(options: AutoCliOptions): Promise<string | undefined> {

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
 import {
   defaultAutorunInProgressLabel,
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
+import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
 import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
 import { parseArgs } from "./args.ts";
 
@@ -23,6 +25,8 @@ describe("parseArgs", () => {
     expect(parsed.dryRun).toBe(false);
     expect(parsed.baseBranch).toBe(defaultAutorunBaseBranch);
     expect(parsed.worktreeRoot).toBe(defaultAutorunWorktreeRoot);
+    expect(parsed.verifyCommand).toBe(defaultAutorunVerifyCommand);
+    expect(parsed.failureLabel).toBe(defaultAutorunFailureLabel);
     expect(parsed.maxFixPasses).toBe(1);
     expect(parsed.force).toBe(false);
     expect(parsed.yes).toBe(false);
@@ -50,6 +54,10 @@ describe("parseArgs", () => {
       "develop",
       "--worktree-root",
       ".tmp/worktrees",
+      "--verify",
+      "bun install --frozen-lockfile && bun run typecheck",
+      "--failure-label",
+      "custom-failed",
       "--model",
       "provider/model",
       "--thinking",
@@ -72,6 +80,8 @@ describe("parseArgs", () => {
     expect(parsed.dryRun).toBe(true);
     expect(parsed.baseBranch).toBe("develop");
     expect(parsed.worktreeRoot).toBe(".tmp/worktrees");
+    expect(parsed.verifyCommand).toBe("bun install --frozen-lockfile && bun run typecheck");
+    expect(parsed.failureLabel).toBe("custom-failed");
     expect(parsed.model).toBe("provider/model");
     expect(parsed.thinkingLevel).toBe("high");
     expect(parsed.maxFixPasses).toBe(3);

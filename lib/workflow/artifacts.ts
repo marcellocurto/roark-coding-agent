@@ -12,6 +12,7 @@ export type StaticArtifactName =
   | "reviewA"
   | "reviewB"
   | "readiness"
+  | "verification"
   | "metadata";
 
 export type NumberedArtifactName = "fixLog" | "finalReview";
@@ -42,6 +43,7 @@ const filenames: Record<StaticArtifactName, string> = {
   reviewA: "review-a.md",
   reviewB: "review-b.md",
   readiness: "readiness.md",
+  verification: "verification.md",
   metadata: "metadata.json",
 };
 

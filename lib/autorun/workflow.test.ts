@@ -15,6 +15,8 @@ const autoOptions = {
   dryRun: false,
   baseBranch: "main",
   worktreeRoot: ".roark/worktrees",
+  verifyCommand: "bun run typecheck",
+  failureLabel: "roark-failed",
   model: "provider/model",
   thinkingLevel: "high",
   maxFixPasses: 3,
