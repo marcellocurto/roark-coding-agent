@@ -16,6 +16,8 @@ const autoOptions = {
   baseBranch: "main",
   verifyCommand: "bun run typecheck",
   failureLabel: "roark-failed",
+  successLabel: "roark-pr-opened",
+  remote: "origin",
   model: "provider/model",
   thinkingLevel: "high",
   maxFixPasses: 3,

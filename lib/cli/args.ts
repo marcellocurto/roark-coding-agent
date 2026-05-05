@@ -1,4 +1,5 @@
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
+import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "../autorun/publish.ts";
 import {
   defaultAutorunInProgressLabel,
   defaultAutorunReadyLabel,
@@ -51,6 +52,8 @@ export type AutoCliOptions = {
   baseBranch: string;
   verifyCommand: string;
   failureLabel: string;
+  successLabel: string;
+  remote: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
   maxFixPasses: number;
@@ -112,6 +115,9 @@ Options:
   --verify <cmd>         Verification command to run before publishing. Runs via 'sh -c'. Defaults to '${defaultAutorunVerifyCommand}'.
   --failure-label <label>
                           Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
+  --success-label <label>
+                          Label applied to the issue when a draft PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
+  --remote <name>        Git remote to push the issue branch to. Defaults to ${defaultAutorunRemote}.
   --force                Re-run phases even if their markdown artifact already exists.
   --yes                  Continue past dirty git preflight for implementation/fix.
   -h, --help             Show this help.
@@ -142,6 +148,8 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     baseBranch: defaultAutorunBaseBranch,
     verifyCommand: defaultAutorunVerifyCommand,
     failureLabel: defaultAutorunFailureLabel,
+    successLabel: defaultAutorunSuccessLabel,
+    remote: defaultAutorunRemote,
     maxFixPasses: 1,
     force: false,
     yes: false,
@@ -174,6 +182,8 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     else if (arg === "--base-branch") options.baseBranch = requiredValue(args, ++index, arg);
     else if (arg === "--verify") options.verifyCommand = requiredValue(args, ++index, arg);
     else if (arg === "--failure-label") options.failureLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--success-label") options.successLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--remote") options.remote = requiredValue(args, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(args, ++index, arg), arg);
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);

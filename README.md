@@ -61,6 +61,22 @@ bun run roark-coding-agent.ts final-review 123 --fix-pass 2
 
 Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`.
 
+## Auto mode
+
+`auto` finds eligible issues, claims them, runs the workflow, and — when readiness is `ready-for-pr` and the verification command succeeds — commits workflow artifacts, pushes the issue branch, opens a draft PR against `main`, and labels the issue with `roark-pr-opened`.
+
+```bash
+bun run roark-coding-agent.ts auto --repo owner/repo
+```
+
+Relevant flags:
+
+- `--remote <name>` — git remote to push the issue branch to. Defaults to `origin`.
+- `--success-label <label>` — label applied to the issue when a draft PR is opened. Defaults to `roark-pr-opened`.
+- `--failure-label <label>` — label applied when readiness or verification fails. Defaults to `roark-failed`.
+
+Auto never merges PRs and never closes issues.
+
 ## Inspiration
 
 [symphony](https://github.com/openai/symphony)

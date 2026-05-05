@@ -3,9 +3,10 @@ import type { AutoCliOptions } from "../cli/args.ts";
 import { claimGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues } from "../github/issue.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
-import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
+import { checkoutIssueBranch, createBranchPlan, type AutorunBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
+import { publishAutorunResult } from "./publish.ts";
 import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
@@ -76,6 +77,7 @@ export async function runAutoDiscovery(options: AutoCliOptions): Promise<void> {
     await runPublishGate({
       options,
       issue,
+      branchPlan,
       workflowContext,
     });
   }
@@ -86,9 +88,10 @@ export async function runAutoDiscovery(options: AutoCliOptions): Promise<void> {
 async function runPublishGate(input: {
   options: AutoCliOptions;
   issue: AutorunIssueCandidate;
+  branchPlan: AutorunBranchPlan;
   workflowContext: WorkflowContext;
 }): Promise<void> {
-  const { options, issue, workflowContext } = input;
+  const { options, issue, branchPlan, workflowContext } = input;
 
   const readinessMarkdown = await readReadinessArtifact(workflowContext);
   const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
@@ -102,7 +105,7 @@ async function runPublishGate(input: {
   const decision = decidePublish({ readinessStatus, verification });
 
   if (decision.publish) {
-    console.log("\nReady to publish (publish step not yet implemented).");
+    await publishAutorunResult({ options, issue, branchPlan, workflowContext, verification });
     return;
   }
 
