@@ -59,7 +59,7 @@ bun run roark-coding-agent.ts fix 123 --fix-pass 2
 bun run roark-coding-agent.ts final-review 123 --fix-pass 2
 ```
 
-Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`. Use `--attempt <n>` with issue commands when you need to target a specific autorun attempt directory.
+Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`.
 
 ## Auto mode
 
@@ -131,17 +131,7 @@ Autorun publishes only when **both** gates pass.
 - **Readiness gate.** The workflow's `readiness.md` artifact must contain a `## Status` heading whose value (after stripping backticks/emphasis) is exactly `ready-for-pr`. Anything else — including `not-ready` or a missing status — fails the gate.
 - **Verification gate.** Autorun runs `--verify` (default `bun run typecheck`) via `sh -c` in the workflow's `cwd`. Exit code `0` passes; any non-zero exit fails. The command, exit code, and tails of stdout/stderr are written to `verification.md`.
 
-When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), includes the artifact contents/excerpt directly in the GitHub comment, and gives the exact `continue` command for that attempt.
-
-### Recovering stopped attempts
-
-A failed autorun attempt is recoverable without relabeling the issue or starting from scratch. Run the command from the same checkout:
-
-```bash
-bun run roark-coding-agent.ts continue 123 --repo owner/repo --attempt 1
-```
-
-If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It switches back to the attempt branch from `attempt.json`, reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns the verification gate, and publishes the draft PR only if both gates pass. This is the intended recovery path for cases like an empty review artifact, failed readiness, or failed verification.
+When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), and the attempt metadata file.
 
 ### Draft PR only — never merges, never closes
 
