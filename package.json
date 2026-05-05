@@ -9,6 +9,7 @@
     "start": "bun run roark-coding-agent.ts",
     "agent": "bun run roark-coding-agent.ts",
     "do": "bun run roark-coding-agent.ts do",
+    "auto": "bun run roark-coding-agent.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
