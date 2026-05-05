@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
 import { parseArgs, usage } from "./lib/cli/args.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
@@ -14,11 +13,6 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   if (parsed.command === "auto") {
     await runAutoDiscovery(parsed);
-    return;
-  }
-
-  if (parsed.command === "continue") {
-    await runAutoContinue(parsed);
     return;
   }
 

@@ -7,12 +7,10 @@ import {
   inferNextFinalReviewPass,
   inferNextFixPass,
   readArtifact,
-  type ArtifactRef,
   type WorkflowContext,
   writeArtifact,
   writeJsonArtifact,
 } from "./artifacts.ts";
-import { validateAgentArtifact } from "./artifact-validation.ts";
 import { assertCleanGit } from "./git.ts";
 import { buildReadinessMarkdown } from "./readiness.ts";
 import {
@@ -64,7 +62,7 @@ export async function planPhase(context: WorkflowContext, runner: AgentRunner = 
 }
 
 export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  if (await shouldRegenerateArtifact(context, implementationTask.artifact)) {
+  if (context.force || !artifactExists(context, implementationTask.artifact)) {
     await assertCleanGit({ cwd: context.cwd, yes: context.yes });
   }
   return runAgentTask(context, runner, implementationTask);
@@ -85,7 +83,7 @@ export async function fixPhase(
   runner: AgentRunner = runPiAgent,
 ): Promise<string> {
   const task = fixTask(pass);
-  if (await shouldRegenerateArtifact(context, task.artifact)) {
+  if (context.force || !artifactExists(context, task.artifact)) {
     await assertCleanGit({ cwd: context.cwd, yes: true });
   }
   return runAgentTask(context, runner, task);
@@ -141,12 +139,6 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   }
 
   await readinessPhase(context);
-}
-
-async function shouldRegenerateArtifact(context: WorkflowContext, artifact: ArtifactRef): Promise<boolean> {
-  if (context.force || !artifactExists(context, artifact)) return true;
-  const existing = await readArtifact(context, artifact);
-  return !validateAgentArtifact(artifact, existing).ok;
 }
 
 export async function runSinglePhase(

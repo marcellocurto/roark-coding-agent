@@ -1,6 +1,5 @@
 import type { AutoCliOptions } from "../cli/args.ts";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
-import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
   artifactRelativePath,
@@ -40,13 +39,8 @@ export type FormatPrBodyInput = {
   attemptMetadataPath?: string;
 };
 
-export type AutorunPublishOptions = Pick<
-  AutoCliOptions,
-  "cwd" | "repo" | "failureLabel" | "successLabel" | "inProgressLabel" | "remote" | "baseBranch"
->;
-
 export type PublishAutorunResultInput = {
-  options: AutorunPublishOptions;
+  options: AutoCliOptions;
   issue: AutorunIssueCandidate;
   branchPlan: AutorunBranchPlan;
   workflowContext: WorkflowContext;
@@ -223,18 +217,5 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     console.warn(
       `Failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
     );
-  }
-
-  for (const label of [options.inProgressLabel, options.failureLabel].filter((label) => label !== options.successLabel)) {
-    try {
-      await runProcessOrThrow(
-        buildRemoveLabelArgv({ repo: options.repo, issueNumber: issue.number, label }),
-        { cwd, label: "gh issue edit --remove-label (success cleanup)" },
-      );
-    } catch (error) {
-      console.warn(
-        `Failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 }
