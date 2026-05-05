@@ -11,6 +11,8 @@ import {
   attemptMetadataRelativePath,
   attemptsRootDir,
   formatAttemptMetadata,
+  latestAttemptNumber,
+  readAttemptIndex,
   readAttemptMetadata,
   summarizeAttempt,
   updateAttemptIndex,
@@ -183,6 +185,38 @@ describe("writeAttemptMetadata + readAttemptMetadata", () => {
 
     const parsed = await readAttemptMetadata(issueDir, metadata.attempt);
     expect(parsed).toEqual(metadata);
+  });
+});
+
+describe("readAttemptIndex + latestAttemptNumber", () => {
+  test("reads the persisted index and returns the latest attempt", async () => {
+    const issueDir = await makeIssueDir();
+    await updateAttemptIndex(issueDir, {
+      attempt: 1,
+      branch: "roark/issue-10",
+      startedAt: "2026-05-05T07:00:00.000Z",
+      endedAt: null,
+      outcome: "failed-readiness",
+      runArtifactPath: ".roark/runs/issue/10/attempts/1",
+    });
+    await updateAttemptIndex(issueDir, {
+      attempt: 3,
+      branch: "roark/issue-10",
+      startedAt: "2026-05-05T09:00:00.000Z",
+      endedAt: null,
+      outcome: "in-progress",
+      runArtifactPath: ".roark/runs/issue/10/attempts/3",
+    });
+
+    expect((await readAttemptIndex(issueDir)).map((entry) => entry.attempt)).toEqual([1, 3]);
+    expect(await latestAttemptNumber(issueDir)).toBe(3);
+  });
+
+  test("falls back to numeric attempt directories when the index is missing", async () => {
+    const issueDir = await makeIssueDir();
+    await mkdir(path.join(issueDir, "attempts", "1"), { recursive: true });
+    await mkdir(path.join(issueDir, "attempts", "4"), { recursive: true });
+    expect(await latestAttemptNumber(issueDir)).toBe(4);
   });
 });
 

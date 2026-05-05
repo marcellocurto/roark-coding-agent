@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { claimGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues } from "../github/issue.ts";
-import { ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { ensureRunDir } from "../workflow/artifacts.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
 import {
   allocateNextAttempt,
@@ -15,18 +15,14 @@ import {
   type AttemptOutcome,
   type Clock,
 } from "./attempts.ts";
-import { checkoutIssueBranch, createBranchPlan, type AutorunBranchPlan } from "./branch.ts";
+import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { publishAutorunResult } from "./publish.ts";
-import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
+import { runPublishGate } from "./publish-flow.ts";
+import { formatContinueCommand } from "./recovery.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
-import {
-  runVerification,
-  writeVerificationArtifact,
-  type VerificationResult,
-} from "./verification.ts";
+import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 
 const discoveryFetchLimit = 100;
 
@@ -111,19 +107,29 @@ export async function runAutoDiscovery(
     try {
       await runFullWorkflow(workflowContext);
 
+      const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
       const gateOutcome = await runPublishGate({
         options,
         issue,
         branchPlan,
         workflowContext,
         attemptMetadata,
-        attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
+        attemptMetadataPath,
+        recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
       });
       outcome = gateOutcome.outcome;
       outcomeDetail = gateOutcome.outcomeDetail;
     } catch (error) {
-      outcome = "errored";
+      outcome = error instanceof ArtifactValidationError ? "failed-output-contract" : "errored";
       outcomeDetail = formatError(error);
+      await markWorkflowError({
+        options,
+        issue,
+        error,
+        phase: error instanceof ArtifactValidationError ? "output-contract" : "workflow-error",
+        attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
+        recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
+      });
       throw error;
     } finally {
       attemptMetadata = formatAttemptMetadata({
@@ -140,77 +146,26 @@ export async function runAutoDiscovery(
   console.log("\nAuto workflow complete.");
 }
 
-type PublishGateOutcome = { outcome: AttemptOutcome; outcomeDetail: string | null };
-
-async function runPublishGate(input: {
+async function markWorkflowError(input: {
   options: AutoCliOptions;
   issue: AutorunIssueCandidate;
-  branchPlan: AutorunBranchPlan;
-  workflowContext: WorkflowContext;
-  attemptMetadata: AttemptMetadata;
+  error: unknown;
+  phase: string;
   attemptMetadataPath: string;
-}): Promise<PublishGateOutcome> {
-  const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath } = input;
-
-  const readinessMarkdown = await readReadinessArtifact(workflowContext);
-  const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
-
-  let verification: VerificationResult | undefined;
-  if (readinessStatus === "ready-for-pr") {
-    verification = await runVerification({ command: options.verifyCommand, cwd: workflowContext.cwd });
-    await writeVerificationArtifact(workflowContext, verification);
-  }
-
-  const decision = decidePublish({ readinessStatus, verification });
-
-  if (decision.publish) {
-    await publishAutorunResult({
-      options,
-      issue,
-      branchPlan,
-      workflowContext,
-      verification,
-      attemptMetadata,
-      attemptMetadataPath,
-    });
-    return { outcome: "published", outcomeDetail: null };
-  }
-
-  await handleNonPublish({ options, issue, workflowContext, decision, attemptMetadataPath });
-  return {
-    outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
-    outcomeDetail: decision.reason,
-  };
-}
-
-async function readReadinessArtifact(context: WorkflowContext): Promise<string | undefined> {
-  try {
-    return await readArtifact(context, "readiness");
-  } catch {
-    return undefined;
-  }
-}
-
-async function handleNonPublish(input: {
-  options: AutoCliOptions;
-  issue: AutorunIssueCandidate;
-  workflowContext: WorkflowContext;
-  decision: Extract<PublishGateDecision, { publish: false }>;
-  attemptMetadataPath: string;
+  recoveryCommand: string;
 }): Promise<void> {
-  const { options, issue, workflowContext, decision, attemptMetadataPath } = input;
-  const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
-
-  console.log(`\nNot publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
-  console.log(`Artifact: ${artifactPath}`);
+  const { options, issue, error, phase, attemptMetadataPath, recoveryCommand } = input;
+  console.log(`\nAuto workflow error on #${issue.number}: ${formatError(error)}`);
   console.log(`Attempt: ${attemptMetadataPath}`);
+  console.log(`Continue: ${recoveryCommand}`);
 
   const comment = formatFailureComment({
     issueNumber: issue.number,
-    phase: decision.phase,
-    reason: decision.reason,
-    artifactPath,
+    issueUrl: issue.url,
+    phase,
+    reason: formatError(error),
     attemptMetadataPath,
+    recoveryCommand,
   });
 
   await markIssueFailed({
@@ -219,6 +174,7 @@ async function handleNonPublish(input: {
     issueNumber: issue.number,
     label: options.failureLabel,
     comment,
+    removeLabels: [options.inProgressLabel],
   });
 }
 

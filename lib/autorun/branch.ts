@@ -34,16 +34,30 @@ export function assertSafeWorkBranch(options: { branchName: string; baseBranch: 
 
 export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
   if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName })) {
-    await runProcessOrThrow(["git", "switch", options.plan.branchName], {
-      cwd: options.cwd,
-      label: "git switch",
-    });
+    await switchBranch({ cwd: options.cwd, branchName: options.plan.branchName });
     return;
   }
 
   await runProcessOrThrow(["git", "switch", "-c", options.plan.branchName, options.plan.baseBranch], {
     cwd: options.cwd,
     label: "git switch -c",
+  });
+}
+
+export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
+  const exists = await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName });
+  if (!exists) {
+    throw new Error(
+      `Cannot continue autorun attempt for #${options.plan.issueNumber}: branch '${options.plan.branchName}' does not exist.`,
+    );
+  }
+  await switchBranch({ cwd: options.cwd, branchName: options.plan.branchName });
+}
+
+async function switchBranch(options: { cwd: string; branchName: string }): Promise<void> {
+  await runProcessOrThrow(["git", "switch", options.branchName], {
+    cwd: options.cwd,
+    label: "git switch",
   });
 }
 

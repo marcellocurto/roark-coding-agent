@@ -19,7 +19,9 @@ export type IssueWorkflowCommand =
   | "final-review"
   | "readiness";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto";
+export type ContinueCommand = "continue";
+
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | ContinueCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -62,7 +64,26 @@ export type AutoCliOptions = {
   yes: boolean;
 };
 
-export type CliOptions = IssueCliOptions | AutoCliOptions;
+export type ContinueCliOptions = {
+  command: "continue";
+  issue: string;
+  cwd: string;
+  outDir: string;
+  repo?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  force: boolean;
+  yes: boolean;
+  maxFixPasses: number;
+  attempt?: number;
+  verifyCommand: string;
+  failureLabel: string;
+  successLabel: string;
+  inProgressLabel: string;
+  remote: string;
+};
+
+export type CliOptions = IssueCliOptions | AutoCliOptions | ContinueCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
@@ -76,12 +97,13 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "readiness",
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue"]);
 
 export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
   auto                  Find and claim eligible GitHub issues, switch branches, and run the full workflow.
+  continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
@@ -101,14 +123,15 @@ Options:
   --out <path>           Runs directory. Defaults to .roark/runs.
   --model <provider/id>  Optional Pi model override, e.g. anthropic/claude-sonnet-4-5.
   --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
-  --max-fix-passes <n>   Maximum automatic fix/review cycles for do. Defaults to 1.
+  --max-fix-passes <n>   Maximum automatic fix/review cycles for do/continue. Defaults to 1.
   --fix-pass <n>         Pass number for standalone fix/final-review.
+  --attempt <n>          Issue/continue commands only: use a specific autorun attempt directory.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.
   --skip-label <label>   Auto skip label. Can be passed multiple times.
   --skip-labels <labels> Auto skip labels as a comma-separated list.
   --limit <n>            Maximum number of eligible auto issues to claim. Defaults to 1.
   --in-progress-label <label>
-                          Auto claim label. Defaults to ${defaultAutorunInProgressLabel}.
+                          Auto claim label, and the label removed on terminal continue success/failure. Defaults to ${defaultAutorunInProgressLabel}.
   --assignee <login>     GitHub user to assign when claiming. Defaults to the authenticated gh user.
   --no-assign            Claim without assigning a user.
   --dry-run              Print selected issues without claiming them or switching branches.
@@ -133,6 +156,7 @@ export function parseArgs(argv: string[]): CliOptions | { help: true } {
   }
 
   if (rawCommand === "auto") return parseAutoArgs(rest);
+  if (rawCommand === "continue") return parseContinueArgs(rest);
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
 }
 
@@ -201,6 +225,49 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
   return options;
 }
 
+function parseContinueArgs(args: string[]): ContinueCliOptions {
+  const [rawIssue, ...rest] = args;
+  if (!rawIssue) throw new Error(`Missing issue.\n\n${usage}`);
+  if (rawIssue.startsWith("--")) throw new Error(`Missing issue.\n\n${usage}`);
+
+  const options: ContinueCliOptions = {
+    command: "continue",
+    issue: rawIssue,
+    cwd: process.cwd(),
+    outDir: ".roark/runs",
+    force: false,
+    yes: false,
+    maxFixPasses: 1,
+    verifyCommand: defaultAutorunVerifyCommand,
+    failureLabel: defaultAutorunFailureLabel,
+    successLabel: defaultAutorunSuccessLabel,
+    inProgressLabel: defaultAutorunInProgressLabel,
+    remote: defaultAutorunRemote,
+  };
+
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
+    else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
+    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--failure-label") options.failureLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--success-label") options.successLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--in-progress-label") options.inProgressLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
+    else if (arg === "--force") options.force = true;
+    else if (arg === "--yes") options.yes = true;
+    else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
+    else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
+  }
+
+  return options;
+}
+
 function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): IssueCliOptions {
   const [rawIssue, ...rest] = args;
   if (!rawIssue) throw new Error(`Missing issue.\n\n${usage}`);
@@ -232,7 +299,8 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): IssueCli
     } else if (arg === "--fix-pass") {
       options.fixPass = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
       fixPassProvided = true;
-    } else if (arg === "--force") options.force = true;
+    } else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
   }

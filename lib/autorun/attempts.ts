@@ -7,6 +7,7 @@ export type AttemptOutcome =
   | "published"
   | "failed-readiness"
   | "failed-verification"
+  | "failed-output-contract"
   | "errored";
 
 export type AttemptMetadata = {
@@ -132,6 +133,42 @@ export async function readAttemptMetadata(
   return JSON.parse(raw) as AttemptMetadata;
 }
 
+export async function readAttemptIndex(issueDir: string): Promise<AttemptSummary[]> {
+  const indexPath = attemptIndexPath(issueDir);
+  if (!existsSync(indexPath)) return [];
+
+  try {
+    const raw = await readFile(indexPath, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as AttemptSummary[] : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function latestAttemptNumber(issueDir: string): Promise<number> {
+  const indexed = await readAttemptIndex(issueDir);
+  const fromIndex = indexed
+    .map((entry) => entry.attempt)
+    .filter((attempt) => Number.isInteger(attempt) && attempt > 0)
+    .toSorted((left, right) => right - left)[0];
+  if (fromIndex !== undefined) return fromIndex;
+
+  const root = attemptsRootDir(issueDir);
+  if (!existsSync(root)) throw new Error(`No autorun attempts found under ${root}. Pass --attempt or run auto first.`);
+
+  const entries = await readdir(root, { withFileTypes: true });
+  const attempts = entries
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .map((entry) => Number(entry.name))
+    .filter((attempt) => Number.isInteger(attempt) && attempt > 0)
+    .toSorted((left, right) => right - left);
+
+  const latest = attempts[0];
+  if (latest === undefined) throw new Error(`No autorun attempts found under ${root}. Pass --attempt or run auto first.`);
+  return latest;
+}
+
 export async function updateAttemptIndex(
   issueDir: string,
   summary: AttemptSummary,
@@ -139,16 +176,7 @@ export async function updateAttemptIndex(
   await mkdir(issueDir, { recursive: true });
   const indexPath = attemptIndexPath(issueDir);
 
-  let current: AttemptSummary[] = [];
-  if (existsSync(indexPath)) {
-    try {
-      const raw = await readFile(indexPath, "utf8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) current = parsed as AttemptSummary[];
-    } catch {
-      current = [];
-    }
-  }
+  let current = await readAttemptIndex(issueDir);
 
   const existingIndex = current.findIndex((entry) => entry.attempt === summary.attempt);
   if (existingIndex >= 0) {
