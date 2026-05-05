@@ -131,7 +131,21 @@ export function reviewAPrompt(context: WorkflowContext): string {
     <artifact kind="implementation_log">${artifactRelativePath(context, "implementationLog")}</artifact>
     <current_git_diff />
   </inputs>
-  <review_focus>Correctness, completeness, edge cases, and regressions.</review_focus>
+  <review_focus>
+    You are a Defect Review agent. Bias every observation toward correctness, requirement coverage, and regression risk.
+    Look specifically for:
+    <item>Misimplementation or partial implementation of the issue's acceptance criteria.</item>
+    <item>Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.</item>
+    <item>Missing or incorrect error handling, race conditions, and ordering issues.</item>
+    <item>Regressions or broken contracts in unrelated callers touched by the diff.</item>
+    <item>Missing or insufficient tests for the changed behavior.</item>
+    <item>Gaps or unsubstantiated claims in the implementation log's validation evidence.</item>
+  </review_focus>
+  <required_fixes_policy>
+    Required Fixes must be limited to defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior.
+    Non-defect concerns (style, naming, refactor ideas) belong under Suggested Improvements, not Required Fixes.
+    Verdict semantics: use <value>approve</value> when no defects are found, <value>fixes-required</value> when defects must be addressed before merge, and <value>blocked</value> only when work cannot proceed without external input.
+  </required_fixes_policy>
   <constraints>
     <constraint>Do not make changes.</constraint>
   </constraints>
@@ -162,7 +176,21 @@ export function reviewBPrompt(context: WorkflowContext): string {
     <artifact kind="implementation_log">${artifactRelativePath(context, "implementationLog")}</artifact>
     <current_git_diff />
   </inputs>
-  <review_focus>Simplicity, fit with existing patterns, tests, maintainability, and whether the solution overreaches.</review_focus>
+  <review_focus>
+    You are a Maintainability Review agent. Bias every observation toward long-term code health and fit with this codebase.
+    Look specifically for:
+    <item>Simplicity: unnecessary complexity, indirection, or premature abstraction.</item>
+    <item>Codebase fit: alignment with existing patterns, idioms, and module boundaries already used here.</item>
+    <item>Scope control: changes that go beyond what the issue requires.</item>
+    <item>Test quality: brittle, redundant, low-signal, or poorly scoped tests; coverage adequacy for the change.</item>
+    <item>Naming and API clarity: ambiguous, misleading, or inconsistent names and public surfaces.</item>
+    <item>Style, formatting, and structure only when they materially harm readability or consistency.</item>
+  </review_focus>
+  <required_fixes_policy>
+    Required Fixes must cite a concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation.
+    Do not mark fixes-required for purely subjective taste; route subjective preferences to Suggested Improvements.
+    Verdict semantics: use <value>approve</value> when no concrete maintainability harms are found, <value>fixes-required</value> when concrete harms must be addressed, and <value>blocked</value> only when work cannot proceed without external input.
+  </required_fixes_policy>
   <constraints>
     <constraint>Do not read Review Agent A's output.</constraint>
     <constraint>Do not make changes.</constraint>
@@ -229,6 +257,11 @@ export function finalReviewPrompt(context: WorkflowContext, pass: number): strin
     <artifact kind="review_b">${artifactRelativePath(context, "reviewB")}</artifact>
     <artifact kind="fix_log">${artifactRelativePath(context, fixLogRef(pass))}</artifact>
   </inputs>
+  <reviewer_roles>
+    <role name="review_a">Defect-focused review: correctness, requirement coverage, bugs, edge cases, regressions.</role>
+    <role name="review_b">Maintainability-focused review: simplicity, codebase fit, scope control, test quality, naming and API clarity.</role>
+    <note>Weigh each input according to its role; do not treat them as interchangeable.</note>
+  </reviewer_roles>
   <instructions>
     <instruction>Review the current diff after fixes against the inputs.</instruction>
     <instruction>Decide if the work is ready for a PR.</instruction>
