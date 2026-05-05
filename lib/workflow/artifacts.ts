@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { CliOptions, ThinkingLevel } from "../cli/args.ts";
+import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
 
 export type StaticArtifactName =
@@ -53,7 +53,7 @@ export function finalReviewRef(pass: number): ArtifactRef {
   return { name: "finalReview", pass };
 }
 
-export function createWorkflowContext(options: CliOptions): WorkflowContext {
+export function createWorkflowContext(options: IssueCliOptions): WorkflowContext {
   const cwd = path.resolve(options.cwd);
   const parsed = parseIssueRef(options.issue, options.repo);
   const outDir = path.resolve(cwd, options.outDir);

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
 import { parseArgs, usage } from "./lib/cli/args.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
 import { runFullWorkflow, runSinglePhase } from "./lib/workflow/phases.ts";
@@ -7,6 +8,11 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   const parsed = parseArgs(argv);
   if ("help" in parsed) {
     console.log(usage);
+    return;
+  }
+
+  if (parsed.command === "auto") {
+    await runAutoDiscovery(parsed);
     return;
   }
 

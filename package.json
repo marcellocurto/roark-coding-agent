@@ -9,6 +9,7 @@
     "start": "bun run roark-coding-agent.ts",
     "agent": "bun run roark-coding-agent.ts",
     "do": "bun run roark-coding-agent.ts do",
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

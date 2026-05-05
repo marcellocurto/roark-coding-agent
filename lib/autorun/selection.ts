@@ -1,0 +1,62 @@
+export type AutorunIssueCandidate = {
+  number: number;
+  title: string;
+  url?: string;
+  createdAt?: string;
+  labels?: Array<{ name: string }>;
+};
+
+export type IssueSelectionOptions = {
+  readyLabel: string;
+  skipLabels: readonly string[];
+  limit: number;
+};
+
+export const defaultAutorunReadyLabel = "afk";
+export const defaultAutorunInProgressLabel = "roark-in-progress";
+
+export const defaultAutorunSkipLabels = [
+  "blocked",
+  "needs-human",
+  "wontfix",
+  "roark-in-progress",
+  "roark-failed",
+  "roark-ready-for-review",
+] as const;
+
+export function selectEligibleIssues(
+  issues: readonly AutorunIssueCandidate[],
+  options: IssueSelectionOptions,
+): AutorunIssueCandidate[] {
+  return issues
+    .filter((issue) => isEligibleIssue(issue, options))
+    .toSorted(compareOldestIssueFirst)
+    .slice(0, options.limit);
+}
+
+export function isEligibleIssue(issue: AutorunIssueCandidate, options: IssueSelectionOptions): boolean {
+  const labels = normalizedLabelSet(issue);
+  if (!labels.has(normalizeLabel(options.readyLabel))) return false;
+  return !options.skipLabels.some((label) => labels.has(normalizeLabel(label)));
+}
+
+function compareOldestIssueFirst(left: AutorunIssueCandidate, right: AutorunIssueCandidate): number {
+  const leftTime = parseCreatedAt(left.createdAt);
+  const rightTime = parseCreatedAt(right.createdAt);
+  if (leftTime !== rightTime) return leftTime - rightTime;
+  return left.number - right.number;
+}
+
+function parseCreatedAt(value: string | undefined): number {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed;
+}
+
+function normalizedLabelSet(issue: AutorunIssueCandidate): Set<string> {
+  return new Set((issue.labels ?? []).map((label) => normalizeLabel(label.name)));
+}
+
+function normalizeLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
