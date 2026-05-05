@@ -60,3 +60,9 @@ bun run roark-coding-agent.ts final-review 123 --fix-pass 2
 ```
 
 Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`.
+
+## Inspiration
+
+[symphony](https://github.com/openai/symphony)
+
+[sandcastle](https://github.com/mattpocock/sandcastle)
