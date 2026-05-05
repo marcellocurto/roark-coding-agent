@@ -7,6 +7,7 @@ import {
   latestFinalReviewPass,
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
+import type { AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
@@ -34,6 +35,8 @@ export type FormatPrBodyInput = {
   verification?: VerificationResult;
   runDirRelative: string;
   artifactPaths: string[];
+  attemptMetadata?: AttemptMetadata;
+  attemptMetadataPath?: string;
 };
 
 export type PublishAutorunResultInput = {
@@ -42,6 +45,8 @@ export type PublishAutorunResultInput = {
   branchPlan: AutorunBranchPlan;
   workflowContext: WorkflowContext;
   verification?: VerificationResult;
+  attemptMetadata?: AttemptMetadata;
+  attemptMetadataPath?: string;
 };
 
 export function buildStageAllArgv(): string[] {
@@ -97,6 +102,19 @@ export function formatPrBody(input: FormatPrBodyInput): string {
     lines.push("- Not run.");
   }
   lines.push("");
+  if (input.attemptMetadata) {
+    const meta = input.attemptMetadata;
+    lines.push("## Attempt");
+    lines.push(`- Attempt: ${meta.attempt}`);
+    lines.push(`- Branch: \`${meta.branch}\``);
+    lines.push(`- Started: ${meta.startedAt}`);
+    if (meta.endedAt) lines.push(`- Ended: ${meta.endedAt}`);
+    lines.push(`- Worktree: \`${meta.worktreePath}\``);
+    if (input.attemptMetadataPath) {
+      lines.push(`- Metadata: \`${input.attemptMetadataPath}\``);
+    }
+    lines.push("");
+  }
   lines.push("## Workflow artifacts");
   if (input.artifactPaths.length === 0) {
     lines.push(`- \`${input.runDirRelative}/\``);
@@ -145,7 +163,7 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
 }
 
 export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<void> {
-  const { options, issue, branchPlan, workflowContext, verification } = input;
+  const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath } = input;
   const cwd = options.cwd;
 
   console.log(`\n=== Publish #${issue.number} ===`);
@@ -172,6 +190,8 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     verification,
     runDirRelative: workflowContext.runDirRelative,
     artifactPaths: collectPrBodyArtifactPaths(workflowContext),
+    attemptMetadata,
+    attemptMetadataPath,
   });
 
   console.log("- Creating draft pull request");

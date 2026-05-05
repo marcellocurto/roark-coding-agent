@@ -36,6 +36,7 @@ export type IssueCliOptions = {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number;
+  attempt?: number;
 };
 
 export type AutoCliOptions = {

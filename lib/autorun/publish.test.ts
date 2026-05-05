@@ -10,6 +10,7 @@ import {
   formatCommitMessage,
   formatPrBody,
 } from "./publish.ts";
+import { formatAttemptMetadata } from "./attempts.ts";
 import type { VerificationResult } from "./verification.ts";
 
 const okVerification: VerificationResult = {
@@ -204,5 +205,48 @@ describe("formatPrBody", () => {
     });
 
     expect(body).toContain("- `.roark/runs/issue/9/`");
+  });
+
+  test("renders the Attempt section with branch, timestamps, worktree, and metadata path", () => {
+    const attemptMetadata = formatAttemptMetadata({
+      attempt: 2,
+      issueNumber: 10,
+      branch: "roark/issue-10",
+      baseBranch: "main",
+      worktreePath: "/repo",
+      runArtifactPath: ".roark/runs/issue/10/attempts/2",
+      startedAt: "2026-05-05T07:17:40.000Z",
+      endedAt: "2026-05-05T07:42:11.000Z",
+      outcome: "published",
+    });
+
+    const body = formatPrBody({
+      issueNumber: 10,
+      verification: okVerification,
+      runDirRelative: ".roark/runs/issue/10/attempts/2",
+      artifactPaths: [".roark/runs/issue/10/attempts/2/readiness.md"],
+      attemptMetadata,
+      attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
+    });
+
+    expect(body).toContain("## Attempt");
+    expect(body).toContain("- Attempt: 2");
+    expect(body).toContain("- Branch: `roark/issue-10`");
+    expect(body).toContain("- Started: 2026-05-05T07:17:40.000Z");
+    expect(body).toContain("- Ended: 2026-05-05T07:42:11.000Z");
+    expect(body).toContain("- Worktree: `/repo`");
+    expect(body).toContain("- Metadata: `.roark/runs/issue/10/attempts/2/attempt.json`");
+    // Attempt block precedes the artifacts list.
+    expect(body.indexOf("## Attempt")).toBeLessThan(body.indexOf("## Workflow artifacts"));
+    expect(body).toContain("- `.roark/runs/issue/10/attempts/2/readiness.md`");
+  });
+
+  test("omits the Attempt section when no metadata is provided", () => {
+    const body = formatPrBody({
+      issueNumber: 9,
+      runDirRelative: ".roark/runs/issue/9",
+      artifactPaths: [".roark/runs/issue/9/readiness.md"],
+    });
+    expect(body).not.toContain("## Attempt");
   });
 });

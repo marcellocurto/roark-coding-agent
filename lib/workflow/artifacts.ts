@@ -26,6 +26,7 @@ export type WorkflowContext = {
   runDirRelative: string;
   issueInput: string;
   issueNumber: string;
+  attempt?: number;
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
@@ -59,7 +60,10 @@ export function createWorkflowContext(options: IssueCliOptions): WorkflowContext
   const cwd = path.resolve(options.cwd);
   const parsed = parseIssueRef(options.issue, options.repo);
   const outDir = path.resolve(cwd, options.outDir);
-  const runDir = path.join(outDir, "issue", parsed.issueNumber);
+  const issueDir = path.join(outDir, "issue", parsed.issueNumber);
+  const runDir = options.attempt !== undefined
+    ? path.join(issueDir, "attempts", String(options.attempt))
+    : issueDir;
   const runDirRelative = path.relative(cwd, runDir) || ".";
 
   return {
@@ -69,6 +73,7 @@ export function createWorkflowContext(options: IssueCliOptions): WorkflowContext
     runDirRelative,
     issueInput: options.issue,
     issueNumber: parsed.issueNumber,
+    attempt: options.attempt,
     repo: parsed.repo,
     model: options.model,
     thinkingLevel: options.thinkingLevel,

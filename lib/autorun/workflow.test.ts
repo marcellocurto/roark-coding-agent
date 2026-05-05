@@ -47,5 +47,20 @@ describe("autorun workflow context", () => {
     expect(workflowOptions.maxFixPasses).toBe(3);
     expect(workflowOptions.force).toBe(true);
     expect(workflowOptions.yes).toBe(true);
+    expect(workflowOptions.attempt).toBeUndefined();
+  });
+
+  test("forwards an explicit attempt number into IssueCliOptions", () => {
+    const branchPlan = createBranchPlan({
+      issueNumber: 123,
+      branchName: "roark/issue-123",
+    });
+    const workflowOptions = createAutorunWorkflowOptions(
+      { number: 123, title: "Do the thing" },
+      branchPlan,
+      autoOptions,
+      4,
+    );
+    expect(workflowOptions.attempt).toBe(4);
   });
 });

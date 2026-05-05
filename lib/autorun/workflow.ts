@@ -7,14 +7,16 @@ export function createAutorunWorkflowContext(
   issue: AutorunIssueCandidate,
   branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
+  attempt?: number,
 ): WorkflowContext {
-  return createWorkflowContext(createAutorunWorkflowOptions(issue, branchPlan, options));
+  return createWorkflowContext(createAutorunWorkflowOptions(issue, branchPlan, options, attempt));
 }
 
 export function createAutorunWorkflowOptions(
   issue: AutorunIssueCandidate,
   branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
+  attempt?: number,
 ): IssueCliOptions {
   return {
     command: "do",
@@ -27,5 +29,6 @@ export function createAutorunWorkflowOptions(
     force: options.force,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,
+    attempt,
   };
 }
