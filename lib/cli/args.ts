@@ -1,8 +1,10 @@
+import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
 import {
   defaultAutorunInProgressLabel,
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
+import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
 import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
 
 export type IssueWorkflowCommand =
@@ -48,6 +50,8 @@ export type AutoCliOptions = {
   dryRun: boolean;
   baseBranch: string;
   worktreeRoot: string;
+  verifyCommand: string;
+  failureLabel: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
   maxFixPasses: number;
@@ -107,6 +111,9 @@ Options:
   --dry-run              Print selected issues without claiming them or creating worktrees.
   --base-branch <branch> Auto worktree base branch. Defaults to ${defaultAutorunBaseBranch}.
   --worktree-root <path> Auto worktree root. Defaults to ${defaultAutorunWorktreeRoot}.
+  --verify <cmd>         Verification command to run before publishing. Runs via 'sh -c'. Defaults to '${defaultAutorunVerifyCommand}'.
+  --failure-label <label>
+                          Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
   --force                Re-run phases even if their markdown artifact already exists.
   --yes                  Continue past dirty git preflight for implementation/fix.
   -h, --help             Show this help.
@@ -136,6 +143,8 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     dryRun: false,
     baseBranch: defaultAutorunBaseBranch,
     worktreeRoot: defaultAutorunWorktreeRoot,
+    verifyCommand: defaultAutorunVerifyCommand,
+    failureLabel: defaultAutorunFailureLabel,
     maxFixPasses: 1,
     force: false,
     yes: false,
@@ -167,6 +176,8 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--base-branch") options.baseBranch = requiredValue(args, ++index, arg);
     else if (arg === "--worktree-root") options.worktreeRoot = requiredValue(args, ++index, arg);
+    else if (arg === "--verify") options.verifyCommand = requiredValue(args, ++index, arg);
+    else if (arg === "--failure-label") options.failureLabel = requiredValue(args, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(args, ++index, arg), arg);
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
