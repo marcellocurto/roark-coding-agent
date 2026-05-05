@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
+import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "../autorun/publish.ts";
 import {
   defaultAutorunInProgressLabel,
   defaultAutorunReadyLabel,
@@ -26,6 +27,8 @@ describe("parseArgs", () => {
     expect(parsed.baseBranch).toBe(defaultAutorunBaseBranch);
     expect(parsed.verifyCommand).toBe(defaultAutorunVerifyCommand);
     expect(parsed.failureLabel).toBe(defaultAutorunFailureLabel);
+    expect(parsed.successLabel).toBe(defaultAutorunSuccessLabel);
+    expect(parsed.remote).toBe(defaultAutorunRemote);
     expect(parsed.maxFixPasses).toBe(1);
     expect(parsed.force).toBe(false);
     expect(parsed.yes).toBe(false);
@@ -55,6 +58,10 @@ describe("parseArgs", () => {
       "bun install --frozen-lockfile && bun run typecheck",
       "--failure-label",
       "custom-failed",
+      "--success-label",
+      "custom-pr-opened",
+      "--remote",
+      "upstream",
       "--model",
       "provider/model",
       "--thinking",
@@ -78,6 +85,8 @@ describe("parseArgs", () => {
     expect(parsed.baseBranch).toBe("develop");
     expect(parsed.verifyCommand).toBe("bun install --frozen-lockfile && bun run typecheck");
     expect(parsed.failureLabel).toBe("custom-failed");
+    expect(parsed.successLabel).toBe("custom-pr-opened");
+    expect(parsed.remote).toBe("upstream");
     expect(parsed.model).toBe("provider/model");
     expect(parsed.thinkingLevel).toBe("high");
     expect(parsed.maxFixPasses).toBe(3);

@@ -22,6 +22,7 @@ export const defaultAutorunSkipLabels = [
   "roark-in-progress",
   "roark-failed",
   "roark-ready-for-review",
+  "roark-pr-opened",
 ] as const;
 
 export function selectEligibleIssues(
