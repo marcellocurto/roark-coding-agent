@@ -1,25 +1,25 @@
 import type { AutoCliOptions, IssueCliOptions } from "../cli/args.ts";
 import { createWorkflowContext, type WorkflowContext } from "../workflow/artifacts.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import type { AutorunWorktreePlan } from "./worktree.ts";
+import type { AutorunBranchPlan } from "./branch.ts";
 
 export function createAutorunWorkflowContext(
   issue: AutorunIssueCandidate,
-  worktreePlan: AutorunWorktreePlan,
+  branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
 ): WorkflowContext {
-  return createWorkflowContext(createAutorunWorkflowOptions(issue, worktreePlan, options));
+  return createWorkflowContext(createAutorunWorkflowOptions(issue, branchPlan, options));
 }
 
 export function createAutorunWorkflowOptions(
   issue: AutorunIssueCandidate,
-  worktreePlan: AutorunWorktreePlan,
+  branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
 ): IssueCliOptions {
   return {
     command: "do",
     issue: String(issue.number),
-    cwd: worktreePlan.worktreePath,
+    cwd: options.cwd,
     outDir: ".roark/runs",
     repo: options.repo,
     model: options.model,

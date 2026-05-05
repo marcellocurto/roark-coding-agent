@@ -6,7 +6,7 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
-import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
+import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 import { parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
@@ -24,7 +24,6 @@ describe("parseArgs", () => {
     expect(parsed.noAssign).toBe(false);
     expect(parsed.dryRun).toBe(false);
     expect(parsed.baseBranch).toBe(defaultAutorunBaseBranch);
-    expect(parsed.worktreeRoot).toBe(defaultAutorunWorktreeRoot);
     expect(parsed.verifyCommand).toBe(defaultAutorunVerifyCommand);
     expect(parsed.failureLabel).toBe(defaultAutorunFailureLabel);
     expect(parsed.maxFixPasses).toBe(1);
@@ -52,8 +51,6 @@ describe("parseArgs", () => {
       "--dry-run",
       "--base-branch",
       "develop",
-      "--worktree-root",
-      ".tmp/worktrees",
       "--verify",
       "bun install --frozen-lockfile && bun run typecheck",
       "--failure-label",
@@ -79,7 +76,6 @@ describe("parseArgs", () => {
     expect(parsed.assignee).toBe("roark-codes");
     expect(parsed.dryRun).toBe(true);
     expect(parsed.baseBranch).toBe("develop");
-    expect(parsed.worktreeRoot).toBe(".tmp/worktrees");
     expect(parsed.verifyCommand).toBe("bun install --frozen-lockfile && bun run typecheck");
     expect(parsed.failureLabel).toBe("custom-failed");
     expect(parsed.model).toBe("provider/model");

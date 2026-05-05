@@ -5,7 +5,7 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
-import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
+import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 
 export type IssueWorkflowCommand =
   | "do"
@@ -49,7 +49,6 @@ export type AutoCliOptions = {
   noAssign: boolean;
   dryRun: boolean;
   baseBranch: string;
-  worktreeRoot: string;
   verifyCommand: string;
   failureLabel: string;
   model?: string;
@@ -78,7 +77,7 @@ const commands = new Set<WorkflowCommand>([...issueCommands, "auto"]);
 export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
-  auto                  Find and claim eligible GitHub issues, create worktrees, and run the full workflow.
+  auto                  Find and claim eligible GitHub issues, switch branches, and run the full workflow.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
@@ -108,9 +107,8 @@ Options:
                           Auto claim label. Defaults to ${defaultAutorunInProgressLabel}.
   --assignee <login>     GitHub user to assign when claiming. Defaults to the authenticated gh user.
   --no-assign            Claim without assigning a user.
-  --dry-run              Print selected issues without claiming them or creating worktrees.
-  --base-branch <branch> Auto worktree base branch. Defaults to ${defaultAutorunBaseBranch}.
-  --worktree-root <path> Auto worktree root. Defaults to ${defaultAutorunWorktreeRoot}.
+  --dry-run              Print selected issues without claiming them or switching branches.
+  --base-branch <branch> Auto issue branch base branch. Defaults to ${defaultAutorunBaseBranch}.
   --verify <cmd>         Verification command to run before publishing. Runs via 'sh -c'. Defaults to '${defaultAutorunVerifyCommand}'.
   --failure-label <label>
                           Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
@@ -142,7 +140,6 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     noAssign: false,
     dryRun: false,
     baseBranch: defaultAutorunBaseBranch,
-    worktreeRoot: defaultAutorunWorktreeRoot,
     verifyCommand: defaultAutorunVerifyCommand,
     failureLabel: defaultAutorunFailureLabel,
     maxFixPasses: 1,
@@ -175,7 +172,6 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     else if (arg === "--no-assign") options.noAssign = true;
     else if (arg === "--dry-run") options.dryRun = true;
     else if (arg === "--base-branch") options.baseBranch = requiredValue(args, ++index, arg);
-    else if (arg === "--worktree-root") options.worktreeRoot = requiredValue(args, ++index, arg);
     else if (arg === "--verify") options.verifyCommand = requiredValue(args, ++index, arg);
     else if (arg === "--failure-label") options.failureLabel = requiredValue(args, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
