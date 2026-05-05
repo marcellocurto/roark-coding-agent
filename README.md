@@ -64,5 +64,7 @@ Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue 
 ## Inspiration
 
 [symphony](https://github.com/openai/symphony)
+https://openai.com/index/open-source-codex-orchestration-symphony/
+https://openai.com/index/harness-engineering/
 
 [sandcastle](https://github.com/mattpocock/sandcastle)
