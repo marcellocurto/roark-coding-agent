@@ -32,6 +32,30 @@ export type AgentTask = {
   prompt: (context: WorkflowContext) => string;
 };
 
+export type AgentTaskFailurePhase = "agent-error" | "output-contract";
+
+export class AgentTaskRunError extends Error {
+  readonly artifact: ArtifactRef;
+  readonly label: string;
+  readonly phase: AgentTaskFailurePhase;
+  readonly originalMessage: string;
+
+  constructor(input: {
+    artifact: ArtifactRef;
+    label: string;
+    phase: AgentTaskFailurePhase;
+    originalError: unknown;
+  }) {
+    const originalMessage = formatError(input.originalError);
+    super(`${input.label} failed: ${originalMessage}`);
+    this.name = "AgentTaskRunError";
+    this.artifact = input.artifact;
+    this.label = input.label;
+    this.phase = input.phase;
+    this.originalMessage = originalMessage;
+  }
+}
+
 export const triageTask: AgentTask = {
   artifact: "triage",
   label: "Triage",
@@ -117,10 +141,18 @@ export async function runAgentTask(context: WorkflowContext, runner: AgentRunner
   }
 
   console.log(`\n=== ${task.label} ===`);
-  const content = await runTaskWithOutputContract(context, runner, task);
-  await writeArtifact(context, task.artifact, content);
-  console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
-  return content;
+  try {
+    const content = await runTaskWithOutputContract(context, runner, task);
+    await writeArtifact(context, task.artifact, content);
+    console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
+    return content;
+  } catch (error) {
+    const phase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
+    const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase, error });
+    await writeArtifact(context, task.artifact, diagnostic);
+    console.log(`\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`);
+    throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase, originalError: error });
+  }
 }
 
 async function runTaskWithOutputContract(
@@ -156,6 +188,50 @@ function repairPrompt(originalPrompt: string, task: AgentTask, reason: string, i
   return `${originalPrompt}\n\n<output_contract_repair>\nThe previous ${task.label} response did not satisfy the required Markdown output contract.\nReason: ${escapeForPrompt(reason)}\nReturn the complete ${task.label} Markdown artifact again, with the exact required sections and a valid verdict/status token. Do not include commentary outside the artifact.\n</output_contract_repair>\n\n<invalid_previous_output>\n${escapeForPrompt(invalidOutput)}\n</invalid_previous_output>`;
 }
 
+function formatAgentTaskErrorArtifact(input: {
+  context: WorkflowContext;
+  task: AgentTask;
+  phase: AgentTaskFailurePhase;
+  error: unknown;
+}): string {
+  const { context, task, phase, error } = input;
+  const lines = [
+    `# ${task.label} Error`,
+    "",
+    "## Status",
+    "errored",
+    "",
+    "## Phase",
+    phase,
+    "",
+    "## Artifact",
+    `\`${artifactRelativePath(context, task.artifact)}\``,
+    "",
+    "## Model",
+    `\`${context.model ?? "roark default"}\``,
+    "",
+    "## Thinking Level",
+    `\`${context.thinkingLevel ?? task.thinkingLevel}\``,
+    "",
+    "## Error",
+    formatFencedBlock(formatError(error), "text"),
+    "",
+    "## Recovery",
+    "Fix the provider/output-contract error, then rerun the same phase or `continue` the autorun attempt. This diagnostic artifact is intentionally invalid as a workflow phase output so continuation will regenerate it.",
+  ];
+  return `${lines.join("\n")}\n`;
+}
+
+function formatFencedBlock(value: string, language: string): string {
+  const fence = value.includes("````") ? "`````" : "````";
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
 function escapeForPrompt(value: string): string {
   return value.replaceAll("</", "<\\/");
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

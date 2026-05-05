@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { claimGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues } from "../github/issue.ts";
-import { ensureRunDir } from "../workflow/artifacts.ts";
+import { artifactRelativePath, ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
 import {
   allocateNextAttempt,
@@ -23,6 +23,7 @@ import { formatContinueCommand } from "./recovery.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
+import { AgentTaskRunError } from "../workflow/tasks.ts";
 
 const discoveryFetchLimit = 100;
 
@@ -120,13 +121,14 @@ export async function runAutoDiscovery(
       outcome = gateOutcome.outcome;
       outcomeDetail = gateOutcome.outcomeDetail;
     } catch (error) {
-      outcome = error instanceof ArtifactValidationError ? "failed-output-contract" : "errored";
+      outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
       outcomeDetail = formatError(error);
       await markWorkflowError({
         options,
         issue,
         error,
-        phase: error instanceof ArtifactValidationError ? "output-contract" : "workflow-error",
+        workflowContext,
+        phase: errorPhase(error),
         attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
         recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
       });
@@ -150,20 +152,26 @@ async function markWorkflowError(input: {
   options: AutoCliOptions;
   issue: AutorunIssueCandidate;
   error: unknown;
+  workflowContext: WorkflowContext;
   phase: string;
   attemptMetadataPath: string;
   recoveryCommand: string;
 }): Promise<void> {
-  const { options, issue, error, phase, attemptMetadataPath, recoveryCommand } = input;
+  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand } = input;
   console.log(`\nAuto workflow error on #${issue.number}: ${formatError(error)}`);
   console.log(`Attempt: ${attemptMetadataPath}`);
   console.log(`Continue: ${recoveryCommand}`);
+
+  const errorArtifact = await readErrorArtifact(workflowContext, error);
+  if (errorArtifact) console.log(`Artifact: ${errorArtifact.path}`);
 
   const comment = formatFailureComment({
     issueNumber: issue.number,
     issueUrl: issue.url,
     phase,
     reason: formatError(error),
+    artifactPath: errorArtifact?.path,
+    artifactContent: errorArtifact?.content,
     attemptMetadataPath,
     recoveryCommand,
   });
@@ -176,6 +184,32 @@ async function markWorkflowError(input: {
     comment,
     removeLabels: [options.inProgressLabel],
   });
+}
+
+async function readErrorArtifact(
+  context: WorkflowContext,
+  error: unknown,
+): Promise<{ path: string; content: string } | undefined> {
+  if (!(error instanceof AgentTaskRunError)) return undefined;
+  try {
+    return {
+      path: artifactRelativePath(context, error.artifact),
+      content: await readArtifact(context, error.artifact),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isOutputContractError(error: unknown): boolean {
+  return error instanceof ArtifactValidationError ||
+    (error instanceof AgentTaskRunError && error.phase === "output-contract");
+}
+
+function errorPhase(error: unknown): string {
+  if (error instanceof AgentTaskRunError) return error.phase;
+  if (error instanceof ArtifactValidationError) return "output-contract";
+  return "workflow-error";
 }
 
 function formatError(error: unknown): string {

@@ -21,6 +21,9 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const trimmed = content.trim();
   if (!trimmed) return invalid("artifact is empty");
 
+  const priorError = parseDiagnosticArtifactError(trimmed);
+  if (priorError) return invalid(priorError);
+
   if (typeof artifact === "string") {
     if (artifact === "triage") {
       return requireVerdict(artifact, content, ["proceed", "blocked", "reject", "needs-human-decision"]);
@@ -68,6 +71,16 @@ function requireVerdict(
     );
   }
   return ok();
+}
+
+function parseDiagnosticArtifactError(markdown: string): string | undefined {
+  const heading = markdown.match(/^#\s+(.+ Error)\s*$/im)?.[1]?.trim();
+  if (!heading) return undefined;
+
+  const phase = markdown.match(/##\s*Phase\s*\n+([^\n]+)/i)?.[1]?.trim();
+  const error = markdown.match(/##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i)?.[1]?.trim();
+  const summary = [phase, error].filter(Boolean).join(": ");
+  return summary ? `previous ${heading} diagnostic: ${summary}` : `previous ${heading} diagnostic`;
 }
 
 function ok(): ArtifactValidationResult {
