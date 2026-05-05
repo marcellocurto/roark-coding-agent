@@ -7,6 +7,7 @@ export type FailureCommentInput = {
   phase: string;
   reason: string;
   artifactPath?: string;
+  attemptMetadataPath?: string;
 };
 
 export type MarkIssueFailedOptions = {
@@ -31,8 +32,11 @@ export type FailureCommentArgvOptions = {
 
 export function formatFailureComment(input: FailureCommentInput): string {
   const lead = `Roark stopped on issue #${input.issueNumber} at phase **${input.phase}**: ${input.reason}.`;
-  if (!input.artifactPath) return `${lead}\n`;
-  return `${lead}\n\nArtifact: \`${input.artifactPath}\`\n`;
+  const lines: string[] = [];
+  if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
+  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  if (lines.length === 0) return `${lead}\n`;
+  return `${lead}\n\n${lines.join("\n")}\n`;
 }
 
 export function buildFailureLabelArgv(options: FailureLabelArgvOptions): string[] {

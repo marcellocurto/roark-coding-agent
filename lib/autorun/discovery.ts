@@ -1,8 +1,20 @@
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { claimGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues } from "../github/issue.ts";
-import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
+import {
+  allocateNextAttempt,
+  attemptMetadataRelativePath,
+  defaultClock,
+  formatAttemptMetadata,
+  summarizeAttempt,
+  updateAttemptIndex,
+  writeAttemptMetadata,
+  type AttemptMetadata,
+  type AttemptOutcome,
+  type Clock,
+} from "./attempts.ts";
 import { checkoutIssueBranch, createBranchPlan, type AutorunBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
@@ -18,7 +30,11 @@ import {
 
 const discoveryFetchLimit = 100;
 
-export async function runAutoDiscovery(options: AutoCliOptions): Promise<void> {
+export async function runAutoDiscovery(
+  options: AutoCliOptions,
+  injected: { clock?: Clock } = {},
+): Promise<void> {
+  const clock = injected.clock ?? defaultClock;
   console.log("\n=== Auto issue discovery ===");
   console.log(`Ready label: ${options.readyLabel}`);
   console.log(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
@@ -70,28 +86,71 @@ export async function runAutoDiscovery(options: AutoCliOptions): Promise<void> {
     console.log(`- Switching to branch ${branchPlan.branchName}`);
     await checkoutIssueBranch({ cwd: options.cwd, plan: branchPlan });
 
-    console.log(`- Running full workflow on branch ${branchPlan.branchName}`);
-    const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options);
-    await runFullWorkflow(workflowContext);
+    const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
+    const attempt = await allocateNextAttempt(issueDir);
 
-    await runPublishGate({
-      options,
-      issue,
-      branchPlan,
-      workflowContext,
+    console.log(`- Running full workflow on branch ${branchPlan.branchName} (attempt ${attempt})`);
+    const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options, attempt);
+    await ensureRunDir(workflowContext);
+
+    let attemptMetadata: AttemptMetadata = formatAttemptMetadata({
+      attempt,
+      issueNumber: issue.number,
+      branch: branchPlan.branchName,
+      baseBranch: branchPlan.baseBranch,
+      worktreePath: workflowContext.cwd,
+      runArtifactPath: workflowContext.runDirRelative,
+      startedAt: clock.now(),
     });
+    await writeAttemptMetadata(issueDir, attemptMetadata);
+    await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
+
+    let outcome: AttemptOutcome = "in-progress";
+    let outcomeDetail: string | null = null;
+
+    try {
+      await runFullWorkflow(workflowContext);
+
+      const gateOutcome = await runPublishGate({
+        options,
+        issue,
+        branchPlan,
+        workflowContext,
+        attemptMetadata,
+        attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
+      });
+      outcome = gateOutcome.outcome;
+      outcomeDetail = gateOutcome.outcomeDetail;
+    } catch (error) {
+      outcome = "errored";
+      outcomeDetail = formatError(error);
+      throw error;
+    } finally {
+      attemptMetadata = formatAttemptMetadata({
+        ...attemptMetadata,
+        endedAt: clock.now(),
+        outcome,
+        outcomeDetail,
+      });
+      await writeAttemptMetadata(issueDir, attemptMetadata);
+      await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
+    }
   }
 
   console.log("\nAuto workflow complete.");
 }
+
+type PublishGateOutcome = { outcome: AttemptOutcome; outcomeDetail: string | null };
 
 async function runPublishGate(input: {
   options: AutoCliOptions;
   issue: AutorunIssueCandidate;
   branchPlan: AutorunBranchPlan;
   workflowContext: WorkflowContext;
-}): Promise<void> {
-  const { options, issue, branchPlan, workflowContext } = input;
+  attemptMetadata: AttemptMetadata;
+  attemptMetadataPath: string;
+}): Promise<PublishGateOutcome> {
+  const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath } = input;
 
   const readinessMarkdown = await readReadinessArtifact(workflowContext);
   const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
@@ -105,11 +164,23 @@ async function runPublishGate(input: {
   const decision = decidePublish({ readinessStatus, verification });
 
   if (decision.publish) {
-    await publishAutorunResult({ options, issue, branchPlan, workflowContext, verification });
-    return;
+    await publishAutorunResult({
+      options,
+      issue,
+      branchPlan,
+      workflowContext,
+      verification,
+      attemptMetadata,
+      attemptMetadataPath,
+    });
+    return { outcome: "published", outcomeDetail: null };
   }
 
-  await handleNonPublish({ options, issue, workflowContext, decision });
+  await handleNonPublish({ options, issue, workflowContext, decision, attemptMetadataPath });
+  return {
+    outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
+    outcomeDetail: decision.reason,
+  };
 }
 
 async function readReadinessArtifact(context: WorkflowContext): Promise<string | undefined> {
@@ -125,18 +196,21 @@ async function handleNonPublish(input: {
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   decision: Extract<PublishGateDecision, { publish: false }>;
+  attemptMetadataPath: string;
 }): Promise<void> {
-  const { options, issue, workflowContext, decision } = input;
+  const { options, issue, workflowContext, decision, attemptMetadataPath } = input;
   const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
 
   console.log(`\nNot publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
   console.log(`Artifact: ${artifactPath}`);
+  console.log(`Attempt: ${attemptMetadataPath}`);
 
   const comment = formatFailureComment({
     issueNumber: issue.number,
     phase: decision.phase,
     reason: decision.reason,
     artifactPath,
+    attemptMetadataPath,
   });
 
   await markIssueFailed({
@@ -146,6 +220,11 @@ async function handleNonPublish(input: {
     label: options.failureLabel,
     comment,
   });
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }
 
 async function resolveAssignee(options: AutoCliOptions): Promise<string | undefined> {

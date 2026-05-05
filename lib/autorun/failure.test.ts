@@ -23,6 +23,30 @@ describe("autorun failure", () => {
     );
   });
 
+  test("formatFailureComment includes the attempt artifact path when provided", () => {
+    const comment = formatFailureComment({
+      issueNumber: 10,
+      phase: "verification",
+      reason: "verify command exited 2",
+      artifactPath: ".roark/runs/issue/10/attempts/2/verification.md",
+      attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
+    });
+    expect(comment).toBe(
+      "Roark stopped on issue #10 at phase **verification**: verify command exited 2.\n\nArtifact: `.roark/runs/issue/10/attempts/2/verification.md`\nAttempt: `.roark/runs/issue/10/attempts/2/attempt.json`\n",
+    );
+  });
+
+  test("formatFailureComment renders only the attempt path when artifact path is omitted", () => {
+    const comment = formatFailureComment({
+      issueNumber: 10,
+      phase: "readiness",
+      reason: 'readiness status is "not-ready"',
+      attemptMetadataPath: ".roark/runs/issue/10/attempts/1/attempt.json",
+    });
+    expect(comment).toContain("Attempt: `.roark/runs/issue/10/attempts/1/attempt.json`");
+    expect(comment).not.toContain("Artifact:");
+  });
+
   test("formatFailureComment omits artifact line when no path is provided", () => {
     const comment = formatFailureComment({
       issueNumber: 8,
@@ -31,6 +55,7 @@ describe("autorun failure", () => {
     });
     expect(comment).toBe('Roark stopped on issue #8 at phase **readiness**: readiness status is "not-ready".\n');
     expect(comment).not.toContain("Artifact:");
+    expect(comment).not.toContain("Attempt:");
   });
 
   test("buildFailureLabelArgv composes a gh issue edit command", () => {
