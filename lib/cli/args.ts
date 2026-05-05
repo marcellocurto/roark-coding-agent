@@ -3,6 +3,7 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
+import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
 
 export type IssueWorkflowCommand =
   | "do"
@@ -45,6 +46,13 @@ export type AutoCliOptions = {
   assignee?: string;
   noAssign: boolean;
   dryRun: boolean;
+  baseBranch: string;
+  worktreeRoot: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  maxFixPasses: number;
+  force: boolean;
+  yes: boolean;
 };
 
 export type CliOptions = IssueCliOptions | AutoCliOptions;
@@ -66,7 +74,7 @@ const commands = new Set<WorkflowCommand>([...issueCommands, "auto"]);
 export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
-  auto                  Find and claim eligible GitHub issues for one-shot autorun. Does not run agents yet.
+  auto                  Find and claim eligible GitHub issues, create worktrees, and run the full workflow.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
@@ -96,7 +104,9 @@ Options:
                           Auto claim label. Defaults to ${defaultAutorunInProgressLabel}.
   --assignee <login>     GitHub user to assign when claiming. Defaults to the authenticated gh user.
   --no-assign            Claim without assigning a user.
-  --dry-run              Print selected issues without claiming them.
+  --dry-run              Print selected issues without claiming them or creating worktrees.
+  --base-branch <branch> Auto worktree base branch. Defaults to ${defaultAutorunBaseBranch}.
+  --worktree-root <path> Auto worktree root. Defaults to ${defaultAutorunWorktreeRoot}.
   --force                Re-run phases even if their markdown artifact already exists.
   --yes                  Continue past dirty git preflight for implementation/fix.
   -h, --help             Show this help.
@@ -124,6 +134,11 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     inProgressLabel: defaultAutorunInProgressLabel,
     noAssign: false,
     dryRun: false,
+    baseBranch: defaultAutorunBaseBranch,
+    worktreeRoot: defaultAutorunWorktreeRoot,
+    maxFixPasses: 1,
+    force: false,
+    yes: false,
   };
 
   let skipLabelsProvided = false;
@@ -150,6 +165,13 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     else if (arg === "--assignee") options.assignee = requiredValue(args, ++index, arg);
     else if (arg === "--no-assign") options.noAssign = true;
     else if (arg === "--dry-run") options.dryRun = true;
+    else if (arg === "--base-branch") options.baseBranch = requiredValue(args, ++index, arg);
+    else if (arg === "--worktree-root") options.worktreeRoot = requiredValue(args, ++index, arg);
+    else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
+    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(args, ++index, arg), arg);
+    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+    else if (arg === "--force") options.force = true;
+    else if (arg === "--yes") options.yes = true;
     else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
     else throw new Error(`The auto command does not take an issue argument. Got '${arg}'.\n\n${usage}`);
   }

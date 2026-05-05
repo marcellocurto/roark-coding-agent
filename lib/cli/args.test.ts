@@ -4,6 +4,7 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
+import { defaultAutorunBaseBranch, defaultAutorunWorktreeRoot } from "../autorun/worktree.ts";
 import { parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
@@ -20,6 +21,11 @@ describe("parseArgs", () => {
     expect(parsed.inProgressLabel).toBe(defaultAutorunInProgressLabel);
     expect(parsed.noAssign).toBe(false);
     expect(parsed.dryRun).toBe(false);
+    expect(parsed.baseBranch).toBe(defaultAutorunBaseBranch);
+    expect(parsed.worktreeRoot).toBe(defaultAutorunWorktreeRoot);
+    expect(parsed.maxFixPasses).toBe(1);
+    expect(parsed.force).toBe(false);
+    expect(parsed.yes).toBe(false);
   });
 
   test("parses auto options", () => {
@@ -40,6 +46,18 @@ describe("parseArgs", () => {
       "--assignee",
       "roark-codes",
       "--dry-run",
+      "--base-branch",
+      "develop",
+      "--worktree-root",
+      ".tmp/worktrees",
+      "--model",
+      "provider/model",
+      "--thinking",
+      "high",
+      "--max-fix-passes",
+      "3",
+      "--force",
+      "--yes",
     ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
@@ -52,6 +70,13 @@ describe("parseArgs", () => {
     expect(parsed.inProgressLabel).toBe("custom-in-progress");
     expect(parsed.assignee).toBe("roark-codes");
     expect(parsed.dryRun).toBe(true);
+    expect(parsed.baseBranch).toBe("develop");
+    expect(parsed.worktreeRoot).toBe(".tmp/worktrees");
+    expect(parsed.model).toBe("provider/model");
+    expect(parsed.thinkingLevel).toBe("high");
+    expect(parsed.maxFixPasses).toBe(3);
+    expect(parsed.force).toBe(true);
+    expect(parsed.yes).toBe(true);
   });
 
   test("rejects issue arguments for auto", () => {
