@@ -1,16 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import path from "node:path";
 import {
   assertSafeWorkBranch,
-  createWorktreePlan,
+  createBranchPlan,
   defaultAutorunBaseBranch,
-  defaultAutorunWorktreeRoot,
-} from "./worktree.ts";
+} from "./branch.ts";
 
-describe("autorun worktree planning", () => {
-  test("plans per-issue worktrees from issue branches", () => {
-    const plan = createWorktreePlan({
-      cwd: "/repo",
+describe("autorun branch planning", () => {
+  test("plans per-issue branches", () => {
+    const plan = createBranchPlan({
       issueNumber: 123,
       branchName: "roark/issue-123",
     });
@@ -19,22 +16,17 @@ describe("autorun worktree planning", () => {
       issueNumber: 123,
       branchName: "roark/issue-123",
       baseBranch: defaultAutorunBaseBranch,
-      worktreePath: path.resolve("/repo", defaultAutorunWorktreeRoot, "issue-123"),
-      worktreePathRelative: path.join(defaultAutorunWorktreeRoot, "issue-123"),
     });
   });
 
-  test("supports custom base branches and worktree roots", () => {
-    const plan = createWorktreePlan({
-      cwd: "/repo",
+  test("supports custom base branches", () => {
+    const plan = createBranchPlan({
       issueNumber: 123,
       branchName: "roark/issue-123",
       baseBranch: "develop",
-      worktreeRoot: ".tmp/roark-worktrees",
     });
 
     expect(plan.baseBranch).toBe("develop");
-    expect(plan.worktreePathRelative).toBe(path.join(".tmp/roark-worktrees", "issue-123"));
   });
 
   test("refuses to use the base branch as the work branch", () => {

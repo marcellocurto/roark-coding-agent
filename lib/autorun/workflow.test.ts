@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createAutorunWorkflowOptions } from "./workflow.ts";
-import { createWorktreePlan } from "./worktree.ts";
+import { createBranchPlan } from "./branch.ts";
 import type { AutoCliOptions } from "../cli/args.ts";
 
 const autoOptions = {
@@ -14,7 +14,6 @@ const autoOptions = {
   noAssign: false,
   dryRun: false,
   baseBranch: "main",
-  worktreeRoot: ".roark/worktrees",
   verifyCommand: "bun run typecheck",
   failureLabel: "roark-failed",
   model: "provider/model",
@@ -25,21 +24,20 @@ const autoOptions = {
 } satisfies AutoCliOptions;
 
 describe("autorun workflow context", () => {
-  test("runs the existing issue workflow inside the issue worktree", () => {
-    const worktreePlan = createWorktreePlan({
-      cwd: "/repo",
+  test("runs the existing issue workflow on the issue branch checkout", () => {
+    const branchPlan = createBranchPlan({
       issueNumber: 123,
       branchName: "roark/issue-123",
     });
     const workflowOptions = createAutorunWorkflowOptions(
       { number: 123, title: "Do the thing" },
-      worktreePlan,
+      branchPlan,
       autoOptions,
     );
 
     expect(workflowOptions.command).toBe("do");
     expect(workflowOptions.issue).toBe("123");
-    expect(workflowOptions.cwd).toBe(worktreePlan.worktreePath);
+    expect(workflowOptions.cwd).toBe("/repo");
     expect(workflowOptions.outDir).toBe(".roark/runs");
     expect(workflowOptions.repo).toBe("owner/repo");
     expect(workflowOptions.model).toBe("provider/model");

@@ -1,35 +1,25 @@
-import path from "node:path";
-import { mkdir } from "node:fs/promises";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 
 export const defaultAutorunBaseBranch = "main";
-export const defaultAutorunWorktreeRoot = ".roark/worktrees";
 
-export type AutorunWorktreePlan = {
+export type AutorunBranchPlan = {
   issueNumber: number;
   branchName: string;
   baseBranch: string;
-  worktreePath: string;
-  worktreePathRelative: string;
 };
 
-export function createWorktreePlan(options: {
-  cwd: string;
+export function createBranchPlan(options: {
   issueNumber: number;
   branchName: string;
   baseBranch?: string;
-  worktreeRoot?: string;
-}): AutorunWorktreePlan {
+}): AutorunBranchPlan {
   const baseBranch = options.baseBranch ?? defaultAutorunBaseBranch;
   assertSafeWorkBranch({ branchName: options.branchName, baseBranch });
 
-  const worktreePathRelative = path.join(options.worktreeRoot ?? defaultAutorunWorktreeRoot, `issue-${options.issueNumber}`);
   return {
     issueNumber: options.issueNumber,
     branchName: options.branchName,
     baseBranch,
-    worktreePath: path.resolve(options.cwd, worktreePathRelative),
-    worktreePathRelative,
   };
 }
 
@@ -42,21 +32,19 @@ export function assertSafeWorkBranch(options: { branchName: string; baseBranch: 
   if (branchName === defaultAutorunBaseBranch) throw new Error(`Autorun work branch cannot be '${defaultAutorunBaseBranch}'.`);
 }
 
-export async function createIssueWorktree(options: { cwd: string; plan: AutorunWorktreePlan }): Promise<void> {
-  await mkdir(path.dirname(options.plan.worktreePath), { recursive: true });
-
+export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
   if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName })) {
-    await runProcessOrThrow(
-      ["git", "worktree", "add", options.plan.worktreePath, options.plan.branchName],
-      { cwd: options.cwd, label: "git worktree add" },
-    );
+    await runProcessOrThrow(["git", "switch", options.plan.branchName], {
+      cwd: options.cwd,
+      label: "git switch",
+    });
     return;
   }
 
-  await runProcessOrThrow(
-    ["git", "worktree", "add", "-b", options.plan.branchName, options.plan.worktreePath, options.plan.baseBranch],
-    { cwd: options.cwd, label: "git worktree add -b" },
-  );
+  await runProcessOrThrow(["git", "switch", "-c", options.plan.branchName, options.plan.baseBranch], {
+    cwd: options.cwd,
+    label: "git switch -c",
+  });
 }
 
 async function gitBranchExists(options: { cwd: string; branchName: string }): Promise<boolean> {
