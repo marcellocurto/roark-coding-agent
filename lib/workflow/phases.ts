@@ -1,5 +1,6 @@
-import { fetchGitHubIssue, formatIssueMarkdown } from "../github/issue.ts";
+import { fetchGitHubIssue } from "../github/issue.ts";
 import { runPiAgent } from "../pi/agent.ts";
+import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import {
   artifactExists,
@@ -39,9 +40,9 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
 
   console.log(`\n=== Fetch issue #${context.issueNumber} ===`);
   const result = await fetchGitHubIssue(context.issueInput, { cwd: context.cwd, repo: context.repo });
-  const issueMarkdown = formatIssueMarkdown(result.issue);
+  const issueArtifact = formatGitHubIssueArtifact(result.issue);
 
-  await writeArtifact(context, "issue", issueMarkdown);
+  await writeArtifact(context, "issue", issueArtifact);
   await writeJsonArtifact(context, "metadata", {
     issueNumber: result.issueNumber,
     repo: result.repo,
@@ -49,7 +50,7 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
     issue: result.issue,
   });
   console.log(`✓ Fetch issue: wrote issue.md and metadata.json`);
-  return issueMarkdown;
+  return issueArtifact;
 }
 
 export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
