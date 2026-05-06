@@ -69,7 +69,7 @@ export const planTask: AgentTask = {
   artifact: "implementationPlan",
   label: "Implementation plan",
   writable: false,
-  thinkingLevel: "xhigh",
+  thinkingLevel: "high",
   prerequisites: ["issue", "triage"],
   prompt: planPrompt,
 };
@@ -87,7 +87,7 @@ export const reviewATask: AgentTask = {
   artifact: "reviewA",
   label: "Review A",
   writable: false,
-  thinkingLevel: "xhigh",
+  thinkingLevel: "high",
   prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
   prompt: reviewAPrompt,
 };
@@ -96,7 +96,7 @@ export const reviewBTask: AgentTask = {
   artifact: "reviewB",
   label: "Review B",
   writable: false,
-  thinkingLevel: "xhigh",
+  thinkingLevel: "high",
   prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
   prompt: reviewBPrompt,
 };
@@ -185,7 +185,7 @@ async function runTaskWithOutputContract(
 }
 
 function repairPrompt(originalPrompt: string, task: AgentTask, reason: string, invalidOutput: string): string {
-  return `${originalPrompt}\n\n<output_contract_repair>\nThe previous ${task.label} response did not satisfy the required Markdown output contract.\nReason: ${escapeForPrompt(reason)}\nReturn the complete ${task.label} Markdown artifact again, with the exact required sections and a valid verdict/status token. Do not include commentary outside the artifact.\n</output_contract_repair>\n\n<invalid_previous_output>\n${escapeForPrompt(invalidOutput)}\n</invalid_previous_output>`;
+  return `${originalPrompt}\n\n<output_contract_repair>\nThe previous ${task.label} response did not satisfy the required Markdown output contract.\nReason: ${escapeForPrompt(reason)}\nReturn the complete ${task.label} Markdown artifact again, with the required heading/verdict/status/ready token needed by the workflow. Do not include commentary outside the artifact.\n</output_contract_repair>\n\n<invalid_previous_output>\n${escapeForPrompt(invalidOutput)}\n</invalid_previous_output>`;
 }
 
 function formatAgentTaskErrorArtifact(input: {
