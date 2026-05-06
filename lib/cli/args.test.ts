@@ -154,4 +154,16 @@ describe("parseArgs", () => {
     expect(parsed.maxFixPasses).toBe(3);
     expect(parsed.attempt).toBe(2);
   });
+
+  test("parses curate-issues as a standalone issue workflow command", () => {
+    const parsed = parseArgs(["curate-issues", "123", "--repo", "owner/repo", "--attempt", "2"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+
+    expect(parsed.command).toBe("curate-issues");
+    if (parsed.command === "auto" || parsed.command === "continue") throw new Error("expected issue options");
+    expect(parsed.issue).toBe("123");
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.attempt).toBe(2);
+  });
 });

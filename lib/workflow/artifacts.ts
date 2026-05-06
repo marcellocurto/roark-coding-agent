@@ -13,7 +13,8 @@ export type StaticArtifactName =
   | "reviewB"
   | "readiness"
   | "verification"
-  | "metadata";
+  | "metadata"
+  | "issueCurationPlan";
 
 export type NumberedArtifactName = "fixLog" | "finalReview";
 
@@ -46,6 +47,7 @@ const filenames: Record<StaticArtifactName, string> = {
   readiness: "readiness.md",
   verification: "verification.md",
   metadata: "metadata.json",
+  issueCurationPlan: "issue-curation-plan.json",
 };
 
 export function fixLogRef(pass: number): ArtifactRef {
