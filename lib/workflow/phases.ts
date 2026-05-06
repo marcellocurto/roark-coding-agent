@@ -106,21 +106,28 @@ export async function readinessPhase(context: WorkflowContext): Promise<string> 
   return readiness;
 }
 
-export async function runFullWorkflow(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<void> {
+export type WorkflowRunResult =
+  | { status: "completed" }
+  | { status: "stopped"; phase: "triage"; verdict: string | undefined }
+  | { status: "stopped"; phase: "planning" }
+  | { status: "stopped"; phase: "review" };
+
+export async function runFullWorkflow(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<WorkflowRunResult> {
   await fetchIssuePhase(context);
 
   const triage = await triagePhase(context, runner);
   if (!shouldProceedAfterTriage(triage)) {
     await readinessPhase(context);
-    console.log(`\nStopped after triage: ${parseVerdict(triage) ?? "unknown verdict"}`);
-    return;
+    const verdict = parseVerdict(triage);
+    console.log(`\nStopped after triage: ${verdict ?? "unknown verdict"}`);
+    return { status: "stopped", phase: "triage", verdict };
   }
 
   const plan = await planPhase(context, runner);
   if (!shouldImplementPlan(plan)) {
     await readinessPhase(context);
     console.log("\nStopped after planning: plan is not ready for implementation.");
-    return;
+    return { status: "stopped", phase: "planning" };
   }
 
   await implementationPhase(context, runner);
@@ -129,7 +136,7 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   if (hasBlockedReview(reviewA, reviewB)) {
     await readinessPhase(context);
     console.log("\nStopped after review: at least one review is blocked.");
-    return;
+    return { status: "stopped", phase: "review" };
   }
 
   if (needsFix(reviewA, reviewB)) {
@@ -141,6 +148,7 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   }
 
   await readinessPhase(context);
+  return { status: "completed" };
 }
 
 async function shouldRegenerateArtifact(context: WorkflowContext, artifact: ArtifactRef): Promise<boolean> {

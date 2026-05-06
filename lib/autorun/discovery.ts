@@ -17,8 +17,8 @@ import {
 } from "./attempts.ts";
 import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
+import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { runPublishGate } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
@@ -106,10 +106,11 @@ export async function runAutoDiscovery(
     let outcomeDetail: string | null = null;
 
     try {
-      await runFullWorkflow(workflowContext);
+      const workflowResult = await runFullWorkflow(workflowContext);
 
       const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
-      const gateOutcome = await runPublishGate({
+      const completionOutcome = await completeAutorunWorkflow({
+        workflowResult,
         options,
         issue,
         branchPlan,
@@ -118,8 +119,8 @@ export async function runAutoDiscovery(
         attemptMetadataPath,
         recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
       });
-      outcome = gateOutcome.outcome;
-      outcomeDetail = gateOutcome.outcomeDetail;
+      outcome = completionOutcome.outcome;
+      outcomeDetail = completionOutcome.outcomeDetail;
     } catch (error) {
       outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
       outcomeDetail = formatError(error);

@@ -10,6 +10,8 @@ import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
 import {
   hasBlockedReview,
   needsFix,
+  parseVerdict,
+  shouldProceedAfterTriage,
   shouldRunAnotherFixPass,
 } from "../workflow/verdicts.ts";
 
@@ -25,6 +27,15 @@ export async function planContinuation(context: WorkflowContext): Promise<Contin
 
   const triage = await inspect(context, "triage");
   if (!triage.valid) return [run("triage", triage.reason), run("plan", "plan depends on triage"), run("implement", "implementation depends on plan"), run("review-a", "review A depends on implementation"), run("review-b", "review B depends on implementation"), readiness("workflow must recompute readiness"), gate("publish gate must run after readiness")];
+
+  const triageMarkdown = triage.content ?? "";
+  if (!shouldProceedAfterTriage(triageMarkdown)) {
+    const verdict = parseVerdict(triageMarkdown) ?? "unknown";
+    return [
+      readiness(`triage verdict is "${verdict}"; readiness records the stop`),
+      noop("triage no-op marker records the terminal outcome"),
+    ];
+  }
 
   const plan = await inspect(context, "implementationPlan");
   if (!plan.valid) return [run("plan", plan.reason), run("implement", "implementation depends on plan"), run("review-a", "review A depends on implementation"), run("review-b", "review B depends on implementation"), readiness("workflow must recompute readiness"), gate("publish gate must run after readiness")];
@@ -100,4 +111,8 @@ function readiness(reason: string): ContinuePlanStep {
 
 function gate(reason: string): ContinuePlanStep {
   return { type: "publish-gate", reason };
+}
+
+function noop(reason: string): ContinuePlanStep {
+  return { type: "noop", reason };
 }

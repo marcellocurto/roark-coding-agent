@@ -88,6 +88,7 @@ bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
    - **Claim** it: assign the user (`--assignee`, defaulting to the authenticated `gh` user, unless `--no-assign`), apply the in-progress label, and post a claim comment naming the branch.
    - **Switch** to `roark/issue-<n>`, creating it from `--base-branch` (default `main`) via `git switch -c` if it does not exist yet.
    - Allocate a per-attempt directory under `.roark/runs/issue/<n>/attempts/<k>/` and run the full `do` workflow there.
+   - If triage returns a non-`proceed` verdict, stop as a no-op: post a concise issue comment, remove the in-progress label, apply the matching terminal/status label, and skip planning, implementation, verification, publishing, and PR creation.
    - Apply the **readiness gate**: `readiness.md` must declare `## Status` as `ready-for-pr`.
    - Apply the **verification gate**: run `--verify` (default `bun run typecheck`) via `sh -c` and require exit code `0`.
    - On success: commit pending workflow artifacts, `git push -u <remote> <branch>`, open a **draft** PR with `gh pr create --draft --base <base-branch> --head <branch>`, and apply the success label to the issue.
@@ -102,6 +103,8 @@ bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
 | Success | `roark-pr-opened` | Applied after a draft PR is opened. | `--success-label` |
 | Failure | `roark-failed` | Applied when the readiness or verification gate fails. | `--failure-label` |
 | Skip set | `blocked`, `needs-human`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened` | Any one of these on an issue removes it from the eligible set. | `--skip-label` (repeatable) or `--skip-labels` (comma-separated) |
+
+Non-`proceed` triage outcomes reuse existing skip/status labels instead of introducing a roark-specific no-op label: `blocked` maps to `blocked`, `needs-human-decision` maps to `needs-human`, and `reject` maps to `wontfix`. These labels are already in the default skip set and describe why autorun should not retry without human relabeling.
 
 If you change a default in code, update this table to match.
 
@@ -132,6 +135,8 @@ Autorun publishes only when **both** gates pass.
 - **Verification gate.** Autorun runs `--verify` (default `bun run typecheck`) via `sh -c` in the workflow's `cwd`. Exit code `0` passes; any non-zero exit fails. The command, exit code, and tails of stdout/stderr are written to `verification.md`.
 
 When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), includes the artifact contents/excerpt directly in the GitHub comment, and gives the exact `continue` command for that attempt.
+
+A triage no-op is handled before these gates: autorun writes readiness, comments with the triage verdict and artifact paths, removes `roark-in-progress`, removes any stale failure label, applies the mapped skip/status label, and does not run verification, push, or create a PR.
 
 ### Recovering stopped attempts
 

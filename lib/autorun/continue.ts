@@ -20,9 +20,10 @@ import {
   type Clock,
 } from "./attempts.ts";
 import { checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
+import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
-import { runPublishGate, type AutorunGateOptions } from "./publish-flow.ts";
+import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
@@ -50,6 +51,10 @@ export async function runAutoContinue(
 
   if (attemptMetadata.outcome === "published" && !options.force) {
     console.log(`Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`);
+    return;
+  }
+  if (attemptMetadata.outcome === "noop-triage" && !options.force) {
+    console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
     return;
   }
 
@@ -84,10 +89,11 @@ export async function runAutoContinue(
   let outcomeDetail: string | null = null;
 
   try {
-    await runFullWorkflow(workflowContext, runner);
+    const workflowResult = await runFullWorkflow(workflowContext, runner);
 
     const issue = await loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber });
-    const gateOutcome = await runPublishGate({
+    const completionOutcome = await completeAutorunWorkflow({
+      workflowResult,
       options: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
       issue,
       branchPlan,
@@ -96,8 +102,8 @@ export async function runAutoContinue(
       attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
       recoveryCommand,
     });
-    outcome = gateOutcome.outcome;
-    outcomeDetail = gateOutcome.outcomeDetail;
+    outcome = completionOutcome.outcome;
+    outcomeDetail = completionOutcome.outcomeDetail;
   } catch (error) {
     outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
     outcomeDetail = formatError(error);
