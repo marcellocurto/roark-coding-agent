@@ -2,12 +2,17 @@ import { runProcessOrThrow } from "../cli/process.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
+const failureArtifactExcerptMaxChars = 6_000;
+
 export type FailureCommentInput = {
   issueNumber: number;
+  issueUrl?: string;
   phase: string;
   reason: string;
   artifactPath?: string;
+  artifactContent?: string;
   attemptMetadataPath?: string;
+  recoveryCommand?: string;
 };
 
 export type MarkIssueFailedOptions = {
@@ -16,6 +21,7 @@ export type MarkIssueFailedOptions = {
   issueNumber: number;
   label: string;
   comment: string;
+  removeLabels?: string[];
 };
 
 export type FailureLabelArgvOptions = {
@@ -31,10 +37,27 @@ export type FailureCommentArgvOptions = {
 };
 
 export function formatFailureComment(input: FailureCommentInput): string {
-  const lead = `Roark stopped on issue #${input.issueNumber} at phase **${input.phase}**: ${input.reason}.`;
+  const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
+  const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${input.reason}.`;
   const lines: string[] = [];
+
   if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
+
+  if (input.artifactContent !== undefined) {
+    if (lines.length > 0) lines.push("");
+    lines.push("## Artifact contents");
+    if (input.artifactPath) lines.push(`\`${input.artifactPath}\``);
+    lines.push(formatFencedBlock(truncateArtifactContent(input.artifactContent), "markdown"));
+  }
+
+  if (input.recoveryCommand) {
+    if (lines.length > 0) lines.push("");
+    lines.push("## Recovery");
+    lines.push("From the same checkout, run:");
+    lines.push(formatFencedBlock(input.recoveryCommand, "bash"));
+  }
+
   if (lines.length === 0) return `${lead}\n`;
   return `${lead}\n\n${lines.join("\n")}\n`;
 }
@@ -42,6 +65,11 @@ export function formatFailureComment(input: FailureCommentInput): string {
 export function buildFailureLabelArgv(options: FailureLabelArgvOptions): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
+}
+
+export function buildRemoveLabelArgv(options: FailureLabelArgvOptions): string[] {
+  const repoArgs = options.repo ? ["--repo", options.repo] : [];
+  return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
 export function buildFailureCommentArgv(options: FailureCommentArgvOptions): string[] {
@@ -67,11 +95,58 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
     console.warn(`Failed to apply failure label '${options.label}': ${formatError(error)}`);
   }
 
+  for (const label of uniqueLabels(options.removeLabels ?? []).filter((label) => label !== options.label)) {
+    try {
+      await runProcessOrThrow(
+        buildRemoveLabelArgv({ repo: options.repo, issueNumber: options.issueNumber, label }),
+        { cwd: options.cwd, label: "gh issue edit --remove-label (failure cleanup)" },
+      );
+    } catch (error) {
+      console.warn(`Failed to remove label '${label}': ${formatError(error)}`);
+    }
+  }
+
   try {
     await runProcessOrThrow(commentArgv, { cwd: options.cwd, label: "gh issue comment (failure)" });
   } catch (error) {
     console.warn(`Failed to post failure comment: ${formatError(error)}`);
   }
+}
+
+function truncateArtifactContent(value: string): string {
+  if (value.length <= failureArtifactExcerptMaxChars) return value;
+  return `${value.slice(0, failureArtifactExcerptMaxChars)}\n\n... (truncated ${value.length - failureArtifactExcerptMaxChars} later characters) ...`;
+}
+
+function formatFencedBlock(value: string, language: string): string {
+  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const char of value) {
+    if (char === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
+}
+
+function uniqueLabels(labels: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const label of labels) {
+    const trimmed = label.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
 }
 
 function formatError(error: unknown): string {

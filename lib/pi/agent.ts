@@ -9,14 +9,18 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
+export const defaultRoarkModel = "openai-codex/gpt-5.5";
+
 const readOnlyTools = ["read", "bash", "grep", "find", "ls"];
 const writableTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 export async function runPiAgent(options: AgentRunRequest): Promise<string> {
+  const modelSpec = requestedModelSpec(options.model);
+  console.log(`model: ${modelSpec}`);
   console.log(`thinking: ${options.thinkingLevel}`);
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
-  const model = options.model ? resolveModel(modelRegistry, options.model) : undefined;
+  const model = resolveModel(modelRegistry, modelSpec);
   const settingsManager = SettingsManager.inMemory({
     retry: { enabled: true, maxRetries: 2 },
   });
@@ -64,10 +68,16 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
 
   try {
     await session.prompt(options.prompt, { expandPromptTemplates: false });
+    const agentError = extractAgentErrorMessage(session.messages);
+    if (agentError) throw new Error(agentError);
     return extractLastAssistantText(session.messages) || streamedText.trim();
   } finally {
     session.dispose();
   }
+}
+
+export function requestedModelSpec(explicitModel?: string): string {
+  return explicitModel ?? defaultRoarkModel;
 }
 
 function resolveModel(modelRegistry: ModelRegistry, spec: string) {
@@ -80,6 +90,21 @@ function resolveModel(modelRegistry: ModelRegistry, spec: string) {
   const model = modelRegistry.find(provider, id);
   if (!model) throw new Error(`Model not found: ${spec}`);
   return model;
+}
+
+export function extractAgentErrorMessage(messages: readonly unknown[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index] as { role?: string; stopReason?: string; errorMessage?: unknown; provider?: string; model?: string };
+    if (message.role !== "assistant") continue;
+    if (message.stopReason !== "error" && !message.errorMessage) continue;
+
+    const providerModel = [message.provider, message.model].filter(Boolean).join("/");
+    const detail = typeof message.errorMessage === "string" && message.errorMessage.trim()
+      ? message.errorMessage.trim()
+      : "agent provider returned an error without a message";
+    return providerModel ? `${providerModel} failed: ${detail}` : detail;
+  }
+  return undefined;
 }
 
 function extractLastAssistantText(messages: readonly unknown[]): string {

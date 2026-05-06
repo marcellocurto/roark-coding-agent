@@ -104,8 +104,46 @@ describe("parseArgs", () => {
     );
   });
 
+  test("parses continue command options", () => {
+    const parsed = parseArgs([
+      "continue",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--attempt",
+      "2",
+      "--verify",
+      "bun test",
+      "--failure-label",
+      "failed",
+      "--success-label",
+      "opened",
+      "--in-progress-label",
+      "busy",
+      "--remote",
+      "upstream",
+      "--max-fix-passes",
+      "4",
+      "--yes",
+    ]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+    expect(parsed.command).toBe("continue");
+    if (parsed.command !== "continue") throw new Error("expected continue options");
+    expect(parsed.issue).toBe("123");
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.verifyCommand).toBe("bun test");
+    expect(parsed.failureLabel).toBe("failed");
+    expect(parsed.successLabel).toBe("opened");
+    expect(parsed.inProgressLabel).toBe("busy");
+    expect(parsed.remote).toBe("upstream");
+    expect(parsed.maxFixPasses).toBe(4);
+    expect(parsed.yes).toBe(true);
+  });
+
   test("still parses issue workflow commands", () => {
-    const parsed = parseArgs(["do", "123", "--repo", "owner/repo", "--max-fix-passes", "3"]);
+    const parsed = parseArgs(["do", "123", "--repo", "owner/repo", "--max-fix-passes", "3", "--attempt", "2"]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
@@ -114,5 +152,6 @@ describe("parseArgs", () => {
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.maxFixPasses).toBe(3);
+    expect(parsed.attempt).toBe(2);
   });
 });

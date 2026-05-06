@@ -41,11 +41,17 @@ export function parseVerdict(markdown: string): string | undefined {
   return known.find((verdict) => normalized.startsWith(verdict));
 }
 
-export function parseReadyForImplementation(markdown: string): boolean {
+export function parseReadyForImplementationValue(markdown: string): "yes" | "no" | undefined {
   const match = markdown.match(/##\s*Ready For Implementation\s*\n+([^\n]+)/i);
-  const answer = match?.[1];
-  if (!answer) return true;
-  return answer.toLowerCase().trim().startsWith("yes");
+  const answer = match?.[1]?.replace(/[`*_]/g, "").trim().toLowerCase();
+  if (!answer) return undefined;
+  if (answer.startsWith("yes")) return "yes";
+  if (answer.startsWith("no")) return "no";
+  return undefined;
+}
+
+export function parseReadyForImplementation(markdown: string): boolean {
+  return parseReadyForImplementationValue(markdown) === "yes";
 }
 
 export function shouldProceedAfterTriage(triage: string): boolean {
