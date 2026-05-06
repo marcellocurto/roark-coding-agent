@@ -17,7 +17,8 @@ export type IssueWorkflowCommand =
   | "review"
   | "fix"
   | "final-review"
-  | "readiness";
+  | "readiness"
+  | "curate-issues";
 
 export type ContinueCommand = "continue";
 
@@ -95,6 +96,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "fix",
   "final-review",
   "readiness",
+  "curate-issues",
 ]);
 
 const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue"]);
@@ -113,6 +115,7 @@ Commands:
   fix <issue>            Run only the fix agent.
   final-review <issue>   Run only the final review agent.
   readiness <issue>      Write deterministic PR readiness markdown.
+  curate-issues <issue>  Write a deterministic issue creation plan from reviewer findings.
 
 Issue can be a number, a GitHub issue URL, or owner/repo#123.
 The auto command does not take an issue argument.
