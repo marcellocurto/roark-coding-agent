@@ -59,4 +59,11 @@ describe("workflow prompt safety policy", () => {
       expect(prompt).toContain("</workflow_phase>");
     }
   });
+
+  test("triage prompt requires blocker verification", () => {
+    const prompt = triagePrompt(context);
+    expect(prompt).toContain("gh issue view &lt;issue&gt; --repo &lt;owner/repo&gt; --json number,title,state,stateReason,closed,closedAt,url");
+    expect(prompt).toContain("Closed or completed blockers are resolved and must not block implementation");
+    expect(prompt).toContain("Stale ## Blocked by body text must not override resolved GitHub state");
+  });
 });

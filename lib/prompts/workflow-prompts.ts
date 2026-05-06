@@ -28,6 +28,15 @@ export function triagePrompt(context: WorkflowContext): string {
     <question>Is anything blocking implementation?</question>
     <question>What evidence from the codebase supports your conclusion?</question>
   </decision_points>
+  <blocker_verification_policy>
+    <instruction>Before returning blocked, verify every blocking issue reference.</instruction>
+    <instruction>Prefer the machine-generated github_issue_relationships snapshot in issue.md for native GitHub blocked/blocking relationships.</instruction>
+    <instruction>For body-only blocker references, verify with: gh issue view &lt;issue&gt; --repo &lt;owner/repo&gt; --json number,title,state,stateReason,closed,closedAt,url</instruction>
+    <instruction>Closed or completed blockers are resolved and must not block implementation.</instruction>
+    <instruction>Stale ## Blocked by body text must not override resolved GitHub state.</instruction>
+    <instruction>If a body-declared blocker cannot be verified, use needs-human-decision rather than blindly returning blocked.</instruction>
+    <instruction>If returning blocked, include exact blocker evidence in ## Evidence: issue number, title if available, state, stateReason/closedAt, source, and verification command or snapshot field used.</instruction>
+  </blocker_verification_policy>
   <output_contract format="markdown" exact_sections="true">
 # Triage
 

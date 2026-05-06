@@ -42,6 +42,19 @@ describe("planContinuation", () => {
     ]);
   });
 
+  test("treats non-proceed triage as terminal", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, "issue", "# GitHub Issue #11\n");
+    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nblocked\n");
+
+    const steps = await planContinuation(context);
+
+    expect(steps).toEqual([
+      { type: "write-readiness", reason: "triage stopped before implementation" },
+      { type: "noop", reason: "terminal triage outcome; no plan/implementation/publish gate" },
+    ]);
+  });
+
   test("continues from a missing final review after an existing fix pass", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required");

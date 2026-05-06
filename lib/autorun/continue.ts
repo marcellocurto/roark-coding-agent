@@ -24,6 +24,7 @@ import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
 import { runPublishGate, type AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
+import { markIssueTriageStopped } from "./triage-stop.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 
@@ -84,20 +85,36 @@ export async function runAutoContinue(
   let outcomeDetail: string | null = null;
 
   try {
-    await runFullWorkflow(workflowContext, runner);
+    const workflowResult = await runFullWorkflow(workflowContext, runner);
 
     const issue = await loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber });
-    const gateOutcome = await runPublishGate({
-      options: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
-      issue,
-      branchPlan,
-      workflowContext,
-      attemptMetadata,
-      attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
-      recoveryCommand,
-    });
-    outcome = gateOutcome.outcome;
-    outcomeDetail = gateOutcome.outcomeDetail;
+    const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
+    if (workflowResult.status === "triage-stopped") {
+      await markIssueTriageStopped({
+        cwd: workflowContext.cwd,
+        repo: parsed.repo,
+        issueNumber: issue.number,
+        issueUrl: issue.url,
+        triageVerdict: workflowResult.triageVerdict,
+        triageArtifactPath: artifactRelativePath(workflowContext, "triage"),
+        attemptMetadataPath,
+        removeLabels: [options.inProgressLabel],
+      });
+      outcome = "triage-stopped";
+      outcomeDetail = `triage verdict is "${workflowResult.triageVerdict}"`;
+    } else {
+      const gateOutcome = await runPublishGate({
+        options: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
+        issue,
+        branchPlan,
+        workflowContext,
+        attemptMetadata,
+        attemptMetadataPath,
+        recoveryCommand,
+      });
+      outcome = gateOutcome.outcome;
+      outcomeDetail = gateOutcome.outcomeDetail;
+    }
   } catch (error) {
     outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
     outcomeDetail = formatError(error);

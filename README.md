@@ -88,6 +88,8 @@ bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
    - **Claim** it: assign the user (`--assignee`, defaulting to the authenticated `gh` user, unless `--no-assign`), apply the in-progress label, and post a claim comment naming the branch.
    - **Switch** to `roark/issue-<n>`, creating it from `--base-branch` (default `main`) via `git switch -c` if it does not exist yet.
    - Allocate a per-attempt directory under `.roark/runs/issue/<n>/attempts/<k>/` and run the full `do` workflow there.
+   - Before triage, fetch a machine-generated GitHub relationship snapshot: native dependencies via `gh api` when available, plus conservatively parsed `Blocked by` body references verified with `gh issue view`.
+   - If triage returns a terminal non-`proceed` verdict, stop cleanly: remove the in-progress label, apply `blocked` for `blocked` or `needs-human` for `reject`/`needs-human-decision`, post a concise comment, and skip verification, push, and PR creation.
    - Apply the **readiness gate**: `readiness.md` must declare `## Status` as `ready-for-pr`.
    - Apply the **verification gate**: run `--verify` (default `bun run typecheck`) via `sh -c` and require exit code `0`.
    - On success: commit pending workflow artifacts, `git push -u <remote> <branch>`, open a **draft** PR with `gh pr create --draft --base <base-branch> --head <branch>`, and apply the success label to the issue.
@@ -100,7 +102,7 @@ bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
 | Ready | `afk` | Issue is opted in to autorun. Only issues with this label are eligible. | `--label` |
 | In-progress | `roark-in-progress` | Applied at claim time so concurrent invocations skip the issue. | `--in-progress-label` |
 | Success | `roark-pr-opened` | Applied after a draft PR is opened. | `--success-label` |
-| Failure | `roark-failed` | Applied when the readiness or verification gate fails. | `--failure-label` |
+| Failure | `roark-failed` | Applied when the readiness or verification gate actually fails, not for clean terminal triage stops. | `--failure-label` |
 | Skip set | `blocked`, `needs-human`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened` | Any one of these on an issue removes it from the eligible set. | `--skip-label` (repeatable) or `--skip-labels` (comma-separated) |
 
 If you change a default in code, update this table to match.
@@ -131,7 +133,7 @@ Autorun publishes only when **both** gates pass.
 - **Readiness gate.** The workflow's `readiness.md` artifact must contain a `## Status` heading whose value (after stripping backticks/emphasis) is exactly `ready-for-pr`. Anything else — including `not-ready` or a missing status — fails the gate.
 - **Verification gate.** Autorun runs `--verify` (default `bun run typecheck`) via `sh -c` in the workflow's `cwd`. Exit code `0` passes; any non-zero exit fails. The command, exit code, and tails of stdout/stderr are written to `verification.md`.
 
-When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), includes the artifact contents/excerpt directly in the GitHub comment, and gives the exact `continue` command for that attempt.
+When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), includes the artifact contents/excerpt directly in the GitHub comment, and gives the exact `continue` command for that attempt. Intentional triage stops (`blocked`, `reject`, or `needs-human-decision`) are handled before these gates and do not receive `roark-failed`.
 
 ### Recovering stopped attempts
 
@@ -141,7 +143,7 @@ A failed autorun attempt is recoverable without relabeling the issue or starting
 bun run roark-coding-agent.ts continue 123 --repo owner/repo --attempt 1
 ```
 
-If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It switches back to the attempt branch from `attempt.json`, reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns the verification gate, and publishes the draft PR only if both gates pass. This is the intended recovery path for cases like an empty review artifact, failed readiness, or failed verification.
+If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It switches back to the attempt branch from `attempt.json`, reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns the verification gate, and publishes the draft PR only if both gates pass. If the existing triage artifact is a valid terminal non-`proceed` verdict, `continue` keeps that as a clean terminal outcome instead of proceeding into planning. This is the intended recovery path for cases like an empty review artifact, failed readiness, or failed verification.
 
 ### Draft PR only — never merges, never closes
 

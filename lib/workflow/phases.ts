@@ -42,7 +42,7 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
 
   console.log(`\n=== Fetch issue #${context.issueNumber} ===`);
   const result = await fetchGitHubIssue(context.issueInput, { cwd: context.cwd, repo: context.repo });
-  const issueArtifact = formatGitHubIssueArtifact(result.issue);
+  const issueArtifact = formatGitHubIssueArtifact(result.issue, result.relationships);
 
   await writeArtifact(context, "issue", issueArtifact);
   await writeJsonArtifact(context, "metadata", {
@@ -50,6 +50,7 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
     repo: result.repo,
     fetchedAt: new Date().toISOString(),
     issue: result.issue,
+    relationships: result.relationships,
   });
   console.log(`✓ Fetch issue: wrote issue.md and metadata.json`);
   return issueArtifact;
@@ -106,21 +107,28 @@ export async function readinessPhase(context: WorkflowContext): Promise<string> 
   return readiness;
 }
 
-export async function runFullWorkflow(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<void> {
+export type WorkflowRunResult =
+  | { status: "triage-stopped"; triageVerdict: string }
+  | { status: "planning-stopped" }
+  | { status: "review-blocked" }
+  | { status: "completed" };
+
+export async function runFullWorkflow(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<WorkflowRunResult> {
   await fetchIssuePhase(context);
 
   const triage = await triagePhase(context, runner);
   if (!shouldProceedAfterTriage(triage)) {
+    const triageVerdict = parseVerdict(triage) ?? "unknown";
     await readinessPhase(context);
-    console.log(`\nStopped after triage: ${parseVerdict(triage) ?? "unknown verdict"}`);
-    return;
+    console.log(`\nStopped after triage: ${triageVerdict}`);
+    return { status: "triage-stopped", triageVerdict };
   }
 
   const plan = await planPhase(context, runner);
   if (!shouldImplementPlan(plan)) {
     await readinessPhase(context);
     console.log("\nStopped after planning: plan is not ready for implementation.");
-    return;
+    return { status: "planning-stopped" };
   }
 
   await implementationPhase(context, runner);
@@ -129,7 +137,7 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   if (hasBlockedReview(reviewA, reviewB)) {
     await readinessPhase(context);
     console.log("\nStopped after review: at least one review is blocked.");
-    return;
+    return { status: "review-blocked" };
   }
 
   if (needsFix(reviewA, reviewB)) {
@@ -141,6 +149,7 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   }
 
   await readinessPhase(context);
+  return { status: "completed" };
 }
 
 async function shouldRegenerateArtifact(context: WorkflowContext, artifact: ArtifactRef): Promise<boolean> {
