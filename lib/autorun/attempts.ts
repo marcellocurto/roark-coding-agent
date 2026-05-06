@@ -5,7 +5,7 @@ import path from "node:path";
 export type AttemptOutcome =
   | "in-progress"
   | "published"
-  | "noop-triage"
+  | "triage-stopped"
   | "failed-readiness"
   | "failed-verification"
   | "failed-output-contract"

@@ -53,7 +53,7 @@ export async function runAutoContinue(
     console.log(`Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`);
     return;
   }
-  if (attemptMetadata.outcome === "noop-triage" && !options.force) {
+  if (attemptMetadata.outcome === "triage-stopped" && !options.force) {
     console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
     return;
   }

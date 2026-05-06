@@ -97,17 +97,6 @@ describe("formatAttemptMetadata", () => {
     expect(metadata.outcome).toBe("published");
   });
 
-  test("accepts noop-triage as a terminal outcome", () => {
-    const metadata = formatAttemptMetadata({
-      ...baseInput,
-      outcome: "noop-triage",
-      outcomeDetail: 'triage verdict is "blocked"',
-      endedAt: "2026-05-05T07:42:11.000Z",
-    });
-    expect(metadata.outcome).toBe("noop-triage");
-    expect(metadata.outcomeDetail).toBe('triage verdict is "blocked"');
-  });
-
   test("preserves outcomeDetail when provided", () => {
     const metadata = formatAttemptMetadata({
       ...baseInput,
@@ -118,6 +107,17 @@ describe("formatAttemptMetadata", () => {
     expect(metadata.outcome).toBe("failed-verification");
     expect(metadata.outcomeDetail).toBe("verify command exited 2");
     expect(metadata.endedAt).toBe("2026-05-05T07:42:11.000Z");
+  });
+
+  test("supports triage-stopped outcome", () => {
+    const metadata = formatAttemptMetadata({
+      ...baseInput,
+      outcome: "triage-stopped",
+      outcomeDetail: 'triage verdict is "blocked"',
+      endedAt: "2026-05-05T07:42:11.000Z",
+    });
+    expect(metadata.outcome).toBe("triage-stopped");
+    expect(metadata.outcomeDetail).toBe('triage verdict is "blocked"');
   });
 });
 

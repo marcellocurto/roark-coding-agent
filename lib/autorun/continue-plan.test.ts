@@ -42,7 +42,7 @@ describe("planContinuation", () => {
     ]);
   });
 
-  test("plans readiness plus no-op marker when existing triage does not proceed", async () => {
+  test("treats non-proceed triage as terminal", async () => {
     const context = await tempContext();
     await writeArtifact(context, "issue", "# GitHub Issue #11\n");
     await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nneeds-human-decision\n");
@@ -51,7 +51,7 @@ describe("planContinuation", () => {
 
     expect(steps).toEqual([
       { type: "write-readiness", reason: 'triage verdict is "needs-human-decision"; readiness records the stop' },
-      { type: "noop", reason: "triage no-op marker records the terminal outcome" },
+      { type: "noop", reason: "terminal triage outcome; no plan/implementation/publish gate" },
     ]);
   });
 

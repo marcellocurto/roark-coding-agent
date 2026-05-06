@@ -33,7 +33,7 @@ export async function planContinuation(context: WorkflowContext): Promise<Contin
     const verdict = parseVerdict(triageMarkdown) ?? "unknown";
     return [
       readiness(`triage verdict is "${verdict}"; readiness records the stop`),
-      noop("triage no-op marker records the terminal outcome"),
+      noop("terminal triage outcome; no plan/implementation/publish gate"),
     ];
   }
 

@@ -29,7 +29,7 @@ const workflowContext: WorkflowContext = {
 };
 
 const branchPlan = { issueNumber: 12, branchName: "roark/issue-12", baseBranch: "main" };
-const issue = { number: 12, title: "Handle no-op" };
+const issue = { number: 12, title: "Handle no-op", url: "https://github.com/owner/repo/issues/12" };
 const attemptMetadata = formatAttemptMetadata({
   attempt: 1,
   issueNumber: 12,
@@ -41,12 +41,12 @@ const attemptMetadata = formatAttemptMetadata({
 });
 
 describe("completeAutorunWorkflow", () => {
-  test("marks triage no-op and does not run the publish gate", async () => {
+  test("marks triage-stopped and does not run the publish gate", async () => {
     let publishCalls = 0;
     const marked: unknown[] = [];
 
     const outcome = await completeAutorunWorkflow({
-      workflowResult: { status: "stopped", phase: "triage", verdict: "blocked" },
+      workflowResult: { status: "triage-stopped", triageVerdict: "blocked" },
       options,
       issue,
       branchPlan,
@@ -58,22 +58,23 @@ describe("completeAutorunWorkflow", () => {
         publishCalls += 1;
         return { outcome: "published", outcomeDetail: null };
       },
-      markTriageNoop: async (input) => {
+      markTriageStopped: async (input) => {
         marked.push(input);
       },
     });
 
-    expect(outcome).toEqual({ outcome: "noop-triage", outcomeDetail: 'triage verdict is "blocked"' });
+    expect(outcome).toEqual({ outcome: "triage-stopped", outcomeDetail: 'triage verdict is "blocked"' });
     expect(publishCalls).toBe(0);
     expect(marked).toHaveLength(1);
     expect(marked[0]).toMatchObject({
       cwd: "/repo",
       repo: "owner/repo",
-      verdict: "blocked",
-      inProgressLabel: "roark-in-progress",
-      failureLabel: "roark-failed",
+      issueNumber: 12,
+      issueUrl: "https://github.com/owner/repo/issues/12",
+      triageVerdict: "blocked",
       triageArtifactPath: ".roark/runs/issue/12/attempts/1/triage.md",
       attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
+      removeLabels: ["roark-in-progress", "roark-failed"],
     });
   });
 
@@ -95,7 +96,7 @@ describe("completeAutorunWorkflow", () => {
         expect(input.recoveryCommand).toBe("bun run roark-coding-agent.ts continue 12 --attempt 1");
         return { outcome: "failed-readiness", outcomeDetail: "readiness status is missing" };
       },
-      markTriageNoop: async () => {
+      markTriageStopped: async () => {
         marked = true;
       },
     });

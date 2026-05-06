@@ -4,16 +4,11 @@ import type { AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { runPublishGate, type AutorunGateOptions, type PublishGateOutcome } from "./publish-flow.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import {
-  isTriageNoopWorkflowResult,
-  markIssueTriageNoop,
-  triageNoopOutcomeDetail,
-  type MarkIssueTriageNoopOptions,
-} from "./triage-noop.ts";
+import { markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
 
 export type AutorunCompletionOutcome =
   | PublishGateOutcome
-  | { outcome: "noop-triage"; outcomeDetail: string | null };
+  | { outcome: "triage-stopped"; outcomeDetail: string | null };
 
 export type CompleteAutorunWorkflowInput = {
   workflowResult: WorkflowRunResult;
@@ -28,7 +23,7 @@ export type CompleteAutorunWorkflowInput = {
 
 export type CompleteAutorunWorkflowInjected = {
   publishGate?: typeof runPublishGate;
-  markTriageNoop?: (options: MarkIssueTriageNoopOptions) => Promise<void>;
+  markTriageStopped?: (options: MarkIssueTriageStoppedOptions) => Promise<void>;
 };
 
 export async function completeAutorunWorkflow(
@@ -36,22 +31,22 @@ export async function completeAutorunWorkflow(
   injected: CompleteAutorunWorkflowInjected = {},
 ): Promise<AutorunCompletionOutcome> {
   const publishGate = injected.publishGate ?? runPublishGate;
-  const markTriageNoop = injected.markTriageNoop ?? markIssueTriageNoop;
+  const markTriageStopped = injected.markTriageStopped ?? markIssueTriageStopped;
 
-  if (isTriageNoopWorkflowResult(input.workflowResult)) {
-    await markTriageNoop({
+  if (input.workflowResult.status === "triage-stopped") {
+    await markTriageStopped({
       cwd: input.options.cwd,
       repo: input.options.repo,
-      issue: input.issue,
-      verdict: input.workflowResult.verdict,
-      inProgressLabel: input.options.inProgressLabel,
-      failureLabel: input.options.failureLabel,
+      issueNumber: input.issue.number,
+      issueUrl: input.issue.url,
+      triageVerdict: input.workflowResult.triageVerdict,
       triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
       attemptMetadataPath: input.attemptMetadataPath,
+      removeLabels: [input.options.inProgressLabel, input.options.failureLabel],
     });
     return {
-      outcome: "noop-triage",
-      outcomeDetail: triageNoopOutcomeDetail(input.workflowResult.verdict),
+      outcome: "triage-stopped",
+      outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
     };
   }
 
