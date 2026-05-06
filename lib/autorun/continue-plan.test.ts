@@ -83,13 +83,49 @@ describe("planContinuation", () => {
       { type: "publish-gate", reason: "publish gate must run after readiness" },
     ]);
   });
+
+  test("does not plan a fix for follow-up-only review ledgers", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "approve", reviewWithLedger("approve", finding("FU1", "follow-up")));
+
+    const steps = await planContinuation(context);
+
+    expect(steps).toEqual([
+      { type: "write-readiness", reason: "reviews approve; recompute deterministic readiness" },
+      { type: "publish-gate", reason: "publish gate must run after readiness" },
+    ]);
+  });
+
+  test("plans readiness without fix work for external-blocker review ledgers", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "approve", reviewWithLedger("blocked", finding("B1", "external-blocker")));
+
+    const steps = await planContinuation(context);
+
+    expect(steps).toEqual([
+      { type: "write-readiness", reason: "a review is blocked; readiness records the stop" },
+      { type: "publish-gate", reason: "publish gate records non-publish" },
+    ]);
+  });
 });
 
-async function writeHappyPathThroughReviews(context: Awaited<ReturnType<typeof tempContext>>, reviewVerdict = "approve") {
+async function writeHappyPathThroughReviews(
+  context: Awaited<ReturnType<typeof tempContext>>,
+  reviewVerdict = "approve",
+  reviewAContent?: string,
+) {
   await writeArtifact(context, "issue", "# GitHub Issue #11\n");
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
   await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
-  await writeArtifact(context, "reviewA", `# Review A\n\n## Verdict\n${reviewVerdict}\n`);
+  await writeArtifact(context, "reviewA", reviewAContent ?? `# Review A\n\n## Verdict\n${reviewVerdict}\n`);
   await writeArtifact(context, "reviewB", `# Review B\n\n## Verdict\n${reviewVerdict}\n`);
+}
+
+function reviewWithLedger(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {
+  return `# Review A\n\n## Verdict\n${verdict}\n\n## Findings Ledger\n${entries}\n`;
+}
+
+function finding(id: string, classification: string): string {
+  return `- Identifier: ${id}\n- Classification: ${classification}\n- Title: ${id}\n- Severity: medium\n- Confidence: high\n- Evidence: file.ts:1\n- Current-issue impact: Impact.\n- Recommended handling: Handle.\n`;
 }
