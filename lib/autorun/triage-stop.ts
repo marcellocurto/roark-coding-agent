@@ -26,8 +26,10 @@ export function parseTriageStoppedVerdict(markdown: string): TriageStoppedVerdic
   return parseVerdict(markdown) ?? "unknown";
 }
 
-export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" {
-  return verdict === "blocked" ? "blocked" : "needs-human";
+export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" | "wontfix" {
+  if (verdict === "blocked") return "blocked";
+  if (verdict === "reject") return "wontfix";
+  return "needs-human";
 }
 
 export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInput): string {

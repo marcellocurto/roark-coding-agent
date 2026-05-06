@@ -12,7 +12,7 @@ describe("triage stop handling", () => {
   test("maps verdicts to terminal labels", () => {
     expect(mapTriageVerdictToLabel("blocked")).toBe("blocked");
     expect(mapTriageVerdictToLabel("needs-human-decision")).toBe("needs-human");
-    expect(mapTriageVerdictToLabel("reject")).toBe("needs-human");
+    expect(mapTriageVerdictToLabel("reject")).toBe("wontfix");
   });
 
   test("parses triage verdict markdown", () => {

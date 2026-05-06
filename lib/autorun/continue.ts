@@ -20,11 +20,11 @@ import {
   type Clock,
 } from "./attempts.ts";
 import { checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
+import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
-import { runPublishGate, type AutorunGateOptions } from "./publish-flow.ts";
+import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
-import { markIssueTriageStopped } from "./triage-stop.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 
@@ -51,6 +51,10 @@ export async function runAutoContinue(
 
   if (attemptMetadata.outcome === "published" && !options.force) {
     console.log(`Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`);
+    return;
+  }
+  if (attemptMetadata.outcome === "triage-stopped" && !options.force) {
+    console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
     return;
   }
 
@@ -88,33 +92,18 @@ export async function runAutoContinue(
     const workflowResult = await runFullWorkflow(workflowContext, runner);
 
     const issue = await loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber });
-    const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
-    if (workflowResult.status === "triage-stopped") {
-      await markIssueTriageStopped({
-        cwd: workflowContext.cwd,
-        repo: parsed.repo,
-        issueNumber: issue.number,
-        issueUrl: issue.url,
-        triageVerdict: workflowResult.triageVerdict,
-        triageArtifactPath: artifactRelativePath(workflowContext, "triage"),
-        attemptMetadataPath,
-        removeLabels: [options.inProgressLabel],
-      });
-      outcome = "triage-stopped";
-      outcomeDetail = `triage verdict is "${workflowResult.triageVerdict}"`;
-    } else {
-      const gateOutcome = await runPublishGate({
-        options: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
-        issue,
-        branchPlan,
-        workflowContext,
-        attemptMetadata,
-        attemptMetadataPath,
-        recoveryCommand,
-      });
-      outcome = gateOutcome.outcome;
-      outcomeDetail = gateOutcome.outcomeDetail;
-    }
+    const completionOutcome = await completeAutorunWorkflow({
+      workflowResult,
+      options: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
+      issue,
+      branchPlan,
+      workflowContext,
+      attemptMetadata,
+      attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
+      recoveryCommand,
+    });
+    outcome = completionOutcome.outcome;
+    outcomeDetail = completionOutcome.outcomeDetail;
   } catch (error) {
     outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
     outcomeDetail = formatError(error);

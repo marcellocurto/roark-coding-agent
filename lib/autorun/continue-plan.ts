@@ -10,6 +10,7 @@ import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
 import {
   hasBlockedReview,
   needsFix,
+  parseVerdict,
   shouldProceedAfterTriage,
   shouldRunAnotherFixPass,
 } from "../workflow/verdicts.ts";
@@ -26,9 +27,12 @@ export async function planContinuation(context: WorkflowContext): Promise<Contin
 
   const triage = await inspect(context, "triage");
   if (!triage.valid) return [run("triage", triage.reason), run("plan", "plan depends on triage"), run("implement", "implementation depends on plan"), run("review-a", "review A depends on implementation"), run("review-b", "review B depends on implementation"), readiness("workflow must recompute readiness"), gate("publish gate must run after readiness")];
-  if (!shouldProceedAfterTriage(triage.content ?? "")) {
+
+  const triageMarkdown = triage.content ?? "";
+  if (!shouldProceedAfterTriage(triageMarkdown)) {
+    const verdict = parseVerdict(triageMarkdown) ?? "unknown";
     return [
-      readiness("triage stopped before implementation"),
+      readiness(`triage verdict is "${verdict}"; readiness records the stop`),
       noop("terminal triage outcome; no plan/implementation/publish gate"),
     ];
   }

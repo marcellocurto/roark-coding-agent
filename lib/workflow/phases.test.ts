@@ -1,9 +1,9 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRunner } from "./agent-runner.ts";
-import { createWorkflowContext, writeArtifact } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import { runFullWorkflow } from "./phases.ts";
 
 const tempDirs: string[] = [];
@@ -23,6 +23,7 @@ async function tempContext() {
     force: false,
     yes: true,
     maxFixPasses: 1,
+    attempt: 1,
   });
   await writeArtifact(context, "issue", "# GitHub Issue #12\n");
   return context;
@@ -42,6 +43,10 @@ describe("runFullWorkflow", () => {
     expect(result).toEqual({ status: "triage-stopped", triageVerdict: "blocked" });
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('name="triage"');
+    expect(artifactExists(context, "readiness")).toBe(true);
+    expect(artifactExists(context, "implementationPlan")).toBe(false);
+    expect(artifactExists(context, "implementationLog")).toBe(false);
+    expect(await readArtifact(context, "readiness")).toContain("- Triage verdict: blocked");
   });
 
   test("completed path returns completed", async () => {
