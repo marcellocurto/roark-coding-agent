@@ -16,6 +16,16 @@ export const sharedSystemPrompt = `<system_prompt>
   <output_contract>Return only the requested Markdown for workflow phases. Treat listed sections as the preferred shape for downstream agents, not as a reason to add filler. Keep required verdict/status/ready tokens exact.</output_contract>
 </system_prompt>`;
 
+const findingsLedgerContract = `  <findings_ledger_contract>
+    <instruction>Output a structured Findings Ledger as the canonical list of review findings.</instruction>
+    <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
+    <instruction>Each finding must include: identifier, classification, title, severity, confidence, evidence, current-issue impact, recommended handling, and optional suggested issue title.</instruction>
+    <instruction>Use <value>must-fix-current</value> only when the current issue cannot be approved until this repository change is fixed.</instruction>
+    <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
+    <instruction>Use <value>follow-up</value> for valid concerns that should be handled outside the current issue and must not block approval for this issue.</instruction>
+    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
+  </findings_ledger_contract>`;
+
 export function triagePrompt(context: WorkflowContext): string {
   return `<workflow_phase name="triage">
   <role>You are the triage agent.</role>
@@ -170,10 +180,11 @@ export function reviewAPrompt(context: WorkflowContext): string {
     <item>Gaps or unsubstantiated claims in the implementation log's validation evidence.</item>
   </review_focus>
   <required_fixes_policy>
-    Required Fixes must be limited to defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior.
-    Non-defect concerns (style, naming, refactor ideas) belong under Suggested Improvements, not Required Fixes.
-    Verdict semantics: use <value>approve</value> when no defects are found, <value>fixes-required</value> when defects must be addressed before merge, and <value>blocked</value> only when work cannot proceed without external input.
+    Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current issue.
+    Non-defect concerns (style, naming, refactor ideas) belong in the Findings Ledger as <value>follow-up</value> or <value>suggestion</value>, not Required Fixes.
+    Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, and <value>blocked</value> when the workflow cannot safely proceed.
   </required_fixes_policy>
+${findingsLedgerContract}
   <constraints>
     <constraint>Do not make changes.</constraint>
   </constraints>
@@ -183,11 +194,25 @@ export function reviewAPrompt(context: WorkflowContext): string {
 ## Verdict
 One of: approve, fixes-required, blocked
 
-## Findings
+## Findings Ledger
+For each finding, include:
+- Identifier:
+- Classification: one of must-fix-current, external-blocker, follow-up, suggestion
+- Title:
+- Severity:
+- Confidence:
+- Evidence:
+- Current-issue impact:
+- Recommended handling:
+- Suggested issue title (optional):
+
+Use None if there are no findings.
 
 ## Required Fixes
+List only unresolved must-fix-current findings that require a current-issue fix.
 
 ## Suggested Improvements
+List only non-blocking suggestion findings.
 
 ## Validation Reviewed
   </output_contract>
@@ -221,10 +246,11 @@ export function reviewBPrompt(context: WorkflowContext): string {
     <item>Style, formatting, and structure only when they materially harm readability or consistency.</item>
   </review_focus>
   <required_fixes_policy>
-    Required Fixes must cite a concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation.
-    Do not mark fixes-required for purely subjective taste; route subjective preferences to Suggested Improvements.
-    Verdict semantics: use <value>approve</value> when no concrete maintainability harms are found, <value>fixes-required</value> when concrete harms must be addressed, and <value>blocked</value> only when work cannot proceed without external input.
+    Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation that blocks approval for the current issue.
+    Do not mark fixes-required for purely subjective taste; route subjective preferences to <value>follow-up</value> or <value>suggestion</value> findings.
+    Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, and <value>blocked</value> when the workflow cannot safely proceed.
   </required_fixes_policy>
+${findingsLedgerContract}
   <constraints>
     <constraint>Do not read Review Agent A's output.</constraint>
     <constraint>Do not make changes.</constraint>
@@ -235,11 +261,25 @@ export function reviewBPrompt(context: WorkflowContext): string {
 ## Verdict
 One of: approve, fixes-required, blocked
 
-## Findings
+## Findings Ledger
+For each finding, include:
+- Identifier:
+- Classification: one of must-fix-current, external-blocker, follow-up, suggestion
+- Title:
+- Severity:
+- Confidence:
+- Evidence:
+- Current-issue impact:
+- Recommended handling:
+- Suggested issue title (optional):
+
+Use None if there are no findings.
 
 ## Required Fixes
+List only unresolved must-fix-current findings that require a current-issue fix.
 
 ## Suggested Improvements
+List only non-blocking suggestion findings.
 
 ## Validation Reviewed
   </output_contract>
@@ -262,7 +302,9 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
     <artifact kind="review_b">${artifactRelativePath(context, "reviewB")}</artifact>${priorFinalReview}
   </inputs>
   <instructions>
-    <instruction>Apply only the required unresolved fixes from the reviews.</instruction>
+    <instruction>Apply only unresolved review findings classified as <value>must-fix-current</value>.</instruction>
+    <instruction>Do not fix non-blocking <value>follow-up</value> or <value>suggestion</value> findings in this pass; leave them for separate work unless they directly block the current issue.</instruction>
+    <instruction>If reviews identify only <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value> findings, do not broaden scope to make unrelated changes.</instruction>
     <instruction>For pass ${pass}, prioritize issues still open after prior fix passes.</instruction>
     <instruction>Do not refactor unrelated code.</instruction>
     <instruction>Do not edit .roark workflow artifacts.</instruction>
@@ -307,7 +349,9 @@ export function finalReviewPrompt(context: WorkflowContext, pass: number): strin
   </reviewer_roles>
   <instructions>
     <instruction>Review the current diff after fixes against the inputs.</instruction>
-    <instruction>Decide if the work is ready for a PR.</instruction>
+    <instruction>Decide if the work is ready for a PR based on unresolved current-issue blockers.</instruction>
+    <instruction>Do not require fixes for non-blocking <value>follow-up</value> or <value>suggestion</value> findings; do not ask the fix agent to address them in the current issue.</instruction>
+    <instruction>Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings and <value>blocked</value> only when the workflow cannot safely proceed.</instruction>
     <instruction>Do not make changes.</instruction>
   </instructions>
   <output_contract format="markdown" section_guidance="preferred">
