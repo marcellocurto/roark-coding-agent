@@ -1,42 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
-import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "../autorun/publish.ts";
-import {
-  defaultAutorunInProgressLabel,
-  defaultAutorunReadyLabel,
-  defaultAutorunSkipLabels,
-} from "../autorun/selection.ts";
-import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
-import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import { defaultMaxFixPasses, parseArgs, usage } from "./args.ts";
+import { parseArgs, usage } from "./args.ts";
 
 describe("parseArgs", () => {
   test("usage names the roark command", () => {
     expect(usage.startsWith("roark <command> [issue] [options]")).toBe(true);
   });
 
-  test("parses auto defaults", () => {
+  test("parses raw auto command without applying defaults", () => {
     const parsed = parseArgs(["auto"]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("auto");
     if (parsed.command !== "auto") throw new Error("expected auto options");
-    expect(parsed.issue).toBeUndefined();
-    expect(parsed.readyLabel).toBe(defaultAutorunReadyLabel);
-    expect(parsed.skipLabels).toEqual([...defaultAutorunSkipLabels]);
-    expect(parsed.limit).toBe(1);
-    expect(parsed.inProgressLabel).toBe(defaultAutorunInProgressLabel);
-    expect(parsed.noAssign).toBe(false);
-    expect(parsed.dryRun).toBe(false);
-    expect(parsed.baseBranch).toBe(defaultAutorunBaseBranch);
-    expect(parsed.verifyCommand).toBe(defaultAutorunVerifyCommand);
-    expect(parsed.failureLabel).toBe(defaultAutorunFailureLabel);
-    expect(parsed.successLabel).toBe(defaultAutorunSuccessLabel);
-    expect(parsed.remote).toBe(defaultAutorunRemote);
-    expect(parsed.maxFixPasses).toBe(defaultMaxFixPasses);
-    expect(parsed.force).toBe(false);
-    expect(parsed.yes).toBe(false);
+    expect(parsed).toEqual({ command: "auto", issue: undefined });
   });
 
   test("parses auto options", () => {
@@ -144,7 +121,7 @@ describe("parseArgs", () => {
     expect(parsed.attempt).toBe(2);
     expect(parsed.cwd).toBe("/tmp/repo");
     expect(parsed.outDir).toBe("runs");
-    expect(parsed.all).toBe(false);
+    expect(parsed.all).toBeUndefined();
   });
 
   test("parses status --all", () => {

@@ -5,7 +5,6 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
-import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 
 export type IssueWorkflowCommand =
@@ -117,6 +116,92 @@ export type StatusCliOptions = {
 
 export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions;
 
+export type RawIssueCliOptions = {
+  command: IssueWorkflowCommand;
+  issue: string;
+  cwd?: string;
+  outDir?: string;
+  repo?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  force?: true;
+  yes?: true;
+  maxFixPasses?: number;
+  fixPass?: number;
+  attempt?: number;
+};
+
+export type RawAutoCliOptions = {
+  command: "auto";
+  issue?: string;
+  cwd?: string;
+  repo?: string;
+  readyLabel?: string;
+  skipLabels?: string[];
+  limit?: number;
+  inProgressLabel?: string;
+  assignee?: string;
+  noAssign?: true;
+  dryRun?: true;
+  baseBranch?: string;
+  verifyCommand?: string;
+  failureLabel?: string;
+  successLabel?: string;
+  remote?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  maxFixPasses?: number;
+  force?: true;
+  yes?: true;
+};
+
+export type RawContinueCliOptions = {
+  command: "continue";
+  issue: string;
+  cwd?: string;
+  outDir?: string;
+  repo?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  force?: true;
+  yes?: true;
+  maxFixPasses?: number;
+  attempt?: number;
+  verifyCommand?: string;
+  failureLabel?: string;
+  successLabel?: string;
+  inProgressLabel?: string;
+  remote?: string;
+};
+
+export type RawRevisePrCliOptions = {
+  command: "revise-pr";
+  prNumber: number;
+  cwd?: string;
+  outDir?: string;
+  repo?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  verifyCommand?: string;
+  remote?: string;
+  maxFixPasses?: number;
+  force?: true;
+  yes?: true;
+  comment?: false;
+};
+
+export type RawStatusCliOptions = {
+  command: "status";
+  issue?: string;
+  all?: true;
+  cwd?: string;
+  outDir?: string;
+  repo?: string;
+  attempt?: number;
+};
+
+export type RawCliOptions = RawIssueCliOptions | RawAutoCliOptions | RawRevisePrCliOptions | RawContinueCliOptions | RawStatusCliOptions;
+
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
   "fetch",
@@ -177,7 +262,7 @@ Options:
   --no-assign            Claim without assigning a user.
   --dry-run              Print selected issues without claiming them or switching branches.
   --base-branch <branch> Auto issue branch base branch. Defaults to ${defaultAutorunBaseBranch}.
-  --verify <cmd>         Verification command to run before publishing. Runs via 'sh -c'. Defaults to '${defaultAutorunVerifyCommand}'.
+  --verify <cmd>         Verification command to run before publishing. Runs via 'sh -c'. Inferred for auto/continue when omitted.
   --failure-label <label>
                           Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
   --success-label <label>
@@ -189,7 +274,7 @@ Options:
   -h, --help             Show this help.
 `;
 
-export function parseArgs(argv: string[]): CliOptions | { help: true } {
+export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { help: true };
 
   const [rawCommand, ...rest] = argv;
@@ -204,25 +289,8 @@ export function parseArgs(argv: string[]): CliOptions | { help: true } {
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
 }
 
-function parseAutoArgs(args: string[]): AutoCliOptions {
-  const options: AutoCliOptions = {
-    command: "auto",
-    cwd: process.cwd(),
-    readyLabel: defaultAutorunReadyLabel,
-    skipLabels: [...defaultAutorunSkipLabels],
-    limit: 1,
-    inProgressLabel: defaultAutorunInProgressLabel,
-    noAssign: false,
-    dryRun: false,
-    baseBranch: defaultAutorunBaseBranch,
-    verifyCommand: defaultAutorunVerifyCommand,
-    failureLabel: defaultAutorunFailureLabel,
-    successLabel: defaultAutorunSuccessLabel,
-    remote: defaultAutorunRemote,
-    maxFixPasses: defaultMaxFixPasses,
-    force: false,
-    yes: false,
-  };
+function parseAutoArgs(args: string[]): RawAutoCliOptions {
+  const options: RawAutoCliOptions = { command: "auto" };
 
   let skipLabelsProvided = false;
   let issueArg: string | undefined;
@@ -237,13 +305,13 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
         options.skipLabels = [];
         skipLabelsProvided = true;
       }
-      options.skipLabels.push(requiredValue(args, ++index, arg));
+      options.skipLabels?.push(requiredValue(args, ++index, arg));
     } else if (arg === "--skip-labels") {
       if (!skipLabelsProvided) {
         options.skipLabels = [];
         skipLabelsProvided = true;
       }
-      options.skipLabels.push(...parseCommaSeparatedLabels(requiredValue(args, ++index, arg)));
+      options.skipLabels?.push(...parseCommaSeparatedLabels(requiredValue(args, ++index, arg)));
     } else if (arg === "--limit") options.limit = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
     else if (arg === "--in-progress-label") options.inProgressLabel = requiredValue(args, ++index, arg);
     else if (arg === "--assignee") options.assignee = requiredValue(args, ++index, arg);
@@ -273,24 +341,13 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
   return options;
 }
 
-function parseRevisePrArgs(args: string[]): RevisePrCliOptions {
+function parseRevisePrArgs(args: string[]): RawRevisePrCliOptions {
   const [rawPrNumber, ...rest] = args;
   if (!rawPrNumber) throw new Error(`Missing PR number.\n\n${usage}`);
   if (rawPrNumber.startsWith("--")) throw new Error(`Missing PR number.\n\n${usage}`);
 
   const prNumber = parsePositiveInteger(rawPrNumber.replace(/^#/, ""), "PR number");
-  const options: RevisePrCliOptions = {
-    command: "revise-pr",
-    prNumber,
-    cwd: process.cwd(),
-    outDir: ".roark/runs",
-    verifyCommand: defaultAutorunVerifyCommand,
-    remote: defaultAutorunRemote,
-    maxFixPasses: 1,
-    force: false,
-    yes: false,
-    comment: true,
-  };
+  const options: RawRevisePrCliOptions = { command: "revise-pr", prNumber };
 
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
@@ -312,13 +369,8 @@ function parseRevisePrArgs(args: string[]): RevisePrCliOptions {
   return options;
 }
 
-function parseStatusArgs(args: string[]): StatusCliOptions {
-  const options: StatusCliOptions = {
-    command: "status",
-    all: false,
-    cwd: process.cwd(),
-    outDir: ".roark/runs",
-  };
+function parseStatusArgs(args: string[]): RawStatusCliOptions {
+  const options: RawStatusCliOptions = { command: "status" };
 
   let issueArg: string | undefined;
   for (let index = 0; index < args.length; index++) {
@@ -340,25 +392,12 @@ function parseStatusArgs(args: string[]): StatusCliOptions {
   return options;
 }
 
-function parseContinueArgs(args: string[]): ContinueCliOptions {
+function parseContinueArgs(args: string[]): RawContinueCliOptions {
   const [rawIssue, ...rest] = args;
   if (!rawIssue) throw new Error(`Missing issue.\n\n${usage}`);
   if (rawIssue.startsWith("--")) throw new Error(`Missing issue.\n\n${usage}`);
 
-  const options: ContinueCliOptions = {
-    command: "continue",
-    issue: rawIssue,
-    cwd: process.cwd(),
-    outDir: ".roark/runs",
-    force: false,
-    yes: false,
-    maxFixPasses: defaultMaxFixPasses,
-    verifyCommand: defaultAutorunVerifyCommand,
-    failureLabel: defaultAutorunFailureLabel,
-    successLabel: defaultAutorunSuccessLabel,
-    inProgressLabel: defaultAutorunInProgressLabel,
-    remote: defaultAutorunRemote,
-  };
+  const options: RawContinueCliOptions = { command: "continue", issue: rawIssue };
 
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
@@ -383,20 +422,12 @@ function parseContinueArgs(args: string[]): ContinueCliOptions {
   return options;
 }
 
-function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): IssueCliOptions {
+function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssueCliOptions {
   const [rawIssue, ...rest] = args;
   if (!rawIssue) throw new Error(`Missing issue.\n\n${usage}`);
   if (rawIssue.startsWith("--")) throw new Error(`Missing issue.\n\n${usage}`);
 
-  const options: IssueCliOptions = {
-    command,
-    issue: rawIssue,
-    cwd: process.cwd(),
-    outDir: ".roark/runs",
-    force: false,
-    yes: false,
-    maxFixPasses: defaultMaxFixPasses,
-  };
+  const options: RawIssueCliOptions = { command, issue: rawIssue };
 
   let maxFixPassesProvided = false;
   let fixPassProvided = false;
