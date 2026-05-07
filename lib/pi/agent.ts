@@ -10,6 +10,10 @@ import {
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
 export const defaultRoarkModel = "openai-codex/gpt-5.5";
+export const roarkPiSettings = {
+  transport: "sse" as const,
+  retry: { enabled: true, maxRetries: 2 },
+};
 
 const readOnlyTools = ["read", "bash", "grep", "find", "ls"];
 const writableTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -21,9 +25,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const model = resolveModel(modelRegistry, modelSpec);
-  const settingsManager = SettingsManager.inMemory({
-    retry: { enabled: true, maxRetries: 2 },
-  });
+  const settingsManager = SettingsManager.inMemory(roarkPiSettings);
 
   const loader = new DefaultResourceLoader({
     cwd: options.cwd,

@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { defaultRoarkModel, extractAgentErrorMessage, requestedModelSpec } from "./agent.ts";
+import { defaultRoarkModel, extractAgentErrorMessage, requestedModelSpec, roarkPiSettings } from "./agent.ts";
+
+describe("Pi agent settings", () => {
+  test("forces SSE transport for automated Roark sessions", () => {
+    expect(roarkPiSettings.transport).toBe("sse");
+  });
+});
 
 describe("Pi agent model selection", () => {
   test("hard defaults to GPT 5.5 when no model override is provided", () => {
