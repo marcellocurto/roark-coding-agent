@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import { AgentTaskRunError, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
@@ -91,6 +91,26 @@ describe("runAgentTask transient agent retry", () => {
     expect(result).toBe(validTriage);
     expect(calls).toBe(2);
     expect(sleeps).toEqual([]);
+    expect(await readArtifact(context, "triage")).toBe(validTriage);
+  });
+
+  test("does not write diagnostic artifacts while transient retries remain", async () => {
+    const context = await createContext();
+    const validTriage = "# Triage\n\n## Verdict\nproceed\n";
+    let calls = 0;
+    const runner: AgentRunner = async () => {
+      calls++;
+      expect(artifactExists(context, "triage")).toBe(false);
+      if (calls < 4) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
+      return validTriage;
+    };
+
+    await expect(runAgentTask(context, runner, triageTask, {
+      delaysMs: [0, 1, 2],
+      sleep: async () => {},
+    })).resolves.toBe(validTriage);
+
+    expect(calls).toBe(4);
     expect(await readArtifact(context, "triage")).toBe(validTriage);
   });
 
