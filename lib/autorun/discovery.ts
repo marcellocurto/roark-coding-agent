@@ -9,6 +9,7 @@ import {
   resolveGitHubIssueRepo,
   type GitHubIssue,
   type GitHubIssueDependency,
+  type GitHubIssueRelationships,
 } from "../github/issue.ts";
 import { ensureRunDir } from "../workflow/artifacts.ts";
 import { assertCleanAutorunGit } from "../workflow/git.ts";
@@ -25,8 +26,9 @@ import { createBranchPlan, ensureIssueWorktree } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
+import { acquireRepoAutorunLock, type AutorunLock } from "./lock.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
-import { findMatchingSkipLabel, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
+import { findMatchingSkipLabel, isEligibleIssue, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 
 const discoveryFetchLimit = 100;
@@ -44,17 +46,24 @@ type AutoRunInjected = {
   runFullWorkflow?: typeof runFullWorkflow;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment;
+  acquireAutorunLock?: typeof acquireRepoAutorunLock;
 };
 
 export async function runAutoDiscovery(
   options: AutoCliOptions,
   injected: AutoRunInjected = {},
 ): Promise<void> {
-  if (options.issue) {
-    await runTargetedAuto(options, injected);
-    return;
+  const acquireLock = injected.acquireAutorunLock ?? acquireRepoAutorunLock;
+  const lock = await acquireLock({ cwd: options.cwd, repo: options.repo });
+  try {
+    if (options.issue) {
+      await runTargetedAuto(options, injected);
+      return;
+    }
+    await runDiscoveryAuto(options, injected);
+  } finally {
+    await releaseAutorunLock(lock);
   }
-  await runDiscoveryAuto(options, injected);
 }
 
 async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
@@ -91,7 +100,7 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
     return;
   }
 
-  await runManagedIssueAttempts(selected, options, injected);
+  await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true });
 }
 
 type SkippedBlockedIssue = {
@@ -119,7 +128,7 @@ async function selectDependencyClearIssues(
       cwd: options.cwd,
       repo,
       issueNumber: issue.number,
-      body: "",
+      body: issue.body ?? "",
     });
 
     if (!relationships.nativeDependenciesAvailable) {
@@ -127,9 +136,7 @@ async function selectDependencyClearIssues(
       throw new Error(`Could not verify native GitHub dependencies for issue #${issue.number}${reason}. Refusing to run unchecked discovery candidate.`);
     }
 
-    const activeBlockers = relationships.blockedBy
-      .filter((blocker) => blocker.state !== "CLOSED")
-      .toSorted(compareDependencyByNumber);
+    const activeBlockers = activeRelationshipBlockers(relationships);
 
     if (activeBlockers.length > 0) {
       skippedBlocked.push({ issue, blockers: activeBlockers });
@@ -145,6 +152,47 @@ async function selectDependencyClearIssues(
 function compareDependencyByNumber(left: GitHubIssueDependency, right: GitHubIssueDependency): number {
   if (left.number !== right.number) return left.number - right.number;
   return left.title.localeCompare(right.title);
+}
+
+function assertDependencyClearForIssue(issue: AutorunIssueCandidate, relationships: GitHubIssueRelationships): void {
+  if (!relationships.nativeDependenciesAvailable) {
+    const reason = relationships.unavailableReason ? `: ${relationships.unavailableReason}` : "";
+    throw new Error(`Could not verify native GitHub dependencies for issue #${issue.number}${reason}. Refusing to run unchecked issue.`);
+  }
+
+  const activeBlockers = activeRelationshipBlockers(relationships);
+  if (activeBlockers.length === 0) return;
+
+  const blockers = activeBlockers.map((blocker) => `#${blocker.number} ${blocker.title} [${blocker.state}]`).join(", ");
+  throw new Error(`Issue #${issue.number} has active blocker(s): ${blockers}`);
+}
+
+function activeRelationshipBlockers(relationships: GitHubIssueRelationships): GitHubIssueDependency[] {
+  return dedupeDependencies([
+    ...relationships.blockedBy.filter((blocker) => blocker.state !== "CLOSED"),
+    ...relationships.bodyDeclaredBlockers
+      .filter((blocker) => blocker.verified && blocker.state !== undefined && blocker.closed !== true && blocker.state !== "CLOSED")
+      .map((blocker) => ({
+        number: blocker.number,
+        title: blocker.title ?? blocker.raw,
+        url: blocker.url,
+        state: blocker.state ?? "OPEN",
+        stateReason: blocker.stateReason,
+        closedAt: blocker.closedAt,
+      })),
+  ]).toSorted(compareDependencyByNumber);
+}
+
+function dedupeDependencies(dependencies: GitHubIssueDependency[]): GitHubIssueDependency[] {
+  const seen = new Set<string>();
+  const result: GitHubIssueDependency[] = [];
+  for (const dependency of dependencies) {
+    const key = `${dependency.url ?? ""}#${dependency.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(dependency);
+  }
+  return result;
 }
 
 async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
@@ -168,6 +216,8 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
     );
   }
 
+  assertDependencyClearForIssue(issue, fetched.relationships);
+
   printSelectedIssues([issue]);
 
   if (runOptions.dryRun) {
@@ -175,13 +225,14 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
     return;
   }
 
-  await runManagedIssueAttempts([issue], runOptions, injected);
+  await runManagedIssueAttempts([issue], runOptions, injected, { requireReadyLabel: false });
 }
 
 async function runManagedIssueAttempts(
   issues: readonly AutorunIssueCandidate[],
   options: AutoCliOptions,
   injected: AutoRunInjected,
+  claimOptions: { requireReadyLabel: boolean },
 ): Promise<void> {
   const assignee = await resolveAssignee(options, injected);
   console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
@@ -190,7 +241,7 @@ async function runManagedIssueAttempts(
 
   const clock = injected.clock ?? defaultClock;
   for (const issue of issues) {
-    await runManagedIssueAttempt(issue, options, assignee, clock, injected);
+    await runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
   }
 
   console.log("\nAuto workflow complete.");
@@ -202,6 +253,7 @@ async function runManagedIssueAttempt(
   assignee: string | undefined,
   clock: Clock,
   injected: AutoRunInjected,
+  claimOptions: { requireReadyLabel: boolean },
 ): Promise<void> {
   const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
   await preflight({ cwd: options.cwd });
@@ -213,6 +265,18 @@ async function runManagedIssueAttempt(
     baseBranch: options.baseBranch,
   });
 
+  console.log(`- Ensuring worktree for branch ${branchPlan.branchName}`);
+  const ensureWorktree = injected.ensureIssueWorktree ?? ensureIssueWorktree;
+  await ensureWorktree({ controlCwd: options.cwd, plan: branchPlan });
+
+  const rechecked = await fetchLatestIssueForClaimRecheck(issue, options, injected);
+  const skipReason = claimRecheckSkipReason(rechecked.issue, options, claimOptions);
+  if (skipReason) {
+    console.log(`- Skipping #${issue.number} before claim: ${skipReason}`);
+    return;
+  }
+  assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
+
   const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
   const attempt = await allocateNextAttempt(issueDir);
 
@@ -220,17 +284,14 @@ async function runManagedIssueAttempt(
   const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
   await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
 
-  console.log(`- Ensuring worktree for branch ${branchPlan.branchName}`);
-  const ensureWorktree = injected.ensureIssueWorktree ?? ensureIssueWorktree;
-  await ensureWorktree({ controlCwd: options.cwd, plan: branchPlan });
-
+  const workflowIssue = rechecked.issue;
   console.log(`- Running full workflow in worktree for branch ${branchPlan.branchName} (attempt ${attempt})`);
-  const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options, attempt);
+  const workflowContext = createAutorunWorkflowContext(workflowIssue, branchPlan, options, attempt);
   await ensureRunDir(workflowContext);
 
   const attemptMetadata: AttemptMetadata = formatAttemptMetadata({
     attempt,
-    issueNumber: issue.number,
+    issueNumber: workflowIssue.number,
     branch: branchPlan.branchName,
     baseBranch: branchPlan.baseBranch,
     worktreePath: workflowContext.agentCwd,
@@ -244,18 +305,18 @@ async function runManagedIssueAttempt(
     branchPlan,
     gateOptions: options,
     attemptMetadata,
-    issue,
+    issue: workflowIssue,
     logPrefix: "Auto",
     beforeWorkflow: async (metadata) => {
       const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
       await publishLedger({
         cwd: options.cwd,
         repo: options.repo,
-        issueNumber: issue.number,
+        issueNumber: workflowIssue.number,
         attemptMetadata: metadata,
         phase: "attempt-start",
         body: formatAttemptStartComment({
-          issueNumber: issue.number,
+          issueNumber: workflowIssue.number,
           attempt,
           branchName: branchPlan.branchName,
           assignee,
@@ -276,10 +337,48 @@ async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjecte
   return options.assignee ?? await getLogin({ cwd: options.cwd });
 }
 
+async function fetchLatestIssueForClaimRecheck(
+  issue: AutorunIssueCandidate,
+  options: AutoCliOptions,
+  injected: AutoRunInjected,
+): Promise<{ issue: AutorunIssueCandidate; relationships: GitHubIssueRelationships }> {
+  const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
+  const fetched = await fetchIssue(issue.url ?? String(issue.number), { cwd: options.cwd, repo: options.repo });
+  return {
+    issue: toAutorunIssueCandidate(fetched.issue),
+    relationships: fetched.relationships,
+  };
+}
+
+function claimRecheckSkipReason(
+  issue: AutorunIssueCandidate,
+  options: AutoCliOptions,
+  claimOptions: { requireReadyLabel: boolean },
+): string | undefined {
+  const skipLabel = findMatchingSkipLabel(issue, options.skipLabels);
+  if (skipLabel) return `issue now has skip label ${skipLabel}`;
+  if (claimOptions.requireReadyLabel && !isEligibleIssue(issue, {
+    readyLabel: options.readyLabel,
+    skipLabels: options.skipLabels,
+    limit: 1,
+  })) {
+    return `issue no longer has ready label ${options.readyLabel}`;
+  }
+  return undefined;
+}
+
+async function releaseAutorunLock(lock: AutorunLock): Promise<void> {
+  try {
+    await lock.release();
+  } catch (error) {
+    console.warn(`Failed to release local autorun lock: ${formatError(error)}`);
+  }
+}
+
 function printSkippedBlockedIssues(skipped: readonly SkippedBlockedIssue[]): void {
   if (skipped.length === 0) return;
 
-  console.log("\nSkipped issue(s) with active native blockers:");
+  console.log("\nSkipped issue(s) with active blockers:");
   for (const skippedIssue of skipped) {
     console.log(`- #${skippedIssue.issue.number} ${skippedIssue.issue.title}${skippedIssue.issue.url ? ` (${skippedIssue.issue.url})` : ""}`);
     for (const blocker of skippedIssue.blockers) {
@@ -299,7 +398,13 @@ function toAutorunIssueCandidate(issue: GitHubIssue): AutorunIssueCandidate {
   return {
     number: issue.number,
     title: issue.title,
+    body: issue.body,
     url: issue.url,
     labels: issue.labels,
   };
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

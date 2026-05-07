@@ -25,6 +25,7 @@ export type GitHubIssue = {
 export type GitHubIssueListItem = {
   number: number;
   title: string;
+  body?: string;
   url?: string;
   createdAt?: string;
   labels?: Array<{ name: string }>;
@@ -102,7 +103,7 @@ export async function listOpenGitHubIssues(options: { cwd: string; repo?: string
     "--limit",
     String(options.limit),
     "--json",
-    "number,title,url,createdAt,labels",
+    "number,title,body,url,createdAt,labels",
   ];
   if (options.repo) args.push("--repo", options.repo);
 
@@ -247,9 +248,9 @@ export async function fetchGitHubIssueRelationships(options: {
 
 export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string): BodyBlockerRef[] {
   const lines = body.split(/\r?\n/);
-  const candidates: string[] = [];
+  const refs: BodyBlockerRef[] = [];
   let inFence = false;
-  let inBlockedBySection = false;
+  let inDependencySection = false;
 
   for (const line of lines) {
     if (/^\s*```/.test(line) || /^\s*~~~/.test(line)) {
@@ -258,21 +259,21 @@ export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string):
     }
     if (inFence) continue;
 
-    if (/^\s*#{2,3}\s*Blocked by\s*$/i.test(line)) {
-      inBlockedBySection = true;
+    if (/^\s*#{2,3}\s*(?:Blocked by|Depends on)\s*$/i.test(line)) {
+      inDependencySection = true;
       continue;
     }
 
-    if (inBlockedBySection && /^\s*#{1,6}\s+/.test(line)) {
-      inBlockedBySection = false;
+    if (inDependencySection && /^\s*#{1,6}\s+/.test(line)) {
+      inDependencySection = false;
     }
 
-    const inlineMatch = line.match(/^\s*Blocked by\s*:\s*(.+)$/i);
-    if (inlineMatch?.[1]) candidates.push(inlineMatch[1]);
-    else if (inBlockedBySection) candidates.push(line);
+    const inlineMatch = line.match(/^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i);
+    if (inlineMatch?.[1]) refs.push(...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo));
+    else if (inDependencySection) refs.push(...extractExplicitIssueRefsFromStart(line.replace(/^\s*[-*]\s*/, ""), currentRepo));
   }
 
-  return dedupeBodyBlockerRefs(candidates.flatMap((candidate) => extractIssueRefs(candidate, currentRepo)));
+  return dedupeBodyBlockerRefs(refs);
 }
 
 export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDependency | undefined {
@@ -388,28 +389,25 @@ function activeIssueCount(issues: GitHubIssueDependency[]): number {
   return issues.filter((issue) => issue.state !== "CLOSED").length;
 }
 
-function extractIssueRefs(text: string, currentRepo: string): BodyBlockerRef[] {
-  const refs: Array<BodyBlockerRef & { index: number }> = [];
+function extractExplicitIssueRefsFromStart(text: string, currentRepo: string): BodyBlockerRef[] {
+  const refs: BodyBlockerRef[] = [];
+  let remainder = text.trim();
 
-  for (const match of text.matchAll(/https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)/gi)) {
-    if (!match[1] || !match[2]) continue;
-    refs.push({ raw: trimRef(match[0]), repo: match[1], number: Number(match[2]), index: match.index ?? 0 });
+  while (remainder.length > 0) {
+    const match = remainder.match(/^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i);
+    if (!match?.[1]) break;
+
+    const repo = match[2] ?? match[4] ?? currentRepo;
+    const number = Number(match[3] ?? match[5] ?? match[6]);
+    if (Number.isInteger(number) && number > 0) refs.push({ raw: match[1], repo, number });
+
+    remainder = remainder.slice(match[1].length).trimStart();
+    const separator = remainder.match(/^(?:[,;]|\band\b|&)\s*/i);
+    if (!separator?.[0]) break;
+    remainder = remainder.slice(separator[0].length).trimStart();
   }
 
-  for (const match of text.matchAll(/(^|[^A-Za-z0-9_.\/-])([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)/g)) {
-    if (!match[2] || !match[3]) continue;
-    refs.push({ raw: `${match[2]}#${match[3]}`, repo: match[2], number: Number(match[3]), index: (match.index ?? 0) + (match[1] ?? "").length });
-  }
-
-  for (const match of text.matchAll(/(^|[^A-Za-z0-9_\/])#(\d+)/g)) {
-    if (!match[2]) continue;
-    refs.push({ raw: `#${match[2]}`, repo: currentRepo, number: Number(match[2]), index: (match.index ?? 0) + (match[1] ?? "").length });
-  }
-
-  return refs
-    .filter((ref) => Number.isInteger(ref.number) && ref.number > 0)
-    .toSorted((left, right) => left.index - right.index)
-    .map(({ index: _index, ...ref }) => ref);
+  return refs;
 }
 
 function dedupeBodyBlockerRefs(refs: BodyBlockerRef[]): BodyBlockerRef[] {
@@ -426,10 +424,6 @@ function dedupeBodyBlockerRefs(refs: BodyBlockerRef[]): BodyBlockerRef[] {
 
 function repoFromIssueUrl(url?: string): string | undefined {
   return url?.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i)?.[1];
-}
-
-function trimRef(value: string): string {
-  return value.replace(/[),.;]+$/g, "");
 }
 
 function normalizeIssueState(value: string | undefined): string {

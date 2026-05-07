@@ -61,6 +61,25 @@ describe("parseBodyDeclaredBlockerRefs", () => {
     ]);
   });
 
+  test("parses explicit depends-on declarations", () => {
+    const refs = parseBodyDeclaredBlockerRefs(
+      [
+        "Depends on #12",
+        "Depends on owner/other#13",
+        "- Depends on: https://github.com/up/down/issues/14",
+        "Depends on whether #99 should be closed.",
+        "This merely mentions depends on #100 in prose and should be ignored.",
+      ].join("\n"),
+      "owner/repo",
+    );
+
+    expect(refs).toEqual([
+      { raw: "#12", repo: "owner/repo", number: 12 },
+      { raw: "owner/other#13", repo: "owner/other", number: 13 },
+      { raw: "https://github.com/up/down/issues/14", repo: "up/down", number: 14 },
+    ]);
+  });
+
   test("skips fenced code blocks and de-dupes refs", () => {
     const refs = parseBodyDeclaredBlockerRefs(
       [
