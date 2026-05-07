@@ -33,7 +33,7 @@ describe("autorun failure", () => {
       artifactPath: ".roark/runs/issue/10/attempts/2/readiness.md",
       artifactContent: "# PR Readiness\n\n## Status\nnot-ready\n",
       attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
-      recoveryCommand: "bun run roark-coding-agent.ts continue 10 --repo owner/repo --attempt 2",
+      recoveryCommand: "roark continue 10 --repo owner/repo --attempt 2",
     });
     expect(comment).toContain(
       'Roark stopped on issue https://github.com/owner/repo/issues/10 at phase **readiness**: readiness status is "not-ready".',
@@ -43,7 +43,7 @@ describe("autorun failure", () => {
     expect(comment).toContain("## Artifact contents");
     expect(comment).toContain("## Status\nnot-ready");
     expect(comment).toContain("## Recovery");
-    expect(comment).toContain("bun run roark-coding-agent.ts continue 10 --repo owner/repo --attempt 2");
+    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
   });
 
   test("formatFailureComment renders only the attempt path when artifact path is omitted", () => {

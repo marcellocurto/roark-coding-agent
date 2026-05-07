@@ -9,7 +9,7 @@ export type ContinueCommandInput = {
 };
 
 export function formatContinueCommand(input: ContinueCommandInput): string {
-  const args = ["bun", "run", "roark-coding-agent.ts", "continue", String(input.issueNumber)];
+  const args = ["roark", "continue", String(input.issueNumber)];
   if (input.repo) args.push("--repo", input.repo);
   if (input.attempt !== undefined) args.push("--attempt", String(input.attempt));
   if (input.yes) args.push("--yes");

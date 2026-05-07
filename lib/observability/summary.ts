@@ -160,8 +160,8 @@ function recomputeSummary(summary: RunSummary): void {
 
 function buildRecoveryCommand(context: WorkflowContext): string {
   const repo = context.repo ? ` --repo ${context.repo}` : "";
-  if (context.attempt !== undefined) return `roark-coding-agent continue ${context.issueNumber}${repo} --attempt ${context.attempt}`;
-  return `roark-coding-agent do ${context.issueNumber}${repo}`;
+  if (context.attempt !== undefined) return `roark continue ${context.issueNumber}${repo} --attempt ${context.attempt}`;
+  return `roark do ${context.issueNumber}${repo}`;
 }
 
 function defaultWarn(message: string): void {
