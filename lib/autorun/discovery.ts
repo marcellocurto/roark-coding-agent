@@ -1,6 +1,15 @@
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
-import { claimGitHubIssue, fetchGitHubIssue, getCurrentGitHubLogin, listOpenGitHubIssues, type GitHubIssue } from "../github/issue.ts";
+import {
+  claimGitHubIssue,
+  fetchGitHubIssue,
+  fetchGitHubIssueRelationships,
+  getCurrentGitHubLogin,
+  listOpenGitHubIssues,
+  resolveGitHubIssueRepo,
+  type GitHubIssue,
+  type GitHubIssueDependency,
+} from "../github/issue.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { finalizeAttemptObservability } from "./observability.ts";
 import { artifactRelativePath, ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
@@ -25,7 +34,7 @@ import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment, publishReviewLedgerComments } from "./ledger-comments.ts";
 import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
-import { findMatchingSkipLabel, selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
+import { findMatchingSkipLabel, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 
 const discoveryFetchLimit = 100;
@@ -34,6 +43,8 @@ type AutoRunInjected = {
   clock?: Clock;
   listOpenGitHubIssues?: typeof listOpenGitHubIssues;
   fetchGitHubIssue?: typeof fetchGitHubIssue;
+  fetchGitHubIssueRelationships?: typeof fetchGitHubIssueRelationships;
+  resolveGitHubIssueRepo?: typeof resolveGitHubIssueRepo;
   assertCleanAutorunGit?: typeof assertCleanAutorunGit;
   getCurrentGitHubLogin?: typeof getCurrentGitHubLogin;
   claimGitHubIssue?: typeof claimGitHubIssue;
@@ -67,11 +78,14 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
     repo: options.repo,
     limit: discoveryFetchLimit,
   });
-  const selected = selectEligibleIssues(issues, {
+  const rankedCandidates = rankEligibleIssues(issues, {
     readyLabel: options.readyLabel,
     skipLabels: options.skipLabels,
     limit: options.limit,
   });
+  const { selected, skippedBlocked } = await selectDependencyClearIssues(rankedCandidates, options, injected);
+
+  printSkippedBlockedIssues(skippedBlocked);
 
   if (selected.length === 0) {
     console.log("\nNo eligible issues found.");
@@ -86,6 +100,59 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
   }
 
   await runManagedIssueAttempts(selected, options, injected);
+}
+
+type SkippedBlockedIssue = {
+  issue: AutorunIssueCandidate;
+  blockers: GitHubIssueDependency[];
+};
+
+async function selectDependencyClearIssues(
+  candidates: readonly AutorunIssueCandidate[],
+  options: AutoCliOptions,
+  injected: AutoRunInjected,
+): Promise<{ selected: AutorunIssueCandidate[]; skippedBlocked: SkippedBlockedIssue[] }> {
+  const selected: AutorunIssueCandidate[] = [];
+  const skippedBlocked: SkippedBlockedIssue[] = [];
+  if (options.limit <= 0) return { selected, skippedBlocked };
+
+  const fetchRelationships = injected.fetchGitHubIssueRelationships ?? fetchGitHubIssueRelationships;
+  const resolveRepo = injected.resolveGitHubIssueRepo ?? resolveGitHubIssueRepo;
+
+  for (const issue of candidates) {
+    if (selected.length >= options.limit) break;
+
+    const repo = await resolveRepo({ cwd: options.cwd, explicitRepo: options.repo, issueUrl: issue.url });
+    const relationships = await fetchRelationships({
+      cwd: options.cwd,
+      repo,
+      issueNumber: issue.number,
+      body: "",
+    });
+
+    if (!relationships.nativeDependenciesAvailable) {
+      const reason = relationships.unavailableReason ? `: ${relationships.unavailableReason}` : "";
+      throw new Error(`Could not verify native GitHub dependencies for issue #${issue.number}${reason}. Refusing to run unchecked discovery candidate.`);
+    }
+
+    const activeBlockers = relationships.blockedBy
+      .filter((blocker) => blocker.state !== "CLOSED")
+      .toSorted(compareDependencyByNumber);
+
+    if (activeBlockers.length > 0) {
+      skippedBlocked.push({ issue, blockers: activeBlockers });
+      continue;
+    }
+
+    selected.push(issue);
+  }
+
+  return { selected, skippedBlocked };
+}
+
+function compareDependencyByNumber(left: GitHubIssueDependency, right: GitHubIssueDependency): number {
+  if (left.number !== right.number) return left.number - right.number;
+  return left.title.localeCompare(right.title);
 }
 
 async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
@@ -329,6 +396,18 @@ async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjecte
   if (options.noAssign) return undefined;
   const getLogin = injected.getCurrentGitHubLogin ?? getCurrentGitHubLogin;
   return options.assignee ?? await getLogin({ cwd: options.cwd });
+}
+
+function printSkippedBlockedIssues(skipped: readonly SkippedBlockedIssue[]): void {
+  if (skipped.length === 0) return;
+
+  console.log("\nSkipped issue(s) with active native blockers:");
+  for (const skippedIssue of skipped) {
+    console.log(`- #${skippedIssue.issue.number} ${skippedIssue.issue.title}${skippedIssue.issue.url ? ` (${skippedIssue.issue.url})` : ""}`);
+    for (const blocker of skippedIssue.blockers) {
+      console.log(`  - blocked by #${blocker.number} ${blocker.title} [${blocker.state}]${blocker.url ? ` (${blocker.url})` : ""}`);
+    }
+  }
 }
 
 function printSelectedIssues(issues: readonly AutorunIssueCandidate[]): void {

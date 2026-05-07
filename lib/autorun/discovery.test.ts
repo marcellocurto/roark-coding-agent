@@ -31,12 +31,119 @@ describe("runAutoDiscovery", () => {
             issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
           ];
         },
+        fetchGitHubIssueRelationships: async (input) => dependencyClearRelationships(Number(input.issueNumber)),
       });
     });
 
     expect(listed).toBe(true);
     expect(logs.join("\n")).toContain("#3 Issue 3");
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
+  });
+
+  test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
+    const checked: number[] = [];
+
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        listOpenGitHubIssues: async () => [
+          issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+          issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+        ],
+        fetchGitHubIssueRelationships: async (input) => {
+          const issueNumber = Number(input.issueNumber);
+          checked.push(issueNumber);
+          return issueNumber === 1
+            ? dependencyClearRelationships(issueNumber, [dependency(99, "Blocker", "OPEN")])
+            : dependencyClearRelationships(issueNumber);
+        },
+      });
+    });
+
+    const logText = logs.join("\n");
+    expect(checked).toEqual([1, 2]);
+    expect(logText).toContain("Skipped issue(s) with active native blockers:");
+    expect(logText).toContain("- #1 Issue 1");
+    expect(logText).toContain("blocked by #99 Blocker [OPEN]");
+    expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
+  });
+
+  test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
+    const checked: number[] = [];
+
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        listOpenGitHubIssues: async () => [
+          issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+          issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+        ],
+        fetchGitHubIssueRelationships: async (input) => {
+          const issueNumber = Number(input.issueNumber);
+          checked.push(issueNumber);
+          return issueNumber === 1
+            ? dependencyClearRelationships(issueNumber, [dependency(99, "Closed blocker", "CLOSED")])
+            : dependencyClearRelationships(issueNumber);
+        },
+      });
+    });
+
+    const logText = logs.join("\n");
+    expect(checked).toEqual([1]);
+    expect(logText).not.toContain("Skipped issue(s) with active native blockers:");
+    expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
+  });
+
+  test("discovery auto selection limit counts unblocked issues", async () => {
+    const checked: number[] = [];
+
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true, limit: 2 }, {
+        listOpenGitHubIssues: async () => [
+          issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+          issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+          issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
+        ],
+        fetchGitHubIssueRelationships: async (input) => {
+          const issueNumber = Number(input.issueNumber);
+          checked.push(issueNumber);
+          return issueNumber === 1
+            ? dependencyClearRelationships(issueNumber, [dependency(99, "Blocker", "OPEN")])
+            : dependencyClearRelationships(issueNumber);
+        },
+      });
+    });
+
+    const logText = logs.join("\n");
+    expect(checked).toEqual([1, 2, 3]);
+    expect(logText).toContain("Selected issue(s):");
+    expect(logText).toContain("- #2 Issue 2");
+    expect(logText).toContain("- #3 Issue 3");
+  });
+
+  test("discovery auto fails closed when native dependency data is unavailable", async () => {
+    let preflighted = false;
+    let claimed = false;
+
+    await expect(runAutoDiscovery({ ...baseOptions() }, {
+      listOpenGitHubIssues: async () => [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])],
+      fetchGitHubIssueRelationships: async () => ({
+        fetchedAt: "2026-05-07T00:00:00.000Z",
+        repo: "owner/repo",
+        nativeDependenciesAvailable: false,
+        blockedBy: [],
+        blocking: [],
+        bodyDeclaredBlockers: [],
+        unavailableReason: "GitHub dependency API unavailable",
+      }),
+      assertCleanAutorunGit: async () => {
+        preflighted = true;
+      },
+      claimGitHubIssue: async () => {
+        claimed = true;
+      },
+    })).rejects.toThrow("Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable");
+
+    expect(preflighted).toBe(false);
+    expect(claimed).toBe(false);
   });
 
   test("targeted auto fetches the requested issue instead of listing discovery candidates", async () => {
@@ -160,6 +267,36 @@ function issue(number: number, createdAt: string, labels: string[]) {
     url: `https://github.com/owner/repo/issues/${number}`,
     createdAt,
     labels: labels.map((name) => ({ name })),
+  };
+}
+
+function dependencyClearRelationships(
+  issueNumber: number,
+  blockedBy: Array<{ number: number; title: string; state: string; url: string }> = [],
+) {
+  return {
+    fetchedAt: "2026-05-07T00:00:00.000Z",
+    repo: "owner/repo",
+    nativeDependenciesAvailable: true,
+    blockedBy,
+    blocking: [],
+    bodyDeclaredBlockers: [],
+    issueDependenciesSummary: {
+      blockedBy: blockedBy.filter((item) => item.state !== "CLOSED").length,
+      blocking: 0,
+      totalBlockedBy: blockedBy.length,
+      totalBlocking: 0,
+    },
+    issueNumber,
+  };
+}
+
+function dependency(number: number, title: string, state: string) {
+  return {
+    number,
+    title,
+    state,
+    url: `https://github.com/owner/repo/issues/${number}`,
   };
 }
 
