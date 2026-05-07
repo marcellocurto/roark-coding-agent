@@ -38,7 +38,15 @@ export function selectEligibleIssues(
 export function isEligibleIssue(issue: AutorunIssueCandidate, options: IssueSelectionOptions): boolean {
   const labels = normalizedLabelSet(issue);
   if (!labels.has(normalizeLabel(options.readyLabel))) return false;
-  return !options.skipLabels.some((label) => labels.has(normalizeLabel(label)));
+  return findMatchingSkipLabel(issue, options.skipLabels) === undefined;
+}
+
+export function findMatchingSkipLabel(
+  issue: AutorunIssueCandidate,
+  skipLabels: readonly string[],
+): string | undefined {
+  const normalizedSkipLabels = new Set(skipLabels.map(normalizeLabel));
+  return issue.labels?.find((label) => normalizedSkipLabels.has(normalizeLabel(label.name)))?.name;
 }
 
 function compareOldestIssueFirst(left: AutorunIssueCandidate, right: AutorunIssueCandidate): number {
