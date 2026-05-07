@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, runAgentTask, triageTask } from "./tasks.ts";
+import { AgentTaskRunError, implementationTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 
 const tempDirs: string[] = [];
@@ -92,6 +92,33 @@ describe("runAgentTask transient agent retry", () => {
     expect(calls).toBe(2);
     expect(sleeps).toEqual([]);
     expect(await readArtifact(context, "triage")).toBe(validTriage);
+  });
+
+  test("adds partial-edit guidance to writable retry prompts", async () => {
+    const context = await createContext();
+    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await writeArtifact(
+      context,
+      "implementationPlan",
+      "# Implementation Plan\n\n## Ready For Implementation\nyes\n",
+    );
+    const prompts: string[] = [];
+    const runner: AgentRunner = async (request) => {
+      prompts.push(request.prompt);
+      if (prompts.length === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
+      return "# Implementation Log\n";
+    };
+
+    await expect(runAgentTask(context, runner, implementationTask, {
+      delaysMs: [0, 60_000, 180_000],
+      sleep: async () => {},
+    })).resolves.toBe("# Implementation Log\n");
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).not.toContain("<transient_connection_retry>");
+    expect(prompts[1]).toContain("<transient_connection_retry>");
+    expect(prompts[1]).toContain("It may have already modified files in the working tree.");
+    expect(prompts[1]).toContain("Inspect the current diff before editing");
   });
 
   test("does not write diagnostic artifacts while transient retries remain", async () => {

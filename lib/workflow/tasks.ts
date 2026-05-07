@@ -209,7 +209,8 @@ async function runAgentRequestWithTransientRetries(
 
   for (let retryIndex = 0; ; retryIndex++) {
     try {
-      return await runner(request);
+      const attemptRequest = retryIndex === 0 ? request : withTransientConnectionRetryPrompt(request, task);
+      return await runner(attemptRequest);
     } catch (error) {
       if (!isTransientAgentConnectionError(error) || retryIndex >= delaysMs.length) throw error;
 
@@ -222,6 +223,14 @@ async function runAgentRequestWithTransientRetries(
       if (delayMs > 0) await sleep(delayMs);
     }
   }
+}
+
+function withTransientConnectionRetryPrompt(request: AgentRunRequest, task: AgentTask): AgentRunRequest {
+  if (!task.writable) return request;
+  return {
+    ...request,
+    prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, finish the phase, run validation, and return the complete required Markdown artifact.\n</transient_connection_retry>`,
+  };
 }
 
 function defaultSleep(ms: number): Promise<void> {
