@@ -4,6 +4,7 @@ import {
   defaultAutorunSkipLabels,
   findMatchingSkipLabel,
   isEligibleIssue,
+  rankEligibleIssues,
   selectEligibleIssues,
   type AutorunIssueCandidate,
 } from "./selection.ts";
@@ -69,6 +70,23 @@ describe("autorun issue selection", () => {
     );
 
     expect(selected.map((candidate) => candidate.number)).toEqual([3]);
+  });
+
+  test("ranks all eligible issues without applying the selection limit", () => {
+    const ranked = rankEligibleIssues(
+      [
+        issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
+        issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+        issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+      ],
+      {
+        readyLabel: defaultAutorunReadyLabel,
+        skipLabels: defaultAutorunSkipLabels,
+        limit: 1,
+      },
+    );
+
+    expect(ranked.map((candidate) => candidate.number)).toEqual([1, 2, 3]);
   });
 
   test("limits selected issues after filtering and sorting", () => {

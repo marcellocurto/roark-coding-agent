@@ -29,10 +29,16 @@ export function selectEligibleIssues(
   issues: readonly AutorunIssueCandidate[],
   options: IssueSelectionOptions,
 ): AutorunIssueCandidate[] {
+  return rankEligibleIssues(issues, options).slice(0, options.limit);
+}
+
+export function rankEligibleIssues(
+  issues: readonly AutorunIssueCandidate[],
+  options: IssueSelectionOptions,
+): AutorunIssueCandidate[] {
   return issues
     .filter((issue) => isEligibleIssue(issue, options))
-    .toSorted(compareOldestIssueFirst)
-    .slice(0, options.limit);
+    .toSorted(compareOldestIssueFirst);
 }
 
 export function isEligibleIssue(issue: AutorunIssueCandidate, options: IssueSelectionOptions): boolean {
