@@ -1,10 +1,13 @@
+import path from "node:path";
 import {
   AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
   ModelRegistry,
+  type ResourceDiagnostic,
   SessionManager,
+  type Skill,
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
@@ -17,6 +20,15 @@ export const roarkPiSettings = {
 
 const readOnlyTools = ["read", "bash", "grep", "find", "ls"];
 const writableTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+export function buildRoarkResourceLoaderSecurityOptions(skillPaths: readonly string[] = []) {
+  return {
+    noExtensions: true,
+    noPromptTemplates: true,
+    noSkills: true,
+    additionalSkillPaths: [...skillPaths],
+  };
+}
 
 export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   const modelSpec = requestedModelSpec(options.model);
@@ -31,9 +43,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     cwd: options.cwd,
     agentDir: getAgentDir(),
     settingsManager,
-    noExtensions: true,
-    noPromptTemplates: true,
-    noSkills: true,
+    ...buildRoarkResourceLoaderSecurityOptions(options.skillPaths),
     appendSystemPromptOverride: (base) => [
       ...base,
       options.systemPrompt,
@@ -41,6 +51,9 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     ],
   });
   await loader.reload();
+  const loadedSkills = loader.getSkills();
+  assertNoResourceLoadErrors(loadedSkills.diagnostics, "skill");
+  assertRequestedSkillsLoaded(loadedSkills.skills, options.skillPaths ?? [], loadedSkills.diagnostics);
 
   const { session, modelFallbackMessage } = await createAgentSession({
     cwd: options.cwd,
@@ -92,6 +105,47 @@ function resolveModel(modelRegistry: ModelRegistry, spec: string) {
   const model = modelRegistry.find(provider, id);
   if (!model) throw new Error(`Model not found: ${spec}`);
   return model;
+}
+
+export function assertNoResourceLoadErrors(diagnostics: readonly ResourceDiagnostic[], resourceType: string): void {
+  const failures = diagnostics.filter((diagnostic) => diagnostic.type === "error" || diagnostic.type === "collision");
+  if (failures.length === 0) return;
+
+  const details = formatResourceDiagnostics(failures);
+  throw new Error(`Pi ${resourceType} loading failed: ${details}`);
+}
+
+export function assertRequestedSkillsLoaded(
+  loadedSkills: readonly Skill[],
+  requestedSkillPaths: readonly string[],
+  diagnostics: readonly ResourceDiagnostic[] = [],
+): void {
+  if (requestedSkillPaths.length === 0) return;
+
+  const missing = requestedSkillPaths.filter((skillPath) => !loadedSkills.some((skill) => skillLoadedFromPath(skill, skillPath)));
+  if (missing.length === 0) return;
+
+  const relevantDiagnostics = diagnostics.filter((diagnostic) => diagnostic.path && missing.some((skillPath) => isSameOrWithin(diagnostic.path!, skillPath)));
+  const diagnosticDetails = relevantDiagnostics.length > 0 ? ` Diagnostics: ${formatResourceDiagnostics(relevantDiagnostics)}` : "";
+  throw new Error(`Pi skill loading failed: requested skill path(s) did not load: ${missing.join(", ")}.${diagnosticDetails}`);
+}
+
+function formatResourceDiagnostics(diagnostics: readonly ResourceDiagnostic[]): string {
+  return diagnostics
+    .map((diagnostic) => `${diagnostic.type}: ${diagnostic.message}${diagnostic.path ? ` (${diagnostic.path})` : ""}`)
+    .join("; ");
+}
+
+function skillLoadedFromPath(skill: Skill, requestedPath: string): boolean {
+  return isSameOrWithin(skill.filePath, requestedPath) || isSameOrWithin(skill.baseDir, requestedPath);
+}
+
+function isSameOrWithin(candidatePath: string, parentPath: string): boolean {
+  const candidate = path.resolve(candidatePath);
+  const parent = path.resolve(parentPath);
+  if (candidate === parent) return true;
+  const parentWithSeparator = parent.endsWith(path.sep) ? parent : `${parent}${path.sep}`;
+  return candidate.startsWith(parentWithSeparator);
 }
 
 export function extractAgentErrorMessage(messages: readonly unknown[]): string | undefined {

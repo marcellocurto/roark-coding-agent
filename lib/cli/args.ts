@@ -103,6 +103,8 @@ const issueCommands = new Set<IssueWorkflowCommand>([
 
 const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue"]);
 
+export const defaultMaxFixPasses = 3;
+
 export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
@@ -129,7 +131,7 @@ Options:
   --out <path>           Runs directory. Defaults to .roark/runs.
   --model <provider/id>  Optional Pi model override, e.g. anthropic/claude-sonnet-4-5.
   --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
-  --max-fix-passes <n>   Maximum automatic fix/review cycles for do/continue. Defaults to 1.
+  --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
   --fix-pass <n>         Pass number for standalone fix/final-review.
   --attempt <n>          Issue/continue commands only: use a specific autorun attempt directory.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.
@@ -181,7 +183,7 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     failureLabel: defaultAutorunFailureLabel,
     successLabel: defaultAutorunSuccessLabel,
     remote: defaultAutorunRemote,
-    maxFixPasses: 1,
+    maxFixPasses: defaultMaxFixPasses,
     force: false,
     yes: false,
   };
@@ -243,7 +245,7 @@ function parseContinueArgs(args: string[]): ContinueCliOptions {
     outDir: ".roark/runs",
     force: false,
     yes: false,
-    maxFixPasses: 1,
+    maxFixPasses: defaultMaxFixPasses,
     verifyCommand: defaultAutorunVerifyCommand,
     failureLabel: defaultAutorunFailureLabel,
     successLabel: defaultAutorunSuccessLabel,
@@ -286,7 +288,7 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): IssueCli
     outDir: ".roark/runs",
     force: false,
     yes: false,
-    maxFixPasses: 1,
+    maxFixPasses: defaultMaxFixPasses,
   };
 
   let maxFixPassesProvided = false;

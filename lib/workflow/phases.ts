@@ -182,6 +182,6 @@ export async function runSinglePhase(
   else if (phase === "final-review") await finalReviewPhase(context, context.fixPass ?? inferNextFinalReviewPass(context), runner);
   else if (phase === "readiness") await readinessPhase(context);
   else if (phase === "curate-issues") await issueCurationPhase(context);
-  else if (phase === "create-issues") await createIssuesPhase(context);
+  else if (phase === "create-issues") await createIssuesPhase(context, runner);
   else throw new Error(`Unsupported phase '${phase}'.`);
 }

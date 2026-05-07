@@ -29,6 +29,20 @@ async function createContext() {
   return context;
 }
 
+describe("runAgentTask skill loading", () => {
+  test("normal workflow tasks do not request any skill paths", async () => {
+    const context = await createContext();
+    const requests: unknown[] = [];
+    const runner: AgentRunner = async (request) => {
+      requests.push(request.skillPaths);
+      return "# Triage\n\n## Verdict\nproceed\n";
+    };
+
+    await expect(runAgentTask(context, runner, triageTask)).resolves.toContain("## Verdict\nproceed");
+    expect(requests).toEqual([undefined]);
+  });
+});
+
 describe("runAgentTask error diagnostics", () => {
   test("writes provider errors into the target phase artifact before throwing", async () => {
     const context = await createContext();
