@@ -11,6 +11,7 @@ import {
   SettingsManager,
 } from "@mariozechner/pi-coding-agent";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
+import { formatCompletedToolLine, formatToolRunSummary, type CompletedToolRunForLog } from "./tool-log.ts";
 
 export const defaultRoarkModel = "openai-codex/gpt-5.5";
 export const roarkPiSettings = {
@@ -71,7 +72,8 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
 
   const phase = options.phase ?? "agent";
   const pendingObservability: Promise<void>[] = [];
-  const toolStarts = new Map<string, number>();
+  const toolStarts = new Map<string, { startedAt: number; args: unknown }>();
+  const completedTools: CompletedToolRunForLog[] = [];
   const emit = (promise: Promise<void> | undefined) => {
     if (promise) pendingObservability.push(promise.catch(() => {}));
   };
@@ -90,26 +92,34 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
       process.stdout.write(delta);
     }
     if (event.type === "tool_execution_start") {
-      toolStarts.set(event.toolCallId, Date.now());
+      toolStarts.set(event.toolCallId, { startedAt: Date.now(), args: event.args });
       emit(options.observer?.toolStarted({
         phase,
         sessionId: session.sessionId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
       }));
-      process.stdout.write(`\n[tool:${event.toolName}]\n`);
     }
     if (event.type === "tool_execution_end") {
-      const startedAt = toolStarts.get(event.toolCallId);
+      const startedTool = toolStarts.get(event.toolCallId);
       toolStarts.delete(event.toolCallId);
+      const durationMs = startedTool === undefined ? undefined : Date.now() - startedTool.startedAt;
       emit(options.observer?.toolCompleted({
         phase,
         sessionId: session.sessionId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        durationMs: startedAt === undefined ? undefined : Date.now() - startedAt,
+        durationMs,
         isError: event.isError,
       }));
+      const completedDurationMs = durationMs ?? 0;
+      completedTools.push({ toolName: event.toolName, durationMs: completedDurationMs });
+      process.stdout.write(`\n${formatCompletedToolLine({
+        toolName: event.toolName,
+        args: startedTool?.args,
+        durationMs: completedDurationMs,
+        isError: event.isError,
+      })}\n`);
     }
     if (event.type === "auto_retry_start") {
       emit(options.observer?.autoRetryStarted({
@@ -143,6 +153,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     } catch (error) {
       console.warn(`! observability session stats failed: ${formatError(error)}`);
     }
+    process.stdout.write(`\n${formatToolRunSummary(completedTools)}\n`);
     await Promise.allSettled(pendingObservability);
     session.dispose();
   }
