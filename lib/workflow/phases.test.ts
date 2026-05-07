@@ -64,6 +64,28 @@ describe("runFullWorkflow", () => {
     expect(await readArtifact(context, "readiness")).toContain("- Triage verdict: blocked");
   });
 
+  test("returns planning-stopped and does not implement when plan is not ready", async () => {
+    const context = await tempContext();
+    const phases: string[] = [];
+    const runner: AgentRunner = async (request) => {
+      if (request.prompt.includes('name="triage"')) {
+        phases.push("triage");
+        return proceedTriage();
+      }
+      if (request.prompt.includes('name="implementation_plan"')) {
+        phases.push("plan");
+        return notReadyPlan();
+      }
+      phases.push("unexpected");
+      throw new Error("unexpected prompt");
+    };
+
+    await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "planning-stopped" });
+    expect(phases).toEqual(["triage", "plan"]);
+    expect(artifactExists(context, "readiness")).toBe(true);
+    expect(artifactExists(context, "implementationLog")).toBe(false);
+  });
+
   test("completed path returns completed", async () => {
     const context = await tempContext();
     await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
@@ -144,6 +166,10 @@ function proceedTriage(): string {
 
 function readyPlan(): string {
   return "# Implementation Plan\n\n## Issue\n#12\n\n## Work Classification\nbackend\n\n## Goal\nTest.\n\n## Non-Goals\nNone.\n\n## Current Code Findings\nFound.\n\n## Proposed Changes\nChange.\n\n## Files Likely To Change\nFiles.\n\n## Detailed Steps\nSteps.\n\n## Tests And Validation\nTests.\n\n## Risks\nLow.\n\n## Rollback Plan\nRevert.\n\n## Ready For Implementation\nyes\n";
+}
+
+function notReadyPlan(): string {
+  return readyPlan().replace("## Ready For Implementation\nyes", "## Ready For Implementation\nno");
 }
 
 function reviewWithLedger(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {

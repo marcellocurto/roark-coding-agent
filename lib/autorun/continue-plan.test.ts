@@ -44,7 +44,7 @@ describe("planContinuation", () => {
 
   test("treats non-proceed triage as terminal", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "issue", "# GitHub Issue #11\n");
+    await writeArtifact(context, "issue", issueArtifact());
     await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nneeds-human-decision\n");
 
     const steps = await planContinuation(context);
@@ -52,6 +52,20 @@ describe("planContinuation", () => {
     expect(steps).toEqual([
       { type: "write-readiness", reason: 'triage verdict is "needs-human-decision"; readiness records the stop' },
       { type: "noop", reason: "terminal triage outcome; no plan/implementation/publish gate" },
+    ]);
+  });
+
+  test("does not plan implementation for a valid plan that is not ready", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, "issue", issueArtifact());
+    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nno\n");
+
+    const steps = await planContinuation(context);
+
+    expect(steps).toEqual([
+      { type: "write-readiness", reason: "implementation plan is not ready; readiness records the stop" },
+      { type: "noop", reason: "terminal planning outcome; no implementation/publish gate" },
     ]);
   });
 
@@ -114,12 +128,16 @@ async function writeHappyPathThroughReviews(
   reviewVerdict = "approve",
   reviewAContent?: string,
 ) {
-  await writeArtifact(context, "issue", "# GitHub Issue #11\n");
+  await writeArtifact(context, "issue", issueArtifact());
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
   await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
   await writeArtifact(context, "reviewA", reviewAContent ?? `# Review A\n\n## Verdict\n${reviewVerdict}\n`);
   await writeArtifact(context, "reviewB", `# Review B\n\n## Verdict\n${reviewVerdict}\n`);
+}
+
+function issueArtifact(): string {
+  return "# GitHub Issue #11\n\n<github_issue_relationships source=\"gh\">\n  <blocking_status active_blockers=\"0\" total_blockers=\"0\" />\n</github_issue_relationships>\n";
 }
 
 function reviewWithLedger(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {

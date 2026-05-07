@@ -19,13 +19,10 @@ import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
 import { buildReadinessMarkdown } from "./readiness.ts";
 import {
-  hasBlockedReview,
-  parseVerdict,
-  shouldImplementPlan,
-  shouldProceedAfterTriage,
-  shouldRunAnotherFixPass,
-  needsFix,
-} from "./verdicts.ts";
+  issueArtifactHasRelationshipSnapshot,
+  planWorkflowProgression,
+  type WorkflowProgressionAction,
+} from "./progression.ts";
 import {
   finalReviewTask,
   fixTask,
@@ -37,9 +34,7 @@ import {
   triageTask,
 } from "./tasks.ts";
 
-export function issueArtifactHasRelationshipSnapshot(content: string): boolean {
-  return /<github_issue_relationships\b/.test(content);
-}
+export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
 export async function fetchIssuePhase(context: WorkflowContext): Promise<string> {
   if (!context.force && artifactExists(context, "issue")) {
@@ -153,42 +148,67 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
 }
 
 async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner): Promise<WorkflowRunResult> {
-  await fetchIssuePhase(context);
+  const completedActions: WorkflowProgressionAction[] = [];
 
-  const triage = await triagePhase(context, runner);
-  if (!shouldProceedAfterTriage(triage)) {
-    const triageVerdict = parseVerdict(triage) ?? "unknown";
-    await readinessPhase(context);
-    console.log(`\nStopped after triage: ${triageVerdict}`);
-    return { status: "triage-stopped", triageVerdict };
-  }
+  for (;;) {
+    const progression = await planWorkflowProgression(context, {
+      force: context.force,
+      completedActions,
+    });
+    const next = progression.actions[0];
 
-  const plan = await planPhase(context, runner);
-  if (!shouldImplementPlan(plan)) {
-    await readinessPhase(context);
-    console.log("\nStopped after planning: plan is not ready for implementation.");
-    return { status: "planning-stopped" };
-  }
-
-  await implementationPhase(context, runner);
-  const { reviewA, reviewB } = await reviewPhase(context, runner);
-
-  if (hasBlockedReview(reviewA, reviewB)) {
-    await readinessPhase(context);
-    console.log("\nStopped after review: at least one review is blocked.");
-    return { status: "review-blocked" };
-  }
-
-  if (needsFix(reviewA, reviewB)) {
-    for (let pass = 1; pass <= context.maxFixPasses; pass++) {
-      await fixPhase(context, pass, runner);
-      const finalReview = await finalReviewPhase(context, pass, runner);
-      if (!shouldRunAnotherFixPass(finalReview)) break;
+    if (!next) {
+      if (progression.terminalStatus) return progression.terminalStatus;
+      throw new Error("Workflow progression produced no next action and no terminal status.");
     }
-  }
 
-  await readinessPhase(context);
-  return { status: "completed" };
+    if (next.type === "run") {
+      await runProgressionPhase(context, runner, next);
+      completedActions.push(next);
+      continue;
+    }
+
+    if (next.type === "write-readiness") {
+      await readinessPhase(context);
+      completedActions.push(next);
+      if (progression.terminalStatus) return logAndReturnTerminal(progression.terminalStatus);
+      continue;
+    }
+
+    if (next.type === "noop") {
+      if (progression.terminalStatus) return logAndReturnTerminal(progression.terminalStatus);
+      throw new Error(`Workflow progression returned a no-op without a terminal status: ${next.reason}`);
+    }
+
+    throw new Error(`Workflow progression returned unsupported fresh-run action '${next.type}'.`);
+  }
+}
+
+async function runProgressionPhase(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  action: Extract<WorkflowProgressionAction, { type: "run" }>,
+): Promise<void> {
+  if (action.phase === "fetch") await fetchIssuePhase(context);
+  else if (action.phase === "triage") await triagePhase(context, runner);
+  else if (action.phase === "plan") await planPhase(context, runner);
+  else if (action.phase === "implement") await implementationPhase(context, runner);
+  else if (action.phase === "review-a") await runAgentTask(context, runner, reviewATask);
+  else if (action.phase === "review-b") await runAgentTask(context, runner, reviewBTask);
+  else if (action.phase === "fix") await fixPhase(context, action.pass, runner);
+  else if (action.phase === "final-review") await finalReviewPhase(context, action.pass, runner);
+  else assertNever(action.phase);
+}
+
+function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
+  if (result.status === "triage-stopped") console.log(`\nStopped after triage: ${result.triageVerdict}`);
+  else if (result.status === "planning-stopped") console.log("\nStopped after planning: plan is not ready for implementation.");
+  else if (result.status === "review-blocked") console.log("\nStopped after review: at least one review is blocked.");
+  return result;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected workflow progression phase '${String(value)}'.`);
 }
 
 async function shouldRegenerateArtifact(context: WorkflowContext, artifact: ArtifactRef): Promise<boolean> {
