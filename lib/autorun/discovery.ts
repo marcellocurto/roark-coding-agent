@@ -19,7 +19,7 @@ import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { formatContinueCommand } from "./recovery.ts";
+import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { selectEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
@@ -131,7 +131,7 @@ export async function runAutoDiscovery(
         workflowContext,
         phase: errorPhase(error),
         attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
-        recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
+        recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt, yes: shouldRecoverWithYes(error) }),
       });
       throw error;
     } finally {

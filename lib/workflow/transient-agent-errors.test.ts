@@ -8,10 +8,12 @@ const transientMessages = [
   "EPIPE writing request body",
   "socket hang up",
   "fetch failed",
+  "network error",
   "connection reset by peer",
   "connection closed before response completed",
   "gateway timeout",
   "service unavailable",
+  "temporarily unavailable",
 ];
 
 const nonTransientMessages = [

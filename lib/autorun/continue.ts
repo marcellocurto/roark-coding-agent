@@ -24,7 +24,7 @@ import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { formatContinueCommand } from "./recovery.ts";
+import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 
@@ -115,7 +115,7 @@ export async function runAutoContinue(
       workflowContext,
       phase: errorPhase(error),
       attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
-      recoveryCommand,
+      recoveryCommand: formatContinueCommand({ issueNumber: parsed.issueNumber, repo: parsed.repo, attempt, yes: shouldRecoverWithYes(error) }),
       cwd: workflowContext.cwd,
       repo: parsed.repo,
     });

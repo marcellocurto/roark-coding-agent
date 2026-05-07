@@ -21,10 +21,12 @@ const transientAgentConnectionErrorPatterns = [
   /\bEPIPE\b/i,
   /socket[_\s]+hang[_\s]+up/i,
   /fetch[_\s]+failed/i,
+  /network[_\s]+error/i,
   /connection[_\s]+reset/i,
   /connection[_\s]+closed/i,
   /gateway[_\s]+timeout/i,
   /service[_\s]+unavailable/i,
+  /temporarily[_\s]+unavailable/i,
 ];
 
 export function isTransientAgentConnectionError(error: unknown): boolean {
