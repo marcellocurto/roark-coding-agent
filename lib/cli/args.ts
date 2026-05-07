@@ -24,7 +24,7 @@ export type IssueWorkflowCommand =
 export type ContinueCommand = "continue";
 export type StatusCommand = "status";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | ContinueCommand | StatusCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -87,6 +87,22 @@ export type ContinueCliOptions = {
   remote: string;
 };
 
+export type RevisePrCliOptions = {
+  command: "revise-pr";
+  prNumber: number;
+  cwd: string;
+  outDir: string;
+  repo?: string;
+  model?: string;
+  thinkingLevel?: ThinkingLevel;
+  verifyCommand: string;
+  remote: string;
+  maxFixPasses: number;
+  force: boolean;
+  yes: boolean;
+  comment: boolean;
+};
+
 export type StatusCliOptions = {
   command: "status";
   issue?: string;
@@ -99,7 +115,7 @@ export type StatusCliOptions = {
   yes?: never;
 };
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | ContinueCliOptions | StatusCliOptions;
+export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
@@ -115,7 +131,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "create-issues",
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue", "status"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status"]);
 
 export const defaultMaxFixPasses = 3;
 
@@ -123,6 +139,7 @@ export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
+  revise-pr <number>     Manually revise an existing open PR from PR feedback.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   status [issue]         Print persisted run observability status; use --all for all known issues.
   do <issue>             Run the full issue workflow.
@@ -165,9 +182,10 @@ Options:
                           Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
   --success-label <label>
                           Label applied to the issue when a draft PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
-  --remote <name>        Git remote to push the issue branch to. Defaults to ${defaultAutorunRemote}.
+  --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
+  --no-comment           revise-pr only: do not post the terminal PR summary comment.
   --force                Re-run phases even if their markdown artifact already exists.
-  --yes                  Continue past dirty git preflight for implementation/fix; approve create-issues mutations.
+  --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
   -h, --help             Show this help.
 `;
 
@@ -180,6 +198,7 @@ export function parseArgs(argv: string[]): CliOptions | { help: true } {
   }
 
   if (rawCommand === "auto") return parseAutoArgs(rest);
+  if (rawCommand === "revise-pr") return parseRevisePrArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
   if (rawCommand === "status") return parseStatusArgs(rest);
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
@@ -249,6 +268,45 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
 
   if (options.noAssign && options.assignee) {
     throw new Error("--assignee cannot be combined with --no-assign.");
+  }
+
+  return options;
+}
+
+function parseRevisePrArgs(args: string[]): RevisePrCliOptions {
+  const [rawPrNumber, ...rest] = args;
+  if (!rawPrNumber) throw new Error(`Missing PR number.\n\n${usage}`);
+  if (rawPrNumber.startsWith("--")) throw new Error(`Missing PR number.\n\n${usage}`);
+
+  const prNumber = parsePositiveInteger(rawPrNumber.replace(/^#/, ""), "PR number");
+  const options: RevisePrCliOptions = {
+    command: "revise-pr",
+    prNumber,
+    cwd: process.cwd(),
+    outDir: ".roark/runs",
+    verifyCommand: defaultAutorunVerifyCommand,
+    remote: defaultAutorunRemote,
+    maxFixPasses: 1,
+    force: false,
+    yes: false,
+    comment: true,
+  };
+
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
+    else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
+    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
+    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--force") options.force = true;
+    else if (arg === "--yes") options.yes = true;
+    else if (arg === "--no-comment") options.comment = false;
+    else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
+    else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
   }
 
   return options;

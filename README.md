@@ -61,6 +61,18 @@ bun run roark-coding-agent.ts final-review 123 --fix-pass 2
 
 Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`. Use `--attempt <n>` with issue commands when you need to target a specific autorun attempt directory.
 
+## Manual PR feedback revision
+
+After a draft PR exists, use `revise-pr` to respond to PR-scoped feedback without starting a new issue run:
+
+```bash
+bun run roark-coding-agent.ts revise-pr 123 --repo owner/repo
+```
+
+The workflow fetches PR metadata, unresolved review threads, and relevant PR comments with `gh api graphql` (including thread `isResolved` state), writes artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/`, checks out the existing PR head branch, plans feedback classifications, applies only `must-fix-current` items, runs one revision reviewer plus up to `--max-fix-passes` fix/review loops (default `1`), runs `--verify` (default `bun run typecheck`), then commits, pushes, and posts one PR summary comment only after review and verification pass.
+
+Safety boundaries: the PR must be open; fork PR heads are refused in v1; the head branch must be non-empty, different from the base branch, and not a shared base branch name such as `main` or `master`; the working tree must be completely clean (including `.roark`) unless `--yes` is passed. `no-action-needed` writes artifacts only and does not mutate, commit, push, or comment by default. `needs-human` and verification/review stops do not commit or push; they leave local changes/artifacts for inspection and post a concise summary unless `--no-comment` is used.
+
 ## Pinned project skills
 
 Roark disables Pi skill discovery for normal workflow agents. The only repo-pinned skill currently loaded by a workflow is `skills/github-issue-create`, and only the approved `create-issues --yes` publishing path passes that exact skill path to the Pi runner. Global or machine-local skills are not used as fallbacks.
