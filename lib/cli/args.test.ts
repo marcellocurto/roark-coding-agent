@@ -191,13 +191,55 @@ describe("parseArgs", () => {
     expect(parsed.yes).toBe(true);
   });
 
+  test("parses revise-pr defaults and options", () => {
+    const parsed = parseArgs([
+      "revise-pr",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--cwd",
+      "/tmp/repo",
+      "--out",
+      "runs",
+      "--model",
+      "provider/model",
+      "--thinking",
+      "high",
+      "--verify",
+      "bun test",
+      "--remote",
+      "upstream",
+      "--max-fix-passes",
+      "2",
+      "--force",
+      "--yes",
+      "--no-comment",
+    ]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+    expect(parsed.command).toBe("revise-pr");
+    if (parsed.command !== "revise-pr") throw new Error("expected revise-pr options");
+    expect(parsed.prNumber).toBe(123);
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.cwd).toBe("/tmp/repo");
+    expect(parsed.outDir).toBe("runs");
+    expect(parsed.model).toBe("provider/model");
+    expect(parsed.thinkingLevel).toBe("high");
+    expect(parsed.verifyCommand).toBe("bun test");
+    expect(parsed.remote).toBe("upstream");
+    expect(parsed.maxFixPasses).toBe(2);
+    expect(parsed.force).toBe(true);
+    expect(parsed.yes).toBe(true);
+    expect(parsed.comment).toBe(false);
+  });
+
   test("still parses issue workflow commands", () => {
     const parsed = parseArgs(["do", "123", "--repo", "owner/repo", "--max-fix-passes", "3", "--attempt", "2"]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("do");
-    if (parsed.command === "auto") throw new Error("expected issue options");
+    if (parsed.command !== "do") throw new Error("expected issue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.maxFixPasses).toBe(3);
@@ -210,7 +252,7 @@ describe("parseArgs", () => {
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("curate-issues");
-    if (parsed.command === "auto" || parsed.command === "continue") throw new Error("expected issue options");
+    if (parsed.command !== "curate-issues") throw new Error("expected issue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);
@@ -222,7 +264,7 @@ describe("parseArgs", () => {
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("create-issues");
-    if (parsed.command === "auto" || parsed.command === "continue") throw new Error("expected issue options");
+    if (parsed.command !== "create-issues") throw new Error("expected issue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);

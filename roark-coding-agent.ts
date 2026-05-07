@@ -2,6 +2,7 @@
 import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
 import { parseArgs, usage } from "./lib/cli/args.ts";
+import { runPrRevision } from "./lib/pr-revision/workflow.ts";
 import { formatDoLocalModeStartMessage, printDoLocalModeReadyMessageIfReady } from "./lib/cli/local-mode.ts";
 import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
@@ -21,6 +22,12 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   if (parsed.command === "continue") {
     await runAutoContinue(parsed);
+    return;
+  }
+
+  if (parsed.command === "revise-pr") {
+    const result = await runPrRevision(parsed);
+    console.log(`\nDone. Revision outcome: ${result.outcome}. Artifacts: ${result.context.revisionDirRelative}`);
     return;
   }
 
