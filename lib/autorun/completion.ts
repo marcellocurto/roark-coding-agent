@@ -1,8 +1,10 @@
 import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
-import type { AttemptMetadata } from "./attempts.ts";
+import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { runPublishGate, type AutorunGateOptions, type PublishGateOutcome } from "./publish-flow.ts";
+import { publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
 
@@ -23,7 +25,7 @@ export type CompleteAutorunWorkflowInput = {
 
 export type CompleteAutorunWorkflowInjected = {
   publishGate?: typeof runPublishGate;
-  markTriageStopped?: (options: MarkIssueTriageStoppedOptions) => Promise<void>;
+  markTriageStopped?: (options: MarkIssueTriageStoppedOptions) => Promise<unknown>;
 };
 
 export async function completeAutorunWorkflow(
@@ -34,7 +36,9 @@ export async function completeAutorunWorkflow(
   const markTriageStopped = injected.markTriageStopped ?? markIssueTriageStopped;
 
   if (input.workflowResult.status === "triage-stopped") {
-    await markTriageStopped({
+    const phase = "triage";
+    const marker = buildRoarkMarker({ issueNumber: input.issue.number, attempt: input.attemptMetadata.attempt, phase });
+    const ref = await markTriageStopped({
       cwd: input.options.cwd,
       repo: input.options.repo,
       issueNumber: input.issue.number,
@@ -43,12 +47,23 @@ export async function completeAutorunWorkflow(
       triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
       attemptMetadataPath: input.attemptMetadataPath,
       removeLabels: [input.options.inProgressLabel, input.options.failureLabel],
+      marker,
+      existingCommentId: input.attemptMetadata.githubComments?.issue?.[phase]?.id,
     });
+    if (isCommentRef(ref)) recordAttemptIssueComment(input.attemptMetadata, phase, ref);
     return {
       outcome: "triage-stopped",
       outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
     };
   }
+
+  await publishReviewLedgerComments({
+    cwd: input.options.cwd,
+    repo: input.options.repo,
+    issue: input.issue,
+    workflowContext: input.workflowContext,
+    attemptMetadata: input.attemptMetadata,
+  });
 
   return publishGate({
     options: input.options,
@@ -59,4 +74,10 @@ export async function completeAutorunWorkflow(
     attemptMetadataPath: input.attemptMetadataPath,
     recoveryCommand: input.recoveryCommand,
   });
+}
+
+function isCommentRef(value: unknown): value is { id: number; url?: string; marker: string } {
+  return typeof value === "object" && value !== null &&
+    typeof (value as { id?: unknown }).id === "number" &&
+    typeof (value as { marker?: unknown }).marker === "string";
 }

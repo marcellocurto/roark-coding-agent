@@ -1,8 +1,10 @@
 import type { AutoCliOptions } from "../cli/args.ts";
+import { readFileSync } from "node:fs";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
+  artifactPath,
   artifactRelativePath,
   finalReviewRef,
   latestFinalReviewPass,
@@ -12,6 +14,7 @@ import type { AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
+import { parseVerdict } from "../workflow/verdicts.ts";
 
 export const defaultAutorunSuccessLabel = "roark-pr-opened";
 export const defaultAutorunRemote = "origin";
@@ -31,6 +34,11 @@ export type SuccessLabelArgvOptions = {
   label: string;
 };
 
+export type ReviewVerdictSummary = {
+  reviewA?: string;
+  reviewB?: string;
+};
+
 export type FormatPrBodyInput = {
   issueNumber: number;
   verification?: VerificationResult;
@@ -38,6 +46,7 @@ export type FormatPrBodyInput = {
   artifactPaths: string[];
   attemptMetadata?: AttemptMetadata;
   attemptMetadataPath?: string;
+  reviewVerdicts?: ReviewVerdictSummary;
 };
 
 export type AutorunPublishOptions = Pick<
@@ -121,6 +130,11 @@ export function formatPrBody(input: FormatPrBodyInput): string {
     }
     lines.push("");
   }
+  lines.push("## Review summary");
+  lines.push(`- Review A: ${input.reviewVerdicts?.reviewA ?? "unknown"}`);
+  lines.push(`- Review B: ${input.reviewVerdicts?.reviewB ?? "unknown"}`);
+  lines.push(`- Full run ledger: issue comments on #${input.issueNumber}`);
+  lines.push("");
   lines.push("## Workflow artifacts");
   if (input.artifactPaths.length === 0) {
     lines.push(`- \`${input.runDirRelative}/\``);
@@ -168,7 +182,7 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
   return result.stdout.trim() !== "";
 }
 
-export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<void> {
+export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath } = input;
   const cwd = options.cwd;
 
@@ -198,6 +212,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     artifactPaths: collectPrBodyArtifactPaths(workflowContext),
     attemptMetadata,
     attemptMetadataPath,
+    reviewVerdicts: collectReviewVerdicts(workflowContext),
   });
 
   console.log("- Creating draft pull request");
@@ -236,5 +251,23 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
         `Failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  return prUrl || undefined;
+}
+
+export function collectReviewVerdicts(context: WorkflowContext): ReviewVerdictSummary {
+  return {
+    reviewA: readVerdictIfExists(context, "reviewA"),
+    reviewB: readVerdictIfExists(context, "reviewB"),
+  };
+}
+
+function readVerdictIfExists(context: WorkflowContext, artifact: "reviewA" | "reviewB"): string | undefined {
+  if (!artifactExists(context, artifact)) return undefined;
+  try {
+    return parseVerdict(readFileSync(artifactPath(context, artifact), "utf8")) ?? "unknown";
+  } catch {
+    return undefined;
   }
 }
