@@ -6,6 +6,23 @@ describe("parseArgs", () => {
     expect(usage.startsWith("roark <command> [issue] [options]")).toBe(true);
   });
 
+  test("parses init command options", () => {
+    const parsed = parseArgs(["init", "--cwd", "/tmp/repo", "--repo", "owner/repo", "--force"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+
+    expect(parsed.command).toBe("init");
+    if (parsed.command !== "init") throw new Error("expected init options");
+    expect(parsed.cwd).toBe("/tmp/repo");
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.force).toBe(true);
+  });
+
+  test("rejects unexpected init arguments", () => {
+    expect(() => parseArgs(["init", "extra"])).toThrow("Unexpected argument 'extra'");
+    expect(() => parseArgs(["init", "--out", "runs"])).toThrow("Unknown option '--out'");
+  });
+
   test("parses raw auto command without applying defaults", () => {
     const parsed = parseArgs(["auto"]);
     expect("help" in parsed).toBe(false);
