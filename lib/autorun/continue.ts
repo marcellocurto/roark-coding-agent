@@ -2,6 +2,7 @@ import path from "node:path";
 import type { ContinueCliOptions, IssueCliOptions } from "../cli/args.ts";
 import { fetchGitHubIssue, parseIssueRef, type GitHubIssue } from "../github/issue.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
+import { finalizeAttemptObservability } from "./observability.ts";
 import { artifactRelativePath, createWorkflowContext, ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { runPiAgent } from "../pi/agent.ts";
@@ -123,14 +124,16 @@ export async function runAutoContinue(
     });
     throw error;
   } finally {
+    const endedAt = clock.now();
     attemptMetadata = formatAttemptMetadata({
       ...attemptMetadata,
-      endedAt: clock.now(),
+      endedAt,
       outcome,
       outcomeDetail,
     });
     await writeAttemptMetadata(issueDir, attemptMetadata);
     await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
+    await finalizeAttemptObservability({ context: workflowContext, outcome, outcomeDetail, endedAt });
   }
 
   console.log("\nContinue workflow complete.");

@@ -69,6 +69,19 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
 
   if (modelFallbackMessage) console.log(`! ${modelFallbackMessage}`);
 
+  const phase = options.phase ?? "agent";
+  const pendingObservability: Promise<void>[] = [];
+  const toolStarts = new Map<string, number>();
+  const emit = (promise: Promise<void> | undefined) => {
+    if (promise) pendingObservability.push(promise.catch(() => {}));
+  };
+  emit(options.observer?.agentSessionStarted({
+    phase,
+    sessionId: session.sessionId,
+    model: modelSpec,
+    thinkingLevel: options.thinkingLevel,
+  }));
+
   let streamedText = "";
   session.subscribe((event) => {
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
@@ -77,7 +90,45 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
       process.stdout.write(delta);
     }
     if (event.type === "tool_execution_start") {
+      toolStarts.set(event.toolCallId, Date.now());
+      emit(options.observer?.toolStarted({
+        phase,
+        sessionId: session.sessionId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+      }));
       process.stdout.write(`\n[tool:${event.toolName}]\n`);
+    }
+    if (event.type === "tool_execution_end") {
+      const startedAt = toolStarts.get(event.toolCallId);
+      toolStarts.delete(event.toolCallId);
+      emit(options.observer?.toolCompleted({
+        phase,
+        sessionId: session.sessionId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        durationMs: startedAt === undefined ? undefined : Date.now() - startedAt,
+        isError: event.isError,
+      }));
+    }
+    if (event.type === "auto_retry_start") {
+      emit(options.observer?.autoRetryStarted({
+        phase,
+        sessionId: session.sessionId,
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        errorMessage: event.errorMessage,
+      }));
+    }
+    if (event.type === "auto_retry_end") {
+      emit(options.observer?.autoRetryCompleted({
+        phase,
+        sessionId: session.sessionId,
+        attempt: event.attempt,
+        success: event.success,
+        finalError: event.finalError,
+      }));
     }
   });
 
@@ -87,6 +138,12 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     if (agentError) throw new Error(agentError);
     return extractLastAssistantText(session.messages) || streamedText.trim();
   } finally {
+    try {
+      emit(options.observer?.agentSessionStats({ phase, stats: session.getSessionStats() }));
+    } catch (error) {
+      console.warn(`! observability session stats failed: ${formatError(error)}`);
+    }
+    await Promise.allSettled(pendingObservability);
     session.dispose();
   }
 }
@@ -185,4 +242,9 @@ function extractTextContent(content: unknown): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
 }

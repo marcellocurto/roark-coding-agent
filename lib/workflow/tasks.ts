@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "../cli/args.ts";
+import { phaseNameForArtifact } from "../observability/observer.ts";
 import type { AgentRunRequest, AgentRunner } from "./agent-runner.ts";
 import {
   artifactExists,
@@ -141,11 +142,15 @@ export async function runAgentTask(
 ): Promise<string> {
   requireArtifacts(context, ...task.prerequisites);
 
+  const phase = phaseNameForArtifact(task.artifact);
+  const thinkingLevel = context.thinkingLevel ?? task.thinkingLevel;
+
   if (!context.force && artifactExists(context, task.artifact)) {
     const existing = await readArtifact(context, task.artifact);
     const validation = validateAgentArtifact(task.artifact, existing);
     if (validation.ok) {
       console.log(`✓ ${task.label}: using existing ${artifactRelativePath(context, task.artifact)}`);
+      await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel, reused: true });
       return existing;
     }
     console.log(
@@ -154,17 +159,20 @@ export async function runAgentTask(
   }
 
   console.log(`\n=== ${task.label} ===`);
+  await context.observer?.phaseStarted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel });
   try {
     const content = await runTaskWithOutputContract(context, runner, task, retryOptions);
     await writeArtifact(context, task.artifact, content);
+    await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel });
     console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
     return content;
   } catch (error) {
-    const phase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
-    const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase, error });
+    const failurePhase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
+    const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase: failurePhase, error });
     await writeArtifact(context, task.artifact, diagnostic);
+    await context.observer?.phaseFailed({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel, error });
     console.log(`\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`);
-    throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase, originalError: error });
+    throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
   }
 }
 
@@ -180,6 +188,8 @@ async function runTaskWithOutputContract(
     thinkingLevel: context.thinkingLevel ?? task.thinkingLevel,
     systemPrompt: sharedSystemPrompt,
     writable: task.writable,
+    observer: context.observer,
+    phase: phaseNameForArtifact(task.artifact),
   };
   const prompt = task.prompt(context);
 

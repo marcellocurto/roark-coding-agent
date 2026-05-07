@@ -36,6 +36,7 @@ export type WorkflowContext = {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number;
+  observer?: import("../observability/observer.ts").RunObserver;
 };
 
 const filenames: Record<StaticArtifactName, string> = {

@@ -22,8 +22,9 @@ export type IssueWorkflowCommand =
   | "create-issues";
 
 export type ContinueCommand = "continue";
+export type StatusCommand = "status";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | ContinueCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | ContinueCommand | StatusCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -86,7 +87,19 @@ export type ContinueCliOptions = {
   remote: string;
 };
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | ContinueCliOptions;
+export type StatusCliOptions = {
+  command: "status";
+  issue?: string;
+  all: boolean;
+  cwd: string;
+  outDir: string;
+  repo?: string;
+  attempt?: number;
+  maxFixPasses?: never;
+  yes?: never;
+};
+
+export type CliOptions = IssueCliOptions | AutoCliOptions | ContinueCliOptions | StatusCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
@@ -102,7 +115,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "create-issues",
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue", "status"]);
 
 export const defaultMaxFixPasses = 3;
 
@@ -111,6 +124,7 @@ export const usage = `roark-coding-agent <command> [issue] [options]
 Commands:
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
+  status [issue]         Print persisted run observability status; use --all for all known issues.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
@@ -134,7 +148,8 @@ Options:
   --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
   --fix-pass <n>         Pass number for standalone fix/final-review.
-  --attempt <n>          Issue/continue commands only: use a specific autorun attempt directory.
+  --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
+  --all                  Status command only: summarize all known issue runs.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.
   --skip-label <label>   Auto skip label. Can be passed multiple times.
   --skip-labels <labels> Auto skip labels as a comma-separated list.
@@ -166,6 +181,7 @@ export function parseArgs(argv: string[]): CliOptions | { help: true } {
 
   if (rawCommand === "auto") return parseAutoArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
+  if (rawCommand === "status") return parseStatusArgs(rest);
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
 }
 
@@ -235,6 +251,34 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     throw new Error("--assignee cannot be combined with --no-assign.");
   }
 
+  return options;
+}
+
+function parseStatusArgs(args: string[]): StatusCliOptions {
+  const options: StatusCliOptions = {
+    command: "status",
+    all: false,
+    cwd: process.cwd(),
+    outDir: ".roark/runs",
+  };
+
+  let issueArg: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--all") options.all = true;
+    else if (arg === "--repo") options.repo = requiredValue(args, ++index, arg);
+    else if (arg === "--cwd") options.cwd = requiredValue(args, ++index, arg);
+    else if (arg === "--out") options.outDir = requiredValue(args, ++index, arg);
+    else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+    else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
+    else if (issueArg) throw new Error(`The status command accepts at most one issue argument. Got '${issueArg}' and '${arg}'.\n\n${usage}`);
+    else issueArg = arg;
+  }
+
+  if (options.all && issueArg) throw new Error("status --all cannot be combined with an issue argument.");
+  if (options.all && options.attempt !== undefined) throw new Error("status --all cannot be combined with --attempt.");
+  if (!options.all && !issueArg) throw new Error(`Missing issue. Use status --all to summarize all known runs.\n\n${usage}`);
+  options.issue = issueArg;
   return options;
 }
 
