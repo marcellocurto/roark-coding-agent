@@ -13,7 +13,8 @@ import {
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 
 const context = {
-  cwd: "/repo",
+  controlCwd: "/repo",
+  agentCwd: "/repo",
   outDir: "/repo/.roark/runs",
   runDir: "/repo/.roark/runs/issue/123",
   runDirRelative: ".roark/runs/issue/123",
@@ -22,6 +23,11 @@ const context = {
   force: false,
   yes: false,
   maxFixPasses: 1,
+} satisfies WorkflowContext;
+
+const splitContext = {
+  ...context,
+  agentCwd: "/repo/.roark/worktrees/issue-123",
 } satisfies WorkflowContext;
 
 describe("workflow prompt safety policy", () => {
@@ -68,6 +74,13 @@ describe("workflow prompt safety policy", () => {
     expect(prompt).toContain("gh issue view &lt;issue&gt; --repo &lt;owner/repo&gt; --json number,title,state,stateReason,closed,closedAt,url");
     expect(prompt).toContain("Closed or completed blockers are resolved and must not block implementation");
     expect(prompt).toContain("Stale ## Blocked by body text must not override resolved GitHub state");
+  });
+
+  test("phase input artifact paths are reachable from split agent cwd", () => {
+    const prompt = implementationPrompt(splitContext);
+    expect(prompt).toContain('<artifact kind="issue">../../runs/issue/123/issue.md</artifact>');
+    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.md</artifact>');
+    expect(prompt).not.toContain('<artifact kind="issue">.roark/runs/issue/123/issue.md</artifact>');
   });
 });
 

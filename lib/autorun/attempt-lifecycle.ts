@@ -57,7 +57,7 @@ export async function runAutorunAttemptLifecycle(
 
   let attemptMetadata = formatAttemptMetadata({
     ...input.attemptMetadata,
-    worktreePath: input.workflowContext.cwd,
+    worktreePath: input.workflowContext.agentCwd,
     runArtifactPath: input.workflowContext.runDirRelative,
     endedAt: null,
     outcome: "in-progress",

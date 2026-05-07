@@ -183,7 +183,7 @@ async function runTaskWithOutputContract(
   retryOptions: AgentTaskRetryOptions,
 ): Promise<string> {
   const request = {
-    cwd: context.cwd,
+    cwd: context.agentCwd,
     model: context.model,
     thinkingLevel: context.thinkingLevel ?? task.thinkingLevel,
     systemPrompt: sharedSystemPrompt,

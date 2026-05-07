@@ -101,7 +101,7 @@ export function buildSuccessLabelArgv(options: SuccessLabelArgvOptions): string[
 }
 
 export function formatCommitMessage(input: { issueNumber: number }): string {
-  return `roark: workflow artifacts for #${input.issueNumber}`;
+  return `roark: implement issue #${input.issueNumber}`;
 }
 
 export function formatPrBody(input: FormatPrBodyInput): string {
@@ -136,6 +136,7 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   lines.push(`- Full run ledger: issue comments on #${input.issueNumber}`);
   lines.push("");
   lines.push("## Workflow artifacts");
+  lines.push("These artifacts are local control-plane state and are not committed to this PR branch.");
   if (input.artifactPaths.length === 0) {
     lines.push(`- \`${input.runDirRelative}/\``);
   } else {
@@ -184,16 +185,17 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
 
 export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath } = input;
-  const cwd = options.cwd;
+  const agentCwd = workflowContext.agentCwd;
+  const controlCwd = workflowContext.controlCwd;
 
   console.log(`\n=== Publish #${issue.number} ===`);
 
-  if (await hasUncommittedChanges({ cwd })) {
-    console.log("- Committing workflow artifacts");
-    await runProcessOrThrow(buildStageAllArgv(), { cwd, label: "git add -A" });
+  if (await hasUncommittedChanges({ cwd: agentCwd })) {
+    console.log("- Committing worktree changes");
+    await runProcessOrThrow(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" });
     await runProcessOrThrow(
       buildCommitArgv({ message: formatCommitMessage({ issueNumber: issue.number }) }),
-      { cwd, label: "git commit" },
+      { cwd: agentCwd, label: "git commit" },
     );
   } else {
     console.log("- No uncommitted changes; skipping commit.");
@@ -202,7 +204,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   console.log(`- Pushing ${branchPlan.branchName} to ${options.remote}`);
   await runProcessOrThrow(
     buildPushArgv({ remote: options.remote, branchName: branchPlan.branchName }),
-    { cwd, label: `git push ${options.remote}` },
+    { cwd: agentCwd, label: `git push ${options.remote}` },
   );
 
   const body = formatPrBody({
@@ -224,7 +226,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       title: issue.title,
       body,
     }),
-    { cwd, label: "gh pr create --draft" },
+    { cwd: agentCwd, label: "gh pr create --draft" },
   );
   const prUrl = prStdout.trim();
   if (prUrl) console.log(`- Draft PR: ${prUrl}`);
@@ -232,7 +234,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   try {
     await runProcessOrThrow(
       buildSuccessLabelArgv({ repo: options.repo, issueNumber: issue.number, label: options.successLabel }),
-      { cwd, label: "gh issue edit --add-label (success)" },
+      { cwd: controlCwd, label: "gh issue edit --add-label (success)" },
     );
   } catch (error) {
     console.warn(
@@ -244,7 +246,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     try {
       await runProcessOrThrow(
         buildRemoveLabelArgv({ repo: options.repo, issueNumber: issue.number, label }),
-        { cwd, label: "gh issue edit --remove-label (success cleanup)" },
+        { cwd: controlCwd, label: "gh issue edit --remove-label (success cleanup)" },
       );
     } catch (error) {
       console.warn(

@@ -13,7 +13,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function createContext() {
+async function createContext(options: { agentCwd?: string } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-tasks-"));
   tempDirs.push(dir);
   const context = createWorkflowContext({
@@ -24,12 +24,26 @@ async function createContext() {
     force: false,
     yes: false,
     maxFixPasses: 1,
-  });
+  }, { agentCwd: options.agentCwd });
   await writeArtifact(context, "issue", "# Issue\n");
   return context;
 }
 
 describe("runAgentTask skill loading", () => {
+  test("runs agent requests in the explicit agent cwd", async () => {
+    const agentCwd = path.join(await mkdtemp(path.join(tmpdir(), "roark-agent-cwd-")), "worktree");
+    tempDirs.push(path.dirname(agentCwd));
+    const context = await createContext({ agentCwd });
+    const requests: string[] = [];
+    const runner: AgentRunner = async (request) => {
+      requests.push(request.cwd);
+      return "# Triage\n\n## Verdict\nproceed\n";
+    };
+
+    await runAgentTask(context, runner, triageTask);
+    expect(requests).toEqual([agentCwd]);
+  });
+
   test("normal workflow tasks do not request any skill paths", async () => {
     const context = await createContext();
     const requests: unknown[] = [];

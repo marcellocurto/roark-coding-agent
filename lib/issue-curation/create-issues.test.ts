@@ -128,7 +128,7 @@ describe("createIssuesFromCurationPlan", () => {
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.skillPaths).toEqual([path.join(context.cwd, "skills", "github-issue-create")]);
+    expect(requests[0]?.skillPaths).toEqual([path.join(context.agentCwd, "skills", "github-issue-create")]);
     expect(requests[0]?.writable).toBe(false);
     expect(requests[0]?.prompt).toContain("Read and follow the available `github-issue-create` skill");
     expect(requests[0]?.prompt).toContain("blocking-1");
@@ -281,7 +281,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("Follow-up tracker");
 
-    const forcedContext = await tempContext({ yes: true, force: true, reuseDir: context.cwd });
+    const forcedContext = await tempContext({ yes: true, force: true, reuseDir: context.controlCwd });
     const forcedCalls: string[][] = [];
     await createIssuesFromCurationPlan({
       context: forcedContext,

@@ -211,14 +211,18 @@ describe("runAutoDiscovery", () => {
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
       },
-      checkoutIssueBranch: async (input) => {
-        calls.push(`checkout:${input.plan.branchName}`);
+      ensureIssueWorktree: async (input) => {
+        calls.push(`worktree:${input.plan.branchName}`);
+        expect(input.controlCwd).toBe(cwd);
+        return path.join(cwd, ".roark/worktrees/issue-29");
       },
       publishIssueLedgerComment: async () => {
         calls.push("ledger");
       },
       runFullWorkflow: async (context) => {
         calls.push(`workflow:${context.runDirRelative}`);
+        expect(context.controlCwd).toBe(cwd);
+        expect(context.agentCwd).toBe(path.join(cwd, ".roark/worktrees/issue-29"));
         return { status: "completed" };
       },
       completeAutorunWorkflow: async (input) => {
@@ -230,7 +234,7 @@ describe("runAutoDiscovery", () => {
     expect(calls).toEqual([
       "preflight",
       "claim:roark/issue-29",
-      "checkout:roark/issue-29",
+      "worktree:roark/issue-29",
       "ledger",
       "workflow:.roark/runs/issue/29/attempts/1",
       "complete:roark/issue-29",

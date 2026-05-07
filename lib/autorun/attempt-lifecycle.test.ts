@@ -163,7 +163,8 @@ async function createFixture(): Promise<{
   await mkdir(runDir, { recursive: true });
 
   const workflowContext: WorkflowContext = {
-    cwd,
+    controlCwd: cwd,
+    agentCwd: cwd,
     outDir: path.join(cwd, ".roark/runs"),
     runDir,
     runDirRelative,

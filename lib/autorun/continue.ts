@@ -12,7 +12,7 @@ import {
   type AttemptMetadata,
   type Clock,
 } from "./attempts.ts";
-import { checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
+import { autorunWorktreePath, checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
@@ -55,15 +55,16 @@ export async function runAutoContinue(
     baseBranch: attemptMetadata.baseBranch,
   };
 
-  const workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt));
+  const agentCwd = attemptMetadata.worktreePath || autorunWorktreePath(cwd, attemptMetadata.issueNumber);
+  const workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd });
   await ensureRunDir(workflowContext);
 
   console.log(`- Switching to branch ${branchPlan.branchName}`);
-  await checkoutExistingIssueBranch({ cwd: workflowContext.cwd, plan: branchPlan });
+  await checkoutExistingIssueBranch({ cwd: workflowContext.controlCwd, plan: branchPlan, worktreePath: workflowContext.agentCwd });
 
   attemptMetadata = formatAttemptMetadata({
     ...attemptMetadata,
-    worktreePath: workflowContext.cwd,
+    worktreePath: workflowContext.agentCwd,
     runArtifactPath: workflowContext.runDirRelative,
   });
 
@@ -71,7 +72,7 @@ export async function runAutoContinue(
     issueDir,
     workflowContext,
     branchPlan,
-    gateOptions: createGateOptions(options, workflowContext.cwd, branchPlan.baseBranch, parsed.repo),
+    gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
     attemptMetadata,
     loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
     runner,
@@ -130,7 +131,7 @@ async function loadIssueCandidate(input: {
   if (fromMetadata) return fromMetadata;
 
   try {
-    const fetched = await fetchGitHubIssue(input.options.issue, { cwd: input.context.cwd, repo: input.options.repo });
+    const fetched = await fetchGitHubIssue(input.options.issue, { cwd: input.context.controlCwd, repo: input.options.repo });
     return toIssueCandidate(fetched.issue);
   } catch {
     return { number: input.issueNumber, title: `Fix issue #${input.issueNumber}` };
