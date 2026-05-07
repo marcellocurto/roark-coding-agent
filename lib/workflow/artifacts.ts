@@ -3,23 +3,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
-
-export type StaticArtifactName =
-  | "issue"
-  | "triage"
-  | "implementationPlan"
-  | "implementationLog"
-  | "reviewA"
-  | "reviewB"
-  | "readiness"
-  | "verification"
-  | "metadata"
-  | "issueCurationPlan"
-  | "issueCreationResults";
-
-export type NumberedArtifactName = "fixLog" | "finalReview";
-
-export type ArtifactRef = StaticArtifactName | { name: NumberedArtifactName; pass: number };
+import { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef } from "./artifact-catalog.ts";
+import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
+export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./artifact-catalog.ts";
+export { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef } from "./artifact-catalog.ts";
 
 export type WorkflowContext = {
   cwd: string;
@@ -38,28 +25,6 @@ export type WorkflowContext = {
   fixPass?: number;
   observer?: import("../observability/observer.ts").RunObserver;
 };
-
-const filenames: Record<StaticArtifactName, string> = {
-  issue: "issue.md",
-  triage: "triage.md",
-  implementationPlan: "implementation-plan.md",
-  implementationLog: "implementation-log.md",
-  reviewA: "review-a.md",
-  reviewB: "review-b.md",
-  readiness: "readiness.md",
-  verification: "verification.md",
-  metadata: "metadata.json",
-  issueCurationPlan: "issue-curation-plan.json",
-  issueCreationResults: "issue-creation-results.json",
-};
-
-export function fixLogRef(pass: number): ArtifactRef {
-  return { name: "fixLog", pass };
-}
-
-export function finalReviewRef(pass: number): ArtifactRef {
-  return { name: "finalReview", pass };
-}
 
 export function createWorkflowContext(options: IssueCliOptions): WorkflowContext {
   const cwd = path.resolve(options.cwd);
@@ -167,13 +132,3 @@ export function latestFinalReviewPass(context: WorkflowContext): number | undefi
   return latest;
 }
 
-export function formatArtifactRef(artifact: ArtifactRef): string {
-  if (typeof artifact === "string") return artifact;
-  return `${artifact.name}-${artifact.pass}`;
-}
-
-function artifactFilename(artifact: ArtifactRef): string {
-  if (typeof artifact === "string") return filenames[artifact];
-  const prefix = artifact.name === "fixLog" ? "fix-log" : "final-review";
-  return `${prefix}-${artifact.pass}.md`;
-}

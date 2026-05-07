@@ -1,5 +1,5 @@
 import { parseReadyForImplementationValue, parseVerdict } from "./verdicts.ts";
-import { formatArtifactRef, type ArtifactRef } from "./artifacts.ts";
+import { artifactContract, formatArtifactRef, type ArtifactRef } from "./artifact-catalog.ts";
 
 export type ArtifactValidationResult =
   | { ok: true }
@@ -24,38 +24,30 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const priorError = parseDiagnosticArtifactError(trimmed);
   if (priorError) return invalid(priorError);
 
-  if (typeof artifact === "string") {
-    if (artifact === "triage") {
-      return requireVerdict(artifact, content, ["proceed", "blocked", "reject", "needs-human-decision"]);
-    }
-    if (artifact === "implementationPlan") {
-      if (!/^#\s+Implementation Plan\b/im.test(content)) return invalid("missing # Implementation Plan heading");
-      const ready = parseReadyForImplementationValue(content);
-      if (!ready) return invalid("missing ## Ready For Implementation value of yes or no");
-      return ok();
-    }
-    if (artifact === "implementationLog") {
-      if (!/^#\s+Implementation Log\b/im.test(content)) return invalid("missing # Implementation Log heading");
-      return ok();
-    }
-    if (artifact === "reviewA" || artifact === "reviewB") {
-      return requireVerdict(artifact, content, ["approve", "fixes-required", "blocked"]);
-    }
-    return ok();
+  const contract = artifactContract(artifact);
+  if (!contract) return ok();
+
+  if (contract.requiredHeading && !requiredHeadingRegex(contract.requiredHeading).test(content)) {
+    return invalid(`missing # ${contract.requiredHeading} heading`);
   }
 
-  if (artifact.name === "fixLog") {
-    if (!new RegExp(`^#\\s+Fix Log Pass\\s+${artifact.pass}\\b`, "im").test(content)) {
-      return invalid(`missing # Fix Log Pass ${artifact.pass} heading`);
-    }
-    return ok();
+  if (contract.requiresReadyForImplementation) {
+    const ready = parseReadyForImplementationValue(content);
+    if (!ready) return invalid("missing ## Ready For Implementation value of yes or no");
   }
 
-  if (artifact.name === "finalReview") {
-    return requireVerdict(artifact, content, ["ready-for-pr", "fixes-required", "blocked"]);
-  }
+  if (contract.allowedVerdicts) return requireVerdict(artifact, content, contract.allowedVerdicts);
 
   return ok();
+}
+
+function requiredHeadingRegex(heading: string): RegExp {
+  const pattern = heading.trim().split(/\s+/).map(escapeRegExp).join("\\s+");
+  return new RegExp(`^#\\s+${pattern}\\b`, "im");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function requireVerdict(

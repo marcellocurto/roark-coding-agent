@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { artifactExists, createWorkflowContext, readArtifact, writeArtifact, type WorkflowContext } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 
@@ -223,6 +223,28 @@ describe("buildIssueCurationPlan", () => {
     expect(plan.run.generatedAt).toBe("2026-05-06T12:00:00.000Z");
     expect(item?.sourceIssueContext).toEqual(plan.sourceIssue);
     expect(item?.runContext.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/implementation-log.md");
+  });
+
+  test("available artifact paths include catalog static refs and numbered refs", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, "metadata", "{}\n");
+    await writeArtifact(context, "triage", "# Triage\n");
+    await writeArtifact(context, "reviewA", reviewWithLedger("None"));
+    await writeArtifact(context, "reviewB", reviewWithLedger("None"));
+    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n");
+    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+
+    const plan = await buildIssueCurationPlan(context, fixedClock);
+
+    expect(plan.run.artifactPaths).toEqual([
+      ".roark/runs/issue/42/attempts/2/issue.md",
+      ".roark/runs/issue/42/attempts/2/metadata.json",
+      ".roark/runs/issue/42/attempts/2/triage.md",
+      ".roark/runs/issue/42/attempts/2/review-a.md",
+      ".roark/runs/issue/42/attempts/2/review-b.md",
+      ".roark/runs/issue/42/attempts/2/fix-log-1.md",
+      ".roark/runs/issue/42/attempts/2/final-review-1.md",
+    ]);
   });
 });
 

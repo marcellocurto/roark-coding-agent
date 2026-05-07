@@ -1,4 +1,5 @@
 import path from "node:path";
+import { ISSUE_CURATION_STATIC_ARTIFACT_REFS } from "./artifact-catalog.ts";
 import {
   artifactExists,
   artifactRelativePath,
@@ -356,19 +357,7 @@ function parseIssueArtifact(markdown: string, fallback: IssueCurationPlan["sourc
 
 function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
   const artifacts: string[] = [];
-  const staticArtifacts = [
-    "issue",
-    "metadata",
-    "triage",
-    "implementationPlan",
-    "implementationLog",
-    "reviewA",
-    "reviewB",
-    "readiness",
-    "verification",
-  ] as const;
-
-  for (const artifact of staticArtifacts) {
+  for (const artifact of ISSUE_CURATION_STATIC_ARTIFACT_REFS) {
     if (artifactExists(context, artifact)) artifacts.push(toPosix(artifactRelativePath(context, artifact)));
   }
 
