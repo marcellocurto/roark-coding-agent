@@ -16,7 +16,8 @@ const options: AutorunGateOptions = {
 };
 
 const workflowContext: WorkflowContext = {
-  cwd: "/repo",
+  controlCwd: "/repo",
+  agentCwd: "/repo/.roark/worktrees/issue-12",
   outDir: "/repo/.roark/runs",
   runDir: "/repo/.roark/runs/issue/12/attempts/1",
   runDirRelative: ".roark/runs/issue/12/attempts/1",

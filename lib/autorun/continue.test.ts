@@ -43,7 +43,8 @@ describe("runAutoContinue", () => {
     await installFakeGh(cwd);
 
     const workflowContext: WorkflowContext = {
-      cwd,
+      controlCwd: cwd,
+      agentCwd: cwd,
       outDir: path.join(cwd, ".roark/runs"),
       runDir: path.join(cwd, ".roark/runs/issue/24/attempts/2"),
       runDirRelative: ".roark/runs/issue/24/attempts/2",

@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 
 export const defaultAutorunBaseBranch = "main";
@@ -32,33 +35,121 @@ export function assertSafeWorkBranch(options: { branchName: string; baseBranch: 
   if (branchName === defaultAutorunBaseBranch) throw new Error(`Autorun work branch cannot be '${defaultAutorunBaseBranch}'.`);
 }
 
-export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
-  if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName })) {
-    await switchBranch({ cwd: options.cwd, branchName: options.plan.branchName });
-    return;
-  }
-
-  await runProcessOrThrow(["git", "switch", "-c", options.plan.branchName, options.plan.baseBranch], {
-    cwd: options.cwd,
-    label: "git switch -c",
-  });
+export function autorunWorktreePath(controlCwd: string, issueNumber: number): string {
+  return path.resolve(controlCwd, ".roark/worktrees", `issue-${issueNumber}`);
 }
 
-export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
-  const exists = await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName });
-  if (!exists) {
-    throw new Error(
-      `Cannot continue autorun attempt for #${options.plan.issueNumber}: branch '${options.plan.branchName}' does not exist.`,
+export async function ensureRoarkWorktreesIgnored(controlCwd: string): Promise<void> {
+  const roarkDir = path.resolve(controlCwd, ".roark");
+  await mkdir(roarkDir, { recursive: true });
+
+  const ignorePath = path.join(roarkDir, ".gitignore");
+  const desiredLine = "worktrees/";
+  const existing = existsSync(ignorePath) ? await readFile(ignorePath, "utf8") : "";
+  const lines = existing.split(/\r?\n/).map((line) => line.trim());
+  if (lines.includes(desiredLine)) return;
+
+  const prefix = existing.length === 0 || existing.endsWith("\n") ? existing : `${existing}\n`;
+  await writeFile(ignorePath, `${prefix}${desiredLine}\n`, "utf8");
+}
+
+export async function ensureIssueWorktree(options: { controlCwd: string; plan: AutorunBranchPlan }): Promise<string> {
+  const agentCwd = autorunWorktreePath(options.controlCwd, options.plan.issueNumber);
+  await ensureRoarkWorktreesIgnored(options.controlCwd);
+  await mkdir(path.dirname(agentCwd), { recursive: true });
+  await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.controlCwd, label: "git fetch origin" });
+
+  if (existsSync(agentCwd)) {
+    await assertDirectory(agentCwd);
+    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+    await updateIssueBranchFromBase({ agentCwd, baseBranch: options.plan.baseBranch });
+    return agentCwd;
+  }
+
+  if (await gitBranchExists({ cwd: options.controlCwd, branchName: options.plan.branchName })) {
+    await runProcessOrThrow(["git", "worktree", "add", agentCwd, options.plan.branchName], {
+      cwd: options.controlCwd,
+      label: "git worktree add",
+    });
+  } else {
+    await runProcessOrThrow(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.baseBranch}`], {
+      cwd: options.controlCwd,
+      label: "git worktree add -b",
+    });
+  }
+
+  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+  await updateIssueBranchFromBase({ agentCwd, baseBranch: options.plan.baseBranch });
+  return agentCwd;
+}
+
+export async function updateIssueBranchFromBase(options: {
+  agentCwd: string;
+  baseBranch: string;
+  preserveUncommitted?: boolean;
+}): Promise<void> {
+  await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.agentCwd, label: "git fetch origin" });
+
+  const shouldStash = options.preserveUncommitted === true && (await hasGitChanges(options.agentCwd));
+  if (shouldStash) {
+    await runProcessOrThrow(
+      ["git", "stash", "push", "--include-untracked", "-m", "roark: preserve uncommitted changes before base merge"],
+      { cwd: options.agentCwd, label: "git stash push" },
     );
   }
-  await switchBranch({ cwd: options.cwd, branchName: options.plan.branchName });
+
+  let merged = false;
+  try {
+    await runProcessOrThrow(["git", "merge", `origin/${options.baseBranch}`], {
+      cwd: options.agentCwd,
+      label: `git merge origin/${options.baseBranch}`,
+    });
+    merged = true;
+  } finally {
+    if (shouldStash && merged) {
+      await runProcessOrThrow(["git", "stash", "pop"], { cwd: options.agentCwd, label: "git stash pop" });
+    }
+  }
 }
 
-async function switchBranch(options: { cwd: string; branchName: string }): Promise<void> {
-  await runProcessOrThrow(["git", "switch", options.branchName], {
-    cwd: options.cwd,
-    label: "git switch",
-  });
+export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
+  await ensureIssueWorktree({ controlCwd: options.cwd, plan: options.plan });
+}
+
+export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan; worktreePath?: string }): Promise<void> {
+  const agentCwd = path.resolve(options.worktreePath ?? autorunWorktreePath(options.cwd, options.plan.issueNumber));
+  if (!existsSync(agentCwd)) {
+    throw new Error(
+      `Cannot continue autorun attempt for #${options.plan.issueNumber}: worktree '${agentCwd}' does not exist.`,
+    );
+  }
+  await assertDirectory(agentCwd);
+  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+}
+
+async function assertDirectory(directoryPath: string): Promise<void> {
+  const current = await stat(directoryPath);
+  if (!current.isDirectory()) throw new Error(`${directoryPath} exists but is not a directory.`);
+}
+
+async function assertWorktreeOnBranch(options: { agentCwd: string; branchName: string }): Promise<void> {
+  const currentBranch = (await runProcessOrThrow(["git", "branch", "--show-current"], {
+    cwd: options.agentCwd,
+    label: "git branch --show-current",
+  })).trim();
+  if (currentBranch !== options.branchName) {
+    throw new Error(
+      `Autorun worktree '${options.agentCwd}' is on branch '${currentBranch || "(detached)"}', expected '${options.branchName}'.`,
+    );
+  }
+}
+
+async function hasGitChanges(cwd: string): Promise<boolean> {
+  const result = await runProcess(["git", "status", "--porcelain"], { cwd });
+  if (result.exitCode !== 0) {
+    throw new Error(`git status --porcelain failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
+  }
+  return result.stdout.trim() !== "";
 }
 
 async function gitBranchExists(options: { cwd: string; branchName: string }): Promise<boolean> {

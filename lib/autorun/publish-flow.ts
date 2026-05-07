@@ -11,7 +11,7 @@ import {
 } from "./verification.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { formatPrCreatedComment, publishIssueLedgerComment } from "./ledger-comments.ts";
-import type { AutorunBranchPlan } from "./branch.ts";
+import { updateIssueBranchFromBase, type AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
@@ -36,7 +36,12 @@ export async function runPublishGate(input: {
 
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
-    verification = await runVerification({ command: options.verifyCommand, cwd: workflowContext.cwd });
+    await updateIssueBranchFromBase({
+      agentCwd: workflowContext.agentCwd,
+      baseBranch: branchPlan.baseBranch,
+      preserveUncommitted: true,
+    });
+    verification = await runVerification({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
     await writeVerificationArtifact(workflowContext, verification);
   }
 

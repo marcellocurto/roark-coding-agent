@@ -21,7 +21,7 @@ import {
   type AttemptMetadata,
   type Clock,
 } from "./attempts.ts";
-import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
+import { createBranchPlan, ensureIssueWorktree } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
@@ -40,7 +40,7 @@ type AutoRunInjected = {
   assertCleanAutorunGit?: typeof assertCleanAutorunGit;
   getCurrentGitHubLogin?: typeof getCurrentGitHubLogin;
   claimGitHubIssue?: typeof claimGitHubIssue;
-  checkoutIssueBranch?: typeof checkoutIssueBranch;
+  ensureIssueWorktree?: typeof ensureIssueWorktree;
   runFullWorkflow?: typeof runFullWorkflow;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment;
@@ -220,11 +220,11 @@ async function runManagedIssueAttempt(
   const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
   await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
 
-  console.log(`- Switching to branch ${branchPlan.branchName}`);
-  const checkoutBranch = injected.checkoutIssueBranch ?? checkoutIssueBranch;
-  await checkoutBranch({ cwd: options.cwd, plan: branchPlan });
+  console.log(`- Ensuring worktree for branch ${branchPlan.branchName}`);
+  const ensureWorktree = injected.ensureIssueWorktree ?? ensureIssueWorktree;
+  await ensureWorktree({ controlCwd: options.cwd, plan: branchPlan });
 
-  console.log(`- Running full workflow on branch ${branchPlan.branchName} (attempt ${attempt})`);
+  console.log(`- Running full workflow in worktree for branch ${branchPlan.branchName} (attempt ${attempt})`);
   const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options, attempt);
   await ensureRunDir(workflowContext);
 
@@ -233,7 +233,7 @@ async function runManagedIssueAttempt(
     issueNumber: issue.number,
     branch: branchPlan.branchName,
     baseBranch: branchPlan.baseBranch,
-    worktreePath: workflowContext.cwd,
+    worktreePath: workflowContext.agentCwd,
     runArtifactPath: workflowContext.runDirRelative,
     startedAt: clock.now(),
   });

@@ -50,7 +50,7 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
   console.log(`\n=== Fetch issue #${context.issueNumber} ===`);
   await context.observer?.phaseStarted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
   try {
-    const result = await fetchGitHubIssue(context.issueInput, { cwd: context.cwd, repo: context.repo });
+    const result = await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo });
     const issueArtifact = formatGitHubIssueArtifact(result.issue, result.relationships);
 
     await writeArtifact(context, "issue", issueArtifact);
@@ -80,7 +80,7 @@ export async function planPhase(context: WorkflowContext, runner: AgentRunner = 
 
 export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
   if (await shouldRegenerateArtifact(context, implementationTask.artifact)) {
-    await assertCleanGit({ cwd: context.cwd, yes: context.yes });
+    await assertCleanGit({ cwd: context.agentCwd, yes: context.yes });
   }
   return runAgentTask(context, runner, implementationTask);
 }
@@ -101,7 +101,7 @@ export async function fixPhase(
 ): Promise<string> {
   const task = fixTask(pass);
   if (await shouldRegenerateArtifact(context, task.artifact)) {
-    await assertCleanGit({ cwd: context.cwd, yes: true });
+    await assertCleanGit({ cwd: context.agentCwd, yes: true });
   }
   return runAgentTask(context, runner, task);
 }

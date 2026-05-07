@@ -9,7 +9,8 @@ export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./ar
 export { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef } from "./artifact-catalog.ts";
 
 export type WorkflowContext = {
-  cwd: string;
+  controlCwd: string;
+  agentCwd: string;
   outDir: string;
   runDir: string;
   runDirRelative: string;
@@ -26,18 +27,23 @@ export type WorkflowContext = {
   observer?: import("../observability/observer.ts").RunObserver;
 };
 
-export function createWorkflowContext(options: IssueCliOptions): WorkflowContext {
-  const cwd = path.resolve(options.cwd);
+export function createWorkflowContext(
+  options: IssueCliOptions,
+  overrides: { agentCwd?: string } = {},
+): WorkflowContext {
+  const controlCwd = path.resolve(options.cwd);
+  const agentCwd = path.resolve(overrides.agentCwd ?? controlCwd);
   const parsed = parseIssueRef(options.issue, options.repo);
-  const outDir = path.resolve(cwd, options.outDir);
+  const outDir = path.resolve(controlCwd, options.outDir);
   const issueDir = path.join(outDir, "issue", parsed.issueNumber);
   const runDir = options.attempt !== undefined
     ? path.join(issueDir, "attempts", String(options.attempt))
     : issueDir;
-  const runDirRelative = path.relative(cwd, runDir) || ".";
+  const runDirRelative = path.relative(controlCwd, runDir) || ".";
 
   return {
-    cwd,
+    controlCwd,
+    agentCwd,
     outDir,
     runDir,
     runDirRelative,
@@ -60,6 +66,10 @@ export function artifactPath(context: WorkflowContext, artifact: ArtifactRef): s
 
 export function artifactRelativePath(context: WorkflowContext, artifact: ArtifactRef): string {
   return path.join(context.runDirRelative, artifactFilename(artifact));
+}
+
+export function artifactAgentPath(context: WorkflowContext, artifact: ArtifactRef): string {
+  return path.relative(context.agentCwd, artifactPath(context, artifact)) || ".";
 }
 
 export async function ensureRunDir(context: WorkflowContext): Promise<void> {

@@ -245,7 +245,7 @@ async function publishIssuesDirectlyWithProcessRunner(
     const argv = buildIssueCreateArgv({ repo: context.repo, title: item.title, body: item.body, labels: item.labels });
     console.log(`- Creating ${item.planItemId}: ${item.title}`);
     try {
-      const processResult = await runner(argv, { cwd: context.cwd });
+      const processResult = await runner(argv, { cwd: context.agentCwd });
       if (processResult.exitCode !== 0) {
         failed.push({
           planItemId: item.planItemId,
@@ -290,12 +290,12 @@ async function publishIssuesWithResolvedSkill(input: {
   const { context, sourcePlanPath, resultPath, creatable, agentRunner, skillResolver } = input;
   if (creatable.length === 0) return { createdCurrentRun: [], failed: [], relationshipOutcomes: [] };
 
-  const skillPath = await skillResolver(context.cwd);
+  const skillPath = await skillResolver(context.agentCwd);
   console.log(`\n=== Create issues from ${sourcePlanPath} with skill ${skillPath} ===`);
 
   try {
     const output = await agentRunner({
-      cwd: context.cwd,
+      cwd: context.agentCwd,
       model: context.model,
       thinkingLevel: context.thinkingLevel ?? "high",
       systemPrompt: issuePublishingSystemPrompt(),

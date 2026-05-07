@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { runProcessOrThrow } from "../cli/process.ts";
 import {
   buildCommitArgv,
   buildPrCreateArgv,
@@ -9,6 +13,7 @@ import {
   defaultAutorunSuccessLabel,
   formatCommitMessage,
   formatPrBody,
+  publishAutorunResult,
 } from "./publish.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { VerificationResult } from "./verification.ts";
@@ -28,6 +33,12 @@ const failedVerification: VerificationResult = {
   stdout: "",
   stderr: "errors",
 };
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
 
 describe("autorun publish defaults", () => {
   test("default success label is roark-pr-opened", () => {
@@ -143,7 +154,83 @@ describe("autorun publish argv builders", () => {
 
 describe("formatCommitMessage", () => {
   test("includes the issue number", () => {
-    expect(formatCommitMessage({ issueNumber: 9 })).toBe("roark: workflow artifacts for #9");
+    expect(formatCommitMessage({ issueNumber: 9 })).toBe("roark: implement issue #9");
+  });
+});
+
+describe("publishAutorunResult", () => {
+  test("uses agent cwd for git and PR creation but control cwd for issue labels", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
+    tempDirs.push(root);
+    const controlCwd = path.join(root, "control");
+    const agentCwd = path.join(root, "agent");
+    const remote = path.join(root, "remote.git");
+    const binDir = path.join(root, "bin");
+    const ghLog = path.join(root, "gh.log");
+    await mkdir(controlCwd, { recursive: true });
+    await mkdir(agentCwd, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      path.join(binDir, "gh"),
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ]; then echo "https://github.com/owner/repo/pull/1"; fi\n`,
+      "utf8",
+    );
+    await chmod(path.join(binDir, "gh"), 0o755);
+
+    await runProcessOrThrow(["git", "init", "-b", "roark/issue-9", agentCwd]);
+    await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: agentCwd });
+    await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "init", "--bare", remote]);
+    await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], { cwd: agentCwd });
+
+    const oldPath = process.env.PATH;
+    const oldGhLog = process.env.ROARK_GH_LOG;
+    process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+    process.env.ROARK_GH_LOG = ghLog;
+    try {
+      const prUrl = await publishAutorunResult({
+        options: {
+          cwd: controlCwd,
+          repo: "owner/repo",
+          failureLabel: "roark-failed",
+          successLabel: "roark-pr-opened",
+          inProgressLabel: "roark-in-progress",
+          remote: "origin",
+          baseBranch: "main",
+        },
+        issue: { number: 9, title: "Fix bug" },
+        branchPlan: { issueNumber: 9, branchName: "roark/issue-9", baseBranch: "main" },
+        workflowContext: {
+          controlCwd,
+          agentCwd,
+          outDir: path.join(controlCwd, ".roark/runs"),
+          runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
+          runDirRelative: ".roark/runs/issue/9/attempts/1",
+          issueInput: "9",
+          issueNumber: "9",
+          attempt: 1,
+          force: false,
+          yes: false,
+          maxFixPasses: 1,
+        },
+      });
+
+      expect(prUrl).toBe("https://github.com/owner/repo/pull/1");
+    } finally {
+      process.env.PATH = oldPath;
+      if (oldGhLog === undefined) delete process.env.ROARK_GH_LOG;
+      else process.env.ROARK_GH_LOG = oldGhLog;
+    }
+
+    const ghCalls = await readFile(ghLog, "utf8");
+    expect(ghCalls).toContain(`${agentCwd}\tpr create`);
+    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
+    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
+    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);
   });
 });
 
@@ -170,6 +257,7 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Review B: unknown");
     expect(body).toContain("- Full run ledger: issue comments on #9");
     expect(body).toContain("## Workflow artifacts");
+    expect(body).toContain("These artifacts are local control-plane state and are not committed to this PR branch.");
     expect(body).toContain("- `.roark/runs/issue/9/readiness.md`");
     expect(body).toContain("- `.roark/runs/issue/9/verification.md`");
     expect(body).toContain("- `.roark/runs/issue/9/implementation-plan.md`");
