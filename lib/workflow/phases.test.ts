@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentRunner } from "./agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
-import { runFullWorkflow } from "./phases.ts";
+import { issueArtifactHasRelationshipSnapshot, runFullWorkflow } from "./phases.ts";
 
 const tempDirs: string[] = [];
 
@@ -25,9 +25,24 @@ async function tempContext() {
     maxFixPasses: 1,
     attempt: 1,
   });
-  await writeArtifact(context, "issue", "# GitHub Issue #12\n");
+  await writeArtifact(
+    context,
+    "issue",
+    "# GitHub Issue #12\n\n<github_issue_relationships source=\"gh\">\n  <blocking_status active_blockers=\"0\" total_blockers=\"0\" />\n</github_issue_relationships>\n",
+  );
   return context;
 }
+
+describe("issueArtifactHasRelationshipSnapshot", () => {
+  test("requires a machine-generated relationship snapshot before reusing issue artifacts", () => {
+    expect(issueArtifactHasRelationshipSnapshot("# GitHub Issue #12\n")).toBe(false);
+    expect(
+      issueArtifactHasRelationshipSnapshot(
+        '<github_issue_relationships source="gh"><blocking_status active_blockers="0" /></github_issue_relationships>',
+      ),
+    ).toBe(true);
+  });
+});
 
 describe("runFullWorkflow", () => {
   test("returns triage-stopped and does not run later agents after blocked triage", async () => {
