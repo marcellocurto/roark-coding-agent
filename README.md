@@ -105,7 +105,7 @@ bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
 | Failure | `roark-failed` | Applied when the readiness or verification gate actually fails, not for clean terminal triage stops. | `--failure-label` |
 | Skip set | `blocked`, `needs-human`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened` | Any one of these on an issue removes it from the eligible set. | `--skip-label` (repeatable) or `--skip-labels` (comma-separated) |
 
-Non-`proceed` triage outcomes reuse existing skip/status labels instead of introducing a roark-specific no-op label: `blocked` maps to `blocked`, `needs-human-decision` maps to `needs-human`, and `reject` maps to `wontfix`. These labels are already in the default skip set and describe why autorun should not retry without human relabeling.
+Non-`proceed` triage outcomes reuse existing skip/status labels instead of introducing a roark-specific no-op label: `blocked` maps to `blocked`, while `needs-human-decision`, `reject`, and unknown terminal verdicts map to `needs-human`. These labels are already in the default skip set and describe why autorun should not retry without human relabeling.
 
 If you change a default in code, update this table to match.
 

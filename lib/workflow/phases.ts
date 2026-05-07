@@ -35,10 +35,18 @@ import {
   triageTask,
 } from "./tasks.ts";
 
+export function issueArtifactHasRelationshipSnapshot(content: string): boolean {
+  return /<github_issue_relationships\b/.test(content);
+}
+
 export async function fetchIssuePhase(context: WorkflowContext): Promise<string> {
   if (!context.force && artifactExists(context, "issue")) {
-    console.log(`✓ Fetch issue: using existing issue.md`);
-    return readArtifact(context, "issue");
+    const existingIssue = await readArtifact(context, "issue");
+    if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
+      console.log(`✓ Fetch issue: using existing issue.md`);
+      return existingIssue;
+    }
+    console.log(`↻ Fetch issue: existing issue.md lacks GitHub relationship snapshot; refetching`);
   }
 
   console.log(`\n=== Fetch issue #${context.issueNumber} ===`);
