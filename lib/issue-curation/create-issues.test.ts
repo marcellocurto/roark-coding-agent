@@ -105,7 +105,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(JSON.parse(await readArtifact(context, "issueCreationResults")).created).toHaveLength(2);
   });
 
-  test("approved run uses the pinned issue-create skill through the agent runner", async () => {
+  test("approved run uses the resolved issue-create skill through the agent runner", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const requests: AgentRunRequest[] = [];
@@ -224,7 +224,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.failed[0]?.message).toContain("without a non-empty message");
   });
 
-  test("missing pinned skill fails before invoking the publishing agent", async () => {
+  test("missing resolved skill fails before invoking the publishing agent", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     let agentCalls = 0;
@@ -233,13 +233,13 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       skillResolver: async () => {
-        throw new Error("Project skill 'github-issue-create' is missing or incomplete at /repo/skills/github-issue-create: missing SKILL.md.");
+        throw new Error("Repo override skill 'github-issue-create' is missing or incomplete at /repo/.roark/skills/github-issue-create: missing SKILL.md.");
       },
       agentRunner: async () => {
         agentCalls += 1;
         return "{}";
       },
-    })).rejects.toThrow("Project skill 'github-issue-create' is missing or incomplete");
+    })).rejects.toThrow("Repo override skill 'github-issue-create' is missing or incomplete");
     expect(agentCalls).toBe(0);
     expect(artifactExists(context, "issueCreationResults")).toBe(false);
   });

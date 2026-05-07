@@ -1,7 +1,7 @@
 import type { ProcessResult } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
-import { resolveGithubIssueCreateSkillPath } from "../skills/project-skills.ts";
+import { resolveGithubIssueCreateSkillPath } from "../skills/skill-resolver.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import {
   artifactExists,
@@ -97,7 +97,7 @@ export type CreateIssuesOptions = {
   context: WorkflowContext;
   /**
    * Test-only/direct publisher override retained for low-level gh argv coverage.
-   * Product create-issues runs use agentRunner with the pinned project skill.
+   * Product create-issues runs use agentRunner with the resolved Roark skill.
    */
   runner?: ProcessRunner;
   agentRunner?: AgentRunner;
@@ -196,7 +196,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
 
   const publishResult = runner
     ? await publishIssuesDirectlyWithProcessRunner(context, creatable, runner)
-    : await publishIssuesWithPinnedSkill({
+    : await publishIssuesWithResolvedSkill({
       context,
       sourcePlanPath,
       resultPath,
@@ -279,7 +279,7 @@ async function publishIssuesDirectlyWithProcessRunner(
   return { createdCurrentRun, failed, relationshipOutcomes: [] };
 }
 
-async function publishIssuesWithPinnedSkill(input: {
+async function publishIssuesWithResolvedSkill(input: {
   context: WorkflowContext;
   sourcePlanPath: string;
   resultPath: string;
@@ -291,7 +291,7 @@ async function publishIssuesWithPinnedSkill(input: {
   if (creatable.length === 0) return { createdCurrentRun: [], failed: [], relationshipOutcomes: [] };
 
   const skillPath = await skillResolver(context.cwd);
-  console.log(`\n=== Create issues from ${sourcePlanPath} with pinned ${skillPath} ===`);
+  console.log(`\n=== Create issues from ${sourcePlanPath} with skill ${skillPath} ===`);
 
   try {
     const output = await agentRunner({

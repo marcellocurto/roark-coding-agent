@@ -3,7 +3,7 @@ import { createWorkflowContext } from "../workflow/artifacts.ts";
 import { issuePublishingPrompt } from "./issue-publishing-prompt.ts";
 
 describe("issuePublishingPrompt", () => {
-  test("requires using the pinned skill and keeps the curation plan authoritative", () => {
+  test("requires using the resolved skill and keeps the curation plan authoritative", () => {
     const context = createWorkflowContext({
       command: "create-issues",
       issue: "12",
