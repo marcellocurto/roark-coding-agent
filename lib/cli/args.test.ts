@@ -8,7 +8,7 @@ import {
 } from "../autorun/selection.ts";
 import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import { parseArgs } from "./args.ts";
+import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
   test("parses auto defaults", () => {
@@ -29,7 +29,7 @@ describe("parseArgs", () => {
     expect(parsed.failureLabel).toBe(defaultAutorunFailureLabel);
     expect(parsed.successLabel).toBe(defaultAutorunSuccessLabel);
     expect(parsed.remote).toBe(defaultAutorunRemote);
-    expect(parsed.maxFixPasses).toBe(1);
+    expect(parsed.maxFixPasses).toBe(defaultMaxFixPasses);
     expect(parsed.force).toBe(false);
     expect(parsed.yes).toBe(false);
   });

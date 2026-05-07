@@ -61,6 +61,12 @@ bun run roark-coding-agent.ts final-review 123 --fix-pass 2
 
 Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`. Use `--attempt <n>` with issue commands when you need to target a specific autorun attempt directory.
 
+## Pinned project skills
+
+Roark disables Pi skill discovery for normal workflow agents. The only repo-pinned skill currently loaded by a workflow is `skills/github-issue-create`, and only the approved `create-issues --yes` publishing path passes that exact skill path to the Pi runner. Global or machine-local skills are not used as fallbacks.
+
+Pinned source: `skills/github-issue-create/` is the repo-owned copy of the upstream Pi `github-issue-create` skill. When updating it, copy the upstream skill directory deliberately, including `SKILL.md`, `templates/`, `examples/`, and `references/`; record the upstream source/commit in the update PR; then run the skill and create-issues tests. Roark requires a valid `SKILL.md` before invoking the publishing agent; supporting files are owned by the skill and may evolve independently.
+
 ## Auto mode
 
 `auto` is a one-shot, label-gated, draft-PR-only workflow. A single invocation finds eligible GitHub issues, claims one, runs the full `do` workflow on a dedicated branch, and — only when readiness is `ready-for-pr` and the verification command succeeds — pushes the branch and opens a draft PR. Roark itself ships no daemon: to run it on a schedule, invoke it from `cron`, `launchd`, GitHub Actions, or any other scheduler you control. While maintainers are still building trust in the workflow, the recommended posture is `--limit 1` (the default) so each invocation processes one issue.

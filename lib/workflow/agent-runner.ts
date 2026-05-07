@@ -7,6 +7,7 @@ export type AgentRunRequest = {
   systemPrompt: string;
   prompt: string;
   writable: boolean;
+  skillPaths?: string[];
 };
 
 export type AgentRunner = (request: AgentRunRequest) => Promise<string>;
