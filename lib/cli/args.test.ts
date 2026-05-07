@@ -129,6 +129,30 @@ describe("parseArgs", () => {
     );
   });
 
+  test("parses status command options", () => {
+    const parsed = parseArgs(["status", "123", "--repo", "owner/repo", "--attempt", "2", "--cwd", "/tmp/repo", "--out", "runs"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+    expect(parsed.command).toBe("status");
+    if (parsed.command !== "status") throw new Error("expected status options");
+    expect(parsed.issue).toBe("123");
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.cwd).toBe("/tmp/repo");
+    expect(parsed.outDir).toBe("runs");
+    expect(parsed.all).toBe(false);
+  });
+
+  test("parses status --all", () => {
+    const parsed = parseArgs(["status", "--all"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+    expect(parsed.command).toBe("status");
+    if (parsed.command !== "status") throw new Error("expected status options");
+    expect(parsed.all).toBe(true);
+    expect(parsed.issue).toBeUndefined();
+  });
+
   test("parses continue command options", () => {
     const parsed = parseArgs([
       "continue",

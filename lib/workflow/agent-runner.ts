@@ -8,6 +8,8 @@ export type AgentRunRequest = {
   prompt: string;
   writable: boolean;
   skillPaths?: string[];
+  observer?: import("../observability/observer.ts").RunObserver;
+  phase?: string;
 };
 
 export type AgentRunner = (request: AgentRunRequest) => Promise<string>;
