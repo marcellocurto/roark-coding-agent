@@ -14,6 +14,7 @@ import {
 } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import { assertCleanGit } from "./git.ts";
+import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
 import { buildReadinessMarkdown } from "./readiness.ts";
 import {
@@ -173,5 +174,6 @@ export async function runSinglePhase(
   else if (phase === "final-review") await finalReviewPhase(context, context.fixPass ?? inferNextFinalReviewPass(context), runner);
   else if (phase === "readiness") await readinessPhase(context);
   else if (phase === "curate-issues") await issueCurationPhase(context);
+  else if (phase === "create-issues") await createIssuesPhase(context);
   else throw new Error(`Unsupported phase '${phase}'.`);
 }

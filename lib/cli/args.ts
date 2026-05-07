@@ -18,7 +18,8 @@ export type IssueWorkflowCommand =
   | "fix"
   | "final-review"
   | "readiness"
-  | "curate-issues";
+  | "curate-issues"
+  | "create-issues";
 
 export type ContinueCommand = "continue";
 
@@ -97,6 +98,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "final-review",
   "readiness",
   "curate-issues",
+  "create-issues",
 ]);
 
 const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "continue"]);
@@ -116,6 +118,7 @@ Commands:
   final-review <issue>   Run only the final review agent.
   readiness <issue>      Write deterministic PR readiness markdown.
   curate-issues <issue>  Write a deterministic issue creation plan from reviewer findings.
+  create-issues <issue>  Create approved GitHub issues from the issue curation plan; dry-run unless --yes.
 
 Issue can be a number, a GitHub issue URL, or owner/repo#123.
 The auto command does not take an issue argument.
@@ -146,7 +149,7 @@ Options:
                           Label applied to the issue when a draft PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue branch to. Defaults to ${defaultAutorunRemote}.
   --force                Re-run phases even if their markdown artifact already exists.
-  --yes                  Continue past dirty git preflight for implementation/fix.
+  --yes                  Continue past dirty git preflight for implementation/fix; approve create-issues mutations.
   -h, --help             Show this help.
 `;
 

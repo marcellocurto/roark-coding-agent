@@ -166,4 +166,17 @@ describe("parseArgs", () => {
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);
   });
+
+  test("parses create-issues with repo, attempt, and approval", () => {
+    const parsed = parseArgs(["create-issues", "123", "--repo", "owner/repo", "--attempt", "2", "--yes"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed) return;
+
+    expect(parsed.command).toBe("create-issues");
+    if (parsed.command === "auto" || parsed.command === "continue") throw new Error("expected issue options");
+    expect(parsed.issue).toBe("123");
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.attempt).toBe(2);
+    expect(parsed.yes).toBe(true);
+  });
 });
