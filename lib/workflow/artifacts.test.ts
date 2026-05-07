@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import type { IssueCliOptions } from "../cli/args.ts";
-import { createWorkflowContext } from "./artifacts.ts";
+import { artifactRelativePath, createWorkflowContext } from "./artifacts.ts";
 
 const baseOptions: IssueCliOptions = {
   command: "do",
@@ -26,5 +26,10 @@ describe("createWorkflowContext", () => {
     expect(context.runDir).toBe(path.resolve("/repo", ".roark/runs/issue/10/attempts/2"));
     expect(context.runDirRelative).toBe(path.join(".roark/runs", "issue", "10", "attempts", "2"));
     expect(context.attempt).toBe(2);
+  });
+
+  test("maps issue creation results artifact", () => {
+    const context = createWorkflowContext(baseOptions);
+    expect(artifactRelativePath(context, "issueCreationResults")).toBe(path.join(".roark/runs", "issue", "10", "issue-creation-results.json"));
   });
 });
