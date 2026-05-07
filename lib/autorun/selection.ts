@@ -1,6 +1,7 @@
 export type AutorunIssueCandidate = {
   number: number;
   title: string;
+  body?: string;
   url?: string;
   createdAt?: string;
   labels?: Array<{ name: string }>;

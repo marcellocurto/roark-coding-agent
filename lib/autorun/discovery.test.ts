@@ -11,6 +11,9 @@ import { defaultAutorunVerifyCommand } from "./verification.ts";
 import { runAutoDiscovery } from "./discovery.ts";
 
 const tempDirs: string[] = [];
+const noOpAutorunLock = {
+  acquireAutorunLock: async () => ({ lockDir: "test-lock", release: async () => {} }),
+};
 
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
@@ -21,6 +24,7 @@ describe("runAutoDiscovery", () => {
     let listed = false;
     const logs = await captureLogs(async () => {
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpAutorunLock,
         listOpenGitHubIssues: async (input) => {
           listed = true;
           expect(input.limit).toBe(100);
@@ -40,11 +44,71 @@ describe("runAutoDiscovery", () => {
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
   });
 
+  test("discovery auto acquires the local lock around selection", async () => {
+    const calls: string[] = [];
+
+    await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+      acquireAutorunLock: async () => {
+        calls.push("acquire-lock");
+        return { lockDir: "test-lock", release: async () => { calls.push("release-lock"); } };
+      },
+      listOpenGitHubIssues: async () => {
+        calls.push("list");
+        return [];
+      },
+    });
+
+    expect(calls).toEqual(["acquire-lock", "list", "release-lock"]);
+  });
+
+  test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
+    const checkedBodies: string[] = [];
+
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpAutorunLock,
+        listOpenGitHubIssues: async () => [
+          { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Depends on #99" },
+          issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+        ],
+        fetchGitHubIssueRelationships: async (input) => {
+          checkedBodies.push(input.body);
+          return Number(input.issueNumber) === 1
+            ? dependencyClearRelationships(1, [], [bodyBlocker(99, "Body blocker", "OPEN")])
+            : dependencyClearRelationships(Number(input.issueNumber));
+        },
+      });
+    });
+
+    const logText = logs.join("\n");
+    expect(checkedBodies).toEqual(["Depends on #99", ""]);
+    expect(logText).toContain("Skipped issue(s) with active blockers:");
+    expect(logText).toContain("blocked by #99 Body blocker [OPEN]");
+    expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
+  });
+
+  test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpAutorunLock,
+        listOpenGitHubIssues: async () => [
+          { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Blocked by #99" },
+        ],
+        fetchGitHubIssueRelationships: async () => dependencyClearRelationships(1, [], [bodyBlocker(99, "Closed body blocker", "CLOSED")]),
+      });
+    });
+
+    const logText = logs.join("\n");
+    expect(logText).not.toContain("Skipped issue(s) with active blockers:");
+    expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
+  });
+
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpAutorunLock,
         listOpenGitHubIssues: async () => [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
@@ -61,7 +125,7 @@ describe("runAutoDiscovery", () => {
 
     const logText = logs.join("\n");
     expect(checked).toEqual([1, 2]);
-    expect(logText).toContain("Skipped issue(s) with active native blockers:");
+    expect(logText).toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("- #1 Issue 1");
     expect(logText).toContain("blocked by #99 Blocker [OPEN]");
     expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
@@ -72,6 +136,7 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpAutorunLock,
         listOpenGitHubIssues: async () => [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
@@ -88,7 +153,7 @@ describe("runAutoDiscovery", () => {
 
     const logText = logs.join("\n");
     expect(checked).toEqual([1]);
-    expect(logText).not.toContain("Skipped issue(s) with active native blockers:");
+    expect(logText).not.toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
   });
 
@@ -97,6 +162,7 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
       await runAutoDiscovery({ ...baseOptions(), dryRun: true, limit: 2 }, {
+        ...noOpAutorunLock,
         listOpenGitHubIssues: async () => [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
@@ -124,6 +190,7 @@ describe("runAutoDiscovery", () => {
     let claimed = false;
 
     await expect(runAutoDiscovery({ ...baseOptions() }, {
+      ...noOpAutorunLock,
       listOpenGitHubIssues: async () => [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])],
       fetchGitHubIssueRelationships: async () => ({
         fetchedAt: "2026-05-07T00:00:00.000Z",
@@ -149,6 +216,7 @@ describe("runAutoDiscovery", () => {
   test("targeted auto fetches the requested issue instead of listing discovery candidates", async () => {
     let fetchedIssue: string | undefined;
     await runAutoDiscovery({ ...baseOptions(), issue: "owner/repo#29", dryRun: true }, {
+      ...noOpAutorunLock,
       listOpenGitHubIssues: async () => {
         throw new Error("targeted auto should not list issues");
       },
@@ -166,6 +234,7 @@ describe("runAutoDiscovery", () => {
     let preflighted = false;
 
     await expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
+      ...noOpAutorunLock,
       fetchGitHubIssue: async () => fetchedGitHubIssue(29, ["roark-in-progress"]),
       assertCleanAutorunGit: async () => {
         preflighted = true;
@@ -183,6 +252,7 @@ describe("runAutoDiscovery", () => {
     const order: string[] = [];
 
     await expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
+      ...noOpAutorunLock,
       fetchGitHubIssue: async () => fetchedGitHubIssue(29, []),
       assertCleanAutorunGit: async () => {
         order.push("preflight");
@@ -196,12 +266,46 @@ describe("runAutoDiscovery", () => {
     expect(order).toEqual(["preflight"]);
   });
 
+  test("targeted auto rechecks labels after worktree setup and skips before claim", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-recheck-"));
+    tempDirs.push(cwd);
+    const calls: string[] = [];
+    let fetchCount = 0;
+
+    await runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
+      ...noOpAutorunLock,
+      fetchGitHubIssue: async () => {
+        fetchCount += 1;
+        return fetchCount === 1
+          ? fetchedGitHubIssue(29, [])
+          : fetchedGitHubIssue(29, ["roark-in-progress"]);
+      },
+      assertCleanAutorunGit: async () => {
+        calls.push("preflight");
+      },
+      ensureIssueWorktree: async () => {
+        calls.push("worktree");
+        return path.join(cwd, ".roark/worktrees/issue-29");
+      },
+      claimGitHubIssue: async () => {
+        calls.push("claim");
+      },
+      runFullWorkflow: async () => {
+        calls.push("workflow");
+        return { status: "completed" };
+      },
+    });
+
+    expect(calls).toEqual(["preflight", "worktree"]);
+  });
+
   test("targeted auto uses the managed claim, branch, attempt, workflow, and completion pipeline", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
     const calls: string[] = [];
 
     await runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
+      ...noOpAutorunLock,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
       fetchGitHubIssue: async () => fetchedGitHubIssue(29, []),
       assertCleanAutorunGit: async () => {
@@ -233,8 +337,8 @@ describe("runAutoDiscovery", () => {
 
     expect(calls).toEqual([
       "preflight",
-      "claim:roark/issue-29",
       "worktree:roark/issue-29",
+      "claim:roark/issue-29",
       "ledger",
       "workflow:.roark/runs/issue/29/attempts/1",
       "complete:roark/issue-29",
@@ -277,6 +381,7 @@ function issue(number: number, createdAt: string, labels: string[]) {
 function dependencyClearRelationships(
   issueNumber: number,
   blockedBy: Array<{ number: number; title: string; state: string; url: string }> = [],
+  bodyDeclaredBlockers: Array<ReturnType<typeof bodyBlocker>> = [],
 ) {
   return {
     fetchedAt: "2026-05-07T00:00:00.000Z",
@@ -284,7 +389,7 @@ function dependencyClearRelationships(
     nativeDependenciesAvailable: true,
     blockedBy,
     blocking: [],
-    bodyDeclaredBlockers: [],
+    bodyDeclaredBlockers,
     issueDependenciesSummary: {
       blockedBy: blockedBy.filter((item) => item.state !== "CLOSED").length,
       blocking: 0,
@@ -301,6 +406,19 @@ function dependency(number: number, title: string, state: string) {
     title,
     state,
     url: `https://github.com/owner/repo/issues/${number}`,
+  };
+}
+
+function bodyBlocker(number: number, title: string, state: string) {
+  return {
+    raw: `#${number}`,
+    repo: "owner/repo",
+    number,
+    verified: true,
+    title,
+    url: `https://github.com/owner/repo/issues/${number}`,
+    state,
+    closed: state === "CLOSED",
   };
 }
 
