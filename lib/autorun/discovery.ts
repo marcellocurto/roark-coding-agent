@@ -10,30 +10,22 @@ import {
   type GitHubIssue,
   type GitHubIssueDependency,
 } from "../github/issue.ts";
-import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
-import { finalizeAttemptObservability } from "./observability.ts";
-import { artifactRelativePath, ensureRunDir, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { ensureRunDir } from "../workflow/artifacts.ts";
 import { assertCleanAutorunGit } from "../workflow/git.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
-import { AgentTaskRunError } from "../workflow/tasks.ts";
 import {
   allocateNextAttempt,
   attemptMetadataRelativePath,
   defaultClock,
   formatAttemptMetadata,
-  summarizeAttempt,
-  updateAttemptIndex,
-  writeAttemptMetadata,
   type AttemptMetadata,
-  type AttemptOutcome,
   type Clock,
 } from "./attempts.ts";
 import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
-import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { formatAttemptStartComment, publishIssueLedgerComment, publishReviewLedgerComments } from "./ledger-comments.ts";
-import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
+import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
+import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { findMatchingSkipLabel, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 
@@ -236,7 +228,7 @@ async function runManagedIssueAttempt(
   const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options, attempt);
   await ensureRunDir(workflowContext);
 
-  let attemptMetadata: AttemptMetadata = formatAttemptMetadata({
+  const attemptMetadata: AttemptMetadata = formatAttemptMetadata({
     attempt,
     issueNumber: issue.number,
     branch: branchPlan.branchName,
@@ -245,151 +237,37 @@ async function runManagedIssueAttempt(
     runArtifactPath: workflowContext.runDirRelative,
     startedAt: clock.now(),
   });
-  await writeAttemptMetadata(issueDir, attemptMetadata);
-  await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
 
-  const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-  await publishLedger({
-    cwd: options.cwd,
-    repo: options.repo,
-    issueNumber: issue.number,
-    attemptMetadata,
-    phase: "attempt-start",
-    body: formatAttemptStartComment({
-      issueNumber: issue.number,
-      attempt,
-      branchName: branchPlan.branchName,
-      assignee,
-      attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
-    }),
-  });
-  await writeAttemptMetadata(issueDir, attemptMetadata);
-
-  let outcome: AttemptOutcome = "in-progress";
-  let outcomeDetail: string | null = null;
-
-  try {
-    const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
-    const workflowResult = await runWorkflow(workflowContext);
-
-    const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
-    const completeWorkflow = injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
-    const completionOutcome = await completeWorkflow({
-      workflowResult,
-      options,
-      issue,
-      branchPlan,
-      workflowContext,
-      attemptMetadata,
-      attemptMetadataPath,
-      recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt }),
-    });
-    outcome = completionOutcome.outcome;
-    outcomeDetail = completionOutcome.outcomeDetail;
-  } catch (error) {
-    outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
-    outcomeDetail = formatError(error);
-    await markWorkflowError({
-      options,
-      issue,
-      error,
-      workflowContext,
-      phase: errorPhase(error),
-      attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
-      recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt, yes: shouldRecoverWithYes(error) }),
-      attemptMetadata,
-    });
-    throw error;
-  } finally {
-    const endedAt = clock.now();
-    attemptMetadata = formatAttemptMetadata({
-      ...attemptMetadata,
-      endedAt,
-      outcome,
-      outcomeDetail,
-    });
-    await writeAttemptMetadata(issueDir, attemptMetadata);
-    await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
-    await finalizeAttemptObservability({ context: workflowContext, outcome, outcomeDetail, endedAt });
-  }
-}
-
-async function markWorkflowError(input: {
-  options: AutoCliOptions;
-  issue: AutorunIssueCandidate;
-  error: unknown;
-  workflowContext: WorkflowContext;
-  phase: string;
-  attemptMetadataPath: string;
-  recoveryCommand: string;
-  attemptMetadata: AttemptMetadata;
-}): Promise<void> {
-  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand, attemptMetadata } = input;
-  console.log(`\nAuto workflow error on #${issue.number}: ${formatError(error)}`);
-  console.log(`Attempt: ${attemptMetadataPath}`);
-  console.log(`Continue: ${recoveryCommand}`);
-
-  await publishReviewLedgerComments({
-    cwd: options.cwd,
-    repo: options.repo,
-    issue,
+  await runAutorunAttemptLifecycle({
+    issueDir,
     workflowContext,
+    branchPlan,
+    gateOptions: options,
     attemptMetadata,
+    issue,
+    logPrefix: "Auto",
+    beforeWorkflow: async (metadata) => {
+      const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
+      await publishLedger({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: issue.number,
+        attemptMetadata: metadata,
+        phase: "attempt-start",
+        body: formatAttemptStartComment({
+          issueNumber: issue.number,
+          attempt,
+          branchName: branchPlan.branchName,
+          assignee,
+          attemptMetadataPath: attemptMetadataRelativePath(metadata),
+        }),
+      });
+    },
+  }, {
+    clock,
+    runFullWorkflow: injected.runFullWorkflow,
+    completeAutorunWorkflow: injected.completeAutorunWorkflow,
   });
-
-  const errorArtifact = await readErrorArtifact(workflowContext, error);
-  if (errorArtifact) console.log(`Artifact: ${errorArtifact.path}`);
-
-  const comment = formatFailureComment({
-    issueNumber: issue.number,
-    issueUrl: issue.url,
-    phase,
-    reason: formatError(error),
-    artifactPath: errorArtifact?.path,
-    artifactContent: errorArtifact?.content,
-    attemptMetadataPath,
-    recoveryCommand,
-  });
-
-  await markIssueFailed({
-    cwd: options.cwd,
-    repo: options.repo,
-    issueNumber: issue.number,
-    label: options.failureLabel,
-    comment,
-    removeLabels: [options.inProgressLabel],
-  });
-}
-
-async function readErrorArtifact(
-  context: WorkflowContext,
-  error: unknown,
-): Promise<{ path: string; content: string } | undefined> {
-  if (!(error instanceof AgentTaskRunError)) return undefined;
-  try {
-    return {
-      path: artifactRelativePath(context, error.artifact),
-      content: await readArtifact(context, error.artifact),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function isOutputContractError(error: unknown): boolean {
-  return error instanceof ArtifactValidationError ||
-    (error instanceof AgentTaskRunError && error.phase === "output-contract");
-}
-
-function errorPhase(error: unknown): string {
-  if (error instanceof AgentTaskRunError) return error.phase;
-  if (error instanceof ArtifactValidationError) return "output-contract";
-  return "workflow-error";
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
 
 async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjected): Promise<string | undefined> {
