@@ -18,6 +18,7 @@ describe("parseArgs", () => {
 
     expect(parsed.command).toBe("auto");
     if (parsed.command !== "auto") throw new Error("expected auto options");
+    expect(parsed.issue).toBeUndefined();
     expect(parsed.readyLabel).toBe(defaultAutorunReadyLabel);
     expect(parsed.skipLabels).toEqual([...defaultAutorunSkipLabels]);
     expect(parsed.limit).toBe(1);
@@ -94,8 +95,32 @@ describe("parseArgs", () => {
     expect(parsed.yes).toBe(true);
   });
 
-  test("rejects issue arguments for auto", () => {
-    expect(() => parseArgs(["auto", "123"])).toThrow("does not take an issue argument");
+  test("parses targeted auto issue refs", () => {
+    for (const issue of ["123", "#123", "https://github.com/owner/repo/issues/123", "owner/repo#123"]) {
+      const parsed = parseArgs(["auto", issue]);
+      expect("help" in parsed).toBe(false);
+      if ("help" in parsed) return;
+      if (parsed.command !== "auto") throw new Error("expected auto options");
+      expect(parsed.issue).toBe(issue);
+    }
+  });
+
+  test("parses targeted auto issue before or after options", () => {
+    const before = parseArgs(["auto", "123", "--repo", "owner/repo", "--dry-run"]);
+    const after = parseArgs(["auto", "--repo", "owner/repo", "--dry-run", "123"]);
+
+    for (const parsed of [before, after]) {
+      expect("help" in parsed).toBe(false);
+      if ("help" in parsed) return;
+      if (parsed.command !== "auto") throw new Error("expected auto options");
+      expect(parsed.issue).toBe("123");
+      expect(parsed.repo).toBe("owner/repo");
+      expect(parsed.dryRun).toBe(true);
+    }
+  });
+
+  test("rejects multiple targeted auto issue refs", () => {
+    expect(() => parseArgs(["auto", "123", "456"])).toThrow("accepts at most one issue argument");
   });
 
   test("rejects conflicting auto assignment options", () => {

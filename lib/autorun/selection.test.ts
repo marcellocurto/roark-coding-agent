@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
+  findMatchingSkipLabel,
   isEligibleIssue,
   selectEligibleIssues,
   type AutorunIssueCandidate,
@@ -95,5 +96,12 @@ describe("autorun issue selection", () => {
         limit: 1,
       }),
     ).toBe(true);
+  });
+
+  test("finds targeted auto skip labels without requiring the ready label", () => {
+    expect(findMatchingSkipLabel(issue(1, "2026-01-01T00:00:00Z", ["Roark-In-Progress"]), defaultAutorunSkipLabels)).toBe(
+      "Roark-In-Progress",
+    );
+    expect(findMatchingSkipLabel(issue(2, "2026-01-01T00:00:00Z", ["enhancement"]), defaultAutorunSkipLabels)).toBeUndefined();
   });
 });

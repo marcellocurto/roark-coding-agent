@@ -45,6 +45,7 @@ export type IssueCliOptions = {
 
 export type AutoCliOptions = {
   command: "auto";
+  issue?: string;
   cwd: string;
   repo?: string;
   readyLabel: string;
@@ -108,7 +109,7 @@ export const defaultMaxFixPasses = 3;
 export const usage = `roark-coding-agent <command> [issue] [options]
 
 Commands:
-  auto                  Find and claim eligible GitHub issues, switch branches, and run the full workflow.
+  auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
@@ -123,7 +124,7 @@ Commands:
   create-issues <issue>  Create approved GitHub issues from the issue curation plan; dry-run unless --yes.
 
 Issue can be a number, a GitHub issue URL, or owner/repo#123.
-The auto command does not take an issue argument.
+Auto without an issue discovers eligible issues; auto with an issue targets that issue directly.
 
 Options:
   --repo <owner/repo>    Repository for gh issue commands.
@@ -189,6 +190,7 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
   };
 
   let skipLabelsProvided = false;
+  let issueArg: string | undefined;
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -223,8 +225,11 @@ function parseAutoArgs(args: string[]): AutoCliOptions {
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
-    else throw new Error(`The auto command does not take an issue argument. Got '${arg}'.\n\n${usage}`);
+    else if (issueArg) throw new Error(`The auto command accepts at most one issue argument. Got '${issueArg}' and '${arg}'.\n\n${usage}`);
+    else issueArg = arg;
   }
+
+  options.issue = issueArg;
 
   if (options.noAssign && options.assignee) {
     throw new Error("--assignee cannot be combined with --no-assign.");
