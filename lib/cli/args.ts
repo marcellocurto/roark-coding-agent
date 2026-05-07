@@ -22,8 +22,9 @@ export type IssueWorkflowCommand =
 
 export type ContinueCommand = "continue";
 export type StatusCommand = "status";
+export type InitCommand = "init";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -114,7 +115,16 @@ export type StatusCliOptions = {
   yes?: never;
 };
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions;
+export type InitCliOptions = {
+  command: "init";
+  cwd: string;
+  repo?: string;
+  force: boolean;
+  maxFixPasses?: never;
+  yes?: never;
+};
+
+export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions;
 
 export type RawIssueCliOptions = {
   command: IssueWorkflowCommand;
@@ -200,7 +210,20 @@ export type RawStatusCliOptions = {
   attempt?: number;
 };
 
-export type RawCliOptions = RawIssueCliOptions | RawAutoCliOptions | RawRevisePrCliOptions | RawContinueCliOptions | RawStatusCliOptions;
+export type RawInitCliOptions = {
+  command: "init";
+  cwd?: string;
+  repo?: string;
+  force?: true;
+};
+
+export type RawCliOptions =
+  | RawIssueCliOptions
+  | RawAutoCliOptions
+  | RawRevisePrCliOptions
+  | RawContinueCliOptions
+  | RawStatusCliOptions
+  | RawInitCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
@@ -216,13 +239,14 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "create-issues",
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status", "init"]);
 
 export const defaultMaxFixPasses = 3;
 
 export const usage = `roark <command> [issue] [options]
 
 Commands:
+  init                  Scaffold repo-local .roark configuration and workflow policy.
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
   revise-pr <number>     Manually revise an existing open PR from PR feedback.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
@@ -282,11 +306,27 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
     throw new Error(`Unknown command '${rawCommand ?? ""}'.\n\n${usage}`);
   }
 
+  if (rawCommand === "init") return parseInitArgs(rest);
   if (rawCommand === "auto") return parseAutoArgs(rest);
   if (rawCommand === "revise-pr") return parseRevisePrArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
   if (rawCommand === "status") return parseStatusArgs(rest);
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
+}
+
+function parseInitArgs(args: string[]): RawInitCliOptions {
+  const options: RawInitCliOptions = { command: "init" };
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--repo") options.repo = requiredValue(args, ++index, arg);
+    else if (arg === "--cwd") options.cwd = requiredValue(args, ++index, arg);
+    else if (arg === "--force") options.force = true;
+    else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
+    else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
+  }
+
+  return options;
 }
 
 function parseAutoArgs(args: string[]): RawAutoCliOptions {

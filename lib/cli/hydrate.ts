@@ -16,6 +16,7 @@ import {
   type AutoCliOptions,
   type CliOptions,
   type ContinueCliOptions,
+  type InitCliOptions,
   type RawCliOptions,
   type RevisePrCliOptions,
   type StatusCliOptions,
@@ -59,6 +60,16 @@ const unsupportedConfigKeys = new Set(["model", "thinking", "updateStrategy"]);
 export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDependencies = {}): Promise<CliOptions> {
   const runner = deps.runner ?? runProcess;
   const workspace = await resolveWorkspace(raw.cwd ?? deps.cwd ?? process.cwd(), runner);
+
+  if (raw.command === "init") {
+    return {
+      command: "init",
+      cwd: workspace,
+      repo: raw.repo,
+      force: raw.force ?? false,
+    } satisfies InitCliOptions;
+  }
+
   const config = await loadRoarkConfig(workspace);
   const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo);
 
@@ -266,7 +277,7 @@ function repoFromQualifiedIssueRef(issue: string | undefined): string | undefine
   return undefined;
 }
 
-async function inferRepoFromOrigin(workspace: string, runner: ProcessRunner): Promise<string | undefined> {
+export async function inferRepoFromOrigin(workspace: string, runner: ProcessRunner = runProcess): Promise<string | undefined> {
   const result = await runner(["git", "remote", "get-url", "origin"], { cwd: workspace });
   if (result.exitCode !== 0) return undefined;
   return parseGithubRepoFromOrigin(result.stdout);
