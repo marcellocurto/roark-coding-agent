@@ -96,11 +96,13 @@ The workflow fetches PR metadata, unresolved review threads, and relevant PR com
 
 Safety boundaries: the PR must be open; fork PR heads are refused in v1; the head branch must be non-empty, different from the base branch, and not a shared base branch name such as `main` or `master`; the working tree must be completely clean (including `.roark`) unless `--yes` is passed. `no-action-needed` writes artifacts only and does not mutate, commit, push, or comment by default. `needs-human` and verification/review stops do not commit or push; they leave local changes/artifacts for inspection and post a concise summary unless `--no-comment` is used.
 
-## Pinned project skills
+## Bundled workflow skills
 
-Roark disables Pi skill discovery for normal workflow agents. The only repo-pinned skill currently loaded by a workflow is `skills/github-issue-create`, and only the approved `create-issues --yes` publishing path passes that exact skill path to the Pi runner. Global or machine-local skills are not used as fallbacks.
+Roark disables Pi skill discovery for normal workflow agents. The approved `create-issues --yes` publishing path resolves the Roark-owned `github-issue-create` skill and passes only that resolved skill path to the Pi runner; global or machine-local skills are not used as fallbacks.
 
-Pinned source: `skills/github-issue-create/` is the repo-owned copy of the upstream Pi `github-issue-create` skill. When updating it, copy the upstream skill directory deliberately, including `SKILL.md`, `templates/`, `examples/`, and `references/`; record the upstream source/commit in the update PR; then run the skill and create-issues tests. Roark requires a valid `SKILL.md` before invoking the publishing agent; supporting files are owned by the skill and may evolve independently.
+Skill resolution currently checks the target workspace first at `.roark/skills/github-issue-create/`. If that repo override directory exists, Roark validates its `SKILL.md` and uses it. Missing or malformed override metadata fails clearly instead of falling back to the bundled copy.
+
+When no repo override exists, Roark loads the bundled package skill from `skills/github-issue-create/` relative to the installed Roark package, not the process working directory. The bundled package includes the skill's `SKILL.md`, `templates/`, `examples/`, and `references/`. When updating the bundled skill, copy the upstream skill directory deliberately, record the upstream source/commit in the update PR, then run the skill and create-issues tests.
 
 ## Auto mode
 

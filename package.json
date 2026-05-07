@@ -1,10 +1,19 @@
 {
   "name": "roark-coding-agent",
+  "version": "0.0.0",
   "module": "roark.ts",
   "type": "module",
   "bin": {
     "roark": "./roark.ts"
   },
+  "files": [
+    "roark.ts",
+    "lib",
+    "skills",
+    "docs",
+    "README.md",
+    "tsconfig.json"
+  ],
   "scripts": {
     "start": "bun run roark.ts",
     "agent": "bun run roark.ts",
