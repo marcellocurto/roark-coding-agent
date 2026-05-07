@@ -1,4 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
+import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
@@ -22,6 +23,8 @@ export type MarkIssueFailedOptions = {
   label: string;
   comment: string;
   removeLabels?: string[];
+  marker?: string;
+  existingCommentId?: number;
 };
 
 export type FailureLabelArgvOptions = {
@@ -77,7 +80,7 @@ export function buildFailureCommentArgv(options: FailureCommentArgvOptions): str
   return ["gh", "issue", "comment", String(options.issueNumber), "--body", options.comment, ...repoArgs];
 }
 
-export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<void> {
+export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<GitHubCommentRef | undefined> {
   const labelArgv = buildFailureLabelArgv({
     repo: options.repo,
     issueNumber: options.issueNumber,
@@ -107,10 +110,21 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
   }
 
   try {
+    if (options.marker) {
+      return await postOrUpdateIssueCommentByMarker({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: options.issueNumber,
+        marker: options.marker,
+        body: options.comment,
+        existingCommentId: options.existingCommentId,
+      });
+    }
     await runProcessOrThrow(commentArgv, { cwd: options.cwd, label: "gh issue comment (failure)" });
   } catch (error) {
     console.warn(`Failed to post failure comment: ${formatError(error)}`);
   }
+  return undefined;
 }
 
 function truncateArtifactContent(value: string): string {

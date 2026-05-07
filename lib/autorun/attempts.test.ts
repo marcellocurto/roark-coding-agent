@@ -14,6 +14,7 @@ import {
   latestAttemptNumber,
   readAttemptIndex,
   readAttemptMetadata,
+  recordAttemptIssueComment,
   summarizeAttempt,
   updateAttemptIndex,
   writeAttemptMetadata,
@@ -118,6 +119,42 @@ describe("formatAttemptMetadata", () => {
     });
     expect(metadata.outcome).toBe("triage-stopped");
     expect(metadata.outcomeDetail).toBe('triage verdict is "blocked"');
+  });
+
+  test("preserves GitHub comment metadata when provided", () => {
+    const metadata = formatAttemptMetadata({
+      ...baseInput,
+      githubComments: {
+        issue: {
+          "review-a": {
+            id: 123,
+            url: "https://github.com/owner/repo/issues/10#issuecomment-123",
+            marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
+            updatedAt: "2026-05-05T07:20:00.000Z",
+          },
+        },
+      },
+    });
+
+    expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(123);
+  });
+});
+
+describe("recordAttemptIssueComment", () => {
+  test("stores issue comment refs by phase", () => {
+    const metadata = formatAttemptMetadata(baseInput);
+    recordAttemptIssueComment(metadata, "review-a", {
+      id: 123,
+      url: "https://github.com/owner/repo/issues/10#issuecomment-123",
+      marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
+    }, "2026-05-05T07:20:00.000Z");
+
+    expect(metadata.githubComments?.issue?.["review-a"]).toEqual({
+      id: 123,
+      url: "https://github.com/owner/repo/issues/10#issuecomment-123",
+      marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
+      updatedAt: "2026-05-05T07:20:00.000Z",
+    });
   });
 });
 

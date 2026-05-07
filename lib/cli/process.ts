@@ -7,6 +7,7 @@ export type ProcessResult = {
 export async function runProcess(args: string[], options: { cwd?: string } = {}): Promise<ProcessResult> {
   const process = Bun.spawn(args, {
     cwd: options.cwd,
+    env: processEnv(),
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -27,4 +28,8 @@ export async function runProcessOrThrow(args: string[], options: { cwd?: string;
     throw new Error(`${label} failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
   }
   return result.stdout;
+}
+
+function processEnv(): Record<string, string> {
+  return Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined));
 }

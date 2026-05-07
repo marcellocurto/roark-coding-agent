@@ -22,6 +22,7 @@ import {
 import { checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
+import { publishReviewLedgerComments } from "./ledger-comments.ts";
 import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
@@ -118,6 +119,7 @@ export async function runAutoContinue(
       recoveryCommand: formatContinueCommand({ issueNumber: parsed.issueNumber, repo: parsed.repo, attempt, yes: shouldRecoverWithYes(error) }),
       cwd: workflowContext.cwd,
       repo: parsed.repo,
+      attemptMetadata,
     });
     throw error;
   } finally {
@@ -214,11 +216,20 @@ async function markContinueError(input: {
   recoveryCommand: string;
   cwd: string;
   repo?: string;
+  attemptMetadata: AttemptMetadata;
 }): Promise<void> {
-  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand, cwd, repo } = input;
+  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand, cwd, repo, attemptMetadata } = input;
   console.log(`\nContinue workflow error on #${issue.number}: ${formatError(error)}`);
   console.log(`Attempt: ${attemptMetadataPath}`);
   console.log(`Continue: ${recoveryCommand}`);
+
+  await publishReviewLedgerComments({
+    cwd,
+    repo,
+    issue,
+    workflowContext,
+    attemptMetadata,
+  });
 
   const errorArtifact = await readErrorArtifact(workflowContext, error);
   if (errorArtifact) console.log(`Artifact: ${errorArtifact.path}`);

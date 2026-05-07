@@ -114,7 +114,7 @@ export async function getCurrentGitHubLogin(options: { cwd: string }): Promise<s
   return (await runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" })).trim();
 }
 
-export async function claimGitHubIssue(options: { cwd: string; repo?: string; plan: AutorunClaimPlan }): Promise<void> {
+export async function claimGitHubIssue(options: { cwd: string; repo?: string; plan: AutorunClaimPlan; postComment?: boolean }): Promise<void> {
   const issueNumber = String(options.plan.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
 
@@ -129,6 +129,8 @@ export async function claimGitHubIssue(options: { cwd: string; repo?: string; pl
       { cwd: options.cwd, label: "gh issue edit --add-assignee" },
     );
   }
+
+  if (options.postComment === false) return;
 
   await runProcessOrThrow(
     ["gh", "issue", "comment", issueNumber, "--body", options.plan.commentBody, ...repoArgs],

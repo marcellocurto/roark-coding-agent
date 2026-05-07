@@ -11,6 +11,13 @@ export type AttemptOutcome =
   | "failed-output-contract"
   | "errored";
 
+export type AttemptGitHubCommentRef = {
+  id: number;
+  url?: string;
+  marker: string;
+  updatedAt: string;
+};
+
 export type AttemptMetadata = {
   attempt: number;
   issueNumber: number;
@@ -22,6 +29,9 @@ export type AttemptMetadata = {
   endedAt: string | null;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
+  githubComments?: {
+    issue?: Record<string, AttemptGitHubCommentRef>;
+  };
 };
 
 export type AttemptSummary = Pick<
@@ -44,6 +54,7 @@ export type FormatAttemptMetadataInput = {
   endedAt?: Date | string | null;
   outcome?: AttemptOutcome;
   outcomeDetail?: string | null;
+  githubComments?: AttemptMetadata["githubComments"];
 };
 
 export function attemptsRootDir(issueDir: string): string {
@@ -90,7 +101,25 @@ export function formatAttemptMetadata(input: FormatAttemptMetadataInput): Attemp
     endedAt: input.endedAt === undefined ? null : toIsoStringOrNull(input.endedAt),
     outcome: input.outcome ?? "in-progress",
     outcomeDetail: input.outcomeDetail ?? null,
+    ...(input.githubComments ? { githubComments: input.githubComments } : {}),
   };
+}
+
+export function recordAttemptIssueComment(
+  metadata: AttemptMetadata,
+  phase: string,
+  ref: { id: number; url?: string; marker: string },
+  updatedAt: Date | string = new Date(),
+): AttemptMetadata {
+  metadata.githubComments ??= {};
+  metadata.githubComments.issue ??= {};
+  metadata.githubComments.issue[phase] = {
+    id: ref.id,
+    ...(ref.url ? { url: ref.url } : {}),
+    marker: ref.marker,
+    updatedAt: toIsoString(updatedAt),
+  };
+  return metadata;
 }
 
 export function summarizeAttempt(metadata: AttemptMetadata): AttemptSummary {

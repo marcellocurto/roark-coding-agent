@@ -1,4 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
+import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
 
@@ -16,6 +17,8 @@ export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
   cwd: string;
   repo?: string;
   removeLabels?: string[];
+  marker?: string;
+  existingCommentId?: number;
 };
 
 export async function readTriageStoppedVerdict(context: WorkflowContext): Promise<TriageStoppedVerdict> {
@@ -63,7 +66,7 @@ export function buildTriageStopCommentArgv(options: { repo?: string; issueNumber
   return ["gh", "issue", "comment", String(options.issueNumber), "--body", options.comment, ...repoArgs];
 }
 
-export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions): Promise<void> {
+export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions): Promise<GitHubCommentRef | undefined> {
   const label = mapTriageVerdictToLabel(options.triageVerdict);
   const comment = formatTriageStoppedComment(options);
 
@@ -88,6 +91,16 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
   }
 
   try {
+    if (options.marker) {
+      return await postOrUpdateIssueCommentByMarker({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: options.issueNumber,
+        marker: options.marker,
+        body: comment,
+        existingCommentId: options.existingCommentId,
+      });
+    }
     await runProcessOrThrow(
       buildTriageStopCommentArgv({ repo: options.repo, issueNumber: options.issueNumber, comment }),
       { cwd: options.cwd, label: "gh issue comment (triage stop)" },
@@ -95,6 +108,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
   } catch (error) {
     console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
   }
+  return undefined;
 }
 
 function uniqueLabels(labels: string[]): string[] {

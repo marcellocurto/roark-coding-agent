@@ -165,6 +165,10 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Command: `bun run typecheck`");
     expect(body).toContain("- Exit code: 0");
     expect(body).toContain("- Status: passed");
+    expect(body).toContain("## Review summary");
+    expect(body).toContain("- Review A: unknown");
+    expect(body).toContain("- Review B: unknown");
+    expect(body).toContain("- Full run ledger: issue comments on #9");
     expect(body).toContain("## Workflow artifacts");
     expect(body).toContain("- `.roark/runs/issue/9/readiness.md`");
     expect(body).toContain("- `.roark/runs/issue/9/verification.md`");
@@ -248,5 +252,19 @@ describe("formatPrBody", () => {
       artifactPaths: [".roark/runs/issue/9/readiness.md"],
     });
     expect(body).not.toContain("## Attempt");
+  });
+
+  test("renders supplied Review A/B verdict summary", () => {
+    const body = formatPrBody({
+      issueNumber: 9,
+      runDirRelative: ".roark/runs/issue/9",
+      artifactPaths: [".roark/runs/issue/9/review-a.md", ".roark/runs/issue/9/review-b.md"],
+      reviewVerdicts: { reviewA: "approve", reviewB: "fixes-required" },
+    });
+
+    expect(body).toContain("## Review summary");
+    expect(body).toContain("- Review A: approve");
+    expect(body).toContain("- Review B: fixes-required");
+    expect(body).toContain("- Full run ledger: issue comments on #9");
   });
 });

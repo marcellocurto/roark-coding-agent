@@ -18,6 +18,7 @@ import {
 import { checkoutIssueBranch, createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
+import { formatAttemptStartComment, publishIssueLedgerComment, publishReviewLedgerComments } from "./ledger-comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
@@ -77,14 +78,14 @@ export async function runAutoDiscovery(
       baseBranch: options.baseBranch,
     });
 
+    const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
+    const attempt = await allocateNextAttempt(issueDir);
+
     console.log(`- Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
-    await claimGitHubIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan });
+    await claimGitHubIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
 
     console.log(`- Switching to branch ${branchPlan.branchName}`);
     await checkoutIssueBranch({ cwd: options.cwd, plan: branchPlan });
-
-    const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
-    const attempt = await allocateNextAttempt(issueDir);
 
     console.log(`- Running full workflow on branch ${branchPlan.branchName} (attempt ${attempt})`);
     const workflowContext = createAutorunWorkflowContext(issue, branchPlan, options, attempt);
@@ -101,6 +102,22 @@ export async function runAutoDiscovery(
     });
     await writeAttemptMetadata(issueDir, attemptMetadata);
     await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
+
+    await publishIssueLedgerComment({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: issue.number,
+      attemptMetadata,
+      phase: "attempt-start",
+      body: formatAttemptStartComment({
+        issueNumber: issue.number,
+        attempt,
+        branchName: branchPlan.branchName,
+        assignee,
+        attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
+      }),
+    });
+    await writeAttemptMetadata(issueDir, attemptMetadata);
 
     let outcome: AttemptOutcome = "in-progress";
     let outcomeDetail: string | null = null;
@@ -132,6 +149,7 @@ export async function runAutoDiscovery(
         phase: errorPhase(error),
         attemptMetadataPath: attemptMetadataRelativePath(attemptMetadata),
         recoveryCommand: formatContinueCommand({ issueNumber: issue.number, repo: options.repo, attempt, yes: shouldRecoverWithYes(error) }),
+        attemptMetadata,
       });
       throw error;
     } finally {
@@ -157,11 +175,20 @@ async function markWorkflowError(input: {
   phase: string;
   attemptMetadataPath: string;
   recoveryCommand: string;
+  attemptMetadata: AttemptMetadata;
 }): Promise<void> {
-  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand } = input;
+  const { options, issue, error, workflowContext, phase, attemptMetadataPath, recoveryCommand, attemptMetadata } = input;
   console.log(`\nAuto workflow error on #${issue.number}: ${formatError(error)}`);
   console.log(`Attempt: ${attemptMetadataPath}`);
   console.log(`Continue: ${recoveryCommand}`);
+
+  await publishReviewLedgerComments({
+    cwd: options.cwd,
+    repo: options.repo,
+    issue,
+    workflowContext,
+    attemptMetadata,
+  });
 
   const errorArtifact = await readErrorArtifact(workflowContext, error);
   if (errorArtifact) console.log(`Artifact: ${errorArtifact.path}`);
