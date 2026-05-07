@@ -32,11 +32,14 @@ async function createContext() {
 describe("runAgentTask error diagnostics", () => {
   test("writes provider errors into the target phase artifact before throwing", async () => {
     const context = await createContext();
+    let calls = 0;
     const runner: AgentRunner = async () => {
+      calls++;
       throw new Error("openai-codex/gpt-5.5 failed: provider unavailable");
     };
 
     await expect(runAgentTask(context, runner, triageTask)).rejects.toThrow(AgentTaskRunError);
+    expect(calls).toBe(1);
 
     const artifact = await readArtifact(context, "triage");
     expect(artifact).toContain("# Triage Error");
@@ -50,13 +53,67 @@ describe("runAgentTask error diagnostics", () => {
 
   test("writes output-contract failures into the target phase artifact", async () => {
     const context = await createContext();
-    const runner: AgentRunner = async () => "";
+    let calls = 0;
+    const runner: AgentRunner = async () => {
+      calls++;
+      return "";
+    };
 
     await expect(runAgentTask(context, runner, triageTask)).rejects.toThrow(AgentTaskRunError);
+    expect(calls).toBe(2);
 
     const artifact = await readArtifact(context, "triage");
     expect(artifact).toContain("# Triage Error");
     expect(artifact).toContain("## Phase\noutput-contract");
     expect(artifact).toContain("triage failed output contract: artifact is empty");
+  });
+});
+
+describe("runAgentTask transient agent retry", () => {
+  test("retries transient connection errors before writing the phase artifact", async () => {
+    const context = await createContext();
+    const validTriage = "# Triage\n\n## Verdict\nproceed\n";
+    let calls = 0;
+    const sleeps: number[] = [];
+    const runner: AgentRunner = async () => {
+      calls++;
+      if (calls === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
+      return validTriage;
+    };
+
+    const result = await runAgentTask(context, runner, triageTask, {
+      delaysMs: [0, 60_000, 180_000],
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    });
+
+    expect(result).toBe(validTriage);
+    expect(calls).toBe(2);
+    expect(sleeps).toEqual([]);
+    expect(await readArtifact(context, "triage")).toBe(validTriage);
+  });
+
+  test("exhausts immediate, one minute, and three minute retries before failing", async () => {
+    const context = await createContext();
+    let calls = 0;
+    const sleeps: number[] = [];
+    const runner: AgentRunner = async () => {
+      calls++;
+      throw new Error("openai-codex/gpt-5.5 failed: fetch failed");
+    };
+
+    await expect(runAgentTask(context, runner, triageTask, {
+      delaysMs: [0, 60_000, 180_000],
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      },
+    })).rejects.toThrow(AgentTaskRunError);
+
+    expect(calls).toBe(4);
+    expect(sleeps).toEqual([60_000, 180_000]);
+    const artifact = await readArtifact(context, "triage");
+    expect(artifact).toContain("# Triage Error");
+    expect(artifact).toContain("openai-codex/gpt-5.5 failed: fetch failed");
   });
 });

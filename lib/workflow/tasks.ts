@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "../cli/args.ts";
-import type { AgentRunner } from "./agent-runner.ts";
+import type { AgentRunRequest, AgentRunner } from "./agent-runner.ts";
 import {
   artifactExists,
   artifactRelativePath,
@@ -22,6 +22,7 @@ import {
   sharedSystemPrompt,
   triagePrompt,
 } from "../prompts/workflow-prompts.ts";
+import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
 
 export type AgentTask = {
   artifact: ArtifactRef;
@@ -33,6 +34,13 @@ export type AgentTask = {
 };
 
 export type AgentTaskFailurePhase = "agent-error" | "output-contract";
+
+export type AgentTaskRetryOptions = {
+  delaysMs?: readonly number[];
+  sleep?: (ms: number) => Promise<void>;
+};
+
+export const transientAgentRetryDelaysMs = [0, 60_000, 180_000] as const;
 
 export class AgentTaskRunError extends Error {
   readonly artifact: ArtifactRef;
@@ -125,7 +133,12 @@ export function finalReviewTask(pass: number): AgentTask {
   };
 }
 
-export async function runAgentTask(context: WorkflowContext, runner: AgentRunner, task: AgentTask): Promise<string> {
+export async function runAgentTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: AgentTask,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<string> {
   requireArtifacts(context, ...task.prerequisites);
 
   if (!context.force && artifactExists(context, task.artifact)) {
@@ -142,7 +155,7 @@ export async function runAgentTask(context: WorkflowContext, runner: AgentRunner
 
   console.log(`\n=== ${task.label} ===`);
   try {
-    const content = await runTaskWithOutputContract(context, runner, task);
+    const content = await runTaskWithOutputContract(context, runner, task, retryOptions);
     await writeArtifact(context, task.artifact, content);
     console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
     return content;
@@ -159,6 +172,7 @@ async function runTaskWithOutputContract(
   context: WorkflowContext,
   runner: AgentRunner,
   task: AgentTask,
+  retryOptions: AgentTaskRetryOptions,
 ): Promise<string> {
   const request = {
     cwd: context.cwd,
@@ -169,19 +183,62 @@ async function runTaskWithOutputContract(
   };
   const prompt = task.prompt(context);
 
-  const first = await runner({ ...request, prompt });
+  const first = await runAgentRequestWithTransientRetries(runner, { ...request, prompt }, task, retryOptions);
   const firstValidation = validateAgentArtifact(task.artifact, first);
   if (firstValidation.ok) return first;
 
   console.log(`! ${task.label}: output invalid (${firstValidation.reason}); retrying once.`);
-  const second = await runner({
+  const second = await runAgentRequestWithTransientRetries(runner, {
     ...request,
     prompt: repairPrompt(prompt, task, firstValidation.reason, first),
-  });
+  }, task, retryOptions);
   const secondValidation = validateAgentArtifact(task.artifact, second);
   if (secondValidation.ok) return second;
 
   throw new ArtifactValidationError(task.artifact, secondValidation.reason);
+}
+
+async function runAgentRequestWithTransientRetries(
+  runner: AgentRunner,
+  request: AgentRunRequest,
+  task: AgentTask,
+  options: AgentTaskRetryOptions,
+): Promise<string> {
+  const delaysMs = options.delaysMs ?? transientAgentRetryDelaysMs;
+  const sleep = options.sleep ?? defaultSleep;
+
+  for (let retryIndex = 0; ; retryIndex++) {
+    try {
+      return await runner(request);
+    } catch (error) {
+      if (!isTransientAgentConnectionError(error) || retryIndex >= delaysMs.length) throw error;
+
+      const delayMs = delaysMs[retryIndex] ?? 0;
+      const retryNumber = retryIndex + 1;
+      const retryCount = delaysMs.length;
+      console.log(
+        `! ${task.label}: transient agent connection error: ${formatError(error)}; retry ${retryNumber}/${retryCount} ${formatRetryDelay(delayMs)}.`,
+      );
+      if (delayMs > 0) await sleep(delayMs);
+    }
+  }
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatRetryDelay(delayMs: number): string {
+  if (delayMs <= 0) return "immediately";
+  if (delayMs % 60_000 === 0) {
+    const minutes = delayMs / 60_000;
+    return `in ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  }
+  if (delayMs % 1_000 === 0) {
+    const seconds = delayMs / 1_000;
+    return `in ${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  return `in ${delayMs}ms`;
 }
 
 function repairPrompt(originalPrompt: string, task: AgentTask, reason: string, invalidOutput: string): string {
