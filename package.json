@@ -1,15 +1,15 @@
 {
   "name": "roark-coding-agent",
-  "module": "roark-coding-agent.ts",
+  "module": "roark.ts",
   "type": "module",
   "bin": {
-    "roark-coding-agent": "./roark-coding-agent.ts"
+    "roark": "./roark.ts"
   },
   "scripts": {
-    "start": "bun run roark-coding-agent.ts",
-    "agent": "bun run roark-coding-agent.ts",
-    "do": "bun run roark-coding-agent.ts do",
-    "auto": "bun run roark-coding-agent.ts auto --repo marcellocurto/roark-coding-agent",
+    "start": "bun run roark.ts",
+    "agent": "bun run roark.ts",
+    "do": "bun run roark.ts do",
+    "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },

@@ -135,7 +135,7 @@ const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr"
 
 export const defaultMaxFixPasses = 3;
 
-export const usage = `roark-coding-agent <command> [issue] [options]
+export const usage = `roark <command> [issue] [options]
 
 Commands:
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.

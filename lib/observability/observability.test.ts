@@ -178,7 +178,7 @@ describe("status rendering", () => {
       },
       totals: { inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 3, cost: 0.01, toolCalls: 1 },
       lastError: "provider unavailable",
-      recoveryCommand: "roark-coding-agent continue 42 --repo owner/repo --attempt 2",
+      recoveryCommand: "roark continue 42 --repo owner/repo --attempt 2",
     }, null, 2));
 
     const output = await renderStatus({ command: "status", issue: "42", all: false, cwd, outDir: ".roark/runs", repo: "owner/repo", attempt: 2 });
@@ -186,7 +186,7 @@ describe("status rendering", () => {
     expect(output).toContain("Status: failed");
     expect(output).toContain("Totals: tokens=3");
     expect(output).toContain("Last error: provider unavailable");
-    expect(output).toContain("Recovery: roark-coding-agent continue 42 --repo owner/repo --attempt 2");
+    expect(output).toContain("Recovery: roark continue 42 --repo owner/repo --attempt 2");
     expect(output).toContain("- Triage: failed");
   });
 

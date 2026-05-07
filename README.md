@@ -8,12 +8,35 @@ A small CLI workflow runner around the Pi coding-agent SDK.
 bun install
 ```
 
+## Global/operator usage
+
+```bash
+bun install -g .
+roark --help
+roark
+roark auto 4
+roark continue 4
+roark do 4
+```
+
+Bare `roark` in an interactive terminal opens a small menu for common commands.
+
+## Local development usage
+
+```bash
+bun run roark.ts --help
+bun run roark.ts auto 4
+bun run roark.ts do 4
+bun test
+bun run typecheck
+```
+
 ## Run the full workflow
 
 ```bash
-bun run roark-coding-agent.ts do 123 --repo owner/repo
-# or
-roark-coding-agent do https://github.com/owner/repo/issues/123
+roark do https://github.com/owner/repo/issues/123
+# or, from a checkout
+bun run roark.ts do 123 --repo owner/repo
 ```
 
 Artifacts are written to:
@@ -27,7 +50,7 @@ The full `do` workflow fetches the GitHub issue, triages it, plans it, implement
 By default, `--max-fix-passes` is `1`.
 
 ```bash
-bun run roark-coding-agent.ts do 123 --repo owner/repo --max-fix-passes 3
+bun run roark.ts do 123 --repo owner/repo --max-fix-passes 3
 ```
 
 Fix artifacts are numbered:
@@ -42,21 +65,21 @@ final-review-2.md
 Each phase is also callable independently:
 
 ```bash
-bun run roark-coding-agent.ts fetch 123 --repo owner/repo
-bun run roark-coding-agent.ts triage 123
-bun run roark-coding-agent.ts plan 123
-bun run roark-coding-agent.ts implement 123
-bun run roark-coding-agent.ts review 123
-bun run roark-coding-agent.ts fix 123
-bun run roark-coding-agent.ts final-review 123
-bun run roark-coding-agent.ts readiness 123
+bun run roark.ts fetch 123 --repo owner/repo
+bun run roark.ts triage 123
+bun run roark.ts plan 123
+bun run roark.ts implement 123
+bun run roark.ts review 123
+bun run roark.ts fix 123
+bun run roark.ts final-review 123
+bun run roark.ts readiness 123
 ```
 
 Standalone fix phases infer the next sensible pass, or you can choose one:
 
 ```bash
-bun run roark-coding-agent.ts fix 123 --fix-pass 2
-bun run roark-coding-agent.ts final-review 123 --fix-pass 2
+bun run roark.ts fix 123 --fix-pass 2
+bun run roark.ts final-review 123 --fix-pass 2
 ```
 
 Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue implementation when the git tree has pre-existing changes outside `.roark`. Use `--attempt <n>` with issue commands when you need to target a specific autorun attempt directory.
@@ -66,7 +89,7 @@ Use `--force` to regenerate an existing phase artifact. Use `--yes` to continue 
 After a draft PR exists, use `revise-pr` to respond to PR-scoped feedback without starting a new issue run:
 
 ```bash
-bun run roark-coding-agent.ts revise-pr 123 --repo owner/repo
+bun run roark.ts revise-pr 123 --repo owner/repo
 ```
 
 The workflow fetches PR metadata, unresolved review threads, and relevant PR comments with `gh api graphql` (including thread `isResolved` state), writes artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/`, checks out the existing PR head branch, plans feedback classifications, applies only `must-fix-current` items, runs one revision reviewer plus up to `--max-fix-passes` fix/review loops (default `1`), runs `--verify` (default `bun run typecheck`), then commits, pushes, and posts one PR summary comment only after review and verification pass.
@@ -88,13 +111,13 @@ Pinned source: `skills/github-issue-create/` is the repo-owned copy of the upstr
 Preview which issue would be picked up, without claiming or branching:
 
 ```bash
-bun run roark-coding-agent.ts auto --repo owner/repo --limit 1 --dry-run
+bun run roark.ts auto --repo owner/repo --limit 1 --dry-run
 ```
 
 Real one-shot run — claim one eligible issue, run the workflow, open a draft PR if both gates pass:
 
 ```bash
-bun run roark-coding-agent.ts auto --repo owner/repo --limit 1
+bun run roark.ts auto --repo owner/repo --limit 1
 ```
 
 ### How an auto run proceeds
@@ -162,7 +185,7 @@ A triage no-op is handled before these gates: autorun writes readiness, comments
 A failed autorun attempt is recoverable without relabeling the issue or starting from scratch. Run the command from the same checkout:
 
 ```bash
-bun run roark-coding-agent.ts continue 123 --repo owner/repo --attempt 1
+roark continue 123 --repo owner/repo --attempt 1
 ```
 
 If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It switches back to the attempt branch from `attempt.json`, reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns the verification gate, and publishes the draft PR only if both gates pass. If the existing triage artifact is a valid terminal non-`proceed` verdict, `continue` keeps that as a clean terminal outcome instead of proceeding into planning. This is the intended recovery path for cases like an empty review artifact, failed readiness, or failed verification.
@@ -220,7 +243,7 @@ Roark ships no daemon. To run autorun periodically, drive the one-shot command f
 **cron** (every hour, with a lock file to prevent overlapping runs):
 
 ```cron
-0 * * * * cd /path/to/repo && /usr/bin/flock -n /tmp/roark-auto.lock /usr/local/bin/bun run roark-coding-agent.ts auto --repo owner/repo --limit 1 >> /var/log/roark.log 2>&1
+0 * * * * cd /path/to/repo && /usr/bin/flock -n /tmp/roark-auto.lock /usr/local/bin/bun run roark.ts auto --repo owner/repo --limit 1 >> /var/log/roark.log 2>&1
 ```
 
 **launchd** (macOS, run hourly under the user's login session so `gh` keychain auth is available):
@@ -236,7 +259,7 @@ Roark ships no daemon. To run autorun periodically, drive the one-shot command f
     <array>
       <string>/usr/local/bin/bun</string>
       <string>run</string>
-      <string>roark-coding-agent.ts</string>
+      <string>roark.ts</string>
       <string>auto</string>
       <string>--repo</string><string>owner/repo</string>
       <string>--limit</string><string>1</string>
@@ -277,7 +300,7 @@ jobs:
       - run: bun install
       - env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bun run roark-coding-agent.ts auto --repo ${{ github.repository }} --limit 1
+        run: bun run roark.ts auto --repo ${{ github.repository }} --limit 1
 ```
 
 In every scheduling environment: keep `--limit 1`, serialize runs (a cron lock file, `launchd` not running on overlap, Actions `concurrency:`), use a dedicated host or runner so the working tree is not shared with humans, and confirm `gh auth status` succeeds as the scheduled user before relying on the schedule.

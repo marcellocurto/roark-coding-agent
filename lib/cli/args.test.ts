@@ -8,9 +8,13 @@ import {
 } from "../autorun/selection.ts";
 import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import { defaultMaxFixPasses, parseArgs } from "./args.ts";
+import { defaultMaxFixPasses, parseArgs, usage } from "./args.ts";
 
 describe("parseArgs", () => {
+  test("usage names the roark command", () => {
+    expect(usage.startsWith("roark <command> [issue] [options]")).toBe(true);
+  });
+
   test("parses auto defaults", () => {
     const parsed = parseArgs(["auto"]);
     expect("help" in parsed).toBe(false);

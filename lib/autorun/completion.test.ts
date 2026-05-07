@@ -89,11 +89,11 @@ describe("completeAutorunWorkflow", () => {
       workflowContext,
       attemptMetadata,
       attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
-      recoveryCommand: "bun run roark-coding-agent.ts continue 12 --attempt 1",
+      recoveryCommand: "roark continue 12 --attempt 1",
     }, {
       publishGate: async (input) => {
         expect(input.issue).toBe(issue);
-        expect(input.recoveryCommand).toBe("bun run roark-coding-agent.ts continue 12 --attempt 1");
+        expect(input.recoveryCommand).toBe("roark continue 12 --attempt 1");
         return { outcome: "failed-readiness", outcomeDetail: "readiness status is missing" };
       },
       markTriageStopped: async () => {
