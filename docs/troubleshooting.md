@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Troubleshooting
-
-Start with the command output, then inspect `.roark/runs` and the managed workspace. Roark tries to leave enough state behind for recovery instead of hiding failures.
-
 ## No Eligible Issues
 
 Symptoms:

@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Configuration
-
-Roark loads repository configuration from `.roark/config.json` at the Git root of the control checkout.
-
 ## Precedence
 
 For most options, Roark uses this order:

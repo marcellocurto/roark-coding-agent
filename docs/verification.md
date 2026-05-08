@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Verification
-
-Roark publishes only when both readiness and verification pass.
-
 ## Gate Order
 
 ```mermaid

@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Lifecycle hooks
-
-Lifecycle hooks are shell commands configured in `.roark/config.json` under `hooks`.
-
 ```json
 {
   "hooks": {

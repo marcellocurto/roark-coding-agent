@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Managed workspaces
-
-Roark autorun uses managed clone workspaces so agent work happens away from the control checkout.
-
 ## Workspace layout
 
 By default, workspaces live under:

@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Issue Curation
-
-Issue curation turns reviewer findings from an issue workflow into a deterministic plan for new GitHub issues.
-
 Use it when Roark found valid work that should not be folded into the current issue.
 
 ## Commands

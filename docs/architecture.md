@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Architecture
-
-This page is for contributors changing Roark itself.
-
 ## System Shape
 
 ```mermaid

@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# PR revisions
-
-Use `revise-pr` after a draft PR already exists and you want Roark to respond to PR-scoped feedback.
-
 ```bash
 roark revise-pr 123 --repo owner/repo
 ```

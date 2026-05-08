@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Roark documentation
-
-Roark is a local workflow runner for GitHub issues. It coordinates managed workspaces, Pi coding-agent phases, verification gates, run artifacts, and draft pull request publishing.
-
 ## Quick Start
 
 ```bash

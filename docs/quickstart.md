@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Quickstart
-
-This page gets a target repository from zero Roark setup to one verified issue run.
-
 ## Prerequisites
 
 Install and authenticate the tools Roark uses:

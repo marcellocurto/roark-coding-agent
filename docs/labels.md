@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Labels
-
-Roark uses GitHub labels for autorun eligibility, lifecycle status, failure status, and generated issue classification.
-
 See [Label semantics](label-semantics.md) for the full reference.
 
 Common defaults:

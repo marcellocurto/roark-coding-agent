@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Recovery
-
-When autorun stops, it leaves the managed workspace and run artifacts for inspection.
-
 ## Continue an attempt
 
 ```bash

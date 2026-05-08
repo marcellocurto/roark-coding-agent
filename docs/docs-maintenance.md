@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Docs Maintenance
-
-Use this page when changing commands, options, config keys, workflow phases, labels, artifacts, or operational behavior.
-
 ## Update Checklist
 
 When behavior changes, check whether these pages need edits:

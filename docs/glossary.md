@@ -5,8 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Glossary
-
 ## Agent Phase
 
 A workflow step that calls the Pi coding-agent SDK, such as planning, implementation, review, or fix.

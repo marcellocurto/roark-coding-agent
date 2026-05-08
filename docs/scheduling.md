@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Scheduling
-
-Roark ships no daemon. Run it periodically with an external scheduler.
-
 ## Principles
 
 - Keep `--limit 1` unless you intentionally want multiple issues per invocation.

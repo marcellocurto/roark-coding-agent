@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Roark label semantics
-
-This page summarizes the GitHub labels Roark reads, applies, or assigns to generated issues during autorun and issue-curation workflows.
-
 ## Autorun eligibility
 
 Autorun is label-gated. An open issue is eligible only when both are true:

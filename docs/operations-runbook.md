@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Operations Runbook
-
-Use this page when Roark runs periodically or on shared infrastructure.
-
 ## Host Setup
 
 Use a dedicated machine, VM, runner, or user account. Avoid sharing a control checkout with humans.

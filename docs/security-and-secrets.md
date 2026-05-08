@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Security and Secrets
-
-Roark operates on GitHub issues, comments, PR feedback, local files, managed workspaces, and shell commands. Treat each boundary deliberately.
-
 ## Threat Boundaries
 
 | Boundary | Risk | Rule |

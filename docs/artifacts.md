@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Artifacts
-
-Roark writes durable reasoning and run state under `.roark/runs`.
-
 Artifacts are useful for:
 
 - understanding why a run stopped

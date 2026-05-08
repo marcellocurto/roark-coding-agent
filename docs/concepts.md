@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T07:00:00Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Concepts
-
-Roark is a local workflow runner for GitHub issues. It coordinates GitHub, a Pi coding-agent run, local workspaces, verification commands, and draft pull request publishing.
-
 ## Mental Model
 
 ```mermaid

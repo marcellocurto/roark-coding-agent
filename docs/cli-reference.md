@@ -5,8 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# CLI Reference
-
 Use the installed binary:
 
 ```bash

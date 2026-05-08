@@ -5,10 +5,6 @@ dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
 
-# Autorun
-
-`roark auto` is a one-shot, label-gated, draft-PR-only workflow.
-
 ```bash
 roark auto --repo owner/repo --limit 1
 ```
