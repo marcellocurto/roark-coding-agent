@@ -62,6 +62,11 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
   if (existsSync(agentCwd)) {
     await assertDirectory(agentCwd);
     await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+    if (await hasGitChanges(agentCwd)) {
+      throw new Error(
+        `Issue worktree '${agentCwd}' has uncommitted changes. Use 'roark continue ${options.plan.issueNumber} --cwd ${options.controlCwd}' to recover a failed attempt, or clean the worktree before starting fresh auto work.`,
+      );
+    }
     await updateIssueBranchFromBase({ agentCwd, baseBranch: options.plan.baseBranch });
     return agentCwd;
   }
@@ -116,15 +121,38 @@ export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunB
   await ensureIssueWorktree({ controlCwd: options.cwd, plan: options.plan });
 }
 
-export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan; worktreePath?: string }): Promise<void> {
+export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan; worktreePath?: string }): Promise<string> {
   const agentCwd = path.resolve(options.worktreePath ?? autorunWorktreePath(options.cwd, options.plan.issueNumber));
-  if (!existsSync(agentCwd)) {
-    throw new Error(
-      `Cannot continue autorun attempt for #${options.plan.issueNumber}: worktree '${agentCwd}' does not exist.`,
-    );
+  if (existsSync(agentCwd)) {
+    await assertDirectory(agentCwd);
+    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+    return agentCwd;
   }
-  await assertDirectory(agentCwd);
+
+  await ensureRoarkWorktreesIgnored(options.cwd);
+  await mkdir(path.dirname(agentCwd), { recursive: true });
+  await runProcessOrThrow(["git", "worktree", "prune"], { cwd: options.cwd, label: "git worktree prune" });
+
+  if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName })) {
+    await runProcessOrThrow(["git", "worktree", "add", agentCwd, options.plan.branchName], {
+      cwd: options.cwd,
+      label: "git worktree add",
+    });
+  } else {
+    await fetchOriginIfAvailable(options.cwd);
+    if (!(await gitRemoteBranchExists({ cwd: options.cwd, branchName: options.plan.branchName }))) {
+      throw new Error(
+        `Cannot continue autorun attempt for #${options.plan.issueNumber}: worktree '${agentCwd}' is missing and neither local branch '${options.plan.branchName}' nor remote branch 'origin/${options.plan.branchName}' exists.`,
+      );
+    }
+    await runProcessOrThrow(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.branchName}`], {
+      cwd: options.cwd,
+      label: "git worktree add -b",
+    });
+  }
+
   await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+  return agentCwd;
 }
 
 async function assertDirectory(directoryPath: string): Promise<void> {
@@ -157,4 +185,15 @@ async function gitBranchExists(options: { cwd: string; branchName: string }): Pr
     cwd: options.cwd,
   });
   return result.exitCode === 0;
+}
+
+async function gitRemoteBranchExists(options: { cwd: string; branchName: string }): Promise<boolean> {
+  const result = await runProcess(["git", "show-ref", "--verify", "--quiet", `refs/remotes/origin/${options.branchName}`], {
+    cwd: options.cwd,
+  });
+  return result.exitCode === 0;
+}
+
+async function fetchOriginIfAvailable(cwd: string): Promise<void> {
+  await runProcess(["git", "fetch", "origin"], { cwd });
 }

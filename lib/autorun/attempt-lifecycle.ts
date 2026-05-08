@@ -149,6 +149,8 @@ async function markWorkflowError(
     issueUrl: issue.url,
     phase,
     reason: formatError(error),
+    branchName: attemptMetadata.branch,
+    worktreePath: attemptMetadata.worktreePath,
     artifactPath: errorArtifact?.path,
     artifactContent: errorArtifact?.content,
     attemptMetadataPath,
@@ -201,6 +203,7 @@ async function readErrorArtifact(
 function recoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): string {
   return formatContinueCommand({
     issueNumber: input.attemptMetadata.issueNumber,
+    cwd: input.gateOptions.cwd,
     repo: input.gateOptions.repo,
     attempt: input.attemptMetadata.attempt,
     yes,

@@ -4,8 +4,8 @@ import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 
 describe("formatContinueCommand", () => {
   test("formats the command needed to continue a specific attempt", () => {
-    expect(formatContinueCommand({ issueNumber: 11, repo: "owner/repo", attempt: 1 })).toBe(
-      "roark continue 11 --repo owner/repo --attempt 1",
+    expect(formatContinueCommand({ issueNumber: 11, cwd: "/repo", repo: "owner/repo", attempt: 1 })).toBe(
+      "roark continue 11 --cwd /repo --repo owner/repo --attempt 1",
     );
   });
 
@@ -16,8 +16,8 @@ describe("formatContinueCommand", () => {
   });
 
   test("appends --yes when dirty-tree recovery is expected", () => {
-    expect(formatContinueCommand({ issueNumber: 11, repo: "owner/repo", attempt: 1, yes: true })).toBe(
-      "roark continue 11 --repo owner/repo --attempt 1 --yes",
+    expect(formatContinueCommand({ issueNumber: 11, cwd: "/repo", repo: "owner/repo", attempt: 1, yes: true })).toBe(
+      "roark continue 11 --cwd /repo --repo owner/repo --attempt 1 --yes",
     );
   });
 });

@@ -3,6 +3,7 @@ import { isTransientAgentConnectionError } from "../workflow/transient-agent-err
 
 export type ContinueCommandInput = {
   issueNumber: number | string;
+  cwd?: string;
   repo?: string;
   attempt?: number;
   yes?: boolean;
@@ -10,6 +11,7 @@ export type ContinueCommandInput = {
 
 export function formatContinueCommand(input: ContinueCommandInput): string {
   const args = ["roark", "continue", String(input.issueNumber)];
+  if (input.cwd) args.push("--cwd", input.cwd);
   if (input.repo) args.push("--repo", input.repo);
   if (input.attempt !== undefined) args.push("--attempt", String(input.attempt));
   if (input.yes) args.push("--yes");

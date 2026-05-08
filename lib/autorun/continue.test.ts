@@ -6,6 +6,7 @@ import type { ContinueCliOptions } from "../cli/args.ts";
 import { writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
+import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
 
 const tempDirs: string[] = [];
@@ -70,7 +71,7 @@ describe("runAutoContinue", () => {
       issueNumber: 24,
       branch: "roark/issue-24",
       baseBranch: "main",
-      worktreePath: cwd,
+      worktreePath: path.join(cwd, "deleted-worktree"),
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     }));
@@ -83,6 +84,7 @@ describe("runAutoContinue", () => {
 
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
     expect(metadata.outcome).toBe("errored");
+    expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
     expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(4242);
     expect(metadata.githubComments?.issue?.["review-b"]?.id).toBe(4242);
   });
@@ -114,7 +116,7 @@ async function initGitRepo(cwd: string, branchName: string): Promise<void> {
   await writeFile(path.join(cwd, "README.md"), "test\n", "utf8");
   await run(cwd, ["git", "add", "README.md"]);
   await run(cwd, ["git", "commit", "-m", "initial"]);
-  await run(cwd, ["git", "switch", "-c", branchName]);
+  await run(cwd, ["git", "branch", branchName]);
 }
 
 async function installFakeGh(cwd: string): Promise<void> {
