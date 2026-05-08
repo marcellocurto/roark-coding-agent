@@ -20,7 +20,7 @@ import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
 
 export async function runAutoContinue(
   options: ContinueCliOptions,
@@ -132,7 +132,10 @@ export async function runAutoContinue(
         console.log("\nContinuation plan:");
         for (const line of formatContinuationPlan(plan)) console.log(line);
       },
-      beforeRun: async () => runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd),
+      beforeRun: async () => {
+        await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
+        await runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd);
+      },
       afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
     }, { clock });
   } finally {
@@ -174,6 +177,7 @@ function createGateOptions(
     remote: options.remote,
     baseBranch,
     hooks: options.hooks,
+    workspace: options.workspace,
   };
 }
 

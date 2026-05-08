@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { runProcess, runProcessOrThrow, type ProcessResult } from "../cli/process.ts";
@@ -17,6 +17,7 @@ export type WorkspaceConfig = {
   strategy: WorkspaceStrategy;
   cloneRemote: string;
   clone: WorkspaceCloneConfig;
+  copyToWorktree: string[];
 };
 
 export type LifecycleHooksConfig = {
@@ -53,6 +54,7 @@ export const defaultWorkspaceConfig: WorkspaceConfig = {
   strategy: "clone",
   cloneRemote: "origin",
   clone: { filter: "blob:none", depth: null },
+  copyToWorktree: [],
 };
 export const defaultLifecycleHooks: LifecycleHooksConfig = { timeoutMs: 600_000 };
 
@@ -153,6 +155,7 @@ export async function prepareCloneWorkspace(input: {
       await runProcessOrThrowWithRunner(runner, cloneArgs, { cwd: input.controlCwd, label: "git clone" });
       try {
         await checkoutWorkspaceBranch({ cwd: workspacePath, plan: input.plan, runner });
+        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
         await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
       } catch (error) {
         await writePoisonState(workspacePath, error);
@@ -167,6 +170,7 @@ export async function prepareCloneWorkspace(input: {
         );
       }
       await updateWorkspaceFromBase({ cwd: workspacePath, baseBranch: input.plan.baseBranch, preserveUncommitted: input.mode === "continue", runner });
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
     }
 
     return {
@@ -184,6 +188,114 @@ export async function prepareCloneWorkspace(input: {
     await releaseLock();
     throw error;
   }
+}
+
+export async function refreshCopyToWorktree(input: {
+  controlCwd: string;
+  worktreePath: string;
+  copyToWorktree?: readonly string[];
+  runner?: ProcessRunner;
+}): Promise<void> {
+  const entries = input.copyToWorktree ?? [];
+  if (entries.length === 0) return;
+  const runner = input.runner ?? runProcess;
+  const preflight: Array<{ entry: string; source: string; destination: string }> = [];
+
+  for (const rawEntry of entries) {
+    const entry = validateCopyToWorktreeEntry(rawEntry, "workspace.copyToWorktree");
+    const source = path.resolve(input.controlCwd, entry);
+    const destination = path.resolve(input.worktreePath, entry);
+    assertPathInsideRoot({ root: path.resolve(input.controlCwd), target: source });
+    assertPathInsideRoot({ root: path.resolve(input.worktreePath), target: destination });
+    await assertCopyDestinationParentsSafe({ worktreePath: input.worktreePath, destination, entry });
+
+    try {
+      await stat(source);
+    } catch {
+      throw new Error(`Configured workspace.copyToWorktree source '${entry}' is missing at '${source}'.`);
+    }
+
+    const ignored = await runner(["git", "check-ignore", "--quiet", "--", entry], { cwd: input.worktreePath });
+    if (ignored.exitCode !== 0) {
+      const detail = ignored.exitCode === 1 ? "path is not ignored" : `git check-ignore failed: ${tail(ignored.stderr || ignored.stdout) || "(empty)"}`;
+      throw new Error(`Refusing to copy workspace.copyToWorktree path '${entry}': destination must be ignored by Git in '${input.worktreePath}' (${detail}).`);
+    }
+
+    preflight.push({ entry, source, destination });
+  }
+
+  for (const item of preflight) {
+    await rm(item.destination, { recursive: true, force: true });
+    await copyDereferenced(item.source, item.destination);
+
+    const status = await runner(["git", "status", "--porcelain", "--", item.entry], { cwd: input.worktreePath });
+    if (status.exitCode !== 0) {
+      throw new Error(`git status check failed after copying workspace.copyToWorktree path '${item.entry}': ${tail(status.stderr || status.stdout)}`);
+    }
+    if (status.stdout.trim() !== "") {
+      throw new Error(`Refusing copied workspace.copyToWorktree path '${item.entry}': copied destination is visible to Git.\n${status.stdout.trim()}`);
+    }
+  }
+}
+
+export function validateCopyToWorktreeEntry(value: string, keyPath = "workspace.copyToWorktree"): string {
+  if (typeof value !== "string" || value.trim() === "") throw new Error(`${keyPath} entries must be non-empty strings.`);
+  const entry = value.trim().replace(/\\+/g, "/");
+  if (entry.includes("*") || entry.includes("?") || entry.includes("[")) throw new Error(`${keyPath} entry '${value}' must be a literal path; globs are not supported.`);
+  if (path.isAbsolute(entry) || /^[A-Za-z]:\//.test(entry) || entry.startsWith("//")) throw new Error(`${keyPath} entry '${value}' must be a relative path.`);
+  const segments = entry.split("/").filter(Boolean);
+  if (segments.length === 0) throw new Error(`${keyPath} entry '${value}' must be a non-empty relative path.`);
+  if (segments.some((segment) => segment === "..")) throw new Error(`${keyPath} entry '${value}' must not contain parent traversal.`);
+  if (segments.some((segment) => segment === ".git")) throw new Error(`${keyPath} entry '${value}' must not target .git.`);
+  return segments.join("/");
+}
+
+async function assertCopyDestinationParentsSafe(input: { worktreePath: string; destination: string; entry: string }): Promise<void> {
+  const root = path.resolve(input.worktreePath);
+  const destination = path.resolve(input.destination);
+  assertPathInsideRoot({ root, target: destination });
+  const rootStat = await lstat(root);
+  if (rootStat.isSymbolicLink()) throw new Error(`Refusing to copy workspace.copyToWorktree path '${input.entry}': worktree path '${root}' is a symlink.`);
+  const rootReal = await realpath(root);
+  let current = root;
+  const relativeParent = path.relative(root, path.dirname(destination));
+  for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    let currentStat;
+    try {
+      currentStat = await lstat(current);
+    } catch (error) {
+      if (isNotFoundError(error)) break;
+      throw error;
+    }
+    if (currentStat.isSymbolicLink()) {
+      throw new Error(`Refusing to copy workspace.copyToWorktree path '${input.entry}': destination parent '${current}' is a symlink.`);
+    }
+    const currentReal = await realpath(current);
+    assertPathInsideRoot({ root: rootReal, target: currentReal });
+  }
+}
+
+async function copyDereferenced(source: string, destination: string): Promise<void> {
+  const sourceStat = await stat(source);
+  const mode = sourceStat.mode & 0o7777;
+  if (sourceStat.isDirectory()) {
+    await mkdir(destination, { recursive: true, mode });
+    await chmod(destination, mode);
+    const entries = await readdir(source, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyDereferenced(path.join(source, entry.name), path.join(destination, entry.name));
+    }
+    await chmod(destination, mode);
+    return;
+  }
+  if (sourceStat.isFile()) {
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(source, destination);
+    await chmod(destination, mode);
+    return;
+  }
+  throw new Error(`Cannot copy workspace.copyToWorktree source '${source}': unsupported file type.`);
 }
 
 export async function runLifecycleHook(
@@ -399,6 +511,10 @@ function parseDurationMs(value: string): number {
   if (unit === "d") return amount * 24 * 60 * 60 * 1000;
   if (unit === "h") return amount * 60 * 60 * 1000;
   return amount * 60 * 1000;
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT";
 }
 
 function tail(value: string, max = 4000): string {

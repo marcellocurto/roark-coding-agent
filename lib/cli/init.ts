@@ -10,7 +10,7 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultMaxFixPasses, type InitCliOptions } from "./args.ts";
-import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig, type WorkspaceConfig } from "../autorun/workspace.ts";
 import { inferRepoFromOrigin, inferVerifyCommand, type RoarkConfig } from "./hydrate.ts";
 import { runProcess, type ProcessResult } from "./process.ts";
 
@@ -27,6 +27,8 @@ export type InitResult = {
 type InitDependencies = {
   runner?: ProcessRunner;
 };
+
+type InitRoarkConfig = Omit<RoarkConfig, "workspace"> & { workspace: Omit<WorkspaceConfig, "copyToWorktree"> };
 
 const managedFiles = [".roark/config.json", ".roark/WORKFLOW.md", ".roark/.gitignore"] as const;
 
@@ -89,7 +91,8 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   };
 }
 
-function buildInitConfig(input: { repo: string; verify?: string; setupHook?: string }): RoarkConfig {
+function buildInitConfig(input: { repo: string; verify?: string; setupHook?: string }): InitRoarkConfig {
+  const { copyToWorktree: _copyToWorktree, ...workspaceDefaults } = defaultWorkspaceConfig;
   return {
     repo: input.repo,
     baseBranch: defaultAutorunBaseBranch,
@@ -100,7 +103,7 @@ function buildInitConfig(input: { repo: string; verify?: string; setupHook?: str
     failureLabel: defaultAutorunFailureLabel,
     skipLabels: [...defaultAutorunSkipLabels],
     maxFixPasses: defaultMaxFixPasses,
-    workspace: defaultWorkspaceConfig,
+    workspace: workspaceDefaults,
     hooks: {
       ...(input.setupHook ? { afterCreate: input.setupHook, beforeRun: input.setupHook, beforeVerify: input.setupHook } : {}),
       timeoutMs: defaultLifecycleHooks.timeoutMs,

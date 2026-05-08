@@ -25,6 +25,7 @@ import {
 import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
+  validateCopyToWorktreeEntry,
   type LifecycleHooksConfig,
   type WorkspaceConfig,
 } from "../autorun/workspace.ts";
@@ -268,7 +269,7 @@ function parseWorkspaceConfig(value: unknown, configPath: string): WorkspaceConf
     throw new Error(`Invalid Roark config at ${configPath}: 'workspace' must be an object.`);
   }
   const record = value as Record<string, unknown>;
-  assertKnownNestedKeys(record, new Set(["root", "strategy", "cloneRemote", "clone"]), "workspace", configPath);
+  assertKnownNestedKeys(record, new Set(["root", "strategy", "cloneRemote", "clone", "copyToWorktree"]), "workspace", configPath);
   const strategy = record.strategy ?? defaultWorkspaceConfig.strategy;
   if (strategy !== "clone") throw new Error(`Invalid Roark config at ${configPath}: 'workspace.strategy' must be 'clone'.`);
   const root = record.root ?? defaultWorkspaceConfig.root;
@@ -297,7 +298,23 @@ function parseWorkspaceConfig(value: unknown, configPath: string): WorkspaceConf
     }
   }
 
-  return { root, strategy: "clone", cloneRemote, clone };
+  const copyToWorktree = parseCopyToWorktree(record.copyToWorktree, configPath);
+
+  return { root, strategy: "clone", cloneRemote, clone, copyToWorktree };
+}
+
+function parseCopyToWorktree(value: unknown, configPath: string): string[] {
+  if (value === undefined) return [...defaultWorkspaceConfig.copyToWorktree];
+  if (!Array.isArray(value)) throw new Error(`Invalid Roark config at ${configPath}: 'workspace.copyToWorktree' must be an array of relative paths.`);
+  return value.map((entry, index) => {
+    if (typeof entry !== "string") throw new Error(`Invalid Roark config at ${configPath}: 'workspace.copyToWorktree[${index}]' must be a non-empty string.`);
+    try {
+      return validateCopyToWorktreeEntry(entry, `workspace.copyToWorktree[${index}]`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(`Invalid Roark config at ${configPath}: ${detail}`);
+    }
+  });
 }
 
 function parseHooksConfig(value: unknown, configPath: string): LifecycleHooksConfig {

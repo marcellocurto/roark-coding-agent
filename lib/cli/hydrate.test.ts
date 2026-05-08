@@ -79,6 +79,7 @@ describe("hydrateCliOptions", () => {
         strategy: "clone",
         cloneRemote: "upstream",
         clone: { filter: null, depth: 2 },
+        copyToWorktree: [".secrets/env"],
       },
       hooks: {
         afterCreate: "npm ci",
@@ -101,6 +102,7 @@ describe("hydrateCliOptions", () => {
       strategy: "clone",
       cloneRemote: "upstream",
       clone: { filter: null, depth: 2 },
+      copyToWorktree: [".secrets/env"],
     });
     expect(autoHydrated.hooks).toEqual({
       afterCreate: "npm ci",
@@ -134,6 +136,26 @@ describe("hydrateCliOptions", () => {
     const strategyRaw = parseArgs(["auto", "--cwd", withWorktreeStrategy]);
     if ("help" in strategyRaw) throw new Error("expected options");
     await expect(hydrateCliOptions(strategyRaw)).rejects.toThrow("workspace.strategy' must be 'clone'");
+
+    const withInvalidCopy = await tempGitRepo();
+    await writeConfig(withInvalidCopy, { workspace: { copyToWorktree: [".secrets/env", "../escape"] }, verify: "bun test", repo: "owner/repo" });
+    const invalidCopyRaw = parseArgs(["auto", "--cwd", withInvalidCopy]);
+    if ("help" in invalidCopyRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(invalidCopyRaw)).rejects.toThrow("workspace.copyToWorktree[1]");
+
+    const withGlobCopy = await tempGitRepo();
+    await writeConfig(withGlobCopy, { workspace: { copyToWorktree: ["secrets/*"] }, verify: "bun test", repo: "owner/repo" });
+    const globCopyRaw = parseArgs(["auto", "--cwd", withGlobCopy]);
+    if ("help" in globCopyRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(globCopyRaw)).rejects.toThrow("globs are not supported");
+
+    for (const [entry, message] of [["/abs", "must be a relative path"], [".git/config", "must not target .git"], ["", "non-empty"], [42, "non-empty string"]] as const) {
+      const repo = await tempGitRepo();
+      await writeConfig(repo, { workspace: { copyToWorktree: [entry] }, verify: "bun test", repo: "owner/repo" });
+      const raw = parseArgs(["auto", "--cwd", repo]);
+      if ("help" in raw) throw new Error("expected options");
+      await expect(hydrateCliOptions(raw)).rejects.toThrow(message);
+    }
 
     const withInvalidHook = await tempGitRepo();
     await writeConfig(withInvalidHook, { hooks: { beforeRun: "" }, verify: "bun test", repo: "owner/repo" });

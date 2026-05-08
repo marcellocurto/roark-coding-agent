@@ -60,7 +60,12 @@ describe("runInit", () => {
       failureLabel: defaultAutorunFailureLabel,
       skipLabels: [...defaultAutorunSkipLabels],
       maxFixPasses: defaultMaxFixPasses,
-      workspace: defaultWorkspaceConfig,
+      workspace: {
+        root: defaultWorkspaceConfig.root,
+        strategy: defaultWorkspaceConfig.strategy,
+        cloneRemote: defaultWorkspaceConfig.cloneRemote,
+        clone: defaultWorkspaceConfig.clone,
+      },
       hooks: { timeoutMs: defaultLifecycleHooks.timeoutMs },
       sandbox: { provider: "host" },
     });
