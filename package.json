@@ -17,6 +17,7 @@
   "scripts": {
     "start": "bun run roark.ts",
     "agent": "bun run roark.ts",
+    "install-global": "bun install -g \"$PWD\"",
     "do": "bun run roark.ts do",
     "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",

@@ -10,13 +10,22 @@ bun install
 
 ## Global/operator usage
 
+Install from an absolute package path. Bun currently treats `bun install -g .` as an anonymous package and may not link the `roark` binary.
+
 ```bash
-bun install -g .
+bun install -g "$PWD"
+command -v roark
 roark --help
 roark
 roark auto 4
 roark continue 4
 roark do 4
+```
+
+You can also run the convenience script from this checkout:
+
+```bash
+bun run install-global
 ```
 
 Bare `roark` in an interactive terminal opens a small menu for common commands.
