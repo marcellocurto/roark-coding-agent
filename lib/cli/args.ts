@@ -6,6 +6,7 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
+import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig } from "../autorun/workspace.ts";
 
 export type IssueWorkflowCommand =
   | "do"
@@ -23,8 +24,9 @@ export type IssueWorkflowCommand =
 export type ContinueCommand = "continue";
 export type StatusCommand = "status";
 export type InitCommand = "init";
+export type WorkspaceCommand = "workspace";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -66,6 +68,8 @@ export type AutoCliOptions = {
   maxFixPasses: number;
   force: boolean;
   yes: boolean;
+  workspace?: WorkspaceConfig;
+  hooks?: LifecycleHooksConfig;
 };
 
 export type ContinueCliOptions = {
@@ -85,6 +89,8 @@ export type ContinueCliOptions = {
   successLabel: string;
   inProgressLabel: string;
   remote: string;
+  workspace?: WorkspaceConfig;
+  hooks?: LifecycleHooksConfig;
 };
 
 export type RevisePrCliOptions = {
@@ -124,7 +130,7 @@ export type InitCliOptions = {
   yes?: never;
 };
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions;
+export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions;
 
 export type RawIssueCliOptions = {
   command: IssueWorkflowCommand;
@@ -217,13 +223,19 @@ export type RawInitCliOptions = {
   force?: true;
 };
 
+export type RawWorkspaceCliOptions =
+  | { command: "workspace"; action: "list"; cwd?: string; repo?: string }
+  | { command: "workspace"; action: "remove"; issue: number; cwd?: string; repo?: string; force?: true }
+  | { command: "workspace"; action: "prune"; olderThan: string; cwd?: string; repo?: string; force?: true };
+
 export type RawCliOptions =
   | RawIssueCliOptions
   | RawAutoCliOptions
   | RawRevisePrCliOptions
   | RawContinueCliOptions
   | RawStatusCliOptions
-  | RawInitCliOptions;
+  | RawInitCliOptions
+  | RawWorkspaceCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
@@ -239,7 +251,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "create-issues",
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status", "init"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status", "init", "workspace"]);
 
 export const defaultMaxFixPasses = 3;
 
@@ -251,6 +263,11 @@ Commands:
   revise-pr <number>     Manually revise an existing open PR from PR feedback.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   status [issue]         Print persisted run observability status; use --all for all known issues.
+  workspace list         List managed clone workspaces.
+  workspace remove --issue <n> [--force]
+                        Remove one managed workspace; dirty workspaces require --force.
+  workspace prune --older-than <duration> [--force]
+                        Remove old clean workspaces, e.g. --older-than 30d.
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
@@ -307,6 +324,7 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   }
 
   if (rawCommand === "init") return parseInitArgs(rest);
+  if (rawCommand === "workspace") return parseWorkspaceArgs(rest);
   if (rawCommand === "auto") return parseAutoArgs(rest);
   if (rawCommand === "revise-pr") return parseRevisePrArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
@@ -327,6 +345,44 @@ function parseInitArgs(args: string[]): RawInitCliOptions {
   }
 
   return options;
+}
+
+function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
+  const [action, ...rest] = args;
+  if (action !== "list" && action !== "remove" && action !== "prune") {
+    throw new Error(`workspace requires one of: list, remove, prune.\n\n${usage}`);
+  }
+
+  let cwd: string | undefined;
+  let repo: string | undefined;
+  let force: true | undefined;
+  let issue: number | undefined;
+  let olderThan: string | undefined;
+
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--cwd") cwd = requiredValue(rest, ++index, arg);
+    else if (arg === "--repo") repo = requiredValue(rest, ++index, arg);
+    else if (arg === "--force") force = true;
+    else if (arg === "--issue") issue = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--older-than") olderThan = requiredValue(rest, ++index, arg);
+    else if (arg?.startsWith("--")) throw new Error(`Unknown option '${arg}'.\n\n${usage}`);
+    else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
+  }
+
+  if (action === "list") {
+    if (force || issue !== undefined || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
+    return { command: "workspace", action, cwd, repo };
+  }
+  if (action === "remove") {
+    if (issue === undefined) throw new Error("workspace remove requires --issue <n>.");
+    if (olderThan !== undefined) throw new Error("workspace remove cannot be combined with --older-than.");
+    return { command: "workspace", action, issue, cwd, repo, force };
+  }
+
+  if (!olderThan) throw new Error("workspace prune requires --older-than <duration>.");
+  if (issue !== undefined) throw new Error("workspace prune cannot be combined with --issue.");
+  return { command: "workspace", action, olderThan, cwd, repo, force };
 }
 
 function parseAutoArgs(args: string[]): RawAutoCliOptions {

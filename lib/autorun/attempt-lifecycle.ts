@@ -32,6 +32,8 @@ export type RunAutorunAttemptLifecycleInput = {
   issue?: AutorunIssueCandidate;
   loadIssue?: () => Promise<AutorunIssueCandidate>;
   beforeWorkflow?: (attemptMetadata: AttemptMetadata) => Promise<void>;
+  beforeRun?: (attemptMetadata: AttemptMetadata) => Promise<void>;
+  afterRun?: (attemptMetadata: AttemptMetadata) => Promise<void>;
   runner?: AgentRunner;
   logPrefix?: string;
   inProgressOutcomeDetail?: string | null;
@@ -72,6 +74,9 @@ export async function runAutorunAttemptLifecycle(
     await input.beforeWorkflow?.(attemptMetadata);
     await persistAttempt(input.issueDir, attemptMetadata);
 
+    await input.beforeRun?.(attemptMetadata);
+    await persistAttempt(input.issueDir, attemptMetadata);
+
     const workflowResult = await runWorkflow(input.workflowContext, input.runner);
     const issue = await resolveIssue(input);
     const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
@@ -93,6 +98,11 @@ export async function runAutorunAttemptLifecycle(
     await markWorkflowError(input, injected, attemptMetadata, error);
     throw error;
   } finally {
+    try {
+      await input.afterRun?.(attemptMetadata);
+    } catch (error) {
+      console.warn(`afterRun hook failed: ${formatError(error)}`);
+    }
     const endedAt = clock.now();
     attemptMetadata = formatAttemptMetadata({
       ...attemptMetadata,
@@ -151,6 +161,7 @@ async function markWorkflowError(
     reason: formatError(error),
     branchName: attemptMetadata.branch,
     worktreePath: attemptMetadata.worktreePath,
+    workspacePath: attemptMetadata.workspace?.path,
     artifactPath: errorArtifact?.path,
     artifactContent: errorArtifact?.content,
     attemptMetadataPath,

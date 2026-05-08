@@ -56,6 +56,71 @@ describe("runAutoContinue", () => {
     await runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 });
   });
 
+  test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-managed-"));
+    tempDirs.push(cwd, workspacePath);
+    await installFakeGh(cwd);
+
+    const workflowContext: WorkflowContext = {
+      controlCwd: cwd,
+      agentCwd: workspacePath,
+      outDir: path.join(cwd, ".roark/runs"),
+      runDir: path.join(cwd, ".roark/runs/issue/24/attempts/2"),
+      runDirRelative: ".roark/runs/issue/24/attempts/2",
+      issueInput: "24",
+      issueNumber: "24",
+      repo: "owner/repo",
+      attempt: 2,
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+    };
+    await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
+    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
+      attempt: 2,
+      issueNumber: 24,
+      branch: "roark/issue-24",
+      baseBranch: "main",
+      worktreePath: path.join(cwd, "legacy-worktree"),
+      workspace: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
+      runArtifactPath: workflowContext.runDirRelative,
+      startedAt: "2026-05-07T00:00:00.000Z",
+    }));
+
+    const calls: string[] = [];
+    await expect(runAutoContinue({
+      ...continueOptions,
+      issue: "24",
+      cwd,
+      attempt: 2,
+      hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
+    }, {
+      ensureAutorunLabelContract: async () => ({ existing: [], missing: [], created: [] }),
+      prepareCloneWorkspace: async (input) => {
+        calls.push(`prepare:${input.workspacePath}`);
+        expect(input.mode).toBe("continue");
+        expect(input.workspacePath).toBe(workspacePath);
+        return {
+          path: workspacePath,
+          metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
+          releaseLock: async () => { calls.push("release"); },
+        };
+      },
+      runner: async (_request: AgentRunRequest) => {
+        calls.push("runner");
+        throw new Error("triage failed");
+      },
+    })).rejects.toThrow("Triage failed: triage failed");
+
+    expect(calls).toEqual([`prepare:${workspacePath}`, "runner", "release"]);
+    expect(await Bun.file(path.join(workspacePath, "before-run.txt")).text()).toBe("before");
+    const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
+    expect(metadata.worktreePath).toBe(workspacePath);
+    expect(metadata.workspace?.path).toBe(workspacePath);
+    expect(metadata.outcome).toBe("errored");
+  });
+
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
     tempDirs.push(cwd);

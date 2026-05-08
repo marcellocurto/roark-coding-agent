@@ -12,6 +12,7 @@ export type FailureCommentInput = {
   reason: string;
   branchName?: string;
   worktreePath?: string;
+  workspacePath?: string;
   artifactPath?: string;
   artifactContent?: string;
   attemptMetadataPath?: string;
@@ -48,7 +49,8 @@ export function formatFailureComment(input: FailureCommentInput): string {
 
   lines.push(`Issue: #${input.issueNumber}`);
   if (input.branchName) lines.push(`Branch: \`${input.branchName}\``);
-  if (input.worktreePath) lines.push(`Worktree: \`${input.worktreePath}\``);
+  if (input.workspacePath) lines.push(`Workspace: \`${input.workspacePath}\``);
+  else if (input.worktreePath) lines.push(`Worktree: \`${input.worktreePath}\``);
   if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
 

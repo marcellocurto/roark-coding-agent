@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ContinueCliOptions, IssueCliOptions } from "../cli/args.ts";
 import { fetchGitHubIssue, parseIssueRef, type GitHubIssue } from "../github/issue.ts";
@@ -19,13 +20,21 @@ import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
 
 export async function runAutoContinue(
   options: ContinueCliOptions,
-  injected: { clock?: Clock; runner?: AgentRunner } = {},
+  injected: {
+    clock?: Clock;
+    runner?: AgentRunner;
+    prepareCloneWorkspace?: typeof prepareCloneWorkspace;
+    ensureAutorunLabelContract?: typeof ensureAutorunLabelContract;
+  } = {},
 ): Promise<void> {
   const clock = injected.clock ?? defaultClock;
   const runner = injected.runner ?? runPiAgent;
+  const prepareWorkspace = injected.prepareCloneWorkspace ?? prepareCloneWorkspace;
+  const ensureLabels = injected.ensureAutorunLabelContract ?? ensureAutorunLabelContract;
   const cwd = path.resolve(options.cwd);
   const parsed = parseIssueRef(options.issue, options.repo);
   const outDir = path.resolve(cwd, options.outDir);
@@ -50,7 +59,7 @@ export async function runAutoContinue(
     return;
   }
 
-  await ensureAutorunLabelContract({
+  await ensureLabels({
     cwd,
     repo: parsed.repo ?? options.repo,
     inProgressLabel: options.inProgressLabel,
@@ -64,29 +73,51 @@ export async function runAutoContinue(
     baseBranch: attemptMetadata.baseBranch,
   };
 
+  let preparedWorkspace: PreparedWorkspace | undefined;
+  const legacyAgentCwd = attemptMetadata.worktreePath && existsSync(attemptMetadata.worktreePath)
+    ? attemptMetadata.worktreePath
+    : autorunWorktreePath(cwd, attemptMetadata.issueNumber);
   let workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), {
-    agentCwd: autorunWorktreePath(cwd, attemptMetadata.issueNumber),
+    agentCwd: attemptMetadata.workspace?.path ?? legacyAgentCwd,
   });
   await ensureRunDir(workflowContext);
 
-  console.log(`- Switching to branch ${branchPlan.branchName}`);
-  const recoveredAgentCwd = await checkoutExistingIssueBranch({
-    cwd: workflowContext.controlCwd,
-    plan: branchPlan,
-    worktreePath: workflowContext.agentCwd,
-  });
-  if (recoveredAgentCwd !== workflowContext.agentCwd) {
-    workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd });
+  if (attemptMetadata.workspace) {
+    console.log(`- Reusing workspace for branch ${branchPlan.branchName}`);
+    preparedWorkspace = await prepareWorkspace({
+      controlCwd: cwd,
+      repo: parsed.repo ?? options.repo,
+      issueNumber: attemptMetadata.issueNumber,
+      plan: branchPlan,
+      workspace: options.workspace ?? defaultWorkspaceConfig,
+      hooks: options.hooks ?? defaultLifecycleHooks,
+      mode: "continue",
+      workspacePath: attemptMetadata.workspace.path,
+    });
+    workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: preparedWorkspace.path });
     await ensureRunDir(workflowContext);
+  } else {
+    console.log(`- Switching to legacy worktree branch ${branchPlan.branchName}`);
+    const recoveredAgentCwd = await checkoutExistingIssueBranch({
+      cwd: workflowContext.controlCwd,
+      plan: branchPlan,
+      worktreePath: workflowContext.agentCwd,
+    });
+    if (recoveredAgentCwd !== workflowContext.agentCwd) {
+      workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd });
+      await ensureRunDir(workflowContext);
+    }
   }
 
   attemptMetadata = formatAttemptMetadata({
     ...attemptMetadata,
     worktreePath: workflowContext.agentCwd,
+    workspace: preparedWorkspace?.metadata ?? attemptMetadata.workspace,
     runArtifactPath: workflowContext.runDirRelative,
   });
 
-  await runAutorunAttemptLifecycle({
+  try {
+    await runAutorunAttemptLifecycle({
     issueDir,
     workflowContext,
     branchPlan,
@@ -96,12 +127,17 @@ export async function runAutoContinue(
     runner,
     logPrefix: "Continue",
     inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
-    beforeWorkflow: async () => {
-      const plan = await planContinuation(workflowContext);
-      console.log("\nContinuation plan:");
-      for (const line of formatContinuationPlan(plan)) console.log(line);
-    },
-  }, { clock });
+      beforeWorkflow: async () => {
+        const plan = await planContinuation(workflowContext);
+        console.log("\nContinuation plan:");
+        for (const line of formatContinuationPlan(plan)) console.log(line);
+      },
+      beforeRun: async () => runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd),
+      afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
+    }, { clock });
+  } finally {
+    await preparedWorkspace?.releaseLock();
+  }
 
   console.log("\nContinue workflow complete.");
 }
@@ -137,6 +173,7 @@ function createGateOptions(
     inProgressLabel: options.inProgressLabel,
     remote: options.remote,
     baseBranch,
+    hooks: options.hooks,
   };
 }
 

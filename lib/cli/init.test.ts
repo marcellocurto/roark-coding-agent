@@ -8,6 +8,7 @@ import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 import { defaultAutorunSuccessLabel } from "../autorun/publish.ts";
 import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel, defaultAutorunSkipLabels } from "../autorun/selection.ts";
 import { defaultMaxFixPasses, parseArgs } from "./args.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import { hydrateCliOptions } from "./hydrate.ts";
 import { roarkGitignoreContent, runInit } from "./init.ts";
 import { runProcessOrThrow } from "./process.ts";
@@ -59,6 +60,9 @@ describe("runInit", () => {
       failureLabel: defaultAutorunFailureLabel,
       skipLabels: [...defaultAutorunSkipLabels],
       maxFixPasses: defaultMaxFixPasses,
+      workspace: defaultWorkspaceConfig,
+      hooks: { timeoutMs: defaultLifecycleHooks.timeoutMs },
+      sandbox: { provider: "host" },
     });
   });
 

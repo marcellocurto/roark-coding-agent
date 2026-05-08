@@ -69,6 +69,85 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.dryRun).toBe(true);
   });
 
+  test("hydrates workspace and lifecycle hook config for auto and workspace commands", async () => {
+    const repo = await tempGitRepo();
+    await writeConfig(repo, {
+      repo: "config/repo",
+      verify: "bun run typecheck",
+      workspace: {
+        root: "~/custom-roark-workspaces",
+        strategy: "clone",
+        cloneRemote: "upstream",
+        clone: { filter: null, depth: 2 },
+      },
+      hooks: {
+        afterCreate: "npm ci",
+        beforeRun: "npm ci",
+        beforeVerify: "npm test -- --list",
+        afterRun: "echo done",
+        beforeRemove: "echo removing",
+        timeoutMs: 1234,
+      },
+      sandbox: { provider: "host" },
+    });
+
+    const autoRaw = parseArgs(["auto", "4", "--cwd", repo]);
+    if ("help" in autoRaw) throw new Error("expected options");
+    const autoHydrated = await hydrateCliOptions(autoRaw);
+    expect(autoHydrated.command).toBe("auto");
+    if (autoHydrated.command !== "auto") throw new Error("expected auto options");
+    expect(autoHydrated.workspace).toEqual({
+      root: "~/custom-roark-workspaces",
+      strategy: "clone",
+      cloneRemote: "upstream",
+      clone: { filter: null, depth: 2 },
+    });
+    expect(autoHydrated.hooks).toEqual({
+      afterCreate: "npm ci",
+      beforeRun: "npm ci",
+      beforeVerify: "npm test -- --list",
+      afterRun: "echo done",
+      beforeRemove: "echo removing",
+      timeoutMs: 1234,
+    });
+
+    const workspaceRaw = parseArgs(["workspace", "remove", "--issue", "4", "--force", "--cwd", repo]);
+    if ("help" in workspaceRaw) throw new Error("expected options");
+    const workspaceHydrated = await hydrateCliOptions(workspaceRaw);
+    expect(workspaceHydrated.command).toBe("workspace");
+    if (workspaceHydrated.command !== "workspace" || workspaceHydrated.action !== "remove") throw new Error("expected workspace remove options");
+    expect(workspaceHydrated.issue).toBe(4);
+    expect(workspaceHydrated.force).toBe(true);
+    expect(workspaceHydrated.workspace.cloneRemote).toBe("upstream");
+    expect(workspaceHydrated.hooks.beforeRemove).toBe("echo removing");
+  });
+
+  test("rejects invalid workspace, hook, and sandbox config", async () => {
+    const withUnknownNested = await tempGitRepo();
+    await writeConfig(withUnknownNested, { workspace: { unknown: true }, verify: "bun test", repo: "owner/repo" });
+    const unknownRaw = parseArgs(["auto", "--cwd", withUnknownNested]);
+    if ("help" in unknownRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'workspace.unknown'");
+
+    const withWorktreeStrategy = await tempGitRepo();
+    await writeConfig(withWorktreeStrategy, { workspace: { strategy: "worktree" }, verify: "bun test", repo: "owner/repo" });
+    const strategyRaw = parseArgs(["auto", "--cwd", withWorktreeStrategy]);
+    if ("help" in strategyRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(strategyRaw)).rejects.toThrow("workspace.strategy' must be 'clone'");
+
+    const withInvalidHook = await tempGitRepo();
+    await writeConfig(withInvalidHook, { hooks: { beforeRun: "" }, verify: "bun test", repo: "owner/repo" });
+    const hookRaw = parseArgs(["auto", "--cwd", withInvalidHook]);
+    if ("help" in hookRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(hookRaw)).rejects.toThrow("hooks.beforeRun' must be a non-empty string");
+
+    const withSandbox = await tempGitRepo();
+    await writeConfig(withSandbox, { sandbox: { provider: "docker" }, verify: "bun test", repo: "owner/repo" });
+    const sandboxRaw = parseArgs(["auto", "--cwd", withSandbox]);
+    if ("help" in sandboxRaw) throw new Error("expected options");
+    await expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
+  });
+
   test("applies config values before built-in defaults", async () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, {

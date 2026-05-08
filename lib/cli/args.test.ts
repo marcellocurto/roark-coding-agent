@@ -189,6 +189,30 @@ describe("parseArgs", () => {
     expect(parsed.yes).toBe(true);
   });
 
+  test("parses workspace maintenance commands", () => {
+    const list = parseArgs(["workspace", "list", "--cwd", "/repo", "--repo", "owner/repo"]);
+    expect("help" in list).toBe(false);
+    if ("help" in list) return;
+    expect(list).toEqual({ command: "workspace", action: "list", cwd: "/repo", repo: "owner/repo" });
+
+    const remove = parseArgs(["workspace", "remove", "--issue", "207", "--force"]);
+    expect("help" in remove).toBe(false);
+    if ("help" in remove) return;
+    expect(remove).toEqual({ command: "workspace", action: "remove", issue: 207, cwd: undefined, repo: undefined, force: true });
+
+    const prune = parseArgs(["workspace", "prune", "--older-than", "30d"]);
+    expect("help" in prune).toBe(false);
+    if ("help" in prune) return;
+    expect(prune).toEqual({ command: "workspace", action: "prune", olderThan: "30d", cwd: undefined, repo: undefined, force: undefined });
+  });
+
+  test("rejects invalid workspace maintenance arguments", () => {
+    expect(() => parseArgs(["workspace"])).toThrow("workspace requires one of");
+    expect(() => parseArgs(["workspace", "remove"])).toThrow("workspace remove requires --issue");
+    expect(() => parseArgs(["workspace", "prune"])).toThrow("workspace prune requires --older-than");
+    expect(() => parseArgs(["workspace", "list", "--force"])).toThrow("workspace list only accepts");
+  });
+
   test("parses revise-pr defaults and options", () => {
     const parsed = parseArgs([
       "revise-pr",

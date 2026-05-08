@@ -120,6 +120,37 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(comment).toContain("invalid direct validation output");
   });
 
+  test("runs fatal beforeRun after metadata is persisted and before workflow", async () => {
+    const fixture = await createFixture();
+    const calls: string[] = [];
+
+    await expect(runAutorunAttemptLifecycle({
+      ...fixture,
+      issue: { number: 44, title: "Lifecycle" },
+      beforeRun: async () => {
+        const persisted = await readAttemptMetadata(fixture.issueDir, 1);
+        expect(persisted.outcome).toBe("in-progress");
+        calls.push("beforeRun");
+        throw new Error("setup failed");
+      },
+    }, {
+      clock: { now: () => new Date("2026-05-07T02:45:00.000Z") },
+      runFullWorkflow: async () => {
+        calls.push("workflow");
+        return { status: "completed" };
+      },
+      publishReviewLedgerComments: async () => {},
+      markIssueFailed: async () => undefined,
+      finalizeAttemptObservability: async () => {},
+    })).rejects.toThrow("setup failed");
+
+    expect(calls).toEqual(["beforeRun"]);
+    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    expect(terminal.outcome).toBe("errored");
+    expect(terminal.outcomeDetail).toBe("setup failed");
+    expect(terminal.endedAt).toBe("2026-05-07T02:45:00.000Z");
+  });
+
   test("classifies generic failures as errored and records terminal metadata from finally", async () => {
     const fixture = await createFixture();
     const comments: string[] = [];

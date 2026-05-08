@@ -22,6 +22,12 @@ import {
   type RevisePrCliOptions,
   type StatusCliOptions,
 } from "./args.ts";
+import {
+  defaultLifecycleHooks,
+  defaultWorkspaceConfig,
+  type LifecycleHooksConfig,
+  type WorkspaceConfig,
+} from "../autorun/workspace.ts";
 import { runProcess, type ProcessResult } from "./process.ts";
 
 export type RoarkConfig = {
@@ -34,6 +40,9 @@ export type RoarkConfig = {
   failureLabel?: string;
   skipLabels?: string[];
   maxFixPasses?: number;
+  workspace?: WorkspaceConfig;
+  hooks?: LifecycleHooksConfig;
+  sandbox?: { provider: "host" };
 };
 
 type ProcessRunner = (args: string[], options?: { cwd?: string }) => Promise<ProcessResult>;
@@ -54,6 +63,9 @@ const configKeys = new Set([
   "failureLabel",
   "skipLabels",
   "maxFixPasses",
+  "workspace",
+  "hooks",
+  "sandbox",
 ]);
 
 const unsupportedConfigKeys = new Set(["model", "thinking", "updateStrategy"]);
@@ -73,6 +85,14 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
 
   const config = await loadRoarkConfig(workspace);
   const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo);
+  const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
+  const hooks = config.hooks ?? defaultLifecycleHooks;
+
+  if (raw.command === "workspace") {
+    if (raw.action === "list") return { command: "workspace", action: "list", cwd: workspace, repo, workspace: workspaceConfig, hooks };
+    if (raw.action === "remove") return { command: "workspace", action: "remove", issue: raw.issue, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
+    return { command: "workspace", action: "prune", olderThan: raw.olderThan, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
+  }
 
   if (raw.command === "auto") {
     const verifyCommand = await hydrateRequiredVerifyCommand(raw.verifyCommand, config, workspace, runner, raw.command);
@@ -102,6 +122,8 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,
       force: raw.force ?? false,
       yes: raw.yes ?? false,
+      workspace: workspaceConfig,
+      hooks,
     } satisfies AutoCliOptions;
   }
 
@@ -124,6 +146,8 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       successLabel: raw.successLabel ?? config.successLabel ?? defaultAutorunSuccessLabel,
       inProgressLabel: raw.inProgressLabel ?? config.inProgressLabel ?? defaultAutorunInProgressLabel,
       remote: raw.remote ?? defaultAutorunRemote,
+      workspace: workspaceConfig,
+      hooks,
     } satisfies ContinueCliOptions;
   }
 
@@ -232,7 +256,82 @@ export async function loadRoarkConfig(workspace: string): Promise<RoarkConfig> {
     config.maxFixPasses = record.maxFixPasses as number;
   }
 
+  if (record.workspace !== undefined) config.workspace = parseWorkspaceConfig(record.workspace, configPath);
+  if (record.hooks !== undefined) config.hooks = parseHooksConfig(record.hooks, configPath);
+  if (record.sandbox !== undefined) config.sandbox = parseSandboxConfig(record.sandbox, configPath);
+
   return config;
+}
+
+function parseWorkspaceConfig(value: unknown, configPath: string): WorkspaceConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Roark config at ${configPath}: 'workspace' must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  assertKnownNestedKeys(record, new Set(["root", "strategy", "cloneRemote", "clone"]), "workspace", configPath);
+  const strategy = record.strategy ?? defaultWorkspaceConfig.strategy;
+  if (strategy !== "clone") throw new Error(`Invalid Roark config at ${configPath}: 'workspace.strategy' must be 'clone'.`);
+  const root = record.root ?? defaultWorkspaceConfig.root;
+  if (typeof root !== "string" || root.trim() === "") throw new Error(`Invalid Roark config at ${configPath}: 'workspace.root' must be a non-empty string.`);
+  const cloneRemote = record.cloneRemote ?? defaultWorkspaceConfig.cloneRemote;
+  if (typeof cloneRemote !== "string" || cloneRemote.trim() === "") throw new Error(`Invalid Roark config at ${configPath}: 'workspace.cloneRemote' must be a non-empty string.`);
+
+  let clone = { ...defaultWorkspaceConfig.clone };
+  if (record.clone !== undefined) {
+    if (!record.clone || typeof record.clone !== "object" || Array.isArray(record.clone)) {
+      throw new Error(`Invalid Roark config at ${configPath}: 'workspace.clone' must be an object.`);
+    }
+    const cloneRecord = record.clone as Record<string, unknown>;
+    assertKnownNestedKeys(cloneRecord, new Set(["filter", "depth"]), "workspace.clone", configPath);
+    if (cloneRecord.filter !== undefined) {
+      if (cloneRecord.filter !== null && (typeof cloneRecord.filter !== "string" || cloneRecord.filter.trim() === "")) {
+        throw new Error(`Invalid Roark config at ${configPath}: 'workspace.clone.filter' must be a non-empty string or null.`);
+      }
+      clone.filter = cloneRecord.filter as string | null;
+    }
+    if (cloneRecord.depth !== undefined) {
+      if (cloneRecord.depth !== null && (!Number.isInteger(cloneRecord.depth) || (cloneRecord.depth as number) < 1)) {
+        throw new Error(`Invalid Roark config at ${configPath}: 'workspace.clone.depth' must be a positive integer or null.`);
+      }
+      clone.depth = cloneRecord.depth as number | null;
+    }
+  }
+
+  return { root, strategy: "clone", cloneRemote, clone };
+}
+
+function parseHooksConfig(value: unknown, configPath: string): LifecycleHooksConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid Roark config at ${configPath}: 'hooks' must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  assertKnownNestedKeys(record, new Set(["afterCreate", "beforeRun", "beforeVerify", "afterRun", "beforeRemove", "timeoutMs"]), "hooks", configPath);
+  const hooks: LifecycleHooksConfig = { timeoutMs: defaultLifecycleHooks.timeoutMs };
+  for (const key of ["afterCreate", "beforeRun", "beforeVerify", "afterRun", "beforeRemove"] as const) {
+    const hook = record[key];
+    if (hook === undefined) continue;
+    if (typeof hook !== "string" || hook.trim() === "") throw new Error(`Invalid Roark config at ${configPath}: 'hooks.${key}' must be a non-empty string.`);
+    hooks[key] = hook;
+  }
+  if (record.timeoutMs !== undefined) {
+    if (!Number.isInteger(record.timeoutMs) || (record.timeoutMs as number) < 1) throw new Error(`Invalid Roark config at ${configPath}: 'hooks.timeoutMs' must be a positive integer.`);
+    hooks.timeoutMs = record.timeoutMs as number;
+  }
+  return hooks;
+}
+
+function parseSandboxConfig(value: unknown, configPath: string): { provider: "host" } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Invalid Roark config at ${configPath}: 'sandbox' must be an object.`);
+  const record = value as Record<string, unknown>;
+  assertKnownNestedKeys(record, new Set(["provider"]), "sandbox", configPath);
+  if (record.provider !== undefined && record.provider !== "host") throw new Error(`Invalid Roark config at ${configPath}: 'sandbox.provider' must be 'host'.`);
+  return { provider: "host" };
+}
+
+function assertKnownNestedKeys(record: Record<string, unknown>, allowed: Set<string>, keyPath: string, configPath: string): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.has(key)) throw new Error(`Unknown Roark config key '${keyPath}.${key}' in ${configPath}.`);
+  }
 }
 
 export function parseGithubRepoFromOrigin(originUrl: string): string | undefined {
@@ -254,7 +353,7 @@ async function hydrateRepo(
 ): Promise<string | undefined> {
   if (raw.repo) return raw.repo;
 
-  const issueRepo = repoFromQualifiedIssueRef("issue" in raw ? raw.issue : undefined);
+  const issueRepo = repoFromQualifiedIssueRef("issue" in raw && typeof raw.issue === "string" ? raw.issue : undefined);
   if (issueRepo) return issueRepo;
 
   if (config.repo) return config.repo;
@@ -262,7 +361,7 @@ async function hydrateRepo(
   const inferred = await inferRepoFromOrigin(workspace, runner);
   if (inferred) return inferred;
 
-  if (raw.command === "status") return undefined;
+  if (raw.command === "status" || raw.command === "workspace") return undefined;
 
   const prompted = promptRepo ? await promptRepo(workspace) : await promptForRepoIfInteractive(workspace);
   if (prompted) return prompted;

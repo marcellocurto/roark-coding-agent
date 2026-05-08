@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import type { AttemptWorkspaceMetadata } from "./workspace.ts";
 
 export type AttemptOutcome =
   | "in-progress"
@@ -29,6 +30,7 @@ export type AttemptMetadata = {
   endedAt: string | null;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
+  workspace?: AttemptWorkspaceMetadata;
   githubComments?: {
     issue?: Record<string, AttemptGitHubCommentRef>;
   };
@@ -55,6 +57,7 @@ export type FormatAttemptMetadataInput = {
   outcome?: AttemptOutcome;
   outcomeDetail?: string | null;
   githubComments?: AttemptMetadata["githubComments"];
+  workspace?: AttemptWorkspaceMetadata;
 };
 
 export function attemptsRootDir(issueDir: string): string {
@@ -96,6 +99,7 @@ export function formatAttemptMetadata(input: FormatAttemptMetadataInput): Attemp
     branch: input.branch,
     baseBranch: input.baseBranch,
     worktreePath: input.worktreePath,
+    ...(input.workspace ? { workspace: input.workspace } : {}),
     runArtifactPath: input.runArtifactPath,
     startedAt: toIsoString(input.startedAt),
     endedAt: input.endedAt === undefined ? null : toIsoStringOrNull(input.endedAt),
