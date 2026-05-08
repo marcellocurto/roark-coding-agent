@@ -277,8 +277,8 @@ Options:
   --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
   --all                  Status command only: summarize all known issue runs.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.
-  --skip-label <label>   Auto skip label. Can be passed multiple times.
-  --skip-labels <labels> Auto skip labels as a comma-separated list.
+  --skip-label <label>   Auto skip label. Can be passed multiple times; lifecycle labels are still appended.
+  --skip-labels <labels> Auto skip labels as a comma-separated list; lifecycle labels are still appended.
   --limit <n>            Maximum number of eligible auto issues to claim. Defaults to 1.
   --in-progress-label <label>
                           Auto claim label, and the label removed on terminal continue success/failure. Defaults to ${defaultAutorunInProgressLabel}.

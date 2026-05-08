@@ -17,6 +17,7 @@ import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
+import { ensureAutorunLabelContract } from "./labels.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
 export async function runAutoContinue(
@@ -48,6 +49,14 @@ export async function runAutoContinue(
     console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
     return;
   }
+
+  await ensureAutorunLabelContract({
+    cwd,
+    repo: parsed.repo ?? options.repo,
+    inProgressLabel: options.inProgressLabel,
+    failureLabel: options.failureLabel,
+    successLabel: options.successLabel,
+  });
 
   const branchPlan: AutorunBranchPlan = {
     issueNumber: attemptMetadata.issueNumber,

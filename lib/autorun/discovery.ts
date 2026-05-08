@@ -24,6 +24,7 @@ import {
 } from "./attempts.ts";
 import { createBranchPlan, ensureIssueWorktree } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
+import { ensureAutorunLabelContract } from "./labels.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
 import { acquireRepoAutorunLock, type AutorunLock } from "./lock.ts";
@@ -47,6 +48,7 @@ type AutoRunInjected = {
   completeAutorunWorkflow?: typeof completeAutorunWorkflow;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment;
   acquireAutorunLock?: typeof acquireRepoAutorunLock;
+  ensureAutorunLabelContract?: typeof ensureAutorunLabelContract;
 };
 
 export async function runAutoDiscovery(
@@ -56,6 +58,7 @@ export async function runAutoDiscovery(
   const acquireLock = injected.acquireAutorunLock ?? acquireRepoAutorunLock;
   const lock = await acquireLock({ cwd: options.cwd, repo: options.repo });
   try {
+    await ensureRequiredLabelsBeforeIssueWork(options, injected);
     if (options.issue) {
       await runTargetedAuto(options, injected);
       return;
@@ -64,6 +67,19 @@ export async function runAutoDiscovery(
   } finally {
     await releaseAutorunLock(lock);
   }
+}
+
+async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
+  const ensureLabels = injected.ensureAutorunLabelContract ?? ensureAutorunLabelContract;
+  await ensureLabels({
+    cwd: options.cwd,
+    repo: options.repo,
+    readyLabel: options.readyLabel,
+    inProgressLabel: options.inProgressLabel,
+    failureLabel: options.failureLabel,
+    successLabel: options.successLabel,
+    dryRun: options.dryRun,
+  });
 }
 
 async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
+import { mergeLifecycleSkipLabels } from "../autorun/labels.ts";
 import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "../autorun/publish.ts";
 import {
   defaultAutorunInProgressLabel,
@@ -75,22 +76,26 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
 
   if (raw.command === "auto") {
     const verifyCommand = await hydrateRequiredVerifyCommand(raw.verifyCommand, config, workspace, runner, raw.command);
+    const inProgressLabel = raw.inProgressLabel ?? config.inProgressLabel ?? defaultAutorunInProgressLabel;
+    const failureLabel = raw.failureLabel ?? config.failureLabel ?? defaultAutorunFailureLabel;
+    const successLabel = raw.successLabel ?? config.successLabel ?? defaultAutorunSuccessLabel;
+    const configuredSkipLabels = raw.skipLabels ?? config.skipLabels ?? [...defaultAutorunSkipLabels];
     return {
       command: "auto",
       issue: raw.issue,
       cwd: workspace,
       repo,
       readyLabel: raw.readyLabel ?? config.readyLabel ?? defaultAutorunReadyLabel,
-      skipLabels: raw.skipLabels ?? config.skipLabels ?? [...defaultAutorunSkipLabels],
+      skipLabels: mergeLifecycleSkipLabels({ skipLabels: configuredSkipLabels, inProgressLabel, failureLabel, successLabel }),
       limit: raw.limit ?? 1,
-      inProgressLabel: raw.inProgressLabel ?? config.inProgressLabel ?? defaultAutorunInProgressLabel,
+      inProgressLabel,
       assignee: raw.assignee,
       noAssign: raw.noAssign ?? false,
       dryRun: raw.dryRun ?? false,
       baseBranch: raw.baseBranch ?? config.baseBranch ?? defaultAutorunBaseBranch,
       verifyCommand,
-      failureLabel: raw.failureLabel ?? config.failureLabel ?? defaultAutorunFailureLabel,
-      successLabel: raw.successLabel ?? config.successLabel ?? defaultAutorunSuccessLabel,
+      failureLabel,
+      successLabel,
       remote: raw.remote ?? defaultAutorunRemote,
       model: raw.model,
       thinkingLevel: raw.thinkingLevel,

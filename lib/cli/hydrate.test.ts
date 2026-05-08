@@ -60,7 +60,7 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.repo).toBe("cli/repo");
     expect(hydrated.verifyCommand).toBe("bun run cli-check");
     expect(hydrated.readyLabel).toBe("cli-ready");
-    expect(hydrated.skipLabels).toEqual(["cli-skip"]);
+    expect(hydrated.skipLabels).toEqual(["cli-skip", "config-progress", "config-failed", "config-success", "blocked", "needs-human"]);
     expect(hydrated.baseBranch).toBe("cli-main");
     expect(hydrated.maxFixPasses).toBe(5);
     expect(hydrated.inProgressLabel).toBe("config-progress");

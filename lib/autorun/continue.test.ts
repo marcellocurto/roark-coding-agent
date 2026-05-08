@@ -37,6 +37,25 @@ const continueOptions = {
 } satisfies ContinueCliOptions;
 
 describe("runAutoContinue", () => {
+  test("already-published attempts return before label preflight or branch work", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-published-"));
+    tempDirs.push(cwd);
+    await installFailingGh(cwd);
+    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
+      attempt: 2,
+      issueNumber: 24,
+      branch: "roark/issue-24",
+      baseBranch: "main",
+      worktreePath: path.join(cwd, ".roark/worktrees/issue-24"),
+      runArtifactPath: ".roark/runs/issue/24/attempts/2",
+      startedAt: "2026-05-07T00:00:00.000Z",
+      endedAt: "2026-05-07T00:10:00.000Z",
+      outcome: "published",
+    }));
+
+    await runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 });
+  });
+
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
     tempDirs.push(cwd);
@@ -117,6 +136,17 @@ async function initGitRepo(cwd: string, branchName: string): Promise<void> {
   await run(cwd, ["git", "add", "README.md"]);
   await run(cwd, ["git", "commit", "-m", "initial"]);
   await run(cwd, ["git", "branch", branchName]);
+}
+
+async function installFailingGh(cwd: string): Promise<void> {
+  const binDir = path.join(cwd, "bin");
+  await mkdir(binDir, { recursive: true });
+  await writeFile(path.join(binDir, "gh"), `#!/usr/bin/env bash
+echo "gh should not be called" >&2
+exit 99
+`, "utf8");
+  await chmod(path.join(binDir, "gh"), 0o755);
+  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
 
 async function installFakeGh(cwd: string): Promise<void> {

@@ -13,6 +13,7 @@ import { runAutoDiscovery } from "./discovery.ts";
 const tempDirs: string[] = [];
 const noOpAutorunLock = {
   acquireAutorunLock: async () => ({ lockDir: "test-lock", release: async () => {} }),
+  ensureAutorunLabelContract: async () => ({ existing: [], missing: [], created: [] }),
 };
 
 afterEach(async () => {
@@ -52,13 +53,17 @@ describe("runAutoDiscovery", () => {
         calls.push("acquire-lock");
         return { lockDir: "test-lock", release: async () => { calls.push("release-lock"); } };
       },
+      ensureAutorunLabelContract: async () => {
+        calls.push("ensure-labels");
+        return { existing: [], missing: [], created: [] };
+      },
       listOpenGitHubIssues: async () => {
         calls.push("list");
         return [];
       },
     });
 
-    expect(calls).toEqual(["acquire-lock", "list", "release-lock"]);
+    expect(calls).toEqual(["acquire-lock", "ensure-labels", "list", "release-lock"]);
   });
 
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
@@ -213,20 +218,24 @@ describe("runAutoDiscovery", () => {
     expect(claimed).toBe(false);
   });
 
-  test("targeted auto fetches the requested issue instead of listing discovery candidates", async () => {
-    let fetchedIssue: string | undefined;
+  test("targeted auto ensures labels before fetching the requested issue", async () => {
+    const calls: string[] = [];
     await runAutoDiscovery({ ...baseOptions(), issue: "owner/repo#29", dryRun: true }, {
       ...noOpAutorunLock,
+      ensureAutorunLabelContract: async () => {
+        calls.push("ensure-labels");
+        return { existing: [], missing: [], created: [] };
+      },
       listOpenGitHubIssues: async () => {
         throw new Error("targeted auto should not list issues");
       },
       fetchGitHubIssue: async (input) => {
-        fetchedIssue = input;
+        calls.push(`fetch:${input}`);
         return fetchedGitHubIssue(29, []);
       },
     });
 
-    expect(fetchedIssue).toBe("owner/repo#29");
+    expect(calls).toEqual(["ensure-labels", "fetch:owner/repo#29"]);
   });
 
   test("targeted auto refuses skip labels before claim", async () => {
