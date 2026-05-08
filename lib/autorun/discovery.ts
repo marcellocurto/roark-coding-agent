@@ -31,7 +31,7 @@ import { acquireRepoAutorunLock, type AutorunLock } from "./lock.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { findMatchingSkipLabel, isEligibleIssue, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
-import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, runLifecycleHook } from "./workspace.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook } from "./workspace.ts";
 
 const discoveryFetchLimit = 100;
 
@@ -350,7 +350,10 @@ async function runManagedIssueAttempt(
           }),
         });
       },
-      beforeRun: async () => runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path),
+      beforeRun: async () => {
+        await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: preparedWorkspace.path, copyToWorktree: options.workspace?.copyToWorktree });
+        await runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path);
+      },
       afterRun: async () => runLifecycleHook("afterRun", options.hooks, preparedWorkspace.path),
     }, {
       clock,

@@ -13,11 +13,12 @@ import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { formatPrCreatedComment, publishIssueLedgerComment } from "./ledger-comments.ts";
 import { updateIssueBranchFromBase, type AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { runLifecycleHook, type LifecycleHooksConfig } from "./workspace.ts";
+import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
   hooks?: LifecycleHooksConfig;
+  workspace?: WorkspaceConfig;
 };
 
 export type PublishGateOutcome = { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null };
@@ -43,6 +44,7 @@ export async function runPublishGate(input: {
       baseBranch: branchPlan.baseBranch,
       preserveUncommitted: true,
     });
+    await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
     await runLifecycleHook("beforeVerify", options.hooks, workflowContext.agentCwd);
     verification = await runVerification({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
     await writeVerificationArtifact(workflowContext, verification);
