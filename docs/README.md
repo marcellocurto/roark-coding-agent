@@ -2,7 +2,7 @@
 title: Roark documentation
 summary: Index of Roark user, operator, and contributor documentation.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T06:28:17Z
 ---
 
 # Roark documentation
@@ -23,6 +23,7 @@ Start here when you need detail beyond the root `README.md`.
 - Schedule Roark externally: [Scheduling](scheduling.md)
 - Handle secrets safely: [Security and secrets](security-and-secrets.md)
 - Understand GitHub labels: [Labels](labels.md) and [Label semantics](label-semantics.md)
+- Understand bundled and repo-local skill resolution: [Workflow skills](workflow-skills.md)
 
 ## By role
 
@@ -36,4 +37,4 @@ Read [Autorun](autorun.md), [Recovery](recovery.md), [Scheduling](scheduling.md)
 
 ### Contributor
 
-Read [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), and [Labels](labels.md).
+Read [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), and [Workflow skills](workflow-skills.md).

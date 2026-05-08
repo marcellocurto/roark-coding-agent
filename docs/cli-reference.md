@@ -2,7 +2,7 @@
 title: CLI reference
 summary: Command and option reference for common Roark workflows.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T06:28:17Z
 ---
 
 # CLI reference
@@ -22,6 +22,7 @@ roark do 123 --repo owner/repo
 roark continue 123 --repo owner/repo --attempt 1
 roark revise-pr 123 --repo owner/repo
 roark status 123 --repo owner/repo
+roark create-issues 123 --repo owner/repo --yes
 ```
 
 ## Phase commands
@@ -47,7 +48,7 @@ roark readiness 123 --repo owner/repo
 - `--thinking <level>`: thinking level override.
 - `--max-fix-passes <n>`: maximum fix/review cycles.
 - `--force`: regenerate existing phase artifacts.
-- `--yes`: bypass supported dirty-tree preflight prompts/refusals.
+- `--yes`: bypass supported dirty-tree preflight prompts/refusals; approve `create-issues` mutations.
 - `--attempt <n>`: select a specific issue attempt.
 
 ## Autorun options
