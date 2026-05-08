@@ -1,3 +1,10 @@
+---
+title: Roark label semantics
+summary: Full reference for GitHub labels Roark reads, applies, or assigns during autorun and issue-curation workflows.
+dateCreated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T06:27:02Z
+---
+
 # Roark label semantics
 
 This page summarizes the GitHub labels Roark reads, applies, or assigns to generated issues during autorun and issue-curation workflows.

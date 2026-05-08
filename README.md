@@ -193,7 +193,14 @@ An issue is eligible only if it carries the ready label **and** carries none of 
 
 ### Managed workspace copies
 
-Managed clone workspaces start from Git state, so ignored host-local files are absent by default. Repositories that need ignored local material for setup or verification can declare explicit paths in `.roark/config.json`:
+Managed clone workspaces start from Git state, so ignored host-local files are absent by default. If verification fails in a managed workspace because ignored files are missing, for example:
+
+```text
+Missing .secrets/env/dev/local.web.env
+Missing .secrets/env/dev/vercel.web.env
+```
+
+keep the real files in the control checkout and declare the ignored directory in `.roark/config.json` under the existing `workspace` object:
 
 ```json
 {
@@ -204,9 +211,13 @@ Managed clone workspaces start from Git state, so ignored host-local files are a
 }
 ```
 
+`workspace.copyToWorktree` is nested under `workspace`, not a top-level key. Each entry uses the same relative path for the source in the control checkout and the destination in the managed worktree. The source must exist locally before Roark starts.
+
 `workspace.copyToWorktree` entries are literal paths relative to the control checkout. Roark rejects absolute paths, parent traversal, `.git` paths, empty strings, and glob-looking entries containing `*`, `?`, or `[`. Globs are not supported in v1.
 
-Before copying, Roark requires each configured destination path itself to be ignored by Git in the managed workspace (`git check-ignore`). After copying, it verifies the copied path is still invisible to `git status`. Missing sources fail clearly before any configured paths are written. Existing destination paths are removed first, so the host-controlled copy clobbers stale workspace content on each workspace preparation, before `afterCreate`, `beforeRun`, and `beforeVerify`. Directories are copied recursively, symlinks are dereferenced into the target contents rather than preserved as symlinks, and file modes such as `0600` are preserved.
+Before copying, Roark requires each configured destination path itself to be ignored by Git in the managed workspace (`git check-ignore .secrets/env`). After copying, it verifies the copied path is still invisible to `git status`. Missing sources fail clearly before any configured paths are written. Existing destination paths are removed first, so the host-controlled copy clobbers stale workspace content on each workspace preparation, before `afterCreate`, `beforeRun`, and `beforeVerify`. Directories are copied recursively, symlinks are dereferenced into the target contents rather than preserved as symlinks, and file modes such as `0600` are preserved.
+
+If `.roark/` is ignored wholesale in the target repository, `.roark/config.json` is host-local and will not be shared through Git unless the ignore rules explicitly allow it. Do not store secret values in `.roark/config.json`; store only paths such as `.secrets/env`.
 
 ### Worktree isolation and naming
 
