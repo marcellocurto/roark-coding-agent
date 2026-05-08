@@ -8,6 +8,30 @@ A small CLI workflow runner around the Pi coding-agent SDK.
 bun install
 ```
 
+## Good install paths
+
+### 1. Internal / simplest: clone + install globally
+
+On another machine:
+
+```bash
+git clone https://github.com/marcellocurto/roark-coding-agent.git
+cd roark-coding-agent
+bun install
+bun install -g "$PWD"
+roark --help
+```
+
+This is probably best for now.
+
+For servers, pin a tag or commit:
+
+```bash
+git checkout v0.1.0
+bun install
+bun install -g "$PWD"
+```
+
 ## Global/operator usage
 
 Install from an absolute package path. Bun currently treats `bun install -g .` as an anonymous package and may not link the `roark` binary.
