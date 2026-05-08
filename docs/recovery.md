@@ -2,7 +2,7 @@
 title: Recovery
 summary: How to inspect and continue failed or stopped Roark attempts.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Recovery
@@ -41,3 +41,17 @@ Uncommitted failed work is recoverable only while the persistent issue workspace
 - `.roark/runs/issue/<n>/attempts/<k>/readiness.md`
 
 See [Artifacts](artifacts.md) for the full layout.
+
+## Recovery checklist
+
+1. Open `summary.json`.
+2. Open `readiness.md` and `verification.md`.
+3. Inspect the managed workspace if uncommitted edits matter.
+4. Fix host setup, config, hook, ignored-file, or code issues.
+5. Run `roark continue`.
+
+## Next steps
+
+- Use [Troubleshooting](troubleshooting.md) for symptom-specific recovery.
+- Use [Managed workspaces](managed-workspaces.md) before deleting workspaces.
+- Use [Operations runbook](operations-runbook.md) for scheduled-run failure response.

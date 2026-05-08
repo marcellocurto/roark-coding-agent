@@ -2,7 +2,7 @@
 title: Workflow skills
 summary: How Roark resolves bundled and repo-local skills while keeping normal workflow agents isolated from ambient Pi skill discovery.
 dateCreated: 2026-05-08T06:28:17Z
-lastUpdated: 2026-05-08T06:28:17Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Workflow skills
@@ -44,3 +44,9 @@ When updating the bundled skill:
 1. Copy the upstream skill directory deliberately.
 2. Record the upstream source and commit in the update PR.
 3. Run skill-resolution and create-issues tests.
+
+## Next steps
+
+- Use [Issue curation](issue-curation.md) for the `curate-issues` and `create-issues` workflow.
+- Use [Architecture](architecture.md) for contributor-level integration points.
+- Use [CLI reference](cli-reference.md) for command options.

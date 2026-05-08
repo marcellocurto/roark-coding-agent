@@ -2,7 +2,7 @@
 title: Lifecycle hooks
 summary: Reference for workspace lifecycle hooks such as dependency installation and pre-verification setup.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Lifecycle hooks
@@ -46,3 +46,9 @@ Lifecycle hooks are shell commands configured in `.roark/config.json` under `hoo
 - Commands that mutate unrelated host state.
 
 For ignored local file copying, prefer `workspace.copyToWorktree`. See [Managed workspaces](managed-workspaces.md).
+
+## Next steps
+
+- Use [Configuration](configuration.md#hook-keys) for the hook reference table.
+- Use [Verification](verification.md#hooks-before-verification) for pre-verification setup.
+- Use [Security and secrets](security-and-secrets.md#threat-boundaries) before adding hooks on shared hosts.

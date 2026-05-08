@@ -1,40 +1,75 @@
 ---
 title: Roark documentation
-summary: Index of Roark user, operator, and contributor documentation.
+summary: Start page and navigation map for Roark user, operator, reference, and contributor documentation.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:28:17Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Roark documentation
 
-Start here when you need detail beyond the root `README.md`.
+Roark is a local workflow runner for GitHub issues. It coordinates managed workspaces, Pi coding-agent phases, verification gates, run artifacts, and draft pull request publishing.
 
-## By task
+## Quick Start
 
-- Configure a repository: [Configuration](configuration.md)
-- Use managed clone workspaces or copy ignored local files: [Managed workspaces](managed-workspaces.md)
-- Run label-gated automation: [Autorun](autorun.md)
-- Recover a stopped or failed attempt: [Recovery](recovery.md)
-- Respond to feedback on an existing PR: [PR revisions](pr-revisions.md)
-- Understand verification commands and gates: [Verification](verification.md)
-- Add lifecycle setup hooks: [Lifecycle hooks](lifecycle-hooks.md)
-- Inspect run outputs: [Artifacts](artifacts.md)
-- Look up commands and flags: [CLI reference](cli-reference.md)
-- Schedule Roark externally: [Scheduling](scheduling.md)
-- Handle secrets safely: [Security and secrets](security-and-secrets.md)
-- Understand GitHub labels: [Labels](labels.md) and [Label semantics](label-semantics.md)
-- Understand bundled and repo-local skill resolution: [Workflow skills](workflow-skills.md)
+```bash
+roark init
+roark auto --repo owner/repo --limit 1 --dry-run
+roark do 123 --repo owner/repo
+```
+
+For the full first-run path, read [Quickstart](quickstart.md).
+
+## Start Here
+
+- [Quickstart](quickstart.md) - install, initialize a target repository, run one issue, inspect results, and recover.
+- [Concepts](concepts.md) - control checkout, managed workspace, attempt, readiness gate, verification gate, and artifacts.
+- [Usage](usage.md) - choose between `do`, `auto`, `continue`, `revise-pr`, workspace commands, and issue curation.
+- [Glossary](glossary.md) - short definitions for common Roark terms.
+
+## Workflows
+
+- [Autorun](autorun.md) - label-gated one-shot automation and draft PR publishing.
+- [Recovery](recovery.md) - inspect and continue stopped or failed attempts.
+- [PR revisions](pr-revisions.md) - respond to feedback on an existing pull request.
+- [Issue curation](issue-curation.md) - turn reviewer findings into approved follow-up GitHub issues.
+- [Verification](verification.md) - readiness and verification gates.
+
+## Operations
+
+- [Operations runbook](operations-runbook.md) - host setup, permissions, monitoring, recovery, cleanup, and upgrades.
+- [Scheduling](scheduling.md) - cron, launchd, and GitHub Actions examples.
+- [Managed workspaces](managed-workspaces.md) - clone workspaces and `workspace.copyToWorktree`.
+- [Security and secrets](security-and-secrets.md) - secret handling and untrusted input boundaries.
+- [Troubleshooting](troubleshooting.md) - common failure symptoms and recovery steps.
+
+## Reference
+
+- [CLI reference](cli-reference.md) - commands and options.
+- [Configuration](configuration.md) - `.roark/config.json`, defaults, and precedence.
+- [Labels](labels.md) and [Label semantics](label-semantics.md) - GitHub label roles and lifecycle transitions.
+- [Artifacts](artifacts.md) - `.roark/runs` layout and phase outputs.
+- [Lifecycle hooks](lifecycle-hooks.md) - setup commands such as dependency installation.
+
+## Development
+
+- [Architecture](architecture.md) - contributor-level module and workflow overview.
+- [Workflow skills](workflow-skills.md) - bundled and repo-local skill resolution.
+- [Docs maintenance](docs-maintenance.md) - checks to keep docs aligned with CLI behavior.
 
 ## By role
 
 ### Repository user
 
-Read [Configuration](configuration.md), [Managed workspaces](managed-workspaces.md), and [Verification](verification.md).
+Read [Quickstart](quickstart.md), [Concepts](concepts.md), [Configuration](configuration.md), [Managed workspaces](managed-workspaces.md), and [Verification](verification.md).
 
 ### Operator
 
-Read [Autorun](autorun.md), [Recovery](recovery.md), [Scheduling](scheduling.md), and [Security and secrets](security-and-secrets.md).
+Read [Operations runbook](operations-runbook.md), [Autorun](autorun.md), [Recovery](recovery.md), [Scheduling](scheduling.md), [Security and secrets](security-and-secrets.md), and [Troubleshooting](troubleshooting.md).
 
 ### Contributor
 
-Read [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), and [Workflow skills](workflow-skills.md).
+Read [Architecture](architecture.md), [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), [Workflow skills](workflow-skills.md), and [Docs maintenance](docs-maintenance.md).
+
+## Navigation Metadata
+
+`docs/docs.json` contains the same top-level navigation groups for future docs-site generation or link checks.

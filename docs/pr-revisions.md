@@ -2,7 +2,7 @@
 title: PR revisions
 summary: How `roark revise-pr` responds to feedback on an existing pull request.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # PR revisions
@@ -36,3 +36,23 @@ roark revise-pr 123 --repo owner/repo
 ## Safety boundaries
 
 Roark refuses closed PRs, fork PR heads in v1, base/shared branch heads, and dirty working trees unless `--yes` is passed. `needs-human`, no-op, and verification-failure outcomes do not commit or push.
+
+## Useful commands
+
+Run with an explicit verification command:
+
+```bash
+roark revise-pr 123 --repo owner/repo --verify "bun run check"
+```
+
+Skip the terminal summary comment:
+
+```bash
+roark revise-pr 123 --repo owner/repo --no-comment
+```
+
+## Next steps
+
+- Use [Troubleshooting](troubleshooting.md#pr-revision-makes-no-commit) for no-op revisions.
+- Use [Artifacts](artifacts.md#pr-revision-layout) to inspect revision outputs.
+- Use [CLI reference](cli-reference.md#pr-revision-options) for options.

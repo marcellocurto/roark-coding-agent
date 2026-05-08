@@ -2,7 +2,7 @@
 title: Managed workspaces
 summary: How Roark prepares clone-backed workspaces and copies ignored host-local files into them.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Managed workspaces
@@ -54,7 +54,7 @@ Roark rejects entries that are:
 - empty strings
 - parent traversal such as `../secret`
 - `.git` paths
-- glob-looking paths containing `*`, `?`, or `[` 
+- glob-looking paths containing `*`, `?`, or `[`
 
 Before copying, Roark requires the destination path itself to be ignored by Git:
 
@@ -74,3 +74,19 @@ After copying, Roark checks `git status --porcelain -- <path>` and refuses to co
 - Copied files are refreshed before workspace run and before verification.
 
 Do not store secret values in `.roark/config.json`; store only path names such as `.secrets/env`.
+
+## Workspace commands
+
+```bash
+roark workspace list
+roark workspace remove --issue 123
+roark workspace prune --older-than 30d
+```
+
+Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
+
+## Next steps
+
+- Use [Recovery](recovery.md) before deleting a failed issue workspace.
+- Use [Security and secrets](security-and-secrets.md) for copied ignored files.
+- Use [Operations runbook](operations-runbook.md#workspace-cleanup) for cleanup procedures.

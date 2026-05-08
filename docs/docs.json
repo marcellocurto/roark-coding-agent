@@ -1,0 +1,54 @@
+{
+  "navigation": [
+    {
+      "title": "Start here",
+      "items": [
+        { "title": "Overview", "path": "README.md" },
+        { "title": "Quickstart", "path": "quickstart.md" },
+        { "title": "Concepts", "path": "concepts.md" },
+        { "title": "Usage", "path": "usage.md" },
+        { "title": "Glossary", "path": "glossary.md" }
+      ]
+    },
+    {
+      "title": "Workflows",
+      "items": [
+        { "title": "Autorun", "path": "autorun.md" },
+        { "title": "Recovery", "path": "recovery.md" },
+        { "title": "PR Revisions", "path": "pr-revisions.md" },
+        { "title": "Issue Curation", "path": "issue-curation.md" },
+        { "title": "Verification", "path": "verification.md" }
+      ]
+    },
+    {
+      "title": "Operations",
+      "items": [
+        { "title": "Operations Runbook", "path": "operations-runbook.md" },
+        { "title": "Scheduling", "path": "scheduling.md" },
+        { "title": "Managed Workspaces", "path": "managed-workspaces.md" },
+        { "title": "Security and Secrets", "path": "security-and-secrets.md" },
+        { "title": "Troubleshooting", "path": "troubleshooting.md" }
+      ]
+    },
+    {
+      "title": "Reference",
+      "items": [
+        { "title": "CLI Reference", "path": "cli-reference.md" },
+        { "title": "Configuration", "path": "configuration.md" },
+        { "title": "Labels", "path": "labels.md" },
+        { "title": "Label Semantics", "path": "label-semantics.md" },
+        { "title": "Artifacts", "path": "artifacts.md" },
+        { "title": "Lifecycle Hooks", "path": "lifecycle-hooks.md" }
+      ]
+    },
+    {
+      "title": "Development",
+      "items": [
+        { "title": "Architecture", "path": "architecture.md" },
+        { "title": "Workflow Skills", "path": "workflow-skills.md" },
+        { "title": "Docs Maintenance", "path": "docs-maintenance.md" }
+      ]
+    }
+  ],
+  "redirects": []
+}

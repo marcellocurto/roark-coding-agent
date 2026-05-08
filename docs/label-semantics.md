@@ -2,7 +2,7 @@
 title: Roark label semantics
 summary: Full reference for GitHub labels Roark reads, applies, or assigns during autorun and issue-curation workflows.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T06:27:02Z
+lastUpdated: 2026-05-08T07:00:00Z
 ---
 
 # Roark label semantics
@@ -55,3 +55,34 @@ The issue-curation and `create-issues` flow assigns labels to new GitHub issues 
 - `--failure-label <label>` — label applied when readiness or verification fails. Defaults to `roark-failed`.
 
 When changing in-progress, success, or failure labels, Roark appends those lifecycle labels to the effective skip set automatically so already-claimed, successful, or failed issues are not selected again unintentionally.
+
+## Lifecycle transitions
+
+| State | Typical labels | What Roark does next |
+| --- | --- | --- |
+| Ready for automation | `afk` and no skip labels | Eligible for `roark auto` discovery. |
+| Claimed | `afk`, `roark-in-progress` | Run is in progress; other autorun processes skip it. |
+| Published | `roark-pr-opened` | Draft PR has been opened; future autorun skips it. |
+| Failed readiness or verification | `roark-failed` | Operator should inspect artifacts and use `roark continue`. |
+| Blocked by triage or external condition | `blocked` | Autorun skips it until a human changes labels or scope. |
+| Needs human decision | `needs-human` | Autorun skips it until a human resolves the decision. |
+
+## Operational checks
+
+Preview selection:
+
+```bash
+roark auto --repo owner/repo --limit 1 --dry-run
+```
+
+Inspect one issue:
+
+```bash
+gh issue view 123 --repo owner/repo --json labels,state,assignees
+```
+
+## Next steps
+
+- Use [Autorun](autorun.md) for the full label-gated workflow.
+- Use [Troubleshooting](troubleshooting.md#no-eligible-issues) when selection is surprising.
+- Use [Configuration](configuration.md#label-configuration) before changing label names.
