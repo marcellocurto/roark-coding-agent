@@ -47,7 +47,7 @@ Artifacts are written to:
 
 The full `do` workflow fetches the GitHub issue, triages it, plans it, implements it, runs two review agents, applies up to `--max-fix-passes` fix/review cycles when needed, and writes `readiness.md`.
 
-By default, `--max-fix-passes` is `1`.
+By default, `--max-fix-passes` is `3`.
 
 ```bash
 bun run roark.ts do 123 --repo owner/repo --max-fix-passes 3
@@ -224,7 +224,7 @@ Workflow:
 
 - `--model <provider/id>` — optional Pi model override.
 - `--thinking <level>` — override thinking level (`off|minimal|low|medium|high|xhigh`).
-- `--max-fix-passes <n>` — maximum fix/review cycles. Defaults to `1`.
+- `--max-fix-passes <n>` — maximum fix/review cycles. Defaults to `3`.
 - `--force` — re-run phases even if their artifact exists.
 - `--yes` — continue past dirty git preflight for implementation/fix.
 
