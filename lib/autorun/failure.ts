@@ -10,6 +10,8 @@ export type FailureCommentInput = {
   issueUrl?: string;
   phase: string;
   reason: string;
+  branchName?: string;
+  worktreePath?: string;
   artifactPath?: string;
   artifactContent?: string;
   attemptMetadataPath?: string;
@@ -44,6 +46,9 @@ export function formatFailureComment(input: FailureCommentInput): string {
   const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${input.reason}.`;
   const lines: string[] = [];
 
+  lines.push(`Issue: #${input.issueNumber}`);
+  if (input.branchName) lines.push(`Branch: \`${input.branchName}\``);
+  if (input.worktreePath) lines.push(`Worktree: \`${input.worktreePath}\``);
   if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
 

@@ -30,7 +30,7 @@ export async function runAutoContinue(
   const outDir = path.resolve(cwd, options.outDir);
   const issueDir = path.join(outDir, "issue", parsed.issueNumber);
   const attempt = options.attempt ?? await latestAttemptNumber(issueDir);
-  const recoveryCommand = formatContinueCommand({ issueNumber: parsed.issueNumber, repo: parsed.repo, attempt });
+  const recoveryCommand = formatContinueCommand({ issueNumber: parsed.issueNumber, cwd, repo: parsed.repo, attempt });
 
   console.log("\n=== Continue autorun attempt ===");
   console.log(`Issue: #${parsed.issueNumber}`);
@@ -55,12 +55,21 @@ export async function runAutoContinue(
     baseBranch: attemptMetadata.baseBranch,
   };
 
-  const agentCwd = attemptMetadata.worktreePath || autorunWorktreePath(cwd, attemptMetadata.issueNumber);
-  const workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd });
+  let workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), {
+    agentCwd: autorunWorktreePath(cwd, attemptMetadata.issueNumber),
+  });
   await ensureRunDir(workflowContext);
 
   console.log(`- Switching to branch ${branchPlan.branchName}`);
-  await checkoutExistingIssueBranch({ cwd: workflowContext.controlCwd, plan: branchPlan, worktreePath: workflowContext.agentCwd });
+  const recoveredAgentCwd = await checkoutExistingIssueBranch({
+    cwd: workflowContext.controlCwd,
+    plan: branchPlan,
+    worktreePath: workflowContext.agentCwd,
+  });
+  if (recoveredAgentCwd !== workflowContext.agentCwd) {
+    workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd });
+    await ensureRunDir(workflowContext);
+  }
 
   attemptMetadata = formatAttemptMetadata({
     ...attemptMetadata,

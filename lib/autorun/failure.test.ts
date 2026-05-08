@@ -12,7 +12,7 @@ describe("autorun failure", () => {
     expect(defaultAutorunFailureLabel).toBe("roark-failed");
   });
 
-  test("formatFailureComment includes phase, reason, and artifact path", () => {
+  test("formatFailureComment includes phase, reason, issue number, and artifact path", () => {
     const comment = formatFailureComment({
       issueNumber: 8,
       phase: "verification",
@@ -20,50 +20,56 @@ describe("autorun failure", () => {
       artifactPath: ".roark/runs/issue/8/verification.md",
     });
     expect(comment).toBe(
-      "Roark stopped on issue #8 at phase **verification**: verify command exited 2.\n\nArtifact: `.roark/runs/issue/8/verification.md`\n",
+      "Roark stopped on issue #8 at phase **verification**: verify command exited 2.\n\nIssue: #8\nArtifact: `.roark/runs/issue/8/verification.md`\n",
     );
   });
 
-  test("formatFailureComment includes attempt path, artifact contents, and recovery command", () => {
+  test("formatFailureComment includes branch, worktree, attempt path, artifact contents, and recovery command", () => {
     const comment = formatFailureComment({
       issueNumber: 10,
       issueUrl: "https://github.com/owner/repo/issues/10",
       phase: "readiness",
       reason: 'readiness status is "not-ready"',
+      branchName: "roark/issue-10",
+      worktreePath: "/repo/.roark/worktrees/issue-10",
       artifactPath: ".roark/runs/issue/10/attempts/2/readiness.md",
       artifactContent: "# PR Readiness\n\n## Status\nnot-ready\n",
       attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
-      recoveryCommand: "roark continue 10 --repo owner/repo --attempt 2",
+      recoveryCommand: "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
     });
     expect(comment).toContain(
       'Roark stopped on issue https://github.com/owner/repo/issues/10 at phase **readiness**: readiness status is "not-ready".',
     );
+    expect(comment).toContain("Issue: #10");
+    expect(comment).toContain("Branch: `roark/issue-10`");
+    expect(comment).toContain("Worktree: `/repo/.roark/worktrees/issue-10`");
     expect(comment).toContain("Artifact: `.roark/runs/issue/10/attempts/2/readiness.md`");
     expect(comment).toContain("Attempt: `.roark/runs/issue/10/attempts/2/attempt.json`");
     expect(comment).toContain("## Artifact contents");
     expect(comment).toContain("## Status\nnot-ready");
     expect(comment).toContain("## Recovery");
-    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
+    expect(comment).toContain("roark continue 10 --cwd /repo --repo owner/repo --attempt 2");
   });
 
-  test("formatFailureComment renders only the attempt path when artifact path is omitted", () => {
+  test("formatFailureComment renders only the issue and attempt path when artifact path is omitted", () => {
     const comment = formatFailureComment({
       issueNumber: 10,
       phase: "readiness",
       reason: 'readiness status is "not-ready"',
       attemptMetadataPath: ".roark/runs/issue/10/attempts/1/attempt.json",
     });
+    expect(comment).toContain("Issue: #10");
     expect(comment).toContain("Attempt: `.roark/runs/issue/10/attempts/1/attempt.json`");
     expect(comment).not.toContain("Artifact:");
   });
 
-  test("formatFailureComment omits artifact line when no path is provided", () => {
+  test("formatFailureComment omits artifact and attempt lines when no paths are provided", () => {
     const comment = formatFailureComment({
       issueNumber: 8,
       phase: "readiness",
       reason: 'readiness status is "not-ready"',
     });
-    expect(comment).toBe('Roark stopped on issue #8 at phase **readiness**: readiness status is "not-ready".\n');
+    expect(comment).toBe('Roark stopped on issue #8 at phase **readiness**: readiness status is "not-ready".\n\nIssue: #8\n');
     expect(comment).not.toContain("Artifact:");
     expect(comment).not.toContain("Attempt:");
   });

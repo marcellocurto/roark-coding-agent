@@ -105,6 +105,8 @@ export async function handleNonPublish(input: {
     issueUrl: issue.url,
     phase: decision.phase,
     reason: decision.reason,
+    branchName: attemptMetadata.branch,
+    worktreePath: attemptMetadata.worktreePath,
     artifactPath,
     artifactContent,
     attemptMetadataPath,

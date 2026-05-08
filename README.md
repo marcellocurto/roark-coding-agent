@@ -106,7 +106,7 @@ When no repo override exists, Roark loads the bundled package skill from `skills
 
 ## Auto mode
 
-`auto` is a one-shot, label-gated, draft-PR-only workflow. A single invocation finds eligible GitHub issues, claims one, runs the full `do` workflow on a dedicated branch, and — only when readiness is `ready-for-pr` and the verification command succeeds — pushes the branch and opens a draft PR. Roark itself ships no daemon: to run it on a schedule, invoke it from `cron`, `launchd`, GitHub Actions, or any other scheduler you control. While maintainers are still building trust in the workflow, the recommended posture is `--limit 1` (the default) so each invocation processes one issue.
+`auto` is a one-shot, label-gated, draft-PR-only workflow. A single invocation finds eligible GitHub issues, claims one, runs the full `do` workflow in `.roark/worktrees/issue-<n>` on a dedicated branch, and — only when readiness is `ready-for-pr` and the verification command succeeds — pushes the branch and opens a draft PR. Roark itself ships no daemon: to run it on a schedule, invoke it from `cron`, `launchd`, GitHub Actions, or any other scheduler you control. While maintainers are still building trust in the workflow, the recommended posture is `--limit 1` (the default) so each invocation processes one issue.
 
 ### One-shot example
 
@@ -129,14 +129,14 @@ bun run roark.ts auto --repo owner/repo --limit 1
 3. Sort oldest-first and slice to `--limit` (default `1`).
 4. For each selected issue:
    - **Claim** it: assign the user (`--assignee`, defaulting to the authenticated `gh` user, unless `--no-assign`), apply the in-progress label, and post a claim comment naming the branch.
-   - **Switch** to `roark/issue-<n>`, creating it from `--base-branch` (default `main`) via `git switch -c` if it does not exist yet.
-   - Allocate a per-attempt directory under `.roark/runs/issue/<n>/attempts/<k>/` and run the full `do` workflow there.
+   - **Prepare** `.roark/worktrees/issue-<n>` on `roark/issue-<n>`, creating the branch from `origin/<base-branch>` (default `origin/main`) when needed.
+   - Allocate a per-attempt directory under `.roark/runs/issue/<n>/attempts/<k>/` and run the full `do` workflow in the issue worktree.
    - Before triage, fetch a machine-generated GitHub relationship snapshot: native dependencies via `gh api` when available, plus conservatively parsed `Blocked by` body references verified with `gh issue view`.
    - If triage returns a terminal non-`proceed` verdict, stop cleanly: post a concise issue comment, remove the in-progress label, remove any stale failure label, apply the matching terminal/status label, and skip planning, implementation, verification, publishing, and PR creation.
    - Apply the **readiness gate**: `readiness.md` must declare `## Status` as `ready-for-pr`.
    - Apply the **verification gate**: run `--verify` (default `bun run typecheck`) via `sh -c` and require exit code `0`.
-   - On success: commit pending workflow artifacts, `git push -u <remote> <branch>`, open a **draft** PR with `gh pr create --draft --base <base-branch> --head <branch>`, and apply the success label to the issue.
-   - On failure: apply the failure label and post a comment that links the failing artifact (e.g. `readiness.md` or `verification.md`) and the attempt metadata file.
+   - On success: commit target-repo changes once after the gates pass, excluding `.roark/runs` artifacts, `git push -u <remote> <branch>`, open a **draft** PR with `gh pr create --draft --base <base-branch> --head <branch>`, and apply the success label to the issue.
+   - On failure: leave work uncommitted in the issue worktree, apply the failure label, and post a recovery comment with the branch, worktree, failing artifact, attempt metadata file, and exact `roark continue` command.
 
 ### Required labels
 
@@ -156,11 +156,11 @@ If you change a default in code, update this table to match.
 
 An issue is eligible only if it carries the ready label **and** carries none of the skip labels. The skip set includes the in-progress, success, and failure labels, so an issue that has already been claimed, shipped a draft PR, or failed will not be picked up again until a maintainer relabels it. `--limit` defaults to `1`: a single invocation claims at most one issue, runs to completion, and then exits. Maintainers can raise the limit later, but keeping it at `1` is the recommended posture while building confidence in autorun.
 
-### Branch isolation and naming
+### Worktree isolation and naming
 
-Each issue gets its own branch named `roark/issue-<n>`, created from `--base-branch` (default `main`) using `git switch -c <branch> <base-branch>`. If the branch already exists, autorun simply switches to it. Autorun refuses to use the base branch as the work branch.
+Each issue gets its own branch named `roark/issue-<n>` and a persistent worktree at `.roark/worktrees/issue-<n>`. New branches are created from `--base-branch` (default `main`, fetched as `origin/main`). Autorun refuses to use the base branch as the work branch.
 
-Isolation here is **branch-level**, not a separate `git worktree` directory: the workflow runs in place inside the current checkout. If you want filesystem-level isolation, create a dedicated checkout (or a `git worktree add`) up front and run `auto` from there. In all cases, run `auto` from a clean tree dedicated to roark so its commits do not collide with other in-flight work.
+Branches are the durable source for code state. `.roark/runs` artifacts are the durable source for reasoning/history. Uncommitted failed work is recoverable only while the persistent issue worktree still exists; if the worktree is deleted, `continue` can recreate it from the local or remote branch but cannot reconstruct deleted uncommitted edits. Fresh `auto` refuses dirty existing issue worktrees and tells you to use `continue` for recovery.
 
 Per-attempt metadata is written under:
 
@@ -176,9 +176,9 @@ The per-attempt `attempt.json` records the branch, base branch, start/end times,
 Autorun publishes only when **both** gates pass.
 
 - **Readiness gate.** The workflow's `readiness.md` artifact must contain a `## Status` heading whose value (after stripping backticks/emphasis) is exactly `ready-for-pr`. Anything else — including `not-ready` or a missing status — fails the gate.
-- **Verification gate.** Autorun runs `--verify` (default `bun run typecheck`) via `sh -c` in the workflow's `cwd`. Exit code `0` passes; any non-zero exit fails. The command, exit code, and tails of stdout/stderr are written to `verification.md`.
+- **Verification gate.** Autorun runs `--verify` (default `bun run typecheck`) via `sh -c` in the issue worktree. Exit code `0` passes; any non-zero exit fails. The command, exit code, and tails of stdout/stderr are written to `verification.md`.
 
-When either gate fails, autorun does not push and does not open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the failing phase, the failing artifact (`readiness.md` or `verification.md`), includes the artifact contents/excerpt directly in the GitHub comment, and gives the exact `continue` command for that attempt. Intentional triage stops (`blocked`, `reject`, or `needs-human-decision`) are handled before these gates and do not receive `roark-failed`.
+When either gate fails, autorun does not commit, push, or open a PR. Instead it applies the failure label (`--failure-label`, default `roark-failed`) and posts a comment on the issue that names the branch, worktree path, failing phase, failing artifact (`readiness.md` or `verification.md`), attempt metadata path, artifact contents/excerpt, and exact `continue` command for that attempt. Intentional triage stops (`blocked`, `reject`, or `needs-human-decision`) are handled before these gates and do not receive `roark-failed`.
 
 A triage no-op is handled before these gates: autorun writes readiness, comments with the triage verdict and artifact paths, removes `roark-in-progress`, removes any stale failure label, applies the mapped skip/status label, and does not run verification, push, or create a PR.
 
@@ -187,10 +187,10 @@ A triage no-op is handled before these gates: autorun writes readiness, comments
 A failed autorun attempt is recoverable without relabeling the issue or starting from scratch. Run the command from the same checkout:
 
 ```bash
-roark continue 123 --repo owner/repo --attempt 1
+roark continue 123 --cwd /repo --repo owner/repo --attempt 1
 ```
 
-If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It switches back to the attempt branch from `attempt.json`, reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns the verification gate, and publishes the draft PR only if both gates pass. If the existing triage artifact is a valid terminal non-`proceed` verdict, `continue` keeps that as a clean terminal outcome instead of proceeding into planning. This is the intended recovery path for cases like an empty review artifact, failed readiness, or failed verification.
+If `--attempt` is omitted, `continue` uses the latest attempt recorded in `.roark/runs/issue/<n>/attempts.json`. It reuses `.roark/worktrees/issue-<n>` when present; if the worktree is missing, it recreates it from local branch `roark/issue-<n>` or remote branch `origin/roark/issue-<n>`. If neither exists, it fails clearly. It reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites `readiness.md`, reruns verification in the worktree, and publishes the draft PR only if both gates pass. Dirty worktrees are allowed for the selected failed attempt; deleted uncommitted edits are not reconstructed.
 
 ### Draft PR only — never merges, never closes
 
@@ -240,12 +240,18 @@ Publish:
 
 ### External scheduling
 
-Roark ships no daemon. To run autorun periodically, drive the one-shot command from any scheduler that can run `bun` and `gh` as a user with valid `gh auth status`. The snippets below are minimal starting points the operator owns; adapt them to your environment.
+Roark v1 supports server-local one-shot execution only. To run autorun periodically, drive this command from an external scheduler as a user with valid `gh auth status`:
+
+```bash
+roark auto --cwd /srv/roark/repos/app --limit 1
+```
+
+Roark ships no daemon, SSH worker mode, Docker worker mode, or parallel worker pool in v1. Non-interactive scheduler runs must provide or infer required repository/auth/verification configuration; when required information is missing, Roark should fail clearly rather than prompt. The snippets below are minimal starting points the operator owns; adapt them to your environment.
 
 **cron** (every hour, with a lock file to prevent overlapping runs):
 
 ```cron
-0 * * * * cd /path/to/repo && /usr/bin/flock -n /tmp/roark-auto.lock /usr/local/bin/bun run roark.ts auto --repo owner/repo --limit 1 >> /var/log/roark.log 2>&1
+0 * * * * /usr/bin/flock -n /tmp/roark-auto.lock /usr/local/bin/roark auto --cwd /srv/roark/repos/app --repo owner/repo --limit 1 >> /var/log/roark.log 2>&1
 ```
 
 **launchd** (macOS, run hourly under the user's login session so `gh` keychain auth is available):
@@ -256,13 +262,12 @@ Roark ships no daemon. To run autorun periodically, drive the one-shot command f
 <plist version="1.0">
   <dict>
     <key>Label</key><string>com.example.roark.auto</string>
-    <key>WorkingDirectory</key><string>/path/to/repo</string>
+    <key>WorkingDirectory</key><string>/srv/roark/repos/app</string>
     <key>ProgramArguments</key>
     <array>
-      <string>/usr/local/bin/bun</string>
-      <string>run</string>
-      <string>roark.ts</string>
+      <string>/usr/local/bin/roark</string>
       <string>auto</string>
+      <string>--cwd</string><string>/srv/roark/repos/app</string>
       <string>--repo</string><string>owner/repo</string>
       <string>--limit</string><string>1</string>
     </array>

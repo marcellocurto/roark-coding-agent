@@ -85,7 +85,7 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.md`");
     expect(comment).toContain("invalid output");
     expect(comment).toContain("Attempt: `.roark/runs/issue/44/attempts/1/attempt.json`");
-    expect(comment).toContain("roark continue 44 --repo owner/repo --attempt 1");
+    expect(comment).toContain(`roark continue 44 --cwd ${fixture.gateOptions.cwd} --repo owner/repo --attempt 1`);
   });
 
   test("includes direct artifact validation error artifact details in the failure comment", async () => {

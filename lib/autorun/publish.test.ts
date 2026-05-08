@@ -13,6 +13,7 @@ import {
   defaultAutorunSuccessLabel,
   formatCommitMessage,
   formatPrBody,
+  hasUncommittedChanges,
   publishAutorunResult,
 } from "./publish.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
@@ -51,8 +52,8 @@ describe("autorun publish defaults", () => {
 });
 
 describe("autorun publish argv builders", () => {
-  test("buildStageAllArgv stages all changes", () => {
-    expect(buildStageAllArgv()).toEqual(["git", "add", "-A"]);
+  test("buildStageAllArgv stages target changes but excludes run artifacts", () => {
+    expect(buildStageAllArgv()).toEqual(["git", "add", "-A", "--", ".", ":(exclude).roark/runs"]);
   });
 
   test("buildCommitArgv composes a git commit command", () => {
@@ -158,6 +159,31 @@ describe("formatCommitMessage", () => {
   });
 });
 
+describe("publish git staging", () => {
+  test("ignores .roark/runs when deciding and staging publish changes", async () => {
+    const repo = await mkdtemp(path.join(tmpdir(), "roark-publish-stage-test-"));
+    tempDirs.push(repo);
+    await runProcessOrThrow(["git", "init", "-b", "main", repo]);
+    await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: repo });
+    await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: repo });
+    await writeFile(path.join(repo, "README.md"), "hello\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md"], { cwd: repo });
+    await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: repo });
+
+    await mkdir(path.join(repo, ".roark/runs/issue/9/attempts/1"), { recursive: true });
+    await writeFile(path.join(repo, ".roark/runs/issue/9/attempts/1/attempt.json"), "{}\n", "utf8");
+    expect(await hasUncommittedChanges({ cwd: repo })).toBe(false);
+
+    await writeFile(path.join(repo, "feature.txt"), "feature\n", "utf8");
+    expect(await hasUncommittedChanges({ cwd: repo })).toBe(true);
+    await runProcessOrThrow(buildStageAllArgv(), { cwd: repo });
+
+    const cached = await gitOutput(repo, ["diff", "--cached", "--name-only"]);
+    expect(cached).toContain("feature.txt");
+    expect(cached).not.toContain(".roark/runs");
+  });
+});
+
 describe("publishAutorunResult", () => {
   test("uses agent cwd for git and PR creation but control cwd for issue labels", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
@@ -231,6 +257,86 @@ describe("publishAutorunResult", () => {
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);
+  });
+
+  test("creates one commit for target changes and excludes .roark/runs artifacts", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-publish-commit-test-"));
+    tempDirs.push(root);
+    const controlCwd = path.join(root, "control");
+    const agentCwd = path.join(root, "agent");
+    const remote = path.join(root, "remote.git");
+    const binDir = path.join(root, "bin");
+    const ghLog = path.join(root, "gh.log");
+    await mkdir(controlCwd, { recursive: true });
+    await mkdir(agentCwd, { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      path.join(binDir, "gh"),
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ]; then echo "https://github.com/owner/repo/pull/1"; fi\n`,
+      "utf8",
+    );
+    await chmod(path.join(binDir, "gh"), 0o755);
+
+    await runProcessOrThrow(["git", "init", "-b", "roark/issue-9", agentCwd]);
+    await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: agentCwd });
+    await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "init", "--bare", remote]);
+    await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], { cwd: agentCwd });
+
+    const beforeCommitCount = Number(await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]));
+    await writeFile(path.join(agentCwd, "feature.txt"), "feature\n", "utf8");
+    await mkdir(path.join(agentCwd, ".roark/runs/issue/9/attempts/1"), { recursive: true });
+    await writeFile(path.join(agentCwd, ".roark/runs/issue/9/attempts/1/attempt.json"), "{}\n", "utf8");
+
+    const oldPath = process.env.PATH;
+    const oldGhLog = process.env.ROARK_GH_LOG;
+    process.env.PATH = `${binDir}:${oldPath ?? ""}`;
+    process.env.ROARK_GH_LOG = ghLog;
+    try {
+      await publishAutorunResult({
+        options: {
+          cwd: controlCwd,
+          repo: "owner/repo",
+          failureLabel: "roark-failed",
+          successLabel: "roark-pr-opened",
+          inProgressLabel: "roark-in-progress",
+          remote: "origin",
+          baseBranch: "main",
+        },
+        issue: { number: 9, title: "Fix bug" },
+        branchPlan: { issueNumber: 9, branchName: "roark/issue-9", baseBranch: "main" },
+        workflowContext: {
+          controlCwd,
+          agentCwd,
+          outDir: path.join(controlCwd, ".roark/runs"),
+          runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
+          runDirRelative: ".roark/runs/issue/9/attempts/1",
+          issueInput: "9",
+          issueNumber: "9",
+          attempt: 1,
+          force: false,
+          yes: false,
+          maxFixPasses: 1,
+        },
+      });
+    } finally {
+      process.env.PATH = oldPath;
+      if (oldGhLog === undefined) delete process.env.ROARK_GH_LOG;
+      else process.env.ROARK_GH_LOG = oldGhLog;
+    }
+
+    const afterCommitCount = Number(await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]));
+    expect(afterCommitCount).toBe(beforeCommitCount + 1);
+    expect(await gitOutput(agentCwd, ["log", "-1", "--pretty=%s"])).toBe(formatCommitMessage({ issueNumber: 9 }));
+    expect(await gitOutput(agentCwd, ["show", "HEAD:feature.txt"])).toBe("feature");
+
+    const committedPaths = await gitOutput(agentCwd, ["ls-tree", "-r", "--name-only", "HEAD"]);
+    expect(committedPaths).toContain("feature.txt");
+    expect(committedPaths).not.toContain(".roark/runs");
   });
 });
 
@@ -356,3 +462,7 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Full run ledger: issue comments on #9");
   });
 });
+
+async function gitOutput(cwd: string, args: string[]): Promise<string> {
+  return (await runProcessOrThrow(["git", ...args], { cwd })).trim();
+}
