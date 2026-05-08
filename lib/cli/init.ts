@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
@@ -10,6 +10,7 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultMaxFixPasses, type InitCliOptions } from "./args.ts";
+import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import { inferRepoFromOrigin, inferVerifyCommand, type RoarkConfig } from "./hydrate.ts";
 import { runProcess, type ProcessResult } from "./process.ts";
 
@@ -55,7 +56,8 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   assertOwnerRepo(repo);
 
   const verify = await inferVerifyCommand(options.cwd, runner);
-  const config = buildInitConfig({ repo, verify });
+  const setupHook = await inferSetupHook(options.cwd);
+  const config = buildInitConfig({ repo, verify, setupHook });
   const writes = new Map<string, string>([
     [".roark/config.json", `${JSON.stringify(config, null, 2)}\n`],
     [".roark/WORKFLOW.md", roarkWorkflowContent],
@@ -87,7 +89,7 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   };
 }
 
-function buildInitConfig(input: { repo: string; verify?: string }): RoarkConfig {
+function buildInitConfig(input: { repo: string; verify?: string; setupHook?: string }): RoarkConfig {
   return {
     repo: input.repo,
     baseBranch: defaultAutorunBaseBranch,
@@ -98,7 +100,28 @@ function buildInitConfig(input: { repo: string; verify?: string }): RoarkConfig 
     failureLabel: defaultAutorunFailureLabel,
     skipLabels: [...defaultAutorunSkipLabels],
     maxFixPasses: defaultMaxFixPasses,
+    workspace: defaultWorkspaceConfig,
+    hooks: {
+      ...(input.setupHook ? { afterCreate: input.setupHook, beforeRun: input.setupHook, beforeVerify: input.setupHook } : {}),
+      timeoutMs: defaultLifecycleHooks.timeoutMs,
+    },
+    sandbox: { provider: "host" },
   };
+}
+
+async function inferSetupHook(workspace: string): Promise<string | undefined> {
+  if (existsSync(path.join(workspace, "bun.lock")) || existsSync(path.join(workspace, "bun.lockb"))) return "bun install --frozen-lockfile";
+  if (existsSync(path.join(workspace, "pnpm-lock.yaml"))) return "pnpm install --frozen-lockfile";
+  if (existsSync(path.join(workspace, "package-lock.json"))) return "npm ci";
+  if (existsSync(path.join(workspace, "yarn.lock"))) {
+    try {
+      const lockfile = await readFile(path.join(workspace, "yarn.lock"), "utf8");
+      return lockfile.startsWith("# yarn lockfile v1") ? "yarn install --frozen-lockfile" : "yarn install --immutable";
+    } catch {
+      return "yarn install --immutable";
+    }
+  }
+  return undefined;
 }
 
 async function ensureRoarkDirectory(workspace: string): Promise<void> {

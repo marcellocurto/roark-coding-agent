@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
@@ -8,6 +8,7 @@ import { defaultAutorunFailureLabel } from "./failure.ts";
 import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "./publish.ts";
 import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel, defaultAutorunSkipLabels } from "./selection.ts";
 import { defaultAutorunVerifyCommand } from "./verification.ts";
+import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
 
 const tempDirs: string[] = [];
@@ -275,13 +276,19 @@ describe("runAutoDiscovery", () => {
     expect(order).toEqual(["preflight"]);
   });
 
-  test("targeted auto rechecks labels after worktree setup and skips before claim", async () => {
+  test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-recheck-"));
     tempDirs.push(cwd);
+    const workspacePath = path.join(cwd, "managed-workspace");
     const calls: string[] = [];
     let fetchCount = 0;
 
-    await runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
+    await runAutoDiscovery({
+      ...baseOptions(cwd),
+      issue: "29",
+      noAssign: true,
+      hooks: { timeoutMs: 1000, beforeRun: "printf should-not-run > before-run.txt" },
+    }, {
       ...noOpAutorunLock,
       fetchGitHubIssue: async () => {
         fetchCount += 1;
@@ -292,9 +299,13 @@ describe("runAutoDiscovery", () => {
       assertCleanAutorunGit: async () => {
         calls.push("preflight");
       },
-      ensureIssueWorktree: async () => {
-        calls.push("worktree");
-        return path.join(cwd, ".roark/worktrees/issue-29");
+      prepareCloneWorkspace: async () => {
+        calls.push("workspace");
+        return {
+          path: workspacePath,
+          metadata: { path: workspacePath, strategy: "clone", cloneRemote: "origin", createdNow: true },
+          releaseLock: async () => { calls.push("release"); },
+        };
       },
       claimGitHubIssue: async () => {
         calls.push("claim");
@@ -305,15 +316,22 @@ describe("runAutoDiscovery", () => {
       },
     });
 
-    expect(calls).toEqual(["preflight", "worktree"]);
+    expect(calls).toEqual(["preflight", "workspace", "release"]);
   });
 
-  test("targeted auto uses the managed claim, branch, attempt, workflow, and completion pipeline", async () => {
+  test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-clone-workspace-"));
+    tempDirs.push(workspacePath);
     const calls: string[] = [];
 
-    await runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
+    await runAutoDiscovery({
+      ...baseOptions(cwd),
+      issue: "29",
+      noAssign: true,
+      hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
+    }, {
       ...noOpAutorunLock,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
       fetchGitHubIssue: async () => fetchedGitHubIssue(29, []),
@@ -324,10 +342,20 @@ describe("runAutoDiscovery", () => {
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
       },
-      ensureIssueWorktree: async (input) => {
-        calls.push(`worktree:${input.plan.branchName}`);
+      prepareCloneWorkspace: async (input) => {
+        calls.push(`workspace:${input.plan.branchName}`);
         expect(input.controlCwd).toBe(cwd);
-        return path.join(cwd, ".roark/worktrees/issue-29");
+        return {
+          path: workspacePath,
+          metadata: {
+            path: workspacePath,
+            strategy: "clone",
+            cloneRemote: "origin",
+            cloneUrl: "git@github.com:owner/repo.git",
+            createdNow: true,
+          },
+          releaseLock: async () => { calls.push("release"); },
+        };
       },
       publishIssueLedgerComment: async () => {
         calls.push("ledger");
@@ -335,7 +363,8 @@ describe("runAutoDiscovery", () => {
       runFullWorkflow: async (context) => {
         calls.push(`workflow:${context.runDirRelative}`);
         expect(context.controlCwd).toBe(cwd);
-        expect(context.agentCwd).toBe(path.join(cwd, ".roark/worktrees/issue-29"));
+        expect(context.agentCwd).toBe(workspacePath);
+        expect(await readFile(path.join(workspacePath, "before-run.txt"), "utf8")).toBe("before");
         return { status: "completed" };
       },
       completeAutorunWorkflow: async (input) => {
@@ -346,12 +375,22 @@ describe("runAutoDiscovery", () => {
 
     expect(calls).toEqual([
       "preflight",
-      "worktree:roark/issue-29",
+      "workspace:roark/issue-29",
       "claim:roark/issue-29",
       "ledger",
       "workflow:.roark/runs/issue/29/attempts/1",
       "complete:roark/issue-29",
+      "release",
     ]);
+    const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/29"), 1);
+    expect(metadata.worktreePath).toBe(workspacePath);
+    expect(metadata.workspace).toEqual({
+      path: workspacePath,
+      strategy: "clone",
+      cloneRemote: "origin",
+      cloneUrl: "git@github.com:owner/repo.git",
+      createdNow: true,
+    });
   });
 });
 

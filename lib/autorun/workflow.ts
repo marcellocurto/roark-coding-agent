@@ -8,10 +8,11 @@ export function createAutorunWorkflowContext(
   branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
   attempt?: number,
+  agentCwd = autorunWorktreePath(options.cwd, issue.number),
 ): WorkflowContext {
   return createWorkflowContext(
     createAutorunWorkflowOptions(issue, branchPlan, options, attempt),
-    { agentCwd: autorunWorktreePath(options.cwd, issue.number) },
+    { agentCwd },
   );
 }
 

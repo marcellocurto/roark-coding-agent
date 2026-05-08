@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
+import { runWorkspaceCommand } from "./lib/autorun/workspace.ts";
 import { parseArgs, usage } from "./lib/cli/args.ts";
 import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
@@ -49,6 +50,11 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   if (parsed.command === "status") {
     console.log(await renderStatus(parsed));
+    return;
+  }
+
+  if (parsed.command === "workspace") {
+    await runWorkspaceCommand(parsed);
     return;
   }
 

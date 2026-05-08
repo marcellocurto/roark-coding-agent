@@ -185,7 +185,7 @@ describe("publish git staging", () => {
 });
 
 describe("publishAutorunResult", () => {
-  test("uses agent cwd for git and PR creation but control cwd for issue labels", async () => {
+  test("uses agent cwd for git and control cwd for PR creation and issue labels", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
     tempDirs.push(root);
     const controlCwd = path.join(root, "control");
@@ -253,7 +253,7 @@ describe("publishAutorunResult", () => {
     }
 
     const ghCalls = await readFile(ghLog, "utf8");
-    expect(ghCalls).toContain(`${agentCwd}\tpr create`);
+    expect(ghCalls).toContain(`${controlCwd}\tpr create`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);

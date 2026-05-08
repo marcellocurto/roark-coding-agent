@@ -124,7 +124,8 @@ export function formatPrBody(input: FormatPrBodyInput): string {
     lines.push(`- Branch: \`${meta.branch}\``);
     lines.push(`- Started: ${meta.startedAt}`);
     if (meta.endedAt) lines.push(`- Ended: ${meta.endedAt}`);
-    lines.push(`- Worktree: \`${meta.worktreePath}\``);
+    if (meta.workspace?.path) lines.push(`- Workspace: \`${meta.workspace.path}\``);
+    else lines.push(`- Worktree: \`${meta.worktreePath}\``);
     if (input.attemptMetadataPath) {
       lines.push(`- Metadata: \`${input.attemptMetadataPath}\``);
     }
@@ -227,7 +228,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       title: issue.title,
       body,
     }),
-    { cwd: agentCwd, label: "gh pr create --draft" },
+    { cwd: controlCwd, label: "gh pr create --draft" },
   );
   const prUrl = prStdout.trim();
   if (prUrl) console.log(`- Draft PR: ${prUrl}`);
