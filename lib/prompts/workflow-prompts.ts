@@ -217,26 +217,60 @@ export function implementationPrompt(context: WorkflowContext, restartPass = 0):
 </workflow_phase>`;
 }
 
-function reviewPrompt(context: WorkflowContext, pass: number, reviewer: "A" | "B"): string {
-  const isA = reviewer === "A";
-  const phase = isA ? "review_a" : "review_b";
-  const role = isA ? "Review Agent A" : "Review Agent B";
-  const successCriteria = isA
-    ? "Defect review succeeds when required fixes cite concrete defects with file-level evidence, validation gaps are identified, and non-defect concerns are not promoted to blockers."
-    : "Maintainability review succeeds when required fixes cite concrete code-health harms with file-level evidence and subjective preferences remain suggested improvements.";
-  const focus = isA
-    ? `<item>Misimplementation or partial implementation of the issue's acceptance criteria.</item>\n    <item>Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.</item>\n    <item>Missing or incorrect error handling, race conditions, and ordering issues.</item>\n    <item>Regressions or broken contracts in unrelated callers touched by the diff.</item>\n    <item>Missing or insufficient tests for the changed behavior.</item>\n    <item>Gaps or unsubstantiated claims in the implementation/refinement logs' validation evidence.</item>`
-    : `<item>Simplicity: unnecessary complexity, indirection, or premature abstraction.</item>\n    <item>Codebase fit: alignment with existing patterns, idioms, and module boundaries already used here.</item>\n    <item>Scope control: changes that go beyond what the issue requires.</item>\n    <item>Test quality: brittle, redundant, low-signal, or poorly scoped tests; coverage adequacy for the change.</item>\n    <item>Naming and API clarity: ambiguous, misleading, or inconsistent names and public surfaces.</item>\n    <item>Style, formatting, and structure only when they materially harm readability or consistency.</item>`;
-  const requiredFixesPolicy = isA
-    ? "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current issue."
-    : "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation that blocks approval for the current issue.";
-  const reviewAConstraint = isA ? "" : "\n    <constraint>Do not read Review Agent A's output.</constraint>";
+type ReviewPromptConfig = {
+  phase: string;
+  reviewerLabel: string;
+  role: string;
+  successCriteria: string;
+  focusName: string;
+  focusItems: readonly string[];
+  requiredFixesPolicy: string;
+  extraConstraints: readonly string[];
+};
+
+const reviewAConfig: ReviewPromptConfig = {
+  phase: "review_a",
+  reviewerLabel: "A",
+  role: "Review Agent A",
+  successCriteria: "Defect review succeeds when required fixes cite concrete defects with file-level evidence, validation gaps are identified, and non-defect concerns are not promoted to blockers.",
+  focusName: "Defect",
+  focusItems: [
+    "Misimplementation or partial implementation of the issue's acceptance criteria.",
+    "Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.",
+    "Missing or incorrect error handling, race conditions, and ordering issues.",
+    "Regressions or broken contracts in unrelated callers touched by the diff.",
+    "Missing or insufficient tests for the changed behavior.",
+    "Gaps or unsubstantiated claims in the implementation/refinement logs' validation evidence.",
+  ],
+  requiredFixesPolicy: "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current issue.",
+  extraConstraints: [],
+};
+
+const reviewBConfig: ReviewPromptConfig = {
+  phase: "review_b",
+  reviewerLabel: "B",
+  role: "Review Agent B",
+  successCriteria: "Maintainability review succeeds when required fixes cite concrete code-health harms with file-level evidence and subjective preferences remain suggested improvements.",
+  focusName: "Maintainability",
+  focusItems: [
+    "Simplicity: unnecessary complexity, indirection, or premature abstraction.",
+    "Codebase fit: alignment with existing patterns, idioms, and module boundaries already used here.",
+    "Scope control: changes that go beyond what the issue requires.",
+    "Test quality: brittle, redundant, low-signal, or poorly scoped tests; coverage adequacy for the change.",
+    "Naming and API clarity: ambiguous, misleading, or inconsistent names and public surfaces.",
+    "Style, formatting, and structure only when they materially harm readability or consistency.",
+  ],
+  requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation that blocks approval for the current issue.",
+  extraConstraints: ["Do not read Review Agent A's output."],
+};
+
+function renderReviewPrompt(context: WorkflowContext, pass: number, config: ReviewPromptConfig): string {
   const failedVerification = pass > 0 ? verificationArtifactInput(context, pass) : "";
 
-  return `<workflow_phase name="${phase}" pass="${pass}">
-  <role>You are ${role}.</role>
+  return `<workflow_phase name="${config.phase}" pass="${pass}">
+  <role>You are ${config.role}.</role>
   <success_criteria>
-    ${successCriteria}
+    ${config.successCriteria}
   </success_criteria>
   <inputs>
     <artifact kind="issue">${artifactAgentPath(context, "issue")}</artifact>
@@ -250,21 +284,21 @@ function reviewPrompt(context: WorkflowContext, pass: number, reviewer: "A" | "B
     Start with the current refined diff/stat for cycle ${pass}. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the review verdict and any findings with concrete evidence.
   </inspection_budget>
   <review_focus>
-    You are a ${isA ? "Defect" : "Maintainability"} Review agent. Review the final post-refinement code state for cycle ${pass}.
+    You are a ${config.focusName} Review agent. Review the final post-refinement code state for cycle ${pass}.
     Look specifically for:
-    ${focus}
+${formatReviewFocusItems(config.focusItems)}
   </review_focus>
   <required_fixes_policy>
-    ${requiredFixesPolicy}
+    ${config.requiredFixesPolicy}
     Non-blocking concerns belong in the Findings Ledger as <value>follow-up</value> or <value>suggestion</value>, not Required Fixes.
     Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, <value>restart-required</value> when the implementation direction is fundamentally wrong and incremental fixes would be more expensive/risky than resetting to the pre-implementation baseline, and <value>blocked</value> when the workflow cannot safely proceed.
   </required_fixes_policy>
 ${findingsLedgerContract}
-  <constraints>${reviewAConstraint}
-    <constraint>Do not make changes.</constraint>
+  <constraints>
+${formatReviewConstraints(config)}
   </constraints>
   <output_contract format="markdown" section_guidance="preferred">
-# Review ${reviewer} Pass ${pass}
+# Review ${config.reviewerLabel} Pass ${pass}
 
 ## Verdict
 One of: approve, fixes-required, restart-required, blocked
@@ -297,12 +331,20 @@ List only non-blocking suggestion findings.
 </workflow_phase>`;
 }
 
+function formatReviewFocusItems(items: readonly string[]): string {
+  return items.map((item) => `    <item>${item}</item>`).join("\n");
+}
+
+function formatReviewConstraints(config: ReviewPromptConfig): string {
+  return [...config.extraConstraints, "Do not make changes."].map((constraint) => `    <constraint>${constraint}</constraint>`).join("\n");
+}
+
 export function reviewAPrompt(context: WorkflowContext, pass = 0): string {
-  return reviewPrompt(context, pass, "A");
+  return renderReviewPrompt(context, pass, reviewAConfig);
 }
 
 export function reviewBPrompt(context: WorkflowContext, pass = 0): string {
-  return reviewPrompt(context, pass, "B");
+  return renderReviewPrompt(context, pass, reviewBConfig);
 }
 
 export function codeRefinementPrompt(context: WorkflowContext, pass: number, source: "initial" | "fix" | "restart" = pass === 0 ? "initial" : "fix"): string {
