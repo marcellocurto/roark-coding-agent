@@ -106,6 +106,24 @@ describe("autorun verification", () => {
     }).repairable).toBe(true);
   });
 
+  test("does not treat generic test not-found output as command unavailable", () => {
+    expect(classifyVerificationFailure({
+      ok: false,
+      command: "bun test",
+      exitCode: 1,
+      stdout: "",
+      stderr: "AssertionError: expected element to be not found",
+    }).repairable).toBe(true);
+
+    expect(classifyVerificationFailure({
+      ok: false,
+      command: "bun test",
+      exitCode: 1,
+      stdout: "",
+      stderr: "Error: not found",
+    }).repairable).toBe(true);
+  });
+
   test("parses verification artifacts for continuation planning", () => {
     const parsed = parseVerificationArtifact(formatVerificationArtifact({
       ok: false,
