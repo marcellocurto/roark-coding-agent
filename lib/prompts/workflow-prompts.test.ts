@@ -39,6 +39,24 @@ const splitContext = {
 
 const tempDirs: string[] = [];
 
+function phasePrompts(testContext: WorkflowContext): string[] {
+  return [
+    triagePrompt(testContext),
+    planDraftPrompt(testContext),
+    planPrompt(testContext),
+    implementationPrompt(testContext),
+    codeRefinementPrompt(testContext, 0),
+    reviewAPrompt(testContext),
+    reviewBPrompt(testContext),
+    fixPrompt(testContext, 1),
+    finalReviewPrompt(testContext, 1),
+  ];
+}
+
+function matchCount(value: string, pattern: RegExp): number {
+  return value.match(pattern)?.length ?? 0;
+}
+
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
@@ -73,12 +91,26 @@ describe("workflow prompt safety policy", () => {
   });
 
   test("phase prompts use XML tags around role, inputs, instructions, and output contracts", () => {
-    for (const prompt of [triagePrompt(context), planDraftPrompt(context), planPrompt(context), implementationPrompt(context), codeRefinementPrompt(context, 0), reviewAPrompt(context), reviewBPrompt(context), fixPrompt(context, 1), finalReviewPrompt(context, 1)]) {
+    for (const prompt of phasePrompts(context)) {
       expect(prompt).toContain("<workflow_phase");
       expect(prompt).toContain("<role>");
       expect(prompt).toContain("<inputs>");
       expect(prompt).toContain("<output_contract");
       expect(prompt).toContain("</workflow_phase>");
+    }
+  });
+
+  test("phase prompts keep a single balanced workflow envelope", () => {
+    for (const prompt of phasePrompts(context)) {
+      expect(matchCount(prompt, /<workflow_phase\b/g)).toBe(1);
+      expect(matchCount(prompt, /<\/workflow_phase>/g)).toBe(1);
+      expect(matchCount(prompt, /<role>You are /g)).toBe(1);
+      expect(matchCount(prompt, /<success_criteria>/g)).toBe(1);
+      expect(matchCount(prompt, /<\/success_criteria>/g)).toBe(1);
+      expect(matchCount(prompt, /<inputs>/g)).toBe(1);
+      expect(matchCount(prompt, /<\/inputs>/g)).toBe(1);
+      expect(matchCount(prompt, /<output_contract\b/g)).toBe(1);
+      expect(matchCount(prompt, /<\/output_contract>/g)).toBe(1);
     }
   });
 
