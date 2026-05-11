@@ -166,7 +166,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       thinkingProfile: raw.thinkingProfile,
       verifyCommand: raw.verifyCommand ?? config.verify ?? defaultAutorunVerifyCommand,
       remote: raw.remote ?? defaultAutorunRemote,
-      maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? 1,
+      maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,
       force: raw.force ?? false,
       yes: raw.yes ?? false,
       comment: raw.comment ?? true,

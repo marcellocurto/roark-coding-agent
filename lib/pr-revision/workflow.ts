@@ -5,8 +5,10 @@ import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { buildCommitArgv, buildPushArgv, buildStageAllArgv } from "../autorun/publish.ts";
 import {
+  classifyVerificationFailure,
   formatVerificationArtifact,
   runVerification,
+  verificationFailureReason,
   type VerificationResult,
   type VerificationRunner,
 } from "../autorun/verification.ts";
@@ -106,6 +108,8 @@ export async function runPrRevision(
     return { outcome: "needs-human", context, planStatus };
   }
 
+  const artifactFilenames = ["pr-feedback.md", "revision-plan.md"];
+
   await runRevisionAgent(context, runner, {
     label: "Revision implementation",
     artifact: "revision-log.md",
@@ -113,6 +117,7 @@ export async function runPrRevision(
     thinkingStage: "revisionImplementation",
     prompt: revisionImplementationPrompt(context, 0),
   });
+  artifactFilenames.push("revision-log.md");
 
   let review = await runRevisionAgent(context, runner, {
     label: "Revision review",
@@ -121,56 +126,126 @@ export async function runPrRevision(
     thinkingStage: "revisionReview",
     prompt: revisionReviewPrompt(context, 0),
   });
+  artifactFilenames.push("revision-review.md");
   let reviewVerdict = parseReviewVerdict(review);
+  let fixPassesUsed = 0;
+  let verification: VerificationResult | undefined;
 
-  for (let pass = 1; reviewVerdict === "fixes-required" && pass <= context.maxFixPasses; pass++) {
+  while (true) {
+    if (reviewVerdict === "fixes-required") {
+      if (fixPassesUsed >= context.maxFixPasses) {
+        await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
+        await postSummary({
+          context,
+          outcome: "review-blocked",
+          planStatus,
+          reviewVerdict,
+          skipped: extractSectionBullets(review, "Required Fixes"),
+          artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+        });
+        return { outcome: "review-blocked", context, planStatus, reviewVerdict };
+      }
+
+      const pass = ++fixPassesUsed;
+      const logArtifact = `revision-log-fix-pass-${pass}.md`;
+      await runRevisionAgent(context, runner, {
+        label: `Revision fix pass ${pass}`,
+        artifact: logArtifact,
+        writable: true,
+        thinkingStage: "revisionFix",
+        prompt: revisionImplementationPrompt(context, pass),
+      });
+      artifactFilenames.push(logArtifact);
+
+      const reviewArtifact = `revision-review-pass-${pass}.md`;
+      review = await runRevisionAgent(context, runner, {
+        label: `Revision review pass ${pass}`,
+        artifact: reviewArtifact,
+        writable: false,
+        thinkingStage: "revisionReview",
+        prompt: revisionReviewPrompt(context, pass),
+      });
+      artifactFilenames.push(reviewArtifact);
+      reviewVerdict = parseReviewVerdict(review);
+      continue;
+    }
+
+    if (reviewVerdict === "blocked") {
+      await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
+      await postSummary({
+        context,
+        outcome: "review-blocked",
+        planStatus,
+        reviewVerdict,
+        skipped: extractSectionBullets(review, "Required Fixes"),
+        artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+      });
+      return { outcome: "review-blocked", context, planStatus, reviewVerdict };
+    }
+
+    verification = await runVerification({ command: context.verifyCommand, cwd, runner: deps.verificationRunner });
+    await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
+    addArtifactFilename(artifactFilenames, "verification.md");
+
+    if (verification.ok) break;
+
+    const classification = classifyVerificationFailure(verification);
+    const failedReason = classification.repairable
+      ? `Verification failed after ${context.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
+      : verificationFailureReason(verification);
+
+    if (!classification.repairable || fixPassesUsed >= context.maxFixPasses) {
+      await updateMetadata(context, feedback, {
+        outcome: "verification-failed",
+        planStatus,
+        reviewVerdict,
+        verification,
+        verificationFailureReason: failedReason,
+        fixPassesUsed,
+        endedAt: new Date().toISOString(),
+      });
+      await postSummary({
+        context,
+        outcome: "verification-failed",
+        planStatus,
+        reviewVerdict,
+        verification,
+        addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
+        skipped: [failedReason, ...extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items")],
+        artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+      });
+      return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
+    }
+
+    const pass = ++fixPassesUsed;
+    const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
+    await writePrRevisionArtifact(context, verificationBeforeFixArtifact, formatVerificationArtifact(verification));
+    artifactFilenames.push(verificationBeforeFixArtifact);
+    console.log(`Archived verification failure: ${prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact)}`);
+
+    const logArtifact = `revision-log-fix-pass-${pass}.md`;
     await runRevisionAgent(context, runner, {
       label: `Revision fix pass ${pass}`,
-      artifact: `revision-log-fix-pass-${pass}.md`,
+      artifact: logArtifact,
       writable: true,
       thinkingStage: "revisionFix",
       prompt: revisionImplementationPrompt(context, pass),
     });
+    artifactFilenames.push(logArtifact);
+
+    const reviewArtifact = `revision-review-pass-${pass}.md`;
     review = await runRevisionAgent(context, runner, {
       label: `Revision review pass ${pass}`,
-      artifact: `revision-review-pass-${pass}.md`,
+      artifact: reviewArtifact,
       writable: false,
       thinkingStage: "revisionReview",
       prompt: revisionReviewPrompt(context, pass),
     });
+    artifactFilenames.push(reviewArtifact);
     reviewVerdict = parseReviewVerdict(review);
   }
 
-  if (reviewVerdict !== "approve") {
-    await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, endedAt: new Date().toISOString() });
-    await postSummary({
-      context,
-      outcome: "review-blocked",
-      planStatus,
-      reviewVerdict,
-      skipped: extractSectionBullets(review, "Required Fixes"),
-      artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "revision-log.md", "revision-review.md", "metadata.json"]),
-    });
-    return { outcome: "review-blocked", context, planStatus, reviewVerdict };
-  }
-
-  const verification = await runVerification({ command: context.verifyCommand, cwd, runner: deps.verificationRunner });
-  await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
-
-  if (!verification.ok) {
-    await updateMetadata(context, feedback, { outcome: "verification-failed", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
-    await postSummary({
-      context,
-      outcome: "verification-failed",
-      planStatus,
-      reviewVerdict,
-      verification,
-      addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
-      skipped: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items"),
-      artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "revision-log.md", "revision-review.md", "verification.md", "metadata.json"]),
-    });
-    return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
-  }
+  if (!verification) throw new Error("Revision verification did not run.");
 
   if ((await dirtyLinesOutsideRoark(cwd)).length === 0) {
     await updateMetadata(context, feedback, { outcome: "no-code-changes", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
@@ -181,7 +256,7 @@ export async function runPrRevision(
       reviewVerdict,
       verification,
       skipped: ["Planner requested a revision, but no non-.roark code changes were present after implementation."],
-      artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "revision-log.md", "revision-review.md", "verification.md", "metadata.json"]),
+      artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
     });
     return { outcome: "no-code-changes", context, planStatus, reviewVerdict, verification };
   }
@@ -196,7 +271,7 @@ export async function runPrRevision(
     verification,
     addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
     skipped: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items"),
-    artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "revision-log.md", "revision-review.md", "verification.md", "metadata.json"]),
+    artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
   });
 
   return { outcome: "published", context, planStatus, reviewVerdict, verification };
@@ -349,7 +424,11 @@ async function commitAndPushRevision(context: PrRevisionContext, branchName: str
 }
 
 function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): string[] {
-  return filenames.map((filename) => prRevisionArtifactRelativePath(context, filename));
+  return [...new Set(filenames)].map((filename) => prRevisionArtifactRelativePath(context, filename));
+}
+
+function addArtifactFilename(filenames: string[], filename: string): void {
+  if (!filenames.includes(filename)) filenames.push(filename);
 }
 
 function escapeRegExp(value: string): string {

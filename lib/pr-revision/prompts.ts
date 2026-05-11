@@ -39,7 +39,8 @@ export function revisionImplementationPrompt(context: PrRevisionContext, pass: n
   return `<pr_revision_implementation>
 You are implementing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` fix pass ${pass}` : ""}.
 Use ${context.revisionDirRelative}/revision-plan.md and the latest revision review artifact if present.
-Apply only planner-classified must-fix-current items. Do not implement non-blocking, invalid/stale, already-addressed, or needs-human items.
+For fix passes, inspect the latest revision-review*.md artifact if it requested fixes and ${context.revisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.
+Apply only planner-classified must-fix-current items and repair any verification failure captured for this fix pass. Do not implement non-blocking, invalid/stale, already-addressed, or needs-human items.
 Keep scope minimal and inspect the current diff before editing.
 
 Return only this Markdown artifact:
