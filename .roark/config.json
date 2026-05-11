@@ -1,7 +1,7 @@
 {
   "repo": "marcellocurto/roark-coding-agent",
   "baseBranch": "main",
-  "verify": "bun run typecheck",
+  "verify": "bun run check",
   "readyLabel": "afk",
   "inProgressLabel": "roark-in-progress",
   "successLabel": "roark-pr-opened",

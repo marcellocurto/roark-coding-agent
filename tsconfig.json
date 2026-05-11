@@ -10,7 +10,9 @@
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "noEmit": true,
+    "incremental": true,
 
     "strict": true,
     "skipLibCheck": true,
@@ -20,6 +22,7 @@
     "exactOptionalPropertyTypes": true,
     "noUncheckedSideEffectImports": true,
     "forceConsistentCasingInFileNames": true,
+    "useUnknownInCatchVariables": true,
 
     "noUnusedLocals": true,
     "noUnusedParameters": true,
