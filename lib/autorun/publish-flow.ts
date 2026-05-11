@@ -1,5 +1,5 @@
 import path from "node:path";
-import { artifactRelativePath, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
+import { artifactExists, artifactRelativePath, fixLogRef, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishAutorunResult, type AutorunPublishOptions } from "./publish.ts";
@@ -132,10 +132,20 @@ export async function planVerificationRepair(
   verification: VerificationResult,
 ): Promise<{ pass: number } | undefined> {
   if (!classifyVerificationFailure(verification).repairable) return undefined;
-  const pass = inferNextFixPass(context);
+  const pass = inferNextVerificationRepairPass(context);
   if (pass > context.maxFixPasses) return undefined;
   await writeVerificationBeforeFixArtifact(context, pass, verification);
   return { pass };
+}
+
+function inferNextVerificationRepairPass(context: WorkflowContext): number {
+  try {
+    return inferNextFixPass(context);
+  } catch {
+    for (let pass = 1; ; pass++) {
+      if (!artifactExists(context, fixLogRef(pass))) return pass;
+    }
+  }
 }
 
 export async function handleNonPublish(input: {

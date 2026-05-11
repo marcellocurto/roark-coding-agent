@@ -3,9 +3,11 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  codeRefinementPrompt,
   finalReviewPrompt,
   fixPrompt,
   implementationPrompt,
+  planDraftPrompt,
   planPrompt,
   reviewAPrompt,
   reviewBPrompt,
@@ -36,6 +38,24 @@ const splitContext = {
 } satisfies WorkflowContext;
 
 const tempDirs: string[] = [];
+
+function phasePrompts(testContext: WorkflowContext): string[] {
+  return [
+    triagePrompt(testContext),
+    planDraftPrompt(testContext),
+    planPrompt(testContext),
+    implementationPrompt(testContext),
+    codeRefinementPrompt(testContext, 0),
+    reviewAPrompt(testContext),
+    reviewBPrompt(testContext),
+    fixPrompt(testContext, 1),
+    finalReviewPrompt(testContext, 1),
+  ];
+}
+
+function matchCount(value: string, pattern: RegExp): number {
+  return value.match(pattern)?.length ?? 0;
+}
 
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
@@ -71,12 +91,26 @@ describe("workflow prompt safety policy", () => {
   });
 
   test("phase prompts use XML tags around role, inputs, instructions, and output contracts", () => {
-    for (const prompt of [triagePrompt(context), planPrompt(context), implementationPrompt(context), reviewAPrompt(context), reviewBPrompt(context), fixPrompt(context, 1), finalReviewPrompt(context, 1)]) {
+    for (const prompt of phasePrompts(context)) {
       expect(prompt).toContain("<workflow_phase");
       expect(prompt).toContain("<role>");
       expect(prompt).toContain("<inputs>");
       expect(prompt).toContain("<output_contract");
       expect(prompt).toContain("</workflow_phase>");
+    }
+  });
+
+  test("phase prompts keep a single balanced workflow envelope", () => {
+    for (const prompt of phasePrompts(context)) {
+      expect(matchCount(prompt, /<workflow_phase\b/g)).toBe(1);
+      expect(matchCount(prompt, /<\/workflow_phase>/g)).toBe(1);
+      expect(matchCount(prompt, /<role>You are /g)).toBe(1);
+      expect(matchCount(prompt, /<success_criteria>/g)).toBe(1);
+      expect(matchCount(prompt, /<\/success_criteria>/g)).toBe(1);
+      expect(matchCount(prompt, /<inputs>/g)).toBe(1);
+      expect(matchCount(prompt, /<\/inputs>/g)).toBe(1);
+      expect(matchCount(prompt, /<output_contract\b/g)).toBe(1);
+      expect(matchCount(prompt, /<\/output_contract>/g)).toBe(1);
     }
   });
 
@@ -136,6 +170,7 @@ describe("review findings ledger contract", () => {
     for (const prompt of reviewPrompts) {
       expect(prompt).toContain("approve</value> when approved for the current issue");
       expect(prompt).toContain("fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix");
+      expect(prompt).toContain("restart-required</value> when the implementation direction is fundamentally wrong");
       expect(prompt).toContain("blocked</value> when the workflow cannot safely proceed");
     }
   });
@@ -160,6 +195,24 @@ describe("fix-oriented prompt finding handling", () => {
     expect(prompt).toContain("Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings");
   });
 
+  test("code refinement prompt requires safe behavior-preserving simplification decisions", () => {
+    const prompt = codeRefinementPrompt(context, 0);
+    expect(prompt).toContain("Preserve behavior and public contracts");
+    expect(prompt).toContain("Do not broaden scope");
+    expect(prompt).toContain("If complexity is intentionally left in place, cite the issue, refined plan, or codebase reason");
+    expect(prompt).toContain("record specific decisions tied to files/behaviors");
+    expect(prompt).toContain("## Behavior Risk Decisions");
+  });
+
+  test("restart code refinement prompt reads restarted implementation context instead of a fix log", () => {
+    const prompt = codeRefinementPrompt(context, 1, "restart");
+
+    expect(prompt).toContain('<artifact kind="implementation_log">');
+    expect(prompt).toContain('<artifact kind="baseline_reset">');
+    expect(prompt).toContain('<artifact kind="implementation_restart_log">');
+    expect(prompt).not.toContain('<artifact kind="fix_log">');
+  });
+
   test("fix and final review prompts include failed verification when present", async () => {
     const runDir = await mkdtemp(path.join(tmpdir(), "roark-prompt-verification-"));
     tempDirs.push(runDir);
@@ -175,6 +228,8 @@ describe("fix-oriented prompt finding handling", () => {
 
     expect(fixPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
     expect(fixPrompt(verificationContext, 1)).toContain("fix only the local deterministic verification failure");
+    expect(codeRefinementPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
+    expect(reviewAPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
     expect(finalReviewPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
     expect(finalReviewPrompt(verificationContext, 1)).toContain("verify that the fix addressed that failure");
   });

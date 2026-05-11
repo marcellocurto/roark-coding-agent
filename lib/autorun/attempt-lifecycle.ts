@@ -1,9 +1,9 @@
 import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
-import { finalReviewPhase, fixPhase, readinessPhase, runFullWorkflow, type WorkflowRunResult } from "../workflow/phases.ts";
+import { codeRefinementPhase, fixPhase, readinessPhase, runFullWorkflow, reviewPhase, type WorkflowRunResult } from "../workflow/phases.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
-import { shouldRunAnotherFixPass } from "../workflow/verdicts.ts";
+import { hasBlockedReview, needsFix, needsRestart } from "../workflow/verdicts.ts";
 import { finalizeAttemptObservability } from "./observability.ts";
 import {
   attemptMetadataRelativePath,
@@ -150,9 +150,11 @@ async function runVerificationRepairWorkflow(
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
     console.log(`\n=== Verification repair pass ${pass} ===`);
     await fixPhase(context, pass, runner);
-    const finalReview = await finalReviewPhase(context, pass, runner);
-    if (!shouldRunAnotherFixPass(finalReview) || pass >= context.maxFixPasses) break;
-    console.log(`Final review requested more fixes; continuing to fix pass ${pass + 1}.`);
+    await codeRefinementPhase(context, pass, runner);
+    const reviews = await reviewPhase(context, pass, runner);
+    if (hasBlockedReview(reviews.reviewA, reviews.reviewB) || needsRestart(reviews.reviewA, reviews.reviewB)) break;
+    if (!needsFix(reviews.reviewA, reviews.reviewB) || pass >= context.maxFixPasses) break;
+    console.log(`Review requested more fixes; continuing to fix pass ${pass + 1}.`);
   }
   await readinessPhase(context);
   return { status: "completed" };

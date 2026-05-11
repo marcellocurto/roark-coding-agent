@@ -72,7 +72,11 @@ describe("runFullWorkflow", () => {
         phases.push("triage");
         return proceedTriage();
       }
-      if (request.prompt.includes('name="implementation_plan"')) {
+      if (request.prompt.includes('name="implementation_plan_draft"')) {
+        phases.push("plan-draft");
+        return readyPlanDraft();
+      }
+      if (request.prompt.includes('name="implementation_plan_refinement"')) {
         phases.push("plan");
         return notReadyPlan();
       }
@@ -81,28 +85,22 @@ describe("runFullWorkflow", () => {
     };
 
     await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "planning-stopped" });
-    expect(phases).toEqual(["triage", "plan"]);
+    expect(phases).toEqual(["triage", "plan-draft", "plan"]);
     expect(artifactExists(context, "readiness")).toBe(true);
     expect(artifactExists(context, "implementationLog")).toBe(false);
   });
 
   test("completed path returns completed", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+    await seedBaselineAndImplementation(context);
 
     const runner: AgentRunner = async (request) => {
-      if (request.prompt.includes('name="triage"')) {
-        return proceedTriage();
-      }
-      if (request.prompt.includes('name="implementation_plan"')) {
-        return readyPlan();
-      }
-      if (request.prompt.includes('name="review_a"')) {
-        return "# Review A\n\n## Verdict\napprove\n\n## Findings\nNone.\n\n## Required Fixes\nNone.\n\n## Suggested Improvements\nNone.\n\n## Validation Reviewed\nTests.\n";
-      }
-      if (request.prompt.includes('name="review_b"')) {
-        return "# Review B\n\n## Verdict\napprove\n\n## Findings\nNone.\n\n## Required Fixes\nNone.\n\n## Suggested Improvements\nNone.\n\n## Validation Reviewed\nTests.\n";
-      }
+      if (request.prompt.includes('name="triage"')) return proceedTriage();
+      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
+      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
+      if (request.prompt.includes('name="review_a"')) return approveReview("A");
+      if (request.prompt.includes('name="review_b"')) return approveReview("B");
       throw new Error("unexpected prompt");
     };
 
@@ -111,19 +109,21 @@ describe("runFullWorkflow", () => {
 
   test("does not run fix for follow-up and suggestion-only ledgers", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+    await seedBaselineAndImplementation(context);
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
       if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan"')) return readyPlan();
+      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
+      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
         return reviewWithLedger("approve", `${finding("F1", "follow-up")}\n${finding("S1", "suggestion")}`);
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return "# Review B\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n";
+        return "# Review B Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n";
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
       throw new Error("unexpected prompt");
@@ -136,19 +136,21 @@ describe("runFullWorkflow", () => {
 
   test("external-blocker ledgers stop after review without running fix", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+    await seedBaselineAndImplementation(context);
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
       if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan"')) return readyPlan();
+      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
+      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
         return reviewWithLedger("blocked", finding("B1", "external-blocker"));
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return "# Review B\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n";
+        return "# Review B Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n";
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
       throw new Error("unexpected prompt");
@@ -160,8 +162,17 @@ describe("runFullWorkflow", () => {
   });
 });
 
+async function seedBaselineAndImplementation(context: Awaited<ReturnType<typeof tempContext>>) {
+  await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
+  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+}
+
 function proceedTriage(): string {
   return "# Triage\n\n## Verdict\nproceed\n\n## Reasoning\nOK.\n\n## Evidence\nRepo inspected.\n\n## Blocking Questions\nNone.\n\n## Recommended Next Step\nPlan.\n";
+}
+
+function readyPlanDraft(): string {
+  return readyPlan().replace("# Implementation Plan", "# Implementation Plan Draft");
 }
 
 function readyPlan(): string {
@@ -172,8 +183,16 @@ function notReadyPlan(): string {
   return readyPlan().replace("## Ready For Implementation\nyes", "## Ready For Implementation\nno");
 }
 
+function refinementLog(): string {
+  return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
+}
+
+function approveReview(reviewer: "A" | "B"): string {
+  return `# Review ${reviewer} Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n\n## Required Fixes\nNone.\n\n## Suggested Improvements\nNone.\n\n## Validation Reviewed\nTests.\n`;
+}
+
 function reviewWithLedger(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {
-  return `# Review A\n\n## Verdict\n${verdict}\n\n## Findings Ledger\n${entries}\n\n## Required Fixes\nNone.\n\n## Suggested Improvements\nNone.\n\n## Validation Reviewed\nTests.\n`;
+  return `# Review A Pass 0\n\n## Verdict\n${verdict}\n\n## Findings Ledger\n${entries}\n\n## Required Fixes\nNone.\n\n## Suggested Improvements\nNone.\n\n## Validation Reviewed\nTests.\n`;
 }
 
 function finding(id: string, classification: string): string {

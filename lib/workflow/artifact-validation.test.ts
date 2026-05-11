@@ -54,4 +54,8 @@ describe("validateAgentArtifact", () => {
     const result = validateAgentArtifact({ name: "finalReview", pass: 1 }, "# Final Review Pass 1\n\n## Verdict\napprove\n");
     expect(result.ok).toBe(false);
   });
+
+  test("allows restart-required for numbered review cycles", () => {
+    expect(validateAgentArtifact({ name: "reviewA", pass: 0 }, "# Review A Pass 0\n\n## Verdict\nrestart-required\n")).toEqual({ ok: true });
+  });
 });

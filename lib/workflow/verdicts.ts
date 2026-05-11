@@ -13,6 +13,7 @@ export type ReadinessDecisionInput = {
   reviewA: string;
   reviewB: string;
   finalReview: string;
+  allowLegacyFinalReview?: boolean;
 };
 
 export type ReadinessDecision = {
@@ -23,6 +24,7 @@ export type ReadinessDecision = {
   finalVerdict: string;
   planReady: boolean;
   fixesWereNeeded: boolean;
+  restartRequired: boolean;
   blockedByReview: boolean;
   currentIssueBlockingFindings: NormalizedReviewerFinding[];
   externalBlockers: NormalizedReviewerFinding[];
@@ -51,6 +53,7 @@ export function parseVerdict(markdown: string): string | undefined {
     "approve",
     "fixes-required",
     "ready-for-pr",
+    "restart-required",
     "not-ready",
   ];
 
@@ -92,6 +95,10 @@ export function hasBlockedReview(...reviews: string[]): boolean {
   });
 }
 
+export function needsRestart(...reviews: string[]): boolean {
+  return reviews.some((markdown) => parseVerdict(markdown) === "restart-required");
+}
+
 export function shouldRunAnotherFixPass(finalReview: string): boolean {
   return parseVerdict(finalReview) === "fixes-required";
 }
@@ -123,37 +130,40 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
 
   const fallbackFixNeeded = parsedReviews.some(({ markdown, parsed }) => !parsed.hasLedger && parseVerdict(markdown) === "fixes-required");
   const fallbackBlocked = parsedReviews.some(({ markdown, parsed }) => !parsed.hasLedger && parseVerdict(markdown) === "blocked");
+  const restartRequired = parsedReviews.some(({ markdown }) => parseVerdict(markdown) === "restart-required");
   const fixesWereNeeded = currentIssueBlockingFindings.length > 0 || fallbackFixNeeded;
   const blockedByReview = externalBlockers.length > 0 || fallbackBlocked;
   const hasRejectedFindings = rejectedFindings.length > 0;
 
-  const finalReviewWasRun = input.finalReview.trim().length > 0;
+  const legacyFinalReviewWasRun = Boolean(input.allowLegacyFinalReview) && input.finalReview.trim().length > 0;
 
-  const readyWithoutFixes =
+  const readyFromLatestReviews =
     triageVerdict === "proceed" &&
     planReady &&
     reviewsApproveCurrentIssue(parsedReviews) &&
     !fixesWereNeeded &&
+    !restartRequired &&
     !blockedByReview &&
-    !hasRejectedFindings &&
-    !finalReviewWasRun;
+    !legacyFinalReviewWasRun &&
+    !hasRejectedFindings;
 
-  const readyAfterFix =
+  const readyAfterLegacyFinalReview =
     triageVerdict === "proceed" &&
     planReady &&
-    (fixesWereNeeded || finalReviewWasRun) &&
+    legacyFinalReviewWasRun &&
     !blockedByReview &&
     !hasRejectedFindings &&
     finalVerdict === "ready-for-pr";
 
   return {
-    status: readyWithoutFixes || readyAfterFix ? "ready-for-pr" : "not-ready",
+    status: readyFromLatestReviews || readyAfterLegacyFinalReview ? "ready-for-pr" : "not-ready",
     triageVerdict,
     reviewAVerdict,
     reviewBVerdict,
     finalVerdict,
     planReady,
     fixesWereNeeded,
+    restartRequired,
     blockedByReview,
     currentIssueBlockingFindings,
     externalBlockers,

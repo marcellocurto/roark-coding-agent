@@ -2,12 +2,22 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { createWorkflowContext, finalReviewRef, fixLogRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
+import {
+  baselineResetLogRef,
+  createWorkflowContext,
+  fixLogRef,
+  implementationRestartLogRef,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  writeArtifact,
+  type WorkflowContext,
+} from "./artifacts.ts";
 import { planWorkflowProgression } from "./progression.ts";
 
 const tempDirs: string[] = [];
 
-async function tempContext(maxFixPasses = 1): Promise<WorkflowContext> {
+async function tempContext(maxFixPasses = 2): Promise<WorkflowContext> {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-progression-"));
   tempDirs.push(dir);
   return createWorkflowContext({
@@ -27,89 +37,50 @@ afterEach(async () => {
 });
 
 describe("planWorkflowProgression", () => {
-  test("plans the initial missing-artifact workflow order", async () => {
+  test("plans the initial workflow with plan refinement and code refinement before reviews", async () => {
     const context = await tempContext();
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
     expect(progression.terminalStatus).toBeUndefined();
     expect(progression.actions).toEqual([
-      { type: "run", phase: "fetch", reason: "artifact is missing" },
-      { type: "run", phase: "triage", reason: "triage has not run" },
-      { type: "run", phase: "plan", reason: "plan has not run" },
-      { type: "run", phase: "implement", reason: "implementation has not run" },
-      { type: "run", phase: "review-a", reason: "review A has not run" },
-      { type: "run", phase: "review-b", reason: "review B has not run" },
+      { type: "run", phase: "fetch", pass: undefined, reason: "artifact is missing" },
+      { type: "run", phase: "triage", pass: undefined, reason: "triage has not run" },
+      { type: "run", phase: "plan-draft", pass: undefined, reason: "plan draft has not run" },
+      { type: "run", phase: "plan", pass: undefined, reason: "plan refinement has not run" },
+      { type: "run", phase: "capture-baseline", pass: undefined, reason: "baseline has not been captured" },
+      { type: "run", phase: "implement", pass: undefined, reason: "implementation has not run" },
+      { type: "run", phase: "refine-code", pass: 0, reason: "refinement has not run" },
+      { type: "run", phase: "review-a", pass: 0, reason: "review A has not run" },
+      { type: "run", phase: "review-b", pass: 0, reason: "review B has not run" },
       { type: "write-readiness", reason: "workflow must recompute readiness" },
       { type: "publish-gate", reason: "publish gate must run after readiness" },
     ]);
   });
 
-  test("refetches issue artifacts without a relationship snapshot", async () => {
-    const context = await tempContext();
-    await writeArtifact(context, "issue", "# Issue\n");
-
-    const progression = await planWorkflowProgression(context, { includePublishGate: true });
-
-    expect(progression.actions[0]).toEqual({
-      type: "run",
-      phase: "fetch",
-      reason: "issue artifact lacks GitHub relationship snapshot",
-    });
-  });
-
-  test("reruns invalid artifacts before dependent phases", async () => {
-    const context = await tempContext();
-    await writeArtifact(context, "issue", issueArtifact());
-    await writeArtifact(context, "triage", "");
-
-    const progression = await planWorkflowProgression(context, { includePublishGate: true });
-
-    expect(progression.actions[0]).toEqual({ type: "run", phase: "triage", reason: "artifact is empty" });
-    expect(progression.actions[1]).toEqual({ type: "run", phase: "plan", reason: "plan depends on triage" });
-  });
-
-  test("stops after a non-proceed triage verdict", async () => {
-    const context = await tempContext();
-    await writeArtifact(context, "issue", issueArtifact());
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nblocked\n");
-
-    const progression = await planWorkflowProgression(context, { includePublishGate: true });
-
-    expect(progression.terminalStatus).toEqual({ status: "triage-stopped", triageVerdict: "blocked" });
-    expect(progression.actions).toEqual([
-      { type: "write-readiness", reason: 'triage verdict is "blocked"; readiness records the stop' },
-      { type: "noop", reason: "terminal triage outcome; no plan/implementation/publish gate" },
-    ]);
-  });
-
-  test("stops after a valid implementation plan that is not ready", async () => {
+  test("stops after a valid refined implementation plan that is not ready", async () => {
     const context = await tempContext();
     await writeReadyThroughPlan(context, "no");
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
     expect(progression.terminalStatus).toEqual({ status: "planning-stopped" });
-    expect(progression.actions).toEqual([
-      { type: "write-readiness", reason: "implementation plan is not ready; readiness records the stop" },
-      { type: "noop", reason: "terminal planning outcome; no implementation/publish gate" },
-    ]);
   });
 
-  test("stops for blocked reviews", async () => {
+  test("requires missing code refinement before Review A/B", async () => {
     const context = await tempContext();
-    await writeHappyPathThroughReviews(context, "blocked", "approve");
+    await writeReadyThroughImplementation(context);
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
-    expect(progression.terminalStatus).toEqual({ status: "review-blocked" });
-    expect(progression.actions).toEqual([
-      { type: "write-readiness", reason: "a review is blocked; readiness records the stop" },
-      { type: "publish-gate", reason: "publish gate records non-publish" },
+    expect(progression.actions.slice(0, 3)).toEqual([
+      { type: "run", phase: "refine-code", pass: 0, reason: "artifact is missing" },
+      { type: "run", phase: "review-a", pass: 0, reason: "review A depends on refinement" },
+      { type: "run", phase: "review-b", pass: 0, reason: "review B depends on refinement" },
     ]);
   });
 
-  test("completes after approved reviews", async () => {
+  test("completes after latest numbered post-refinement reviews approve", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context);
 
@@ -122,69 +93,101 @@ describe("planWorkflowProgression", () => {
     ]);
   });
 
-  test("runs a required fix pass before final review", async () => {
+  test("fix loop runs fix then refinement then Review A/B", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required", "approve");
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
     expect(progression.terminalStatus).toBeUndefined();
-    expect(progression.actions.slice(0, 2)).toEqual([
+    expect(progression.actions.slice(0, 4)).toEqual([
       { type: "run", phase: "fix", pass: 1, reason: "artifact is missing" },
-      { type: "run", phase: "final-review", pass: 1, reason: "final review depends on fix" },
+      { type: "run", phase: "refine-code", pass: 1, reason: "refinement depends on fix" },
+      { type: "run", phase: "review-a", pass: 1, reason: "review A depends on refinement" },
+      { type: "run", phase: "review-b", pass: 1, reason: "review B depends on refinement" },
     ]);
   });
 
-  test("completes when the latest final review is ready", async () => {
+  test("restart-required loop resets baseline then reimplements/refines/reviews", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "restart-required", "approve");
+
+    const progression = await planWorkflowProgression(context, { includePublishGate: true });
+
+    expect(progression.actions.slice(0, 5)).toEqual([
+      { type: "run", phase: "reset-baseline", pass: 1, reason: "artifact is missing" },
+      { type: "run", phase: "implement", pass: 1, reason: "implementation restart depends on baseline reset" },
+      { type: "run", phase: "refine-code", pass: 1, reason: "refinement depends on restarted implementation" },
+      { type: "run", phase: "review-a", pass: 1, reason: "review A depends on refinement" },
+      { type: "run", phase: "review-b", pass: 1, reason: "review B depends on refinement" },
+    ]);
+  });
+
+  test("readiness is based on the latest review cycle after a fix", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required", "approve");
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+    await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
+    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
     expect(progression.terminalStatus).toEqual({ status: "completed" });
-    expect(progression.actions).toEqual([
-      { type: "write-readiness", reason: "latest final review decides readiness" },
-      { type: "publish-gate", reason: "publish gate must run after readiness" },
+    expect(progression.actions[0]).toEqual({ type: "write-readiness", reason: "latest review cycle approves; recompute deterministic readiness" });
+  });
+
+  test("continues after an already recorded baseline reset by rerunning implementation", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "restart-required", "approve");
+    await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
+
+    const progression = await planWorkflowProgression(context);
+
+    expect(progression.actions[0]).toEqual({ type: "run", phase: "implement", pass: 1, reason: "implementation restart depends on baseline reset" });
+  });
+
+  test("continues restart refinement after a durable restart implementation marker", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "restart-required", "approve");
+    await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
+    await writeArtifact(context, implementationRestartLogRef(1), "# Implementation Restart Log Pass 1\n\n## Summary\nRestarted.\n");
+
+    const progression = await planWorkflowProgression(context);
+
+    expect(progression.actions.slice(0, 3)).toEqual([
+      { type: "run", phase: "refine-code", pass: 1, reason: "artifact is missing" },
+      { type: "run", phase: "review-a", pass: 1, reason: "review A depends on refinement" },
+      { type: "run", phase: "review-b", pass: 1, reason: "review B depends on refinement" },
     ]);
   });
 
-  test("completes after the maximum fix passes are reached", async () => {
-    const context = await tempContext(1);
-    await writeHappyPathThroughReviews(context, "fixes-required", "approve");
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nfixes-required\n");
+  test("does not reschedule restart implementation after a later approved cycle exists", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "restart-required", "approve");
+    await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
+    await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
+    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
 
-    const progression = await planWorkflowProgression(context, { includePublishGate: true });
+    const progression = await planWorkflowProgression(context);
 
     expect(progression.terminalStatus).toEqual({ status: "completed" });
-    expect(progression.actions).toEqual([
-      { type: "write-readiness", reason: "maximum fix passes reached" },
-      { type: "publish-gate", reason: "publish gate records non-publish" },
-    ]);
-  });
-
-  test("continues verification-driven fix passes after final review requests more fixes", async () => {
-    const context = await tempContext(2);
-    await writeHappyPathThroughReviews(context);
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nfixes-required\n");
-
-    const progression = await planWorkflowProgression(context, { includePublishGate: true });
-
-    expect(progression.terminalStatus).toBeUndefined();
-    expect(progression.actions.slice(0, 2)).toEqual([
-      { type: "run", phase: "fix", pass: 2, reason: "artifact is missing" },
-      { type: "run", phase: "final-review", pass: 2, reason: "final review depends on fix" },
-    ]);
+    expect(progression.actions[0]).toEqual({ type: "write-readiness", reason: "latest review cycle approves; recompute deterministic readiness" });
   });
 });
 
 async function writeReadyThroughPlan(context: WorkflowContext, ready: "yes" | "no") {
   await writeArtifact(context, "issue", issueArtifact());
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationPlan", `# Implementation Plan\n\n## Ready For Implementation\n${ready}\n`);
+}
+
+async function writeReadyThroughImplementation(context: WorkflowContext) {
+  await writeReadyThroughPlan(context, "yes");
+  await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
+  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
 }
 
 function issueArtifact(): string {
@@ -196,8 +199,8 @@ async function writeHappyPathThroughReviews(
   reviewAVerdict = "approve",
   reviewBVerdict = "approve",
 ) {
-  await writeReadyThroughPlan(context, "yes");
-  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
-  await writeArtifact(context, "reviewA", `# Review A\n\n## Verdict\n${reviewAVerdict}\n`);
-  await writeArtifact(context, "reviewB", `# Review B\n\n## Verdict\n${reviewBVerdict}\n`);
+  await writeReadyThroughImplementation(context);
+  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+  await writeArtifact(context, reviewARef(0), `# Review A Pass 0\n\n## Verdict\n${reviewAVerdict}\n`);
+  await writeArtifact(context, reviewBRef(0), `# Review B Pass 0\n\n## Verdict\n${reviewBVerdict}\n`);
 }

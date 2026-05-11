@@ -6,6 +6,9 @@ import {
   finalReviewRef,
   fixLogRef,
   formatArtifactRef,
+  implementationRestartLogRef,
+  refinementLogRef,
+  reviewARef,
   verificationBeforeFixRef,
   ISSUE_CURATION_STATIC_ARTIFACT_REFS,
   STATIC_ARTIFACTS,
@@ -15,7 +18,9 @@ import {
 const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   issue: "issue.md",
   triage: "triage.md",
+  implementationPlanDraft: "implementation-plan-draft.md",
   implementationPlan: "implementation-plan.md",
+  preImplementationBaseline: "pre-implementation-baseline.json",
   implementationLog: "implementation-log.md",
   reviewA: "review-a.md",
   reviewB: "review-b.md",
@@ -41,6 +46,12 @@ describe("artifact catalog", () => {
     expect(artifactFilename(finalReviewRef(3))).toBe("final-review-3.md");
     expect(verificationBeforeFixRef(1)).toEqual({ name: "verificationBeforeFix", pass: 1 });
     expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
+    expect(implementationRestartLogRef(1)).toEqual({ name: "implementationRestartLog", pass: 1 });
+    expect(artifactFilename(implementationRestartLogRef(1))).toBe("implementation-restart-log-1.md");
+    expect(refinementLogRef(0)).toEqual({ name: "refinementLog", pass: 0 });
+    expect(reviewARef(2)).toEqual({ name: "reviewA", pass: 2 });
+    expect(artifactFilename(refinementLogRef(0))).toBe("refinement-log-0.md");
+    expect(artifactFilename(reviewARef(2))).toBe("review-a-2.md");
     expect(formatArtifactRef(fixLogRef(2))).toBe("fixLog-2");
   });
 
@@ -67,11 +78,21 @@ describe("artifact catalog", () => {
       "reject",
       "needs-human-decision",
     ]);
+    expect(artifactContract("implementationPlanDraft")).toEqual({
+      requiredHeading: "Implementation Plan Draft",
+      requiresReadyForImplementation: true,
+    });
     expect(artifactContract("implementationPlan")).toEqual({
       requiredHeading: "Implementation Plan",
       requiresReadyForImplementation: true,
     });
     expect(artifactContract(fixLogRef(4))).toEqual({ requiredHeading: "Fix Log Pass 4" });
+    expect(artifactContract(implementationRestartLogRef(4))).toEqual({ requiredHeading: "Implementation Restart Log Pass 4" });
+    expect(artifactContract(refinementLogRef(4))).toEqual({ requiredHeading: "Refinement Log Pass 4" });
+    expect(artifactContract(reviewARef(4))).toEqual({
+      requiredHeading: "Review A Pass 4",
+      allowedVerdicts: ["approve", "fixes-required", "restart-required", "blocked"],
+    });
     expect(artifactContract(finalReviewRef(1))?.allowedVerdicts).toEqual([
       "ready-for-pr",
       "fixes-required",
@@ -85,6 +106,7 @@ describe("artifact catalog", () => {
       "issue",
       "metadata",
       "triage",
+      "implementationPlanDraft",
       "implementationPlan",
       "implementationLog",
       "reviewA",

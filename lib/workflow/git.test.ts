@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { assertCleanAutorunGit } from "./git.ts";
+import { assertCleanAutorunGit, capturePreImplementationBaseline, resetWorktreeToPreImplementationBaseline } from "./git.ts";
 
 const tempDirs: string[] = [];
 
@@ -24,6 +24,21 @@ describe("assertCleanAutorunGit", () => {
     await writeFile(path.join(cwd, "dirty.txt"), "dirty\n", "utf8");
 
     await expect(assertCleanAutorunGit({ cwd })).rejects.toThrow("Autorun needs a clean git working tree");
+  });
+
+  test("baseline reset restores worktree changes while preserving .roark artifacts", async () => {
+    const cwd = await initGitRepo();
+    const baseline = await capturePreImplementationBaseline({ cwd, yes: false });
+    await mkdir(path.join(cwd, ".roark/runs"), { recursive: true });
+    await writeFile(path.join(cwd, ".roark/runs/refinement-log-0.md"), "keep\n", "utf8");
+    await writeFile(path.join(cwd, "README.md"), "changed\n", "utf8");
+    await writeFile(path.join(cwd, "new-file.txt"), "remove\n", "utf8");
+
+    await resetWorktreeToPreImplementationBaseline({ cwd, baseline });
+
+    expect(await readFile(path.join(cwd, "README.md"), "utf8")).toBe("test\n");
+    expect(await readFile(path.join(cwd, ".roark/runs/refinement-log-0.md"), "utf8")).toBe("keep\n");
+    await expect(readFile(path.join(cwd, "new-file.txt"), "utf8")).rejects.toThrow();
   });
 });
 

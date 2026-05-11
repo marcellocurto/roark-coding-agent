@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
+import { artifactExists, baselineResetLogRef, createWorkflowContext, implementationRestartLogRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
+import { AgentTaskRunError, codeRefinementTask, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 
 const tempDirs: string[] = [];
@@ -66,20 +66,41 @@ describe("runAgentTask thinking profiles", () => {
     const requests: string[] = [];
     const runner: AgentRunner = async (request) => {
       requests.push(`${request.writable ? "write" : "read"}:${request.thinkingLevel}`);
-      if (request.prompt.includes("Review A")) return "# Review A\n\n## Verdict\napprove\n";
-      if (request.prompt.includes("Review B")) return "# Review B\n\n## Verdict\napprove\n";
+      if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
+      if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
+      if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
       if (request.prompt.includes("Final Review")) return "# Final Review\n\n## Verdict\nready-for-pr\n";
       if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
       return "# Implementation Log\n";
     };
 
     await runAgentTask(context, runner, implementationTask);
+    await runAgentTask(context, runner, codeRefinementTask(0));
     await runAgentTask(context, runner, reviewATask);
     await runAgentTask(context, runner, reviewBTask);
     await runAgentTask(context, runner, fixTask(1));
     await runAgentTask(context, runner, finalReviewTask(1));
 
-    expect(requests).toEqual(["write:low", "read:medium", "read:medium", "write:low", "read:low"]);
+    expect(requests).toEqual(["write:low", "write:low", "read:medium", "read:medium", "write:low", "read:low"]);
+  });
+
+  test("restart refinement pass uses restart artifacts instead of requiring a fix log", async () => {
+    const context = await createContext({ thinkingProfile: "fast" });
+    await writeReadyThroughReviews(context);
+    await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
+    await writeArtifact(context, implementationRestartLogRef(1), "# Implementation Restart Log Pass 1\n\n## Summary\nRestarted.\n");
+    const prompts: string[] = [];
+
+    await runAgentTask(context, async (request) => {
+      prompts.push(request.prompt);
+      return "# Refinement Log Pass 1\n\n## Summary\nRefined restart.\n";
+    }, codeRefinementTask(1, "restart"));
+
+    expect(await readArtifact(context, refinementLogRef(1))).toContain("Refined restart");
+    expect(prompts[0]).toContain('<artifact kind="implementation_log">');
+    expect(prompts[0]).toContain('<artifact kind="baseline_reset">');
+    expect(prompts[0]).toContain('<artifact kind="implementation_restart_log">');
+    expect(prompts[0]).not.toContain('<artifact kind="fix_log">');
   });
 
   test("deep profile and explicit thinking override use the resolved context config", async () => {
@@ -144,14 +165,16 @@ describe("runAgentTask error diagnostics", () => {
 
 async function writeReadyThroughPlan(context: Awaited<ReturnType<typeof createContext>>) {
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
 }
 
 async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof createContext>>) {
   await writeReadyThroughPlan(context);
   await writeArtifact(context, "implementationLog", "# Implementation Log\n");
-  await writeArtifact(context, "reviewA", "# Review A\n\n## Verdict\napprove\n");
-  await writeArtifact(context, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+  await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
+  await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
 }
 
 describe("runAgentTask transient agent retry", () => {

@@ -55,7 +55,9 @@ async function planFailedVerificationContinuation(
 
   return [
     { type: "run", phase: "fix", pass, reason: "verification failed; repair within remaining fix budget" },
-    { type: "run", phase: "final-review", pass, reason: "final review depends on verification repair" },
+    { type: "run", phase: "refine-code", pass, reason: "refinement depends on verification repair" },
+    { type: "run", phase: "review-a", pass, reason: "review A depends on refinement" },
+    { type: "run", phase: "review-b", pass, reason: "review B depends on refinement" },
     { type: "write-readiness", reason: "workflow must recompute readiness after verification repair" },
     { type: "publish-gate", reason: "publish gate must rerun after verification repair" },
   ];

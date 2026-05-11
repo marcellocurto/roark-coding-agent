@@ -1,8 +1,11 @@
 import {
   artifactExists,
   finalReviewRef,
+  latestCompleteReviewCycle,
   latestFinalReviewPass,
   readArtifact,
+  reviewARef,
+  reviewBRef,
   type WorkflowContext,
 } from "./artifacts.ts";
 import { decideReadiness } from "./verdicts.ts";
@@ -11,11 +14,15 @@ import type { NormalizedReviewerFinding, RejectedReviewerFinding } from "./findi
 export async function buildReadinessMarkdown(context: WorkflowContext): Promise<string> {
   const triage = artifactExists(context, "triage") ? await readArtifact(context, "triage") : "";
   const plan = artifactExists(context, "implementationPlan") ? await readArtifact(context, "implementationPlan") : "";
-  const reviewA = artifactExists(context, "reviewA") ? await readArtifact(context, "reviewA") : "";
-  const reviewB = artifactExists(context, "reviewB") ? await readArtifact(context, "reviewB") : "";
-  const finalReviewPass = latestFinalReviewPass(context);
+  const latestReviewCycle = latestCompleteReviewCycle(context);
+  const reviewAArtifact = latestReviewCycle === undefined ? "reviewA" : reviewARef(latestReviewCycle);
+  const reviewBArtifact = latestReviewCycle === undefined ? "reviewB" : reviewBRef(latestReviewCycle);
+  const reviewA = artifactExists(context, reviewAArtifact) ? await readArtifact(context, reviewAArtifact) : "";
+  const reviewB = artifactExists(context, reviewBArtifact) ? await readArtifact(context, reviewBArtifact) : "";
+  const useLegacyFinalReview = latestReviewCycle === undefined;
+  const finalReviewPass = useLegacyFinalReview ? latestFinalReviewPass(context) : undefined;
   const finalReview = finalReviewPass ? await readArtifact(context, finalReviewRef(finalReviewPass)) : "";
-  const decision = decideReadiness({ triage, plan, reviewA, reviewB, finalReview });
+  const decision = decideReadiness({ triage, plan, reviewA, reviewB, finalReview, allowLegacyFinalReview: useLegacyFinalReview });
 
   return `# PR Readiness
 
@@ -31,12 +38,14 @@ ${context.runDirRelative}
 ## Decision Inputs
 - Triage verdict: ${decision.triageVerdict}
 - Plan ready for implementation: ${decision.planReady ? "yes" : "no"}
+- Latest review cycle: ${latestReviewCycle ?? "legacy/static"}
 - Review A verdict: ${decision.reviewAVerdict}
 - Review B verdict: ${decision.reviewBVerdict}
-- Fixes were needed: ${decision.fixesWereNeeded ? "yes" : "no"}
+- Fixes were needed in latest cycle: ${decision.fixesWereNeeded ? "yes" : "no"}
+- Restart required in latest cycle: ${decision.restartRequired ? "yes" : "no"}
 - Review blocked workflow: ${decision.blockedByReview ? "yes" : "no"}
-- Latest final review pass: ${finalReviewPass ?? "none"}
-- Latest final review verdict: ${decision.finalVerdict}
+- Legacy final review pass used: ${finalReviewPass ?? "none"}
+- Legacy final review verdict used: ${decision.finalVerdict}
 - Maximum fix passes: ${context.maxFixPasses}
 
 ## Current-Issue Blocking Findings
@@ -55,7 +64,7 @@ ${renderFindings(decision.suggestions)}
 ${renderWarnings(decision.parserWarnings, decision.rejectedFindings)}
 
 ## Summary
-${decision.status === "ready-for-pr" ? "The workflow considers this work ready for a pull request." : "The workflow does not consider this work ready for a pull request yet."}
+${decision.status === "ready-for-pr" ? "The workflow considers the latest post-refinement Review A/B cycle ready for a pull request." : "The workflow does not consider this work ready for a pull request yet."}
 
 ## Recommended PR Title
 Fix issue #${context.issueNumber}
