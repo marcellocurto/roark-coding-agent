@@ -328,6 +328,7 @@ Options:
   --no-comment           revise-pr only: do not post the terminal PR summary comment.
   --force                Re-run phases even if their markdown artifact already exists.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
+  -v, --version          Top-level only: print the installed Roark version.
   -h, --help             Show this help.
 `;
 

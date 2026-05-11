@@ -9,6 +9,7 @@ Use the installed binary:
 
 ```bash
 roark --help
+roark --version
 ```
 
 Or run from a source checkout:
@@ -80,6 +81,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--all` | `status` | Summarize all known issue runs. |
 | `--force` | phase, implementation, fix, PR revision | Re-run phases or continue past supported dirty-tree preflights. |
 | `--yes` | supported mutation paths | Continue past supported prompts or approve `create-issues` mutations. |
+| `-v`, `--version` | top-level only | Print the installed Roark version. |
 | `-h`, `--help` | all commands | Show help. |
 
 ## Autorun Options
@@ -119,6 +121,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 ## Examples
 
 ```bash
+roark --version
 roark init
 roark do 123 --repo owner/repo
 roark auto --repo owner/repo --limit 1 --dry-run

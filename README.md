@@ -29,6 +29,7 @@ cd roark-coding-agent
 bun install
 bun install -g "$PWD"
 roark --help
+roark --version
 ```
 
 For servers, pin a tag or commit before installing globally.
@@ -118,6 +119,7 @@ Common topics:
 - [Labels](docs/labels.md) — GitHub label roles and defaults.
 - [Workflow skills](docs/workflow-skills.md) — bundled and repo-local skill behavior.
 - [Architecture](docs/architecture.md) — contributor-level internals.
+- [Versioning](docs/versioning.md) — SemVer policy, changelog expectations, and release checklist.
 - [Glossary](docs/glossary.md) — term definitions.
 
 ## Inspiration

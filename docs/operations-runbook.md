@@ -16,6 +16,7 @@ bun --version
 git --version
 gh --version
 roark --help
+roark --version
 ```
 
 Authenticate:
@@ -147,7 +148,7 @@ Use `--force` only when you have confirmed that dirty work is disposable.
 ## Upgrade Procedure
 
 1. Stop scheduled jobs.
-2. Check current Roark version or commit.
+2. Check the current Roark version with `roark --version`, or record the pinned commit.
 3. Update the Roark checkout deliberately.
 4. Run:
 
@@ -156,6 +157,7 @@ bun install
 bun test
 bun run typecheck
 roark --help
+roark --version
 ```
 
 5. Run `roark auto --dry-run`.
@@ -167,7 +169,7 @@ roark --help
 1. Stop scheduled jobs.
 2. Return the Roark checkout to the previous pinned tag or commit.
 3. Reinstall globally if needed.
-4. Verify `roark --help`.
+4. Verify `roark --help` and `roark --version`.
 5. Re-run `roark status --all`.
 6. Continue failed attempts only after confirming artifact compatibility.
 

@@ -12,6 +12,7 @@
     "skills",
     "docs",
     "README.md",
+    "CHANGELOG.md",
     "tsconfig.json"
   ],
   "scripts": {
@@ -21,7 +22,11 @@
     "do": "bun run roark.ts do",
     "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release:check": "bun test && bun run typecheck",
+    "version:patch": "bun run release:check && bun pm version patch",
+    "version:minor": "bun run release:check && bun pm version minor",
+    "version:major": "bun run release:check && bun pm version major"
   },
   "devDependencies": {
     "@types/bun": "latest",
