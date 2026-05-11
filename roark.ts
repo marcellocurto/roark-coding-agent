@@ -16,6 +16,11 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   const cliArgv = argv.length === 0 ? await resolveInteractiveArgv() : argv;
   if (!cliArgv) return;
 
+  if (isVersionArgv(cliArgv)) {
+    console.log(await readPackageVersion());
+    return;
+  }
+
   const rawParsed = parseArgs(cliArgv);
   if ("help" in rawParsed) {
     console.log(usage);
@@ -68,6 +73,16 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   } else await runSinglePhase(context, parsed.command);
 
   console.log(`\nDone. Artifacts: ${context.runDirRelative}`);
+}
+
+function isVersionArgv(argv: string[]): boolean {
+  return argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v");
+}
+
+async function readPackageVersion(): Promise<string> {
+  const packageJson = (await Bun.file(new URL("./package.json", import.meta.url)).json()) as { version?: unknown };
+  if (typeof packageJson.version !== "string") throw new Error("package.json is missing a string version.");
+  return packageJson.version;
 }
 
 if (import.meta.main) {
