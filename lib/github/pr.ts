@@ -52,6 +52,11 @@ export type PullRequestFeedback = {
 };
 
 export type PullRequestGraphQLResult = {
+  data?: {
+    repository?: {
+      pullRequest?: unknown;
+    };
+  };
   repository?: {
     pullRequest?: unknown;
   };
@@ -98,7 +103,7 @@ export async function resolvePullRequestRepo(options: { cwd: string; repo?: stri
 
 export function parsePullRequestFeedback(raw: string, input: { repo: string; prNumber: number }): PullRequestFeedback {
   const parsed = JSON.parse(raw) as PullRequestGraphQLResult;
-  const pullRequest = parsed.repository?.pullRequest;
+  const pullRequest = parsed.data?.repository?.pullRequest ?? parsed.repository?.pullRequest;
   if (!isRecord(pullRequest)) throw new Error(`GitHub GraphQL response did not include pull request #${input.prNumber}.`);
 
   const pr = normalizePullRequestMetadata(pullRequest, input.prNumber);
