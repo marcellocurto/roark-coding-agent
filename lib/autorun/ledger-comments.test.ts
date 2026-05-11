@@ -104,7 +104,7 @@ describe("autorun ledger comment formatters", () => {
     expect(body).toContain("## Verdict\nfixes-required");
   });
 
-  test("formats draft PR created comments", () => {
+  test("formats PR created comments", () => {
     const body = formatPrCreatedComment({
       issueNumber: 24,
       attempt: 2,
@@ -113,7 +113,7 @@ describe("autorun ledger comment formatters", () => {
     });
 
     expect(body).toStartWith("<!-- roark:issue=24 attempt=2 phase=pr-created -->");
-    expect(body).toContain("Draft PR: https://github.com/owner/repo/pull/30");
+    expect(body).toContain("PR: https://github.com/owner/repo/pull/30");
     expect(body).toContain("Attempt: `.roark/runs/issue/24/attempts/2/attempt.json`");
   });
 });

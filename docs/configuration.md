@@ -87,11 +87,11 @@ It infers:
 | Key | Type | Default | CLI equivalent | Notes |
 | --- | --- | --- | --- | --- |
 | `repo` | string | inferred when possible | `--repo` | GitHub repository as `owner/repo`. |
-| `baseBranch` | string | `main` | `--base-branch` | Base branch for issue branches and draft PRs. |
+| `baseBranch` | string | `main` | `--base-branch` | Base branch for issue branches and PRs. |
 | `verify` | string | inferred for some repos | `--verify` | Shell command run by the verification gate through `sh -c`. |
 | `readyLabel` | string | `afk` | `--label` | Label that opts an issue into autorun eligibility. |
 | `inProgressLabel` | string | `roark-in-progress` | `--in-progress-label` | Label applied when Roark claims an issue. |
-| `successLabel` | string | `roark-pr-opened` | `--success-label` | Label applied after draft PR creation. |
+| `successLabel` | string | `roark-pr-opened` | `--success-label` | Label applied after PR creation. |
 | `failureLabel` | string | `roark-failed` | `--failure-label` | Label applied when readiness or verification fails. |
 | `skipLabels` | string[] | default skip set | `--skip-label`, `--skip-labels` | Labels that prevent autorun selection. |
 | `maxFixPasses` | number | `3` | `--max-fix-passes` | Maximum shared fix/review cycles, including review-driven fixes and verification repair. |

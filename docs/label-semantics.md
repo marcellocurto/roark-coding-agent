@@ -24,7 +24,7 @@ Autorun is label-gated. An open issue is eligible only when both are true:
 | `wontfix` | Skip label | Prevents autorun from selecting the issue. | `--skip-label` / `--skip-labels` |
 | `roark-in-progress` | Claim label and skip label | Applied when Roark claims an issue so concurrent runs skip it. | `--in-progress-label`; replacements are always added to the effective skip set |
 | `roark-failed` | Failure label and skip label | Applied when readiness or verification fails. | `--failure-label`; replacements are always added to the effective skip set |
-| `roark-pr-opened` | Success label and skip label | Applied after Roark opens a draft PR. | `--success-label`; replacements are always added to the effective skip set |
+| `roark-pr-opened` | Success label and skip label | Applied after Roark opens a PR. | `--success-label`; replacements are always added to the effective skip set |
 | `roark-ready-for-review` | Skip label | Prevents autorun from selecting issues already awaiting human review. | `--skip-label` / `--skip-labels` |
 
 Default skip set: `blocked`, `needs-human`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened`.
@@ -47,7 +47,7 @@ The issue-curation and `create-issues` flow assigns labels to new GitHub issues 
 - `--skip-label <label>` — autorun skip label; repeatable. Passing it replaces the default skip set on first use; Roark still appends required lifecycle/status skip labels.
 - `--skip-labels <labels>` — comma-separated autorun skip labels. Passing it replaces the default skip set on first use; Roark still appends required lifecycle/status skip labels.
 - `--in-progress-label <label>` — label applied when claiming an issue. Defaults to `roark-in-progress`.
-- `--success-label <label>` — label applied after opening a draft PR. Defaults to `roark-pr-opened`.
+- `--success-label <label>` — label applied after opening a PR. Defaults to `roark-pr-opened`.
 - `--failure-label <label>` — label applied when readiness or verification fails. Defaults to `roark-failed`.
 
 When changing in-progress, success, or failure labels, Roark appends those lifecycle labels to the effective skip set automatically so already-claimed, successful, or failed issues are not selected again unintentionally.
@@ -58,7 +58,7 @@ When changing in-progress, success, or failure labels, Roark appends those lifec
 | --- | --- | --- |
 | Ready for automation | `afk` and no skip labels | Eligible for `roark auto` discovery. |
 | Claimed | `afk`, `roark-in-progress` | Run is in progress; other autorun processes skip it. |
-| Published | `roark-pr-opened` | Draft PR has been opened; future autorun skips it. |
+| Published | `roark-pr-opened` | PR has been opened; future autorun skips it. |
 | Failed readiness or verification | `roark-failed` | Operator should inspect artifacts and use `roark continue`. |
 | Blocked by triage or external condition | `blocked` | Autorun skips it until a human changes labels or scope. |
 | Needs human decision | `needs-human` | Autorun skips it until a human resolves the decision. |

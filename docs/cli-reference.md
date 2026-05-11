@@ -97,7 +97,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--base-branch <branch>` | Auto issue branch base branch. Defaults to `main`. |
 | `--verify <cmd>` | Verification command to run before publishing. Runs through `sh -c`. |
 | `--failure-label <label>` | Label applied when readiness or verification fails. Defaults to `roark-failed`. |
-| `--success-label <label>` | Label applied when a draft PR is opened. Defaults to `roark-pr-opened`. |
+| `--success-label <label>` | Label applied when a PR is opened. Defaults to `roark-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
 ## PR Revision Options

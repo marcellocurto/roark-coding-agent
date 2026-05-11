@@ -12,7 +12,7 @@ Common defaults:
 - `afk`: ready for autorun.
 - `roark-in-progress`: claimed by Roark.
 - `roark-failed`: stopped at readiness or verification.
-- `roark-pr-opened`: draft PR opened.
+- `roark-pr-opened`: PR opened.
 - `blocked`, `needs-human`, `wontfix`: skip/status labels.
 
 Common lifecycle:

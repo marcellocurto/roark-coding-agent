@@ -123,7 +123,7 @@ When the dry run and manual run are understood, run a single autorun attempt:
 roark auto --repo owner/repo --limit 1
 ```
 
-On success, Roark opens a draft pull request only after readiness and verification pass.
+On success, Roark opens a pull request only after readiness and verification pass.
 
 On failure, Roark leaves the managed workspace and artifacts for inspection. It does not merge, close issues, or mark PRs ready for review.
 

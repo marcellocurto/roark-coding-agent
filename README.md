@@ -1,13 +1,13 @@
 # roark-coding-agent
 
-Roark is a small CLI workflow runner around the Pi coding-agent SDK. It turns GitHub issues into isolated agent runs, review artifacts, verification gates, and draft pull requests.
+Roark is a small CLI workflow runner around the Pi coding-agent SDK. It turns GitHub issues into isolated agent runs, review artifacts, verification gates, and pull requests.
 
 ## What Roark does
 
 - Runs an issue workflow: fetch, triage, plan, implement, review, fix, and readiness.
 - Supports label-gated one-shot automation with `roark auto`.
 - Uses managed clone workspaces so agent work is isolated from the control checkout.
-- Publishes draft PRs only after readiness and verification pass.
+- Publishes PRs only after readiness and verification pass.
 - Recovers failed attempts with `roark continue`.
 - Revises existing PRs from PR-scoped feedback with `roark revise-pr`.
 - Writes durable run artifacts under `.roark/runs`.
@@ -103,7 +103,7 @@ Common topics:
 - [Usage](docs/usage.md) - common commands and when to use them.
 - [Configuration](docs/configuration.md) — `.roark/config.json`, defaults, and precedence.
 - [Managed workspaces](docs/managed-workspaces.md) — clone workspaces and `workspace.copyToWorktree` for ignored local files such as `.secrets/env`.
-- [Autorun](docs/autorun.md) — label-gated automation and draft PR publishing.
+- [Autorun](docs/autorun.md) — label-gated automation and PR publishing.
 - [Recovery](docs/recovery.md) — failed attempts and `roark continue`.
 - [PR revisions](docs/pr-revisions.md) — responding to feedback on an existing PR.
 - [Issue curation](docs/issue-curation.md) — creating follow-up issues from reviewer findings.

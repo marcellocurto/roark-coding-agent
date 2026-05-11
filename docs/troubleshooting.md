@@ -143,7 +143,7 @@ If the branch belongs to a previous attempt, prefer `roark continue`. If it is u
 Symptoms:
 
 - `readiness.md` does not contain `ready-for-pr`
-- no draft PR is opened
+- no PR is opened
 
 Open:
 
@@ -153,7 +153,7 @@ Open:
 
 Then inspect the latest review and fix logs. Use `continue` after addressing local setup issues.
 
-## Draft PR Not Opened
+## PR Not Opened
 
 Common causes:
 

@@ -42,7 +42,7 @@ export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): Re
       role: "success",
       name: input.successLabel,
       color: "1D76DB",
-      description: "Roark lifecycle label. Applied after Roark opens a draft pull request.",
+      description: "Roark lifecycle label. Applied after Roark opens a pull request.",
     },
     {
       role: "triage-blocked",

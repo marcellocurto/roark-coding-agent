@@ -94,7 +94,7 @@ PR revision artifacts include fetched feedback, revision plan, revision log, rev
 
 ## Git Behavior
 
-Issue run artifacts are useful for inspection and recovery. Publishing flows generally avoid including issue run artifacts in the draft PR commit.
+Issue run artifacts are useful for inspection and recovery. Publishing flows generally avoid including issue run artifacts in the PR commit.
 
 PR revision workflows commit revision artifacts with the successful revision.
 

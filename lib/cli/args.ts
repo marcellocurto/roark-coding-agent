@@ -307,7 +307,7 @@ Options:
   --failure-label <label>
                           Label applied to the issue when readiness or verification fails. Defaults to ${defaultAutorunFailureLabel}.
   --success-label <label>
-                          Label applied to the issue when a draft PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
+                          Label applied to the issue when a PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
   --no-comment           revise-pr only: do not post the terminal PR summary comment.
   --force                Re-run phases even if their markdown artifact already exists.

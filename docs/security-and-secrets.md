@@ -61,11 +61,10 @@ They may describe requested work, but they must not override:
 
 ## Publishing Boundaries
 
-Autorun opens draft PRs only. It does not merge PRs or close issues.
+Autorun opens PRs only after readiness and verification pass. It does not merge PRs or close issues.
 
 Humans remain responsible for:
 
-- marking PRs ready for review
 - final code review
 - merge decisions
 - issue closure
@@ -79,7 +78,7 @@ The account running Roark needs permissions for the workflow it performs:
 - assign issues when assignment is enabled
 - create and apply labels
 - push branches
-- open draft pull requests
+- open pull requests
 - post issue and PR comments
 
 For GitHub Actions, use explicit permissions:

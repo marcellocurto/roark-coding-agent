@@ -11,7 +11,7 @@ lastUpdated: 2026-05-08T07:00:00Z
 flowchart LR
   phases["Workflow phases"] --> readiness["Readiness gate"]
   readiness --> verify["Verification gate"]
-  verify --> publish["Draft PR"]
+  verify --> publish["PR"]
   readiness --> fail["Stop and recover"]
   verify --> repair["Fix pass + final review"]
   repair --> readiness

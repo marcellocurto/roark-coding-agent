@@ -25,9 +25,9 @@ The one-shot label-gated workflow invoked by `roark auto`.
 
 The local repository checkout where `roark` is invoked and where `.roark/config.json` and `.roark/runs` live.
 
-## Draft Pull Request
+## Pull Request
 
-The PR Roark opens after readiness and verification pass. Roark leaves it as draft for human review.
+The PR Roark opens after readiness and verification pass.
 
 ## Fix Pass
 

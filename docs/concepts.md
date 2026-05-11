@@ -15,7 +15,7 @@ flowchart TD
   workspace --> phases["Agent phases"]
   phases --> readiness["Readiness gate"]
   readiness --> verify["Verification gate"]
-  verify --> publish["Draft pull request"]
+  verify --> publish["Pull request"]
   phases --> artifacts["Run artifacts"]
   verify --> artifacts
 ```
@@ -48,7 +48,7 @@ Roark creates or reuses an issue branch named:
 roark/issue-<number>
 ```
 
-Publishing pushes this branch and opens a draft pull request against the configured base branch.
+Publishing pushes this branch and opens a pull request against the configured base branch.
 
 ## Attempt
 
@@ -92,15 +92,14 @@ The default ready label is `afk`. Default skip and lifecycle labels include `blo
 
 See [Label semantics](label-semantics.md).
 
-## Draft Pull Requests
+## Pull Requests
 
-Roark opens draft pull requests only after readiness and verification pass.
+Roark opens pull requests only after readiness and verification pass.
 
 Roark does not:
 
 - merge pull requests
 - close issues
-- mark draft PRs ready
 - make final review decisions
 
 ## Run Artifacts

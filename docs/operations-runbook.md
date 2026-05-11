@@ -54,7 +54,7 @@ The account running Roark needs enough permission to:
 - create and edit labels required by Roark
 - create branches
 - push commits
-- open draft pull requests
+- open pull requests
 - read PR review comments for `revise-pr`
 - post issue or PR comments
 

@@ -82,7 +82,6 @@ export function buildPrCreateArgv(options: PrCreateArgvOptions): string[] {
     "gh",
     "pr",
     "create",
-    "--draft",
     "--base",
     options.baseBranch,
     "--head",
@@ -219,7 +218,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     reviewVerdicts: collectReviewVerdicts(workflowContext),
   });
 
-  console.log("- Creating draft pull request");
+  console.log("- Creating pull request");
   const prStdout = await runProcessOrThrow(
     buildPrCreateArgv({
       repo: options.repo,
@@ -228,10 +227,10 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       title: issue.title,
       body,
     }),
-    { cwd: controlCwd, label: "gh pr create --draft" },
+    { cwd: controlCwd, label: "gh pr create" },
   );
   const prUrl = prStdout.trim();
-  if (prUrl) console.log(`- Draft PR: ${prUrl}`);
+  if (prUrl) console.log(`- PR: ${prUrl}`);
 
   try {
     await runProcessOrThrow(

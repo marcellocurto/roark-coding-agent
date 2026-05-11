@@ -1,6 +1,6 @@
 ---
 title: Autorun
-summary: End-to-end behavior of `roark auto`, including issue selection, claiming, gates, and draft PR publishing.
+summary: End-to-end behavior of `roark auto`, including issue selection, claiming, gates, and PR publishing.
 dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
@@ -20,7 +20,7 @@ roark auto --repo owner/repo --limit 1
 7. Apply the readiness gate.
 8. Run the verification gate.
 9. If verification fails and `maxFixPasses` has budget, repair through fix pass + final review + readiness, then rerun verification.
-10. On success, commit code changes, push the branch, and open a draft PR.
+10. On success, commit code changes, push the branch, and open a PR.
 11. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
 
 ## Recommended posture
@@ -35,7 +35,7 @@ See [Label semantics](label-semantics.md) for the full label reference.
 
 ## Safety boundaries
 
-Autorun never merges PRs, never closes issues, and opens draft PRs only. A human reviewer remains responsible for marking PRs ready, reviewing them, and merging them.
+Autorun never merges PRs or closes issues. A human reviewer remains responsible for reviewing PRs and merging them.
 
 ## Useful commands
 

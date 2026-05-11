@@ -24,7 +24,7 @@ For the full first-run path, read [Quickstart](quickstart.md).
 
 ## Workflows
 
-- [Autorun](autorun.md) - label-gated one-shot automation and draft PR publishing.
+- [Autorun](autorun.md) - label-gated one-shot automation and PR publishing.
 - [Recovery](recovery.md) - inspect and continue stopped or failed attempts.
 - [PR revisions](pr-revisions.md) - respond to feedback on an existing pull request.
 - [Issue curation](issue-curation.md) - turn reviewer findings into approved follow-up GitHub issues.

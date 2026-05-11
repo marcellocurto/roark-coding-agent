@@ -75,7 +75,7 @@ describe("autorun publish argv builders", () => {
     ]);
   });
 
-  test("buildPrCreateArgv produces a draft gh pr create command with --repo", () => {
+  test("buildPrCreateArgv produces a gh pr create command with --repo", () => {
     expect(
       buildPrCreateArgv({
         repo: "owner/repo",
@@ -88,7 +88,6 @@ describe("autorun publish argv builders", () => {
       "gh",
       "pr",
       "create",
-      "--draft",
       "--base",
       "main",
       "--head",
@@ -114,7 +113,6 @@ describe("autorun publish argv builders", () => {
       "gh",
       "pr",
       "create",
-      "--draft",
       "--base",
       "main",
       "--head",

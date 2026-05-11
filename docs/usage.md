@@ -83,7 +83,7 @@ Continue should run from the same control checkout when possible. It depends on 
 
 ## PR Revisions
 
-Use `revise-pr` when a draft PR exists and you want Roark to respond to PR-scoped review feedback:
+Use `revise-pr` when a PR exists and you want Roark to respond to PR-scoped review feedback:
 
 ```bash
 roark revise-pr 456 --repo owner/repo

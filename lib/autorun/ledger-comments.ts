@@ -102,9 +102,9 @@ export function formatPrCreatedComment(input: {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "pr-created" });
   const lines = [
     marker,
-    `## Roark draft PR created — attempt ${input.attempt}`,
+    `## Roark PR created — attempt ${input.attempt}`,
     "",
-    `Draft PR: ${input.prUrl}`,
+    `PR: ${input.prUrl}`,
   ];
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
   return `${lines.join("\n")}\n`;
