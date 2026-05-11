@@ -23,13 +23,17 @@
     "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "release:check": "bun test && bun run typecheck",
+    "lint": "eslint .",
+    "check": "bun run typecheck && bun run lint && bun test",
+    "release:check": "bun run check",
     "version:patch": "bun run release:check && bun pm version patch",
     "version:minor": "bun run release:check && bun pm version minor",
     "version:major": "bun run release:check && bun pm version major"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "eslint": "^10.3.0",
+    "typescript-eslint": "^8.59.2",
     "typescript": "^6.0.3"
   },
   "dependencies": {
