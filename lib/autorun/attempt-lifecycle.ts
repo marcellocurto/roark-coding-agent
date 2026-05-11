@@ -1,8 +1,9 @@
 import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
-import { runFullWorkflow, type WorkflowRunResult } from "../workflow/phases.ts";
+import { finalReviewPhase, fixPhase, readinessPhase, runFullWorkflow, type WorkflowRunResult } from "../workflow/phases.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
+import { shouldRunAnotherFixPass } from "../workflow/verdicts.ts";
 import { finalizeAttemptObservability } from "./observability.ts";
 import {
   attemptMetadataRelativePath,
@@ -16,7 +17,7 @@ import {
   defaultClock,
 } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
-import { completeAutorunWorkflow } from "./completion.ts";
+import { completeAutorunWorkflow, type AutorunCompletionOutcome } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
@@ -37,6 +38,7 @@ export type RunAutorunAttemptLifecycleInput = {
   runner?: AgentRunner;
   logPrefix?: string;
   inProgressOutcomeDetail?: string | null;
+  initialVerificationRepairPass?: number;
 };
 
 export type RunAutorunAttemptLifecycleInjected = {
@@ -47,6 +49,8 @@ export type RunAutorunAttemptLifecycleInjected = {
   markIssueFailed?: typeof markIssueFailed;
   finalizeAttemptObservability?: typeof finalizeAttemptObservability;
 };
+
+type TerminalCompletionOutcome = Exclude<AutorunCompletionOutcome, { outcome: "verification-needs-fix" }>;
 
 export async function runAutorunAttemptLifecycle(
   input: RunAutorunAttemptLifecycleInput,
@@ -77,10 +81,12 @@ export async function runAutorunAttemptLifecycle(
     await input.beforeRun?.(attemptMetadata);
     await persistAttempt(input.issueDir, attemptMetadata);
 
-    const workflowResult = await runWorkflow(input.workflowContext, input.runner);
+    const workflowResult = input.initialVerificationRepairPass === undefined
+      ? await runWorkflow(input.workflowContext, input.runner)
+      : await runVerificationRepairWorkflow(input.workflowContext, input.initialVerificationRepairPass, input.runner);
     const issue = await resolveIssue(input);
     const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
-    const completionOutcome = await completeWorkflow({
+    let completionOutcome = await completeWorkflow({
       workflowResult,
       options: input.gateOptions,
       issue,
@@ -90,8 +96,24 @@ export async function runAutorunAttemptLifecycle(
       attemptMetadataPath,
       recoveryCommand: recoveryCommand(input, false),
     });
-    outcome = completionOutcome.outcome;
-    outcomeDetail = completionOutcome.outcomeDetail;
+
+    while (completionOutcome.outcome === "verification-needs-fix") {
+      const repairResult = await runVerificationRepairWorkflow(input.workflowContext, completionOutcome.pass, input.runner);
+      completionOutcome = await completeWorkflow({
+        workflowResult: repairResult,
+        options: input.gateOptions,
+        issue,
+        branchPlan: input.branchPlan,
+        workflowContext: input.workflowContext,
+        attemptMetadata,
+        attemptMetadataPath,
+        recoveryCommand: recoveryCommand(input, false),
+      });
+    }
+
+    const terminalOutcome = completionOutcome as TerminalCompletionOutcome;
+    outcome = terminalOutcome.outcome;
+    outcomeDetail = terminalOutcome.outcomeDetail;
   } catch (error) {
     outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
     outcomeDetail = formatError(error);
@@ -118,6 +140,22 @@ export async function runAutorunAttemptLifecycle(
       endedAt,
     });
   }
+}
+
+async function runVerificationRepairWorkflow(
+  context: WorkflowContext,
+  initialPass: number,
+  runner?: AgentRunner,
+): Promise<WorkflowRunResult> {
+  for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
+    console.log(`\n=== Verification repair pass ${pass} ===`);
+    await fixPhase(context, pass, runner);
+    const finalReview = await finalReviewPhase(context, pass, runner);
+    if (!shouldRunAnotherFixPass(finalReview) || pass >= context.maxFixPasses) break;
+    console.log(`Final review requested more fixes; continuing to fix pass ${pass + 1}.`);
+  }
+  await readinessPhase(context);
+  return { status: "completed" };
 }
 
 async function persistAttempt(issueDir: string, attemptMetadata: AttemptMetadata): Promise<void> {

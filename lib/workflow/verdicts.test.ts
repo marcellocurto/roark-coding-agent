@@ -50,6 +50,15 @@ describe("classification-aware verdict decisions", () => {
     expect(decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger, finalReview: finalReady }).status).toBe("ready-for-pr");
   });
 
+  test("final review verdict gates readiness after a verification-driven fix", () => {
+    const finalFixesRequired = "# Final Review\n\n## Verdict\nfixes-required\n";
+    const finalBlocked = "# Final Review\n\n## Verdict\nblocked\n";
+
+    expect(decideReadiness({ triage, plan, reviewA: approveNoLedger, reviewB: approveNoLedger, finalReview: finalFixesRequired }).status).toBe("not-ready");
+    expect(decideReadiness({ triage, plan, reviewA: approveNoLedger, reviewB: approveNoLedger, finalReview: finalBlocked }).status).toBe("not-ready");
+    expect(decideReadiness({ triage, plan, reviewA: approveNoLedger, reviewB: approveNoLedger, finalReview: finalReady }).status).toBe("ready-for-pr");
+  });
+
   test("external-blocker findings block workflow without invoking fix work", () => {
     const reviewA = review("blocked", entry("B1", "external-blocker"));
 

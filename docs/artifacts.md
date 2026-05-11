@@ -32,6 +32,7 @@ Artifacts are useful for:
                 ├── final-review-1.md
                 ├── readiness.md
                 ├── verification.md
+                ├── verification-before-fix-1.md
                 ├── attempt.json
                 ├── summary.json
                 ├── events.jsonl
@@ -66,7 +67,8 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `fix-log-<n>.md` | Fix pass output. |
 | `final-review-<n>.md` | Review after a fix pass. |
 | `readiness.md` | Final readiness gate artifact. |
-| `verification.md` | Verification command, exit code, stdout tail, and stderr tail. |
+| `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
+| `verification-before-fix-<n>.md` | Archived failed verification output that triggered fix pass `n`. |
 | `attempt.json` | Branch, workspace, and lifecycle metadata. |
 | `summary.json` | Artifact index and run summary. |
 | `events.jsonl` | Observable phase events. |

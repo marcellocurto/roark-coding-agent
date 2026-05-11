@@ -164,6 +164,21 @@ describe("planWorkflowProgression", () => {
       { type: "publish-gate", reason: "publish gate records non-publish" },
     ]);
   });
+
+  test("continues verification-driven fix passes after final review requests more fixes", async () => {
+    const context = await tempContext(2);
+    await writeHappyPathThroughReviews(context);
+    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
+    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nfixes-required\n");
+
+    const progression = await planWorkflowProgression(context, { includePublishGate: true });
+
+    expect(progression.terminalStatus).toBeUndefined();
+    expect(progression.actions.slice(0, 2)).toEqual([
+      { type: "run", phase: "fix", pass: 2, reason: "artifact is missing" },
+      { type: "run", phase: "final-review", pass: 2, reason: "final review depends on fix" },
+    ]);
+  });
 });
 
 async function writeReadyThroughPlan(context: WorkflowContext, ready: "yes" | "no") {

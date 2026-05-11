@@ -1,0 +1,5 @@
+runs/
+worktrees/
+logs/
+locks/
+*.local.json

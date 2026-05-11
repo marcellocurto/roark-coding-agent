@@ -127,18 +127,21 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
   const blockedByReview = externalBlockers.length > 0 || fallbackBlocked;
   const hasRejectedFindings = rejectedFindings.length > 0;
 
+  const finalReviewWasRun = input.finalReview.trim().length > 0;
+
   const readyWithoutFixes =
     triageVerdict === "proceed" &&
     planReady &&
     reviewsApproveCurrentIssue(parsedReviews) &&
     !fixesWereNeeded &&
     !blockedByReview &&
-    !hasRejectedFindings;
+    !hasRejectedFindings &&
+    !finalReviewWasRun;
 
   const readyAfterFix =
     triageVerdict === "proceed" &&
     planReady &&
-    fixesWereNeeded &&
+    (fixesWereNeeded || finalReviewWasRun) &&
     !blockedByReview &&
     !hasRejectedFindings &&
     finalVerdict === "ready-for-pr";

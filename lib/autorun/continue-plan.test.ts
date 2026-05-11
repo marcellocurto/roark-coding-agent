@@ -121,6 +121,76 @@ describe("planContinuation", () => {
       { type: "publish-gate", reason: "publish gate records non-publish" },
     ]);
   });
+
+  test("continues a failed verification attempt into the next repair pass when budget remains", async () => {
+    const context = await tempContext();
+    context.maxFixPasses = 2;
+    await writeHappyPathThroughReviews(context);
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeArtifact(context, "verification", "# Verification\n\n## Exit Code\n1\n");
+
+    const steps = await planContinuation(context, { attemptOutcome: "failed-verification" });
+
+    expect(steps).toEqual([
+      { type: "run", phase: "fix", pass: 1, reason: "verification failed; repair within remaining fix budget" },
+      { type: "run", phase: "final-review", pass: 1, reason: "final review depends on verification repair" },
+      { type: "write-readiness", reason: "workflow must recompute readiness after verification repair" },
+      { type: "publish-gate", reason: "publish gate must rerun after verification repair" },
+    ]);
+  });
+
+  test("continues failed verification after an existing review fix as pass 2", async () => {
+    const context = await tempContext();
+    context.maxFixPasses = 2;
+    await writeHappyPathThroughReviews(context, "fixes-required");
+    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
+    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeArtifact(context, "verification", "# Verification\n\n## Exit Code\n1\n");
+
+    const steps = await planContinuation(context, { attemptOutcome: "failed-verification" });
+
+    expect(steps[0]).toEqual({
+      type: "run",
+      phase: "fix",
+      pass: 2,
+      reason: "verification failed; repair within remaining fix budget",
+    });
+  });
+
+  test("does not auto-repair failed verification when fix budget is exhausted", async () => {
+    const context = await tempContext();
+    context.maxFixPasses = 1;
+    await writeHappyPathThroughReviews(context);
+    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
+    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+    await writeArtifact(context, "verification", "# Verification\n\n## Exit Code\n1\n");
+
+    const steps = await planContinuation(context, { attemptOutcome: "failed-verification" });
+
+    expect(steps).toEqual([
+      {
+        type: "noop",
+        reason: "verification failed and maximum fix passes reached; human action required or pass --force to rerun gates",
+      },
+    ]);
+  });
+
+  test("does not auto-repair command-unavailable verification failures", async () => {
+    const context = await tempContext();
+    context.maxFixPasses = 2;
+    await writeHappyPathThroughReviews(context);
+    await writeArtifact(context, "verification", "# Verification\n\n## Command\n`bun run typecheck`\n\n## Exit Code\n127\n\n## Stdout (tail)\n```\n\n```\n\n## Stderr (tail)\n```\n/bin/bash: tsc: command not found\n```\n");
+
+    const steps = await planContinuation(context, { attemptOutcome: "failed-verification" });
+
+    expect(steps).toEqual([
+      {
+        type: "noop",
+        reason: "verification command exited 127 because a required command was not found; Install dependencies in the verification workspace or configure hooks.beforeVerify, for example: bun install --frozen-lockfile.",
+      },
+    ]);
+  });
 });
 
 async function writeHappyPathThroughReviews(

@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  classifyVerificationFailure,
   defaultAutorunVerifyCommand,
   formatVerificationArtifact,
+  parseVerificationArtifact,
   runVerification,
+  verificationFailureReason,
   type VerificationResult,
   type VerificationRunner,
 } from "./verification.ts";
@@ -70,5 +73,54 @@ describe("autorun verification", () => {
     });
     expect(artifact).toContain("(truncated");
     expect(artifact.length).toBeLessThan(long.length + 600);
+  });
+
+  test("classifies command-unavailable failures as non-repairable with hook guidance", () => {
+    const classification = classifyVerificationFailure({
+      ok: false,
+      command: "bun run typecheck",
+      exitCode: 127,
+      stdout: "",
+      stderr: "/bin/bash: tsc: command not found",
+    });
+
+    expect(classification.repairable).toBe(false);
+    expect(classification.reason).toContain("required command was not found");
+    expect(classification.recoveryGuidance).toContain("hooks.beforeVerify");
+    expect(verificationFailureReason({
+      ok: false,
+      command: "bun run typecheck",
+      exitCode: 127,
+      stdout: "",
+      stderr: "/bin/bash: tsc: command not found",
+    })).toContain("bun install --frozen-lockfile");
+  });
+
+  test("classifies deterministic verification exits as repairable", () => {
+    expect(classifyVerificationFailure({
+      ok: false,
+      command: "bun run check",
+      exitCode: 1,
+      stdout: "",
+      stderr: "lint failed",
+    }).repairable).toBe(true);
+  });
+
+  test("parses verification artifacts for continuation planning", () => {
+    const parsed = parseVerificationArtifact(formatVerificationArtifact({
+      ok: false,
+      command: "bun run typecheck",
+      exitCode: 127,
+      stdout: "",
+      stderr: "/bin/bash: tsc: command not found",
+    }));
+
+    expect(parsed).toEqual({
+      ok: false,
+      command: "bun run typecheck",
+      exitCode: 127,
+      stdout: "",
+      stderr: "/bin/bash: tsc: command not found",
+    });
   });
 });

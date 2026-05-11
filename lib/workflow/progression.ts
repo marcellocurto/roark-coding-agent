@@ -145,7 +145,7 @@ export async function planWorkflowProgression(
     );
   }
 
-  if (needsFix(reviewAMarkdown, reviewBMarkdown)) {
+  if (needsFix(reviewAMarkdown, reviewBMarkdown) || hasExistingFixProgress(context)) {
     for (let pass = 1; pass <= context.maxFixPasses; pass++) {
       const fix = await inspect(context, fixLogRef(pass), options);
       if (!fix.valid) {
@@ -214,6 +214,10 @@ async function inspect(
   return { exists: true, valid: true, reason: "artifact is valid", content };
 }
 
+function hasExistingFixProgress(context: WorkflowContext): boolean {
+  return artifactExists(context, fixLogRef(1)) || artifactExists(context, finalReviewRef(1));
+}
+
 function forceActionForArtifact(artifact: ArtifactRef): WorkflowProgressionAction | undefined {
   if (typeof artifact === "string") {
     if (artifact === "issue") return run("fetch", "forced rerun requested");
@@ -225,7 +229,8 @@ function forceActionForArtifact(artifact: ArtifactRef): WorkflowProgressionActio
     return undefined;
   }
   if (artifact.name === "fixLog") return run("fix", "forced rerun requested", artifact.pass);
-  return run("final-review", "forced rerun requested", artifact.pass);
+  if (artifact.name === "finalReview") return run("final-review", "forced rerun requested", artifact.pass);
+  return undefined;
 }
 
 function hasCompletedAction(actions: readonly WorkflowProgressionAction[], expected: WorkflowProgressionAction): boolean {

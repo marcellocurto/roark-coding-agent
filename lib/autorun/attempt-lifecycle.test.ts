@@ -2,12 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { readArtifact, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { formatAttemptMetadata, readAttemptIndex, readAttemptMetadata } from "./attempts.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 
 const tempDirs: string[] = [];
@@ -44,6 +45,93 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(terminal.outcomeDetail).toBe("verification failed");
     expect(terminal.endedAt).toBe("2026-05-07T01:00:00.000Z");
     expect((await readAttemptIndex(fixture.issueDir))[0]?.outcome).toBe("failed-verification");
+  });
+
+  test("runs fix, final review, readiness, and completion again for verification repair", async () => {
+    const fixture = await createFixture();
+    await writeCompletedWorkflowArtifacts(fixture.workflowContext);
+    const phases: string[] = [];
+    let completions = 0;
+
+    await runAutorunAttemptLifecycle({
+      ...fixture,
+      issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
+      runner: async (request) => {
+        phases.push(request.phase ?? "unknown");
+        expect(request.prompt).toContain("failed_verification");
+        if (request.phase === "fixLog-1") {
+          return "# Fix Log Pass 1\n\n## Summary\nAddressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
+        }
+        if (request.phase === "finalReview-1") {
+          return "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n\n## Reasoning\nVerification failure addressed.\n\n## Remaining Issues\nNone\n\n## Validation\nReviewed.\n";
+        }
+        throw new Error(`unexpected phase ${request.phase}`);
+      },
+    }, {
+      clock: { now: () => new Date("2026-05-07T01:30:00.000Z") },
+      runFullWorkflow: async () => ({ status: "completed" }),
+      completeAutorunWorkflow: async () => {
+        completions += 1;
+        if (completions === 1) {
+          await writeArtifact(fixture.workflowContext, verificationBeforeFixRef(1), "# Verification\n\n## Exit Code\n1\n");
+          return { outcome: "verification-needs-fix", outcomeDetail: "verify command exited 1", pass: 1 };
+        }
+        return { outcome: "published", outcomeDetail: null };
+      },
+      finalizeAttemptObservability: async () => {},
+    });
+
+    expect(completions).toBe(2);
+    expect(phases).toEqual(["fixLog-1", "finalReview-1"]);
+    expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
+    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    expect(terminal.outcome).toBe("published");
+  });
+
+  test("continues verification repair when final review requests another fix pass", async () => {
+    const fixture = await createFixture();
+    await writeCompletedWorkflowArtifacts(fixture.workflowContext);
+    const phases: string[] = [];
+    let completions = 0;
+
+    await runAutorunAttemptLifecycle({
+      ...fixture,
+      issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
+      runner: async (request) => {
+        phases.push(request.phase ?? "unknown");
+        if (request.phase === "fixLog-1") {
+          return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nFinal review requested another fix.\n";
+        }
+        if (request.phase === "finalReview-1") {
+          return "# Final Review Pass 1\n\n## Verdict\nfixes-required\n\n## Reasoning\nRepair is incomplete.\n\n## Remaining Issues\n- Verification failure remains.\n\n## Validation\nReviewed.\n";
+        }
+        if (request.phase === "fixLog-2") {
+          return "# Fix Log Pass 2\n\n## Summary\nCompleted verification repair.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
+        }
+        if (request.phase === "finalReview-2") {
+          return "# Final Review Pass 2\n\n## Verdict\nready-for-pr\n\n## Reasoning\nRepair is complete.\n\n## Remaining Issues\nNone\n\n## Validation\nReviewed.\n";
+        }
+        throw new Error(`unexpected phase ${request.phase}`);
+      },
+    }, {
+      clock: { now: () => new Date("2026-05-07T01:45:00.000Z") },
+      runFullWorkflow: async () => ({ status: "completed" }),
+      completeAutorunWorkflow: async () => {
+        completions += 1;
+        if (completions === 1) {
+          await writeArtifact(fixture.workflowContext, verificationBeforeFixRef(1), "# Verification\n\n## Exit Code\n1\n");
+          return { outcome: "verification-needs-fix", outcomeDetail: "verify command exited 1", pass: 1 };
+        }
+        return { outcome: "published", outcomeDetail: null };
+      },
+      finalizeAttemptObservability: async () => {},
+    });
+
+    expect(completions).toBe(2);
+    expect(phases).toEqual(["fixLog-1", "finalReview-1", "fixLog-2", "finalReview-2"]);
+    expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
+    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    expect(terminal.outcome).toBe("published");
   });
 
   test("classifies output-contract failures and includes failing artifact details in the failure comment", async () => {
@@ -179,6 +267,15 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 });
 
+async function writeCompletedWorkflowArtifacts(context: WorkflowContext): Promise<void> {
+  await writeArtifact(context, "issue", "# GitHub Issue #44\n\n<github_issue_relationships source=\"gh\" />\n");
+  await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+  await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+  await writeArtifact(context, "reviewA", "# Review A\n\n## Verdict\napprove\n");
+  await writeArtifact(context, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+}
+
 async function createFixture(): Promise<{
   issueDir: string;
   workflowContext: WorkflowContext;
@@ -188,6 +285,7 @@ async function createFixture(): Promise<{
 }> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-lifecycle-"));
   tempDirs.push(cwd);
+  await runProcessOrThrow(["git", "init"], { cwd });
   const issueDir = path.join(cwd, ".roark/runs/issue/44");
   const runDirRelative = ".roark/runs/issue/44/attempts/1";
   const runDir = path.join(cwd, runDirRelative);

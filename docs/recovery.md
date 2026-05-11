@@ -21,6 +21,8 @@ If `--attempt` is omitted, Roark uses the latest attempt recorded in:
 
 `continue` reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites readiness, reruns verification, and publishes only if readiness and verification both pass.
 
+If an attempt stopped as `failed-verification` while fix budget remains, `continue` plans the next fix pass, final review, readiness, and publish gate instead of just rerunning the failed command.
+
 ## Dirty workspaces
 
 A failed attempt may leave uncommitted edits in the managed workspace. `continue` is allowed to recover that selected failed attempt. A fresh `auto` run refuses dirty existing issue workspaces and tells you to use `continue` or clean/remove the workspace.
@@ -34,6 +36,7 @@ Uncommitted failed work is recoverable only while the persistent issue workspace
 - `.roark/runs/issue/<n>/attempts/<k>/attempt.json`
 - `.roark/runs/issue/<n>/attempts/<k>/summary.json`
 - `.roark/runs/issue/<n>/attempts/<k>/verification.md`
+- `.roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>.md`
 - `.roark/runs/issue/<n>/attempts/<k>/readiness.md`
 
 See [Artifacts](artifacts.md) for the full layout.

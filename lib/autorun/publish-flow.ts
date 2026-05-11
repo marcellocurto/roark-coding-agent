@@ -1,12 +1,15 @@
 import path from "node:path";
-import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { artifactRelativePath, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishAutorunResult, type AutorunPublishOptions } from "./publish.ts";
 import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
 import {
+  classifyVerificationFailure,
   runVerification,
+  verificationFailureReason,
   writeVerificationArtifact,
+  writeVerificationBeforeFixArtifact,
   type VerificationResult,
 } from "./verification.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
@@ -21,7 +24,18 @@ export type AutorunGateOptions = AutorunPublishOptions & {
   workspace?: WorkspaceConfig;
 };
 
-export type PublishGateOutcome = { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null };
+export type PublishGateOutcome =
+  | { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null }
+  | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
+
+export type RunPublishGateInjected = {
+  updateIssueBranchFromBase?: typeof updateIssueBranchFromBase;
+  refreshCopyToWorktree?: typeof refreshCopyToWorktree;
+  runLifecycleHook?: typeof runLifecycleHook;
+  runVerification?: typeof runVerification;
+  writeVerificationArtifact?: typeof writeVerificationArtifact;
+  handleNonPublish?: typeof handleNonPublish;
+};
 
 export async function runPublishGate(input: {
   options: AutorunGateOptions;
@@ -31,26 +45,32 @@ export async function runPublishGate(input: {
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
   recoveryCommand?: string;
-}): Promise<PublishGateOutcome> {
+}, injected: RunPublishGateInjected = {}): Promise<PublishGateOutcome> {
   const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
+  const updateBranch = injected.updateIssueBranchFromBase ?? updateIssueBranchFromBase;
+  const refreshWorkspace = injected.refreshCopyToWorktree ?? refreshCopyToWorktree;
+  const runHook = injected.runLifecycleHook ?? runLifecycleHook;
+  const verify = injected.runVerification ?? runVerification;
+  const writeVerification = injected.writeVerificationArtifact ?? writeVerificationArtifact;
+  const nonPublish = injected.handleNonPublish ?? handleNonPublish;
 
   const readinessMarkdown = await readReadinessArtifact(workflowContext);
   const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
 
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
-    await updateIssueBranchFromBase({
+    await updateBranch({
       agentCwd: workflowContext.agentCwd,
       baseBranch: branchPlan.baseBranch,
       preserveUncommitted: true,
     });
-    await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
-    await runLifecycleHook("beforeVerify", options.hooks, workflowContext.agentCwd);
-    verification = await runVerification({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
-    await writeVerificationArtifact(workflowContext, verification);
+    await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
+    await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
+    verification = await verify({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
+    await writeVerification(workflowContext, verification);
   }
 
-  const decision = decidePublish({ readinessStatus, verification });
+  let decision = decidePublish({ readinessStatus, verification });
 
   if (decision.publish) {
     const prUrl = await publishAutorunResult({
@@ -80,11 +100,42 @@ export async function runPublishGate(input: {
     return { outcome: "published", outcomeDetail: null };
   }
 
-  await handleNonPublish({ options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand });
+  if (decision.phase === "verification" && verification) {
+    const classification = classifyVerificationFailure(verification);
+    const repair = await planVerificationRepair(workflowContext, verification);
+    if (repair) {
+      console.log(`\nVerification failed; scheduling fix pass ${repair.pass} before terminal failure.`);
+      console.log(`Archived failure: ${artifactRelativePath(workflowContext, verificationBeforeFixRef(repair.pass))}`);
+      return {
+        outcome: "verification-needs-fix",
+        outcomeDetail: decision.reason,
+        pass: repair.pass,
+      };
+    }
+    decision = {
+      ...decision,
+      reason: classification.repairable
+        ? `Verification failed after ${workflowContext.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
+        : verificationFailureReason(verification),
+    };
+  }
+
+  await nonPublish({ options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand });
   return {
     outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
     outcomeDetail: decision.reason,
   };
+}
+
+export async function planVerificationRepair(
+  context: WorkflowContext,
+  verification: VerificationResult,
+): Promise<{ pass: number } | undefined> {
+  if (!classifyVerificationFailure(verification).repairable) return undefined;
+  const pass = inferNextFixPass(context);
+  if (pass > context.maxFixPasses) return undefined;
+  await writeVerificationBeforeFixArtifact(context, pass, verification);
+  return { pass };
 }
 
 export async function handleNonPublish(input: {

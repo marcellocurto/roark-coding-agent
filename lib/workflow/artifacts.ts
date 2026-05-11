@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
-import { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef } from "./artifact-catalog.ts";
+import { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef, verificationBeforeFixRef } from "./artifact-catalog.ts";
 import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
 export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./artifact-catalog.ts";
-export { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef } from "./artifact-catalog.ts";
+export { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef, verificationBeforeFixRef } from "./artifact-catalog.ts";
 
 export type WorkflowContext = {
   controlCwd: string;

@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   finalReviewPrompt,
   fixPrompt,
@@ -10,7 +13,7 @@ import {
   triagePrompt,
   untrustedIssueContentPolicy,
 } from "./workflow-prompts.ts";
-import type { WorkflowContext } from "../workflow/artifacts.ts";
+import { verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 
 const context = {
   controlCwd: "/repo",
@@ -29,6 +32,12 @@ const splitContext = {
   ...context,
   agentCwd: "/repo/.roark/worktrees/issue-123",
 } satisfies WorkflowContext;
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+});
 
 describe("workflow prompt safety policy", () => {
   test("shared system prompt wraps instructions in XML tags", () => {
@@ -147,5 +156,24 @@ describe("fix-oriented prompt finding handling", () => {
     const prompt = finalReviewPrompt(context, 1);
     expect(prompt).toContain("Do not require fixes for non-blocking <value>follow-up</value> or <value>suggestion</value> findings");
     expect(prompt).toContain("Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings");
+  });
+
+  test("fix and final review prompts include failed verification when present", async () => {
+    const runDir = await mkdtemp(path.join(tmpdir(), "roark-prompt-verification-"));
+    tempDirs.push(runDir);
+    const verificationContext = {
+      ...context,
+      controlCwd: runDir,
+      agentCwd: runDir,
+      outDir: path.join(runDir, ".roark/runs"),
+      runDir,
+      runDirRelative: ".",
+    } satisfies WorkflowContext;
+    await writeArtifact(verificationContext, verificationBeforeFixRef(1), "# Verification\n\n## Exit Code\n1\n");
+
+    expect(fixPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
+    expect(fixPrompt(verificationContext, 1)).toContain("fix only the local deterministic verification failure");
+    expect(finalReviewPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
+    expect(finalReviewPrompt(verificationContext, 1)).toContain("verify that the fix addressed that failure");
   });
 });

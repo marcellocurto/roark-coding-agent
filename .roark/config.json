@@ -1,0 +1,37 @@
+{
+  "repo": "marcellocurto/roark-coding-agent",
+  "baseBranch": "main",
+  "verify": "bun run typecheck",
+  "readyLabel": "afk",
+  "inProgressLabel": "roark-in-progress",
+  "successLabel": "roark-pr-opened",
+  "failureLabel": "roark-failed",
+  "skipLabels": [
+    "blocked",
+    "needs-human",
+    "wontfix",
+    "roark-in-progress",
+    "roark-failed",
+    "roark-ready-for-review",
+    "roark-pr-opened"
+  ],
+  "maxFixPasses": 3,
+  "workspace": {
+    "root": "~/.roark/workspaces",
+    "strategy": "clone",
+    "cloneRemote": "origin",
+    "clone": {
+      "filter": "blob:none",
+      "depth": null
+    }
+  },
+  "hooks": {
+    "afterCreate": "bun install --frozen-lockfile",
+    "beforeRun": "bun install --frozen-lockfile",
+    "beforeVerify": "bun install --frozen-lockfile",
+    "timeoutMs": 600000
+  },
+  "sandbox": {
+    "provider": "host"
+  }
+}

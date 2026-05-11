@@ -19,8 +19,9 @@ roark auto --repo owner/repo --limit 1
 6. Run triage, planning, implementation, review, fix passes, and readiness.
 7. Apply the readiness gate.
 8. Run the verification gate.
-9. On success, commit code changes, push the branch, and open a draft PR.
-10. On failure, leave work uncommitted and post recovery information.
+9. If verification fails and `maxFixPasses` has budget, repair through fix pass + final review + readiness, then rerun verification.
+10. On success, commit code changes, push the branch, and open a draft PR.
+11. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
 
 ## Recommended posture
 

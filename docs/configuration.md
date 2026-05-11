@@ -94,7 +94,7 @@ It infers:
 | `successLabel` | string | `roark-pr-opened` | `--success-label` | Label applied after draft PR creation. |
 | `failureLabel` | string | `roark-failed` | `--failure-label` | Label applied when readiness or verification fails. |
 | `skipLabels` | string[] | default skip set | `--skip-label`, `--skip-labels` | Labels that prevent autorun selection. |
-| `maxFixPasses` | number | `3` | `--max-fix-passes` | Maximum issue workflow fix/review cycles. |
+| `maxFixPasses` | number | `3` | `--max-fix-passes` | Maximum shared fix/review cycles, including review-driven fixes and verification repair. |
 | `workspace` | object | clone strategy defaults | none | Managed workspace configuration. |
 | `hooks` | object | no commands, default timeout | none | Lifecycle hook configuration. |
 | `sandbox` | object | `{ "provider": "host" }` | none | Currently host execution only. |
@@ -143,7 +143,7 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 
 ## Verification Configuration
 
-For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference.
+For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference. Failed verification consumes the same `maxFixPasses` budget as reviewer-requested fixes.
 
 Good examples:
 

@@ -6,6 +6,7 @@ import {
   finalReviewRef,
   fixLogRef,
   formatArtifactRef,
+  verificationBeforeFixRef,
   ISSUE_CURATION_STATIC_ARTIFACT_REFS,
   STATIC_ARTIFACTS,
   type StaticArtifactName,
@@ -38,6 +39,8 @@ describe("artifact catalog", () => {
     expect(finalReviewRef(3)).toEqual({ name: "finalReview", pass: 3 });
     expect(artifactFilename(fixLogRef(2))).toBe("fix-log-2.md");
     expect(artifactFilename(finalReviewRef(3))).toBe("final-review-3.md");
+    expect(verificationBeforeFixRef(1)).toEqual({ name: "verificationBeforeFix", pass: 1 });
+    expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
     expect(formatArtifactRef(fixLogRef(2))).toBe("fixLog-2");
   });
 
@@ -74,6 +77,7 @@ describe("artifact catalog", () => {
       "fixes-required",
       "blocked",
     ]);
+    expect(artifactContract(verificationBeforeFixRef(1))).toEqual({});
   });
 
   test("defines static artifacts available to issue curation in stable order", () => {

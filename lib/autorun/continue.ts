@@ -14,7 +14,7 @@ import {
   type Clock,
 } from "./attempts.ts";
 import { autorunWorktreePath, checkoutExistingIssueBranch, type AutorunBranchPlan } from "./branch.ts";
-import { formatContinuationPlan, planContinuation } from "./continue-plan.ts";
+import { formatContinuationPlan, planContinuation, type ContinuePlanStep } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
@@ -117,20 +117,28 @@ export async function runAutoContinue(
   });
 
   try {
+    const continuationPlan = await planContinuation(workflowContext, { attemptOutcome: attemptMetadata.outcome });
+    const initialVerificationRepairPass = verificationRepairPassFromPlan(continuationPlan);
+    if (isTerminalContinuationNoop(continuationPlan) && !options.force) {
+      console.log("\nContinuation plan:");
+      for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
+      return;
+    }
+
     await runAutorunAttemptLifecycle({
-    issueDir,
-    workflowContext,
-    branchPlan,
-    gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
-    attemptMetadata,
-    loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
-    runner,
-    logPrefix: "Continue",
-    inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
+      issueDir,
+      workflowContext,
+      branchPlan,
+      gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
+      attemptMetadata,
+      loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
+      runner,
+      logPrefix: "Continue",
+      inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
+      initialVerificationRepairPass,
       beforeWorkflow: async () => {
-        const plan = await planContinuation(workflowContext);
         console.log("\nContinuation plan:");
-        for (const line of formatContinuationPlan(plan)) console.log(line);
+        for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
       },
       beforeRun: async () => {
         await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
@@ -215,6 +223,17 @@ function toIssueCandidate(issue: GitHubIssue): AutorunIssueCandidate {
     url: issue.url,
     labels: issue.labels,
   };
+}
+
+function verificationRepairPassFromPlan(steps: readonly ContinuePlanStep[]): number | undefined {
+  const first = steps[0];
+  if (first?.type !== "run" || first.phase !== "fix") return undefined;
+  return first.reason.includes("verification failed") ? first.pass : undefined;
+}
+
+function isTerminalContinuationNoop(steps: readonly ContinuePlanStep[]): boolean {
+  const first = steps[0];
+  return steps.length === 1 && first?.type === "noop" && first.reason.includes("maximum fix passes reached");
 }
 
 function assertAttemptMatchesIssue(metadata: AttemptMetadata, issueNumber: string): void {

@@ -11,7 +11,7 @@ export type StaticArtifactName =
   | "issueCurationPlan"
   | "issueCreationResults";
 
-export type NumberedArtifactName = "fixLog" | "finalReview";
+export type NumberedArtifactName = "fixLog" | "finalReview" | "verificationBeforeFix";
 
 export type ArtifactRef = StaticArtifactName | { name: NumberedArtifactName; pass: number };
 
@@ -58,6 +58,7 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
 export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   { name: "fixLog", filenamePrefix: "fix-log", displayName: "Fix Log" },
   { name: "finalReview", filenamePrefix: "final-review", displayName: "Final Review" },
+  { name: "verificationBeforeFix", filenamePrefix: "verification-before-fix", displayName: "Verification Before Fix" },
 ] as const;
 
 export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] = [
@@ -94,6 +95,7 @@ const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> = {
 const numberedContracts: Record<NumberedArtifactName, (pass: number) => ArtifactContract> = {
   fixLog: (pass) => ({ requiredHeading: `Fix Log Pass ${pass}` }),
   finalReview: () => ({ allowedVerdicts: ["ready-for-pr", "fixes-required", "blocked"] }),
+  verificationBeforeFix: () => ({}),
 };
 
 export function fixLogRef(pass: number): ArtifactRef {
@@ -102,6 +104,10 @@ export function fixLogRef(pass: number): ArtifactRef {
 
 export function finalReviewRef(pass: number): ArtifactRef {
   return { name: "finalReview", pass };
+}
+
+export function verificationBeforeFixRef(pass: number): ArtifactRef {
+  return { name: "verificationBeforeFix", pass };
 }
 
 export function artifactFilename(artifact: ArtifactRef): string {
