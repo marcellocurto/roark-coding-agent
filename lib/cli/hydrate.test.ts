@@ -5,7 +5,7 @@ import path from "node:path";
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel } from "../autorun/selection.ts";
-import { parseArgs } from "./args.ts";
+import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 import { hydrateCliOptions, inferVerifyCommand, parseGithubRepoFromOrigin } from "./hydrate.ts";
 import { runProcessOrThrow } from "./process.ts";
 
@@ -204,6 +204,17 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.failureLabel).toBe("failed");
     expect(hydrated.successLabel).toBe("opened");
     expect(hydrated.maxFixPasses).toBe(4);
+  });
+
+  test("revise-pr defaults to the shared max fix pass budget", async () => {
+    const repo = await tempGitRepo();
+    const raw = parseArgs(["revise-pr", "12", "--cwd", repo, "--repo", "owner/repo"]);
+    if ("help" in raw) throw new Error("expected options");
+
+    const hydrated = await hydrateCliOptions(raw);
+    expect(hydrated.command).toBe("revise-pr");
+    if (hydrated.command !== "revise-pr") throw new Error("expected revise-pr options");
+    expect(hydrated.maxFixPasses).toBe(defaultMaxFixPasses);
   });
 
   test("preserves fully-qualified issue refs over config repo unless --repo is explicit", async () => {
