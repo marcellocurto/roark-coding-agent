@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
 
@@ -118,6 +119,7 @@ async function tempContext(maxFixPasses: number): Promise<WorkflowContext> {
     force: false,
     yes: false,
     maxFixPasses,
+    thinkingConfig: getWorkflowThinkingConfig(),
   };
 }
 

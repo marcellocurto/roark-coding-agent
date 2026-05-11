@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { readArtifact, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { formatAttemptMetadata, readAttemptIndex, readAttemptMetadata } from "./attempts.ts";
@@ -304,6 +305,7 @@ async function createFixture(): Promise<{
     force: false,
     yes: false,
     maxFixPasses: 3,
+    thinkingConfig: getWorkflowThinkingConfig(),
   };
   const branchPlan: AutorunBranchPlan = {
     issueNumber: 44,

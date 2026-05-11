@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RevisePrCliOptions } from "../cli/args.ts";
+import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "../workflow/thinking.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 
 export type PrRevisionArtifactName =
@@ -24,6 +25,8 @@ export type PrRevisionContext = {
   revisionDirRelative: string;
   model?: string;
   thinkingLevel?: RevisePrCliOptions["thinkingLevel"];
+  thinkingProfile?: ThinkingProfileName;
+  thinkingConfig: WorkflowThinkingConfig;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -59,6 +62,8 @@ export async function createPrRevisionContext(options: RevisePrCliOptions): Prom
     revisionDirRelative: path.relative(cwd, revisionDir) || ".",
     model: options.model,
     thinkingLevel: options.thinkingLevel,
+    thinkingProfile: options.thinkingProfile,
+    thinkingConfig: getWorkflowThinkingConfig({ profile: options.thinkingProfile, explicitThinkingLevel: options.thinkingLevel }),
     force: options.force,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,

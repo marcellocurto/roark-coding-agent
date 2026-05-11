@@ -292,4 +292,31 @@ describe("parseArgs", () => {
     expect(parsed.attempt).toBe(2);
     expect(parsed.yes).toBe(true);
   });
+
+  test("parses workflow thinking profile flags", () => {
+    const doFast = parseArgs(["do", "123", "--fast"]);
+    const doDeep = parseArgs(["do", "123", "--deep"]);
+    const autoFast = parseArgs(["auto", "--fast"]);
+    const continueDeep = parseArgs(["continue", "123", "--deep"]);
+
+    if ("help" in doFast || "help" in doDeep || "help" in autoFast || "help" in continueDeep) throw new Error("expected options");
+    expect(doFast.command).toBe("do");
+    if (doFast.command !== "do") throw new Error("expected issue options");
+    expect(doFast.thinkingProfile).toBe("fast");
+    expect(doDeep.command).toBe("do");
+    if (doDeep.command !== "do") throw new Error("expected issue options");
+    expect(doDeep.thinkingProfile).toBe("deep");
+    expect(autoFast.command).toBe("auto");
+    if (autoFast.command !== "auto") throw new Error("expected auto options");
+    expect(autoFast.thinkingProfile).toBe("fast");
+    expect(continueDeep.command).toBe("continue");
+    if (continueDeep.command !== "continue") throw new Error("expected continue options");
+    expect(continueDeep.thinkingProfile).toBe("deep");
+  });
+
+  test("rejects ambiguous thinking profile combinations", () => {
+    expect(() => parseArgs(["do", "123", "--fast", "--deep"])).toThrow("--fast cannot be combined with --deep");
+    expect(() => parseArgs(["do", "123", "--fast", "--thinking", "high"])).toThrow("--thinking cannot be combined");
+    expect(() => parseArgs(["do", "123", "--deep", "--thinking", "high"])).toThrow("--thinking cannot be combined");
+  });
 });

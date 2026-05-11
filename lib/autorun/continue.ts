@@ -162,6 +162,7 @@ export function createContinueWorkflowOptions(options: ContinueCliOptions, attem
     repo: options.repo,
     model: options.model,
     thinkingLevel: options.thinkingLevel,
+    thinkingProfile: options.thinkingProfile,
     force: options.force,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,

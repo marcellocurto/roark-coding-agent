@@ -1,7 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { runProcessOrThrow } from "../cli/process.ts";
-import type { RevisePrCliOptions, ThinkingLevel } from "../cli/args.ts";
+import type { RevisePrCliOptions } from "../cli/args.ts";
+import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { buildCommitArgv, buildPushArgv, buildStageAllArgv } from "../autorun/publish.ts";
 import {
   formatVerificationArtifact,
@@ -81,6 +82,7 @@ export async function runPrRevision(
     label: "Revision plan",
     artifact: "revision-plan.md",
     writable: false,
+    thinkingStage: "revisionPlan",
     prompt: revisionPlanPrompt(context),
   });
   const planStatus = parsePlanStatus(plan);
@@ -108,6 +110,7 @@ export async function runPrRevision(
     label: "Revision implementation",
     artifact: "revision-log.md",
     writable: true,
+    thinkingStage: "revisionImplementation",
     prompt: revisionImplementationPrompt(context, 0),
   });
 
@@ -115,6 +118,7 @@ export async function runPrRevision(
     label: "Revision review",
     artifact: "revision-review.md",
     writable: false,
+    thinkingStage: "revisionReview",
     prompt: revisionReviewPrompt(context, 0),
   });
   let reviewVerdict = parseReviewVerdict(review);
@@ -124,12 +128,14 @@ export async function runPrRevision(
       label: `Revision fix pass ${pass}`,
       artifact: `revision-log-fix-pass-${pass}.md`,
       writable: true,
+      thinkingStage: "revisionFix",
       prompt: revisionImplementationPrompt(context, pass),
     });
     review = await runRevisionAgent(context, runner, {
       label: `Revision review pass ${pass}`,
       artifact: `revision-review-pass-${pass}.md`,
       writable: false,
+      thinkingStage: "revisionReview",
       prompt: revisionReviewPrompt(context, pass),
     });
     reviewVerdict = parseReviewVerdict(review);
@@ -199,13 +205,13 @@ export async function runPrRevision(
 async function runRevisionAgent(
   context: PrRevisionContext,
   runner: AgentRunner,
-  input: { label: string; artifact: string; writable: boolean; prompt: string },
+  input: { label: string; artifact: string; writable: boolean; thinkingStage: WorkflowThinkingStage; prompt: string },
 ): Promise<string> {
   console.log(`\n=== ${input.label} ===`);
   const content = await runner({
     cwd: context.cwd,
     model: context.model,
-    thinkingLevel: context.thinkingLevel ?? defaultThinkingLevel(input.writable),
+    thinkingLevel: context.thinkingConfig[input.thinkingStage],
     systemPrompt: sharedSystemPrompt,
     prompt: input.prompt,
     writable: input.writable,
@@ -344,10 +350,6 @@ async function commitAndPushRevision(context: PrRevisionContext, branchName: str
 
 function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): string[] {
   return filenames.map((filename) => prRevisionArtifactRelativePath(context, filename));
-}
-
-function defaultThinkingLevel(writable: boolean): ThinkingLevel {
-  return writable ? "high" : "medium";
 }
 
 function escapeRegExp(value: string): string {

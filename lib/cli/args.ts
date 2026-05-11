@@ -7,6 +7,7 @@ import {
 } from "../autorun/selection.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig } from "../autorun/workspace.ts";
+import type { ThinkingProfileName } from "../workflow/thinking.ts";
 
 export type IssueWorkflowCommand =
   | "do"
@@ -39,6 +40,7 @@ export type IssueCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -65,6 +67,7 @@ export type AutoCliOptions = {
   remote: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   maxFixPasses: number;
   force: boolean;
   yes: boolean;
@@ -80,6 +83,7 @@ export type ContinueCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -101,6 +105,7 @@ export type RevisePrCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   verifyCommand: string;
   remote: string;
   maxFixPasses: number;
@@ -140,6 +145,7 @@ export type RawIssueCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   force?: true;
   yes?: true;
   maxFixPasses?: number;
@@ -166,6 +172,7 @@ export type RawAutoCliOptions = {
   remote?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   maxFixPasses?: number;
   force?: true;
   yes?: true;
@@ -179,6 +186,7 @@ export type RawContinueCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   force?: true;
   yes?: true;
   maxFixPasses?: number;
@@ -198,6 +206,7 @@ export type RawRevisePrCliOptions = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
   verifyCommand?: string;
   remote?: string;
   maxFixPasses?: number;
@@ -255,6 +264,11 @@ const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr"
 
 export const defaultMaxFixPasses = 3;
 
+const thinkingProfileFlags = {
+  "--fast": "fast",
+  "--deep": "deep",
+} as const satisfies Record<string, ThinkingProfileName>;
+
 export const usage = `roark <command> [issue] [options]
 
 Commands:
@@ -289,6 +303,8 @@ Options:
   --out <path>           Runs directory. Defaults to .roark/runs.
   --model <provider/id>  Optional Pi model override, e.g. anthropic/claude-sonnet-4-5.
   --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
+  --fast                 Use the fast workflow thinking profile (cannot combine with --thinking or --deep).
+  --deep                 Use the deep workflow thinking profile (cannot combine with --thinking or --fast).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
   --fix-pass <n>         Pass number for standalone fix/final-review.
   --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
@@ -420,6 +436,7 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
     else if (arg === "--remote") options.remote = requiredValue(args, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(args, ++index, arg), arg);
+    else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
@@ -433,6 +450,7 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
   if (options.noAssign && options.assignee) {
     throw new Error("--assignee cannot be combined with --no-assign.");
   }
+  validateThinkingSelection(options);
 
   return options;
 }
@@ -452,6 +470,7 @@ function parseRevisePrArgs(args: string[]): RawRevisePrCliOptions {
     else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
     else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
@@ -462,6 +481,7 @@ function parseRevisePrArgs(args: string[]): RawRevisePrCliOptions {
     else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
   }
 
+  validateThinkingSelection(options);
   return options;
 }
 
@@ -502,6 +522,7 @@ function parseContinueArgs(args: string[]): RawContinueCliOptions {
     else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
@@ -515,6 +536,7 @@ function parseContinueArgs(args: string[]): RawContinueCliOptions {
     else throw new Error(`Unexpected argument '${arg}'.\n\n${usage}`);
   }
 
+  validateThinkingSelection(options);
   return options;
 }
 
@@ -535,6 +557,7 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
     else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
     else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
     else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--max-fix-passes") {
       options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
       maxFixPassesProvided = true;
@@ -553,8 +576,27 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
   if (fixPassProvided && command !== "fix" && command !== "final-review") {
     throw new Error("--fix-pass is only valid with fix or final-review.");
   }
+  validateThinkingSelection(options);
 
   return options;
+}
+
+function isThinkingProfileFlag(arg: string | undefined): arg is keyof typeof thinkingProfileFlags {
+  return arg !== undefined && Object.hasOwn(thinkingProfileFlags, arg);
+}
+
+function applyThinkingProfileFlag(options: { thinkingProfile?: ThinkingProfileName }, flag: keyof typeof thinkingProfileFlags): void {
+  const profile = thinkingProfileFlags[flag];
+  if (options.thinkingProfile && options.thinkingProfile !== profile) {
+    throw new Error("--fast cannot be combined with --deep.");
+  }
+  options.thinkingProfile = profile;
+}
+
+function validateThinkingSelection(options: { thinkingLevel?: ThinkingLevel; thinkingProfile?: ThinkingProfileName }): void {
+  if (options.thinkingLevel && options.thinkingProfile) {
+    throw new Error("--thinking cannot be combined with --fast or --deep.");
+  }
 }
 
 function requiredValue(args: string[], index: number, flag: string): string {

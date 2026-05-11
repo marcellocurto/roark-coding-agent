@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, implementationTask, runAgentTask, triageTask } from "./tasks.ts";
+import { AgentTaskRunError, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 
 const tempDirs: string[] = [];
@@ -13,7 +13,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function createContext(options: { agentCwd?: string } = {}) {
+async function createContext(options: { agentCwd?: string; thinkingProfile?: "fast" | "deep"; thinkingLevel?: "medium" } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-tasks-"));
   tempDirs.push(dir);
   const context = createWorkflowContext({
@@ -21,6 +21,8 @@ async function createContext(options: { agentCwd?: string } = {}) {
     issue: "12",
     cwd: dir,
     outDir: ".roark/runs",
+    thinkingLevel: options.thinkingLevel,
+    thinkingProfile: options.thinkingProfile,
     force: false,
     yes: false,
     maxFixPasses: 1,
@@ -54,6 +56,49 @@ describe("runAgentTask skill loading", () => {
 
     await expect(runAgentTask(context, runner, triageTask)).resolves.toContain("## Verdict\nproceed");
     expect(requests).toEqual([undefined]);
+  });
+});
+
+describe("runAgentTask thinking profiles", () => {
+  test("uses fast profile levels by explicit task stage", async () => {
+    const context = await createContext({ thinkingProfile: "fast" });
+    await writeReadyThroughPlan(context);
+    const requests: string[] = [];
+    const runner: AgentRunner = async (request) => {
+      requests.push(`${request.writable ? "write" : "read"}:${request.thinkingLevel}`);
+      if (request.prompt.includes("Review A")) return "# Review A\n\n## Verdict\napprove\n";
+      if (request.prompt.includes("Review B")) return "# Review B\n\n## Verdict\napprove\n";
+      if (request.prompt.includes("Final Review")) return "# Final Review\n\n## Verdict\nready-for-pr\n";
+      if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
+      return "# Implementation Log\n";
+    };
+
+    await runAgentTask(context, runner, implementationTask);
+    await runAgentTask(context, runner, reviewATask);
+    await runAgentTask(context, runner, reviewBTask);
+    await runAgentTask(context, runner, fixTask(1));
+    await runAgentTask(context, runner, finalReviewTask(1));
+
+    expect(requests).toEqual(["write:low", "read:medium", "read:medium", "write:low", "read:low"]);
+  });
+
+  test("deep profile and explicit thinking override use the resolved context config", async () => {
+    const deep = await createContext({ thinkingProfile: "deep" });
+    await writeReadyThroughPlan(deep);
+    const deepRequests: string[] = [];
+    await runAgentTask(deep, async (request) => {
+      deepRequests.push(request.thinkingLevel);
+      return "# Implementation Log\n";
+    }, implementationTask);
+    expect(deepRequests).toEqual(["high"]);
+
+    const explicit = await createContext({ thinkingLevel: "medium" });
+    const explicitRequests: string[] = [];
+    await runAgentTask(explicit, async (request) => {
+      explicitRequests.push(request.thinkingLevel);
+      return "# Triage\n\n## Verdict\nproceed\n";
+    }, triageTask);
+    expect(explicitRequests).toEqual(["medium"]);
   });
 });
 
@@ -96,6 +141,18 @@ describe("runAgentTask error diagnostics", () => {
     expect(artifact).toContain("triage failed output contract: artifact is empty");
   });
 });
+
+async function writeReadyThroughPlan(context: Awaited<ReturnType<typeof createContext>>) {
+  await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+  await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+}
+
+async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof createContext>>) {
+  await writeReadyThroughPlan(context);
+  await writeArtifact(context, "implementationLog", "# Implementation Log\n");
+  await writeArtifact(context, "reviewA", "# Review A\n\n## Verdict\napprove\n");
+  await writeArtifact(context, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+}
 
 describe("runAgentTask transient agent retry", () => {
   test("retries transient connection errors before writing the phase artifact", async () => {

@@ -122,6 +122,27 @@ describe("runPrRevision", () => {
     expect(commentCalled).toBe(true);
   });
 
+  test("uses centralized thinking profiles for revision agents", async () => {
+    const cwd = await tempGitRepo();
+    const thinkingLevels: string[] = [];
+
+    const result = await runPrRevision(options(cwd, { thinkingProfile: "fast" }), {
+      fetchFeedback: async () => feedback(),
+      checkout: async () => {},
+      agentRunner: async (request) => {
+        thinkingLevels.push(request.thinkingLevel);
+        if (request.writable) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
+        if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        return "# Revision Review\n\n## Verdict\napprove\n";
+      },
+      verificationRunner: async ({ command }) => ({ ok: false, command, exitCode: 1, stdout: "", stderr: "failed" }),
+      postSummaryComment: async () => {},
+    });
+
+    expect(result.outcome).toBe("verification-failed");
+    expect(thinkingLevels).toEqual(["low", "low", "low"]);
+  });
+
   test("failed verification leaves revision unpublished and posts summary", async () => {
     const cwd = await tempGitRepo();
     let commentCalled = false;

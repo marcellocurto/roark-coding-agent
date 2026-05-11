@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
+import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "./thinking.ts";
 import { parseIssueRef } from "../github/issue.ts";
 import { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef, verificationBeforeFixRef } from "./artifact-catalog.ts";
 import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
@@ -20,6 +21,8 @@ export type WorkflowContext = {
   repo?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  thinkingProfile?: ThinkingProfileName;
+  thinkingConfig: WorkflowThinkingConfig;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -53,6 +56,8 @@ export function createWorkflowContext(
     repo: parsed.repo,
     model: options.model,
     thinkingLevel: options.thinkingLevel,
+    thinkingProfile: options.thinkingProfile,
+    thinkingConfig: getWorkflowThinkingConfig({ profile: options.thinkingProfile, explicitThinkingLevel: options.thinkingLevel }),
     force: options.force,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,

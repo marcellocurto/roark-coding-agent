@@ -14,6 +14,7 @@ import {
   untrustedIssueContentPolicy,
 } from "./workflow-prompts.ts";
 import { verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 
 const context = {
   controlCwd: "/repo",
@@ -26,6 +27,7 @@ const context = {
   force: false,
   yes: false,
   maxFixPasses: 1,
+  thinkingConfig: getWorkflowThinkingConfig(),
 } satisfies WorkflowContext;
 
 const splitContext = {
