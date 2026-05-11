@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "../cli/args.ts";
+import type { WorkflowThinkingStage } from "./thinking.ts";
 import { phaseNameForArtifact } from "../observability/observer.ts";
 import type { AgentRunRequest, AgentRunner } from "./agent-runner.ts";
 import {
@@ -29,7 +29,7 @@ export type AgentTask = {
   artifact: ArtifactRef;
   label: string;
   writable: boolean;
-  thinkingLevel: ThinkingLevel;
+  thinkingStage: WorkflowThinkingStage;
   prerequisites: ArtifactRef[];
   prompt: (context: WorkflowContext) => string;
 };
@@ -69,7 +69,7 @@ export const triageTask: AgentTask = {
   artifact: "triage",
   label: "Triage",
   writable: false,
-  thinkingLevel: "medium",
+  thinkingStage: "triage",
   prerequisites: ["issue"],
   prompt: triagePrompt,
 };
@@ -78,7 +78,7 @@ export const planTask: AgentTask = {
   artifact: "implementationPlan",
   label: "Implementation plan",
   writable: false,
-  thinkingLevel: "high",
+  thinkingStage: "plan",
   prerequisites: ["issue", "triage"],
   prompt: planPrompt,
 };
@@ -87,7 +87,7 @@ export const implementationTask: AgentTask = {
   artifact: "implementationLog",
   label: "Implementation",
   writable: true,
-  thinkingLevel: "high",
+  thinkingStage: "implement",
   prerequisites: ["issue", "triage", "implementationPlan"],
   prompt: implementationPrompt,
 };
@@ -96,7 +96,7 @@ export const reviewATask: AgentTask = {
   artifact: "reviewA",
   label: "Review A",
   writable: false,
-  thinkingLevel: "high",
+  thinkingStage: "reviewA",
   prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
   prompt: reviewAPrompt,
 };
@@ -105,7 +105,7 @@ export const reviewBTask: AgentTask = {
   artifact: "reviewB",
   label: "Review B",
   writable: false,
-  thinkingLevel: "high",
+  thinkingStage: "reviewB",
   prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
   prompt: reviewBPrompt,
 };
@@ -115,7 +115,7 @@ export function fixTask(pass: number): AgentTask {
     artifact: fixLogRef(pass),
     label: `Fix pass ${pass}`,
     writable: true,
-    thinkingLevel: "high",
+    thinkingStage: "fix",
     prerequisites: pass > 1
       ? ["issue", "implementationPlan", "implementationLog", "reviewA", "reviewB", finalReviewRef(pass - 1)]
       : ["issue", "implementationPlan", "implementationLog", "reviewA", "reviewB"],
@@ -128,7 +128,7 @@ export function finalReviewTask(pass: number): AgentTask {
     artifact: finalReviewRef(pass),
     label: `Final review pass ${pass}`,
     writable: false,
-    thinkingLevel: "high",
+    thinkingStage: "finalReview",
     prerequisites: ["issue", "implementationPlan", "reviewA", "reviewB", fixLogRef(pass)],
     prompt: (context) => finalReviewPrompt(context, pass),
   };
@@ -143,7 +143,7 @@ export async function runAgentTask(
   requireArtifacts(context, ...task.prerequisites);
 
   const phase = phaseNameForArtifact(task.artifact);
-  const thinkingLevel = context.thinkingLevel ?? task.thinkingLevel;
+  const thinkingLevel = thinkingLevelForTask(context, task);
 
   if (!context.force && artifactExists(context, task.artifact)) {
     const existing = await readArtifact(context, task.artifact);
@@ -185,7 +185,7 @@ async function runTaskWithOutputContract(
   const request = {
     cwd: context.agentCwd,
     model: context.model,
-    thinkingLevel: context.thinkingLevel ?? task.thinkingLevel,
+    thinkingLevel: thinkingLevelForTask(context, task),
     systemPrompt: sharedSystemPrompt,
     writable: task.writable,
     observer: context.observer,
@@ -243,6 +243,10 @@ function withTransientConnectionRetryPrompt(request: AgentRunRequest, task: Agen
   };
 }
 
+function thinkingLevelForTask(context: WorkflowContext, task: AgentTask) {
+  return context.thinkingConfig[task.thinkingStage];
+}
+
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -287,7 +291,7 @@ function formatAgentTaskErrorArtifact(input: {
     `\`${context.model ?? "roark default"}\``,
     "",
     "## Thinking Level",
-    `\`${context.thinkingLevel ?? task.thinkingLevel}\``,
+    `\`${thinkingLevelForTask(context, task)}\``,
     "",
     "## Error",
     formatFencedBlock(formatError(error), "text"),

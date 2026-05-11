@@ -170,6 +170,17 @@ describe("hydrateCliOptions", () => {
     await expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
   });
 
+  test("preserves CLI thinking profile selection", async () => {
+    const repo = await tempGitRepo();
+    const raw = parseArgs(["do", "12", "--cwd", repo, "--repo", "owner/repo", "--fast"]);
+    if ("help" in raw) throw new Error("expected options");
+
+    const hydrated = await hydrateCliOptions(raw);
+    expect(hydrated.command).toBe("do");
+    if (hydrated.command !== "do") throw new Error("expected issue options");
+    expect(hydrated.thinkingProfile).toBe("fast");
+  });
+
   test("applies config values before built-in defaults", async () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, {

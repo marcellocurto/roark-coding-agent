@@ -297,7 +297,7 @@ async function publishIssuesWithResolvedSkill(input: {
     const output = await agentRunner({
       cwd: context.agentCwd,
       model: context.model,
-      thinkingLevel: context.thinkingLevel ?? "high",
+      thinkingLevel: context.thinkingConfig.issuePublishing,
       systemPrompt: issuePublishingSystemPrompt(),
       prompt: issuePublishingPrompt({
         context,
@@ -311,6 +311,8 @@ async function publishIssuesWithResolvedSkill(input: {
         })),
       }),
       writable: false,
+      observer: context.observer,
+      phase: "issue-publishing",
       skillPaths: [skillPath],
     });
     return toPublishResult(parseIssuePublishingAgentResponse(output), creatable);

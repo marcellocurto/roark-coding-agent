@@ -136,6 +136,33 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.relationshipOutcomes).toEqual([{ planItemId: "blocking-1", status: "not-requested", message: "No native relationship was requested for this plan item." }]);
   });
 
+  test("approved publishing agent uses centralized thinking profiles", async () => {
+    for (const [profile, expected] of [["fast", "low"], ["deep", "high"]] as const) {
+      const context = await tempContext({ yes: true, thinkingProfile: profile });
+      await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+      const thinkingLevels: string[] = [];
+
+      await createIssuesFromCurationPlan({
+        context,
+        clock,
+        skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
+        agentRunner: async (request) => {
+          thinkingLevels.push(request.thinkingLevel);
+          return JSON.stringify({
+            created: [
+              { planItemId: "blocking-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+              { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
+            ],
+            failed: [],
+            relationshipOutcomes: [],
+          });
+        },
+      });
+
+      expect(thinkingLevels).toEqual([expected]);
+    }
+  });
+
   test("approved agent response must cover every creatable plan item exactly once", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
@@ -295,7 +322,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 });
 
-async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string }) {
+async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; thinkingProfile?: "fast" | "deep" }) {
   const dir = options.reuseDir ?? await mkdtemp(path.join(tmpdir(), "roark-create-issues-"));
   if (!options.reuseDir) tempDirs.push(dir);
   return createWorkflowContext({
@@ -304,6 +331,7 @@ async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: 
     cwd: dir,
     outDir: ".roark/runs",
     repo: "owner/repo",
+    thinkingProfile: options.thinkingProfile,
     force: options.force ?? false,
     yes: options.yes,
     maxFixPasses: 1,

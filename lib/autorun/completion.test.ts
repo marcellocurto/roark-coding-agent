@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
@@ -27,6 +28,7 @@ const workflowContext: WorkflowContext = {
   force: false,
   yes: false,
   maxFixPasses: 1,
+  thinkingConfig: getWorkflowThinkingConfig(),
 };
 
 const branchPlan = { issueNumber: 12, branchName: "roark/issue-12", baseBranch: "main" };

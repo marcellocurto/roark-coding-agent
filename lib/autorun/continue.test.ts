@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ContinueCliOptions } from "../cli/args.ts";
 import { writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
 import { autorunWorktreePath } from "./branch.ts";
@@ -75,6 +76,7 @@ describe("runAutoContinue", () => {
       force: false,
       yes: true,
       maxFixPasses: 1,
+      thinkingConfig: getWorkflowThinkingConfig(),
     };
     await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
     await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
@@ -140,6 +142,7 @@ describe("runAutoContinue", () => {
       force: false,
       yes: true,
       maxFixPasses: 1,
+      thinkingConfig: getWorkflowThinkingConfig(),
     };
     await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
     await writeJsonArtifact(workflowContext, "metadata", {

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
 import {
   formatAttemptStartComment,
@@ -33,6 +34,7 @@ describe("autorun ledger comment publishing", () => {
       force: false,
       yes: false,
       maxFixPasses: 1,
+      thinkingConfig: getWorkflowThinkingConfig(),
     };
     await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n");
     await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n");

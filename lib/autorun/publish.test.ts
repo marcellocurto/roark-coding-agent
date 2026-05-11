@@ -18,6 +18,7 @@ import {
 } from "./publish.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { VerificationResult } from "./verification.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 
 const okVerification: VerificationResult = {
   ok: true,
@@ -240,6 +241,7 @@ describe("publishAutorunResult", () => {
           force: false,
           yes: false,
           maxFixPasses: 1,
+          thinkingConfig: getWorkflowThinkingConfig(),
         },
       });
 
@@ -319,6 +321,7 @@ describe("publishAutorunResult", () => {
           force: false,
           yes: false,
           maxFixPasses: 1,
+          thinkingConfig: getWorkflowThinkingConfig(),
         },
       });
     } finally {
