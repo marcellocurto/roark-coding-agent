@@ -13,10 +13,14 @@ export type IssueWorkflowCommand =
   | "do"
   | "fetch"
   | "triage"
+  | "plan-draft"
   | "plan"
+  | "capture-baseline"
   | "implement"
+  | "refine-code"
   | "review"
   | "fix"
+  | "reset-baseline"
   | "final-review"
   | "readiness"
   | "curate-issues"
@@ -250,10 +254,14 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
   "fetch",
   "triage",
+  "plan-draft",
   "plan",
+  "capture-baseline",
   "implement",
+  "refine-code",
   "review",
   "fix",
+  "reset-baseline",
   "final-review",
   "readiness",
   "curate-issues",
@@ -285,11 +293,16 @@ Commands:
   do <issue>             Run the full issue workflow.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
-  plan <issue>           Run only the implementation planning agent.
+  plan-draft <issue>     Run only the draft planning agent.
+  plan <issue>           Refine the draft plan into the final implementation plan.
+  capture-baseline <issue>
+                        Capture the pre-implementation baseline.
   implement <issue>      Run only the implementation agent.
-  review <issue>         Run both review agents.
+  refine-code <issue>    Run only the code refinement agent.
+  review <issue>         Run both review agents for the latest refinement cycle.
   fix <issue>            Run only the fix agent.
-  final-review <issue>   Run only the final review agent.
+  reset-baseline <issue> Reset non-.roark worktree state to the captured baseline.
+  final-review <issue>   Run only the legacy final review agent.
   readiness <issue>      Write deterministic PR readiness markdown.
   curate-issues <issue>  Write a deterministic issue creation plan from reviewer findings.
   create-issues <issue>  Create approved GitHub issues from the issue curation plan; dry-run unless --yes.
@@ -306,7 +319,7 @@ Options:
   --fast                 Use the fast workflow thinking profile (cannot combine with --thinking or --deep).
   --deep                 Use the deep workflow thinking profile (cannot combine with --thinking or --fast).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
-  --fix-pass <n>         Pass number for standalone fix/final-review.
+  --fix-pass <n>         Pass number for standalone fix/refine-code/review/reset-baseline/final-review.
   --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
   --all                  Status command only: summarize all known issue runs.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.

@@ -4,10 +4,32 @@ import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "./thinking.ts";
 import { parseIssueRef } from "../github/issue.ts";
-import { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef, verificationBeforeFixRef } from "./artifact-catalog.ts";
+import {
+  artifactFilename,
+  baselineResetLogRef,
+  finalReviewRef,
+  fixLogRef,
+  formatArtifactRef,
+  implementationRestartLogRef,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  verificationBeforeFixRef,
+} from "./artifact-catalog.ts";
 import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
 export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./artifact-catalog.ts";
-export { artifactFilename, finalReviewRef, fixLogRef, formatArtifactRef, verificationBeforeFixRef } from "./artifact-catalog.ts";
+export {
+  artifactFilename,
+  baselineResetLogRef,
+  finalReviewRef,
+  fixLogRef,
+  formatArtifactRef,
+  implementationRestartLogRef,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  verificationBeforeFixRef,
+} from "./artifact-catalog.ts";
 
 export type WorkflowContext = {
   controlCwd: string;
@@ -125,8 +147,11 @@ export function requireArtifacts(context: WorkflowContext, ...artifacts: Artifac
 export function inferNextFixPass(context: WorkflowContext): number {
   for (let pass = 1; ; pass++) {
     if (!artifactExists(context, fixLogRef(pass))) return pass;
-    if (!artifactExists(context, finalReviewRef(pass))) {
-      throw new Error(`Fix pass ${pass} already exists. Run final-review before starting another fix pass.`);
+    if (!artifactExists(context, refinementLogRef(pass))) {
+      throw new Error(`Fix pass ${pass} already exists. Run refine-code before starting another fix pass.`);
+    }
+    if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) {
+      throw new Error(`Fix pass ${pass} already exists. Run review before starting another fix pass.`);
     }
   }
 }
@@ -145,5 +170,20 @@ export function latestFinalReviewPass(context: WorkflowContext): number | undefi
     latest = pass;
   }
   return latest;
+}
+
+export function latestCompleteReviewCycle(context: WorkflowContext): number | undefined {
+  let latest: number | undefined;
+  for (let pass = 0; artifactExists(context, reviewARef(pass)) && artifactExists(context, reviewBRef(pass)); pass++) {
+    latest = pass;
+  }
+  return latest;
+}
+
+export function inferNextRefinementPass(context: WorkflowContext): number {
+  for (let pass = 0; ; pass++) {
+    if (!artifactExists(context, refinementLogRef(pass))) return pass;
+    if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) return pass;
+  }
 }
 

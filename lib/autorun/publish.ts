@@ -7,7 +7,12 @@ import {
   artifactPath,
   artifactRelativePath,
   finalReviewRef,
+  latestCompleteReviewCycle,
   latestFinalReviewPass,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  type ArtifactRef,
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
 import type { AttemptMetadata } from "./attempts.ts";
@@ -150,16 +155,28 @@ export function formatPrBody(input: FormatPrBodyInput): string {
 }
 
 export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
-  const candidates: Array<Parameters<typeof artifactRelativePath>[1]> = [
+  const candidates: ArtifactRef[] = [
     "issue",
     "triage",
+    "implementationPlanDraft",
     "implementationPlan",
+    "preImplementationBaseline",
     "implementationLog",
-    "reviewA",
-    "reviewB",
-    "readiness",
-    "verification",
   ];
+
+  for (let pass = 0; pass <= context.maxFixPasses; pass++) {
+    const refinement = refinementLogRef(pass);
+    if (artifactExists(context, refinement)) candidates.push(refinement);
+  }
+
+  const latestCycle = latestCompleteReviewCycle(context);
+  if (latestCycle === undefined) {
+    candidates.push("reviewA", "reviewB");
+  } else {
+    candidates.push(reviewARef(latestCycle), reviewBRef(latestCycle));
+  }
+
+  candidates.push("readiness", "verification");
 
   const paths = candidates
     .filter((artifact) => artifactExists(context, artifact))
@@ -260,13 +277,19 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
 }
 
 export function collectReviewVerdicts(context: WorkflowContext): ReviewVerdictSummary {
-  return {
-    reviewA: readVerdictIfExists(context, "reviewA"),
-    reviewB: readVerdictIfExists(context, "reviewB"),
-  };
+  const latestCycle = latestCompleteReviewCycle(context);
+  return latestCycle === undefined
+    ? {
+      reviewA: readVerdictIfExists(context, "reviewA"),
+      reviewB: readVerdictIfExists(context, "reviewB"),
+    }
+    : {
+      reviewA: readVerdictIfExists(context, reviewARef(latestCycle)),
+      reviewB: readVerdictIfExists(context, reviewBRef(latestCycle)),
+    };
 }
 
-function readVerdictIfExists(context: WorkflowContext, artifact: "reviewA" | "reviewB"): string | undefined {
+function readVerdictIfExists(context: WorkflowContext, artifact: ArtifactRef): string | undefined {
   if (!artifactExists(context, artifact)) return undefined;
   try {
     return parseVerdict(readFileSync(artifactPath(context, artifact), "utf8")) ?? "unknown";

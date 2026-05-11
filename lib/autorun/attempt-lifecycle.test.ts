@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readArtifact, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { readArtifact, refinementLogRef, reviewARef, reviewBRef, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
@@ -48,7 +48,7 @@ describe("runAutorunAttemptLifecycle", () => {
     expect((await readAttemptIndex(fixture.issueDir))[0]?.outcome).toBe("failed-verification");
   });
 
-  test("runs fix, final review, readiness, and completion again for verification repair", async () => {
+  test("runs fix, refinement, reviews, readiness, and completion again for verification repair", async () => {
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -63,8 +63,14 @@ describe("runAutorunAttemptLifecycle", () => {
         if (request.phase === "fixLog-1") {
           return "# Fix Log Pass 1\n\n## Summary\nAddressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
         }
-        if (request.phase === "finalReview-1") {
-          return "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n\n## Reasoning\nVerification failure addressed.\n\n## Remaining Issues\nNone\n\n## Validation\nReviewed.\n";
+        if (request.phase === "refinementLog-1") {
+          return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n\n## Changed Files\n- lib/example.ts\n\n## Simplifications Made\nNone\n\n## Abstractions / Names Adjusted\nNone\n\n## Behavior Risk Decisions\n- Verification repair behavior in lib/example.ts was kept unchanged except for the targeted failure.\n\n## Plan / Issue Alignment\nAligned.\n\n## Validation Run\n- bun test (passed)\n\n## Remaining Concerns\nNone\n";
+        }
+        if (request.phase === "reviewA-1") {
+          return "# Review A Pass 1\n\n## Verdict\napprove\n";
+        }
+        if (request.phase === "reviewB-1") {
+          return "# Review B Pass 1\n\n## Verdict\napprove\n";
         }
         throw new Error(`unexpected phase ${request.phase}`);
       },
@@ -83,7 +89,7 @@ describe("runAutorunAttemptLifecycle", () => {
     });
 
     expect(completions).toBe(2);
-    expect(phases).toEqual(["fixLog-1", "finalReview-1"]);
+    expect(phases).toEqual(["fixLog-1", "refinementLog-1", "reviewA-1", "reviewB-1"]);
     expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
     expect(terminal.outcome).toBe("published");
@@ -103,14 +109,26 @@ describe("runAutorunAttemptLifecycle", () => {
         if (request.phase === "fixLog-1") {
           return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nFinal review requested another fix.\n";
         }
-        if (request.phase === "finalReview-1") {
-          return "# Final Review Pass 1\n\n## Verdict\nfixes-required\n\n## Reasoning\nRepair is incomplete.\n\n## Remaining Issues\n- Verification failure remains.\n\n## Validation\nReviewed.\n";
+        if (request.phase === "refinementLog-1") {
+          return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n";
+        }
+        if (request.phase === "reviewA-1") {
+          return "# Review A Pass 1\n\n## Verdict\nfixes-required\n";
+        }
+        if (request.phase === "reviewB-1") {
+          return "# Review B Pass 1\n\n## Verdict\napprove\n";
         }
         if (request.phase === "fixLog-2") {
           return "# Fix Log Pass 2\n\n## Summary\nCompleted verification repair.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
         }
-        if (request.phase === "finalReview-2") {
-          return "# Final Review Pass 2\n\n## Verdict\nready-for-pr\n\n## Reasoning\nRepair is complete.\n\n## Remaining Issues\nNone\n\n## Validation\nReviewed.\n";
+        if (request.phase === "refinementLog-2") {
+          return "# Refinement Log Pass 2\n\n## Summary\nRefined.\n";
+        }
+        if (request.phase === "reviewA-2") {
+          return "# Review A Pass 2\n\n## Verdict\napprove\n";
+        }
+        if (request.phase === "reviewB-2") {
+          return "# Review B Pass 2\n\n## Verdict\napprove\n";
         }
         throw new Error(`unexpected phase ${request.phase}`);
       },
@@ -129,7 +147,7 @@ describe("runAutorunAttemptLifecycle", () => {
     });
 
     expect(completions).toBe(2);
-    expect(phases).toEqual(["fixLog-1", "finalReview-1", "fixLog-2", "finalReview-2"]);
+    expect(phases).toEqual(["fixLog-1", "refinementLog-1", "reviewA-1", "reviewB-1", "fixLog-2", "refinementLog-2", "reviewA-2", "reviewB-2"]);
     expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
     expect(terminal.outcome).toBe("published");
@@ -271,10 +289,13 @@ describe("runAutorunAttemptLifecycle", () => {
 async function writeCompletedWorkflowArtifacts(context: WorkflowContext): Promise<void> {
   await writeArtifact(context, "issue", "# GitHub Issue #44\n\n<github_issue_relationships source=\"gh\" />\n");
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+  await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
   await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
-  await writeArtifact(context, "reviewA", "# Review A\n\n## Verdict\napprove\n");
-  await writeArtifact(context, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+  await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
+  await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
 }
 
 async function createFixture(): Promise<{

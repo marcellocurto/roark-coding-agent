@@ -5,16 +5,22 @@ import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import {
   artifactExists,
+  baselineResetLogRef,
+  fixLogRef,
+  implementationRestartLogRef,
   inferNextFinalReviewPass,
   inferNextFixPass,
+  inferNextRefinementPass,
   readArtifact,
+  reviewARef,
+  reviewBRef,
   type ArtifactRef,
   type WorkflowContext,
   writeArtifact,
   writeJsonArtifact,
 } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
-import { assertCleanGit } from "./git.ts";
+import { assertCleanGit, capturePreImplementationBaseline, resetWorktreeToPreImplementationBaseline, type PreImplementationBaseline } from "./git.ts";
 import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
 import { buildReadinessMarkdown } from "./readiness.ts";
@@ -24,12 +30,15 @@ import {
   type WorkflowProgressionAction,
 } from "./progression.ts";
 import {
+  codeRefinementTask,
+  type CodeRefinementSource,
   finalReviewTask,
   fixTask,
-  implementationTask,
+  implementationTaskForPass,
+  planDraftTask,
   planTask,
-  reviewATask,
-  reviewBTask,
+  reviewATaskForPass,
+  reviewBTaskForPass,
   runAgentTask,
   triageTask,
 } from "./tasks.ts";
@@ -74,23 +83,67 @@ export async function triagePhase(context: WorkflowContext, runner: AgentRunner 
   return runAgentTask(context, runner, triageTask);
 }
 
+export async function planDraftPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
+  return runAgentTask(context, runner, planDraftTask);
+}
+
 export async function planPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
   return runAgentTask(context, runner, planTask);
 }
 
-export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  if (await shouldRegenerateArtifact(context, implementationTask.artifact)) {
-    await assertCleanGit({ cwd: context.agentCwd, yes: context.yes });
+export async function captureBaselinePhase(context: WorkflowContext): Promise<string> {
+  if (!context.force && artifactExists(context, "preImplementationBaseline")) {
+    const existing = await readArtifact(context, "preImplementationBaseline");
+    if (existing.trim()) return existing;
   }
-  return runAgentTask(context, runner, implementationTask);
+  const baseline = await capturePreImplementationBaseline({ cwd: context.agentCwd, yes: context.yes });
+  const content = JSON.stringify({
+    ...baseline,
+    note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
+  }, null, 2);
+  await writeArtifact(context, "preImplementationBaseline", content);
+  console.log(`✓ Capture baseline: wrote pre-implementation-baseline.json`);
+  return content;
+}
+
+export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<string> {
+  const task = implementationTaskForPass(restartPass);
+  if (await shouldRegenerateArtifact(context, task.artifact) || restartPass > 0) {
+    await assertCleanGit({ cwd: context.agentCwd, yes: context.yes || restartPass > 0 });
+  }
+  const content = await runAgentTaskWithForceOverride(context, runner, task, restartPass > 0);
+  if (restartPass > 0) {
+    await writeArtifact(
+      context,
+      implementationRestartLogRef(restartPass),
+      `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.md for the implementation log.\n`,
+    );
+  }
+  return content;
+}
+
+export async function codeRefinementPhase(
+  context: WorkflowContext,
+  pass = inferNextRefinementPass(context),
+  runner: AgentRunner = runPiAgent,
+): Promise<string> {
+  return runAgentTask(context, runner, codeRefinementTask(pass, codeRefinementSourceForPass(context, pass)));
+}
+
+function codeRefinementSourceForPass(context: WorkflowContext, pass: number): CodeRefinementSource {
+  if (pass === 0) return "initial";
+  if (artifactExists(context, fixLogRef(pass))) return "fix";
+  if (artifactExists(context, implementationRestartLogRef(pass)) || artifactExists(context, baselineResetLogRef(pass))) return "restart";
+  return "fix";
 }
 
 export async function reviewPhase(
   context: WorkflowContext,
+  pass = inferNextReviewPass(context),
   runner: AgentRunner = runPiAgent,
 ): Promise<{ reviewA: string; reviewB: string }> {
-  const reviewA = await runAgentTask(context, runner, reviewATask);
-  const reviewB = await runAgentTask(context, runner, reviewBTask);
+  const reviewA = await runAgentTask(context, runner, reviewATaskForPass(pass));
+  const reviewB = await runAgentTask(context, runner, reviewBTaskForPass(pass));
   return { reviewA, reviewB };
 }
 
@@ -104,6 +157,15 @@ export async function fixPhase(
     await assertCleanGit({ cwd: context.agentCwd, yes: true });
   }
   return runAgentTask(context, runner, task);
+}
+
+export async function resetBaselinePhase(context: WorkflowContext, pass: number): Promise<string> {
+  const baseline = JSON.parse(await readArtifact(context, "preImplementationBaseline")) as PreImplementationBaseline;
+  await resetWorktreeToPreImplementationBaseline({ cwd: context.agentCwd, baseline });
+  const content = `# Baseline Reset Pass ${pass}\n\n## Summary\nReset non-.roark worktree state to pre-implementation baseline ${baseline.head}.\n\n## Preserved Control Plane\n.roark artifacts were preserved.\n`;
+  await writeArtifact(context, baselineResetLogRef(pass), content);
+  console.log(`✓ Reset baseline: wrote baseline-reset-${pass}.md`);
+  return content;
 }
 
 export async function finalReviewPhase(
@@ -191,11 +253,15 @@ async function runProgressionPhase(
 ): Promise<void> {
   if (action.phase === "fetch") await fetchIssuePhase(context);
   else if (action.phase === "triage") await triagePhase(context, runner);
+  else if (action.phase === "plan-draft") await planDraftPhase(context, runner);
   else if (action.phase === "plan") await planPhase(context, runner);
-  else if (action.phase === "implement") await implementationPhase(context, runner);
-  else if (action.phase === "review-a") await runAgentTask(context, runner, reviewATask);
-  else if (action.phase === "review-b") await runAgentTask(context, runner, reviewBTask);
+  else if (action.phase === "capture-baseline") await captureBaselinePhase(context);
+  else if (action.phase === "implement") await implementationPhase(context, runner, action.pass ?? 0);
+  else if (action.phase === "refine-code") await codeRefinementPhase(context, action.pass, runner);
+  else if (action.phase === "review-a") await runAgentTask(context, runner, reviewATaskForPass(action.pass ?? 0));
+  else if (action.phase === "review-b") await runAgentTask(context, runner, reviewBTaskForPass(action.pass ?? 0));
   else if (action.phase === "fix") await fixPhase(context, action.pass, runner);
+  else if (action.phase === "reset-baseline") await resetBaselinePhase(context, action.pass ?? 1);
   else if (action.phase === "final-review") await finalReviewPhase(context, action.pass, runner);
   else assertNever(action.phase);
 }
@@ -209,6 +275,28 @@ function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
 
 function assertNever(value: never): never {
   throw new Error(`Unexpected workflow progression phase '${String(value)}'.`);
+}
+
+function inferNextReviewPass(context: WorkflowContext): number {
+  for (let pass = 0; ; pass++) {
+    if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) return pass;
+  }
+}
+
+async function runAgentTaskWithForceOverride(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: Parameters<typeof runAgentTask>[2],
+  force: boolean,
+): Promise<string> {
+  if (!force) return runAgentTask(context, runner, task);
+  const previous = context.force;
+  context.force = true;
+  try {
+    return await runAgentTask(context, runner, task);
+  } finally {
+    context.force = previous;
+  }
 }
 
 async function shouldRegenerateArtifact(context: WorkflowContext, artifact: ArtifactRef): Promise<boolean> {
@@ -227,10 +315,14 @@ export async function runSinglePhase(
   try {
     if (phase === "fetch") await fetchIssuePhase(context);
     else if (phase === "triage") await triagePhase(context, runner);
+    else if (phase === "plan-draft") await planDraftPhase(context, runner);
     else if (phase === "plan") await planPhase(context, runner);
+    else if (phase === "capture-baseline") await captureBaselinePhase(context);
     else if (phase === "implement") await implementationPhase(context, runner);
-    else if (phase === "review") await reviewPhase(context, runner);
+    else if (phase === "refine-code") await codeRefinementPhase(context, context.fixPass ?? inferNextRefinementPass(context), runner);
+    else if (phase === "review") await reviewPhase(context, context.fixPass ?? inferNextReviewPass(context), runner);
     else if (phase === "fix") await fixPhase(context, context.fixPass ?? inferNextFixPass(context), runner);
+    else if (phase === "reset-baseline") await resetBaselinePhase(context, context.fixPass ?? 1);
     else if (phase === "final-review") await finalReviewPhase(context, context.fixPass ?? inferNextFinalReviewPass(context), runner);
     else if (phase === "readiness") await readinessPhase(context);
     else if (phase === "curate-issues") await issueCurationPhase(context);

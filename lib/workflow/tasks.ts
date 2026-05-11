@@ -5,18 +5,25 @@ import {
   artifactExists,
   artifactRelativePath,
   type ArtifactRef,
+  baselineResetLogRef,
   finalReviewRef,
   fixLogRef,
+  implementationRestartLogRef,
   readArtifact,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
   requireArtifacts,
   type WorkflowContext,
   writeArtifact,
 } from "./artifacts.ts";
 import { ArtifactValidationError, validateAgentArtifact } from "./artifact-validation.ts";
 import {
+  codeRefinementPrompt,
   finalReviewPrompt,
   fixPrompt,
   implementationPrompt,
+  planDraftPrompt,
   planPrompt,
   reviewAPrompt,
   reviewBPrompt,
@@ -40,6 +47,8 @@ export type AgentTaskRetryOptions = {
   delaysMs?: readonly number[];
   sleep?: (ms: number) => Promise<void>;
 };
+
+export type CodeRefinementSource = "initial" | "fix" | "restart";
 
 export const transientAgentRetryDelaysMs = [0, 60_000, 180_000] as const;
 
@@ -74,41 +83,81 @@ export const triageTask: AgentTask = {
   prompt: triagePrompt,
 };
 
-export const planTask: AgentTask = {
-  artifact: "implementationPlan",
-  label: "Implementation plan",
+export const planDraftTask: AgentTask = {
+  artifact: "implementationPlanDraft",
+  label: "Implementation plan draft",
   writable: false,
   thinkingStage: "plan",
   prerequisites: ["issue", "triage"],
+  prompt: planDraftPrompt,
+};
+
+export const planTask: AgentTask = {
+  artifact: "implementationPlan",
+  label: "Implementation plan refinement",
+  writable: false,
+  thinkingStage: "plan",
+  prerequisites: ["issue", "triage", "implementationPlanDraft"],
   prompt: planPrompt,
 };
 
-export const implementationTask: AgentTask = {
-  artifact: "implementationLog",
-  label: "Implementation",
-  writable: true,
-  thinkingStage: "implement",
-  prerequisites: ["issue", "triage", "implementationPlan"],
-  prompt: implementationPrompt,
-};
+export const implementationTask: AgentTask = implementationTaskForPass(0);
 
-export const reviewATask: AgentTask = {
-  artifact: "reviewA",
-  label: "Review A",
-  writable: false,
-  thinkingStage: "reviewA",
-  prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
-  prompt: reviewAPrompt,
-};
+export function implementationTaskForPass(restartPass = 0): AgentTask {
+  return {
+    artifact: "implementationLog",
+    label: restartPass > 0 ? `Implementation restart pass ${restartPass}` : "Implementation",
+    writable: true,
+    thinkingStage: "implement",
+    prerequisites: restartPass > 0
+      ? ["issue", "triage", "implementationPlan", reviewARef(restartPass - 1), reviewBRef(restartPass - 1)]
+      : ["issue", "triage", "implementationPlan"],
+    prompt: (context) => implementationPrompt(context, restartPass),
+  };
+}
 
-export const reviewBTask: AgentTask = {
-  artifact: "reviewB",
-  label: "Review B",
-  writable: false,
-  thinkingStage: "reviewB",
-  prerequisites: ["issue", "triage", "implementationPlan", "implementationLog"],
-  prompt: reviewBPrompt,
-};
+export function codeRefinementTask(pass: number, source: CodeRefinementSource = pass === 0 ? "initial" : "fix"): AgentTask {
+  return {
+    artifact: refinementLogRef(pass),
+    label: `Code refinement pass ${pass}`,
+    writable: true,
+    thinkingStage: "fix",
+    prerequisites: codeRefinementPrerequisites(pass, source),
+    prompt: (context) => codeRefinementPrompt(context, pass, source),
+  };
+}
+
+function codeRefinementPrerequisites(pass: number, source: CodeRefinementSource): ArtifactRef[] {
+  if (pass === 0 || source === "initial") return ["issue", "triage", "implementationPlan", "implementationLog"];
+  const shared: ArtifactRef[] = ["issue", "triage", "implementationPlan", "implementationLog", reviewARef(pass - 1), reviewBRef(pass - 1)];
+  if (source === "restart") return [...shared, baselineResetLogRef(pass), implementationRestartLogRef(pass)];
+  return [...shared, fixLogRef(pass)];
+}
+
+export const reviewATask: AgentTask = reviewATaskForPass(0);
+export const reviewBTask: AgentTask = reviewBTaskForPass(0);
+
+export function reviewATaskForPass(pass = 0): AgentTask {
+  return {
+    artifact: reviewARef(pass),
+    label: `Review A pass ${pass}`,
+    writable: false,
+    thinkingStage: "reviewA",
+    prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
+    prompt: (context) => reviewAPrompt(context, pass),
+  };
+}
+
+export function reviewBTaskForPass(pass = 0): AgentTask {
+  return {
+    artifact: reviewBRef(pass),
+    label: `Review B pass ${pass}`,
+    writable: false,
+    thinkingStage: "reviewB",
+    prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
+    prompt: (context) => reviewBPrompt(context, pass),
+  };
+}
 
 export function fixTask(pass: number): AgentTask {
   return {
@@ -116,9 +165,7 @@ export function fixTask(pass: number): AgentTask {
     label: `Fix pass ${pass}`,
     writable: true,
     thinkingStage: "fix",
-    prerequisites: pass > 1
-      ? ["issue", "implementationPlan", "implementationLog", "reviewA", "reviewB", finalReviewRef(pass - 1)]
-      : ["issue", "implementationPlan", "implementationLog", "reviewA", "reviewB"],
+    prerequisites: ["issue", "implementationPlan", "implementationLog", reviewARef(pass - 1), reviewBRef(pass - 1)],
     prompt: (context) => fixPrompt(context, pass),
   };
 }
@@ -129,7 +176,7 @@ export function finalReviewTask(pass: number): AgentTask {
     label: `Final review pass ${pass}`,
     writable: false,
     thinkingStage: "finalReview",
-    prerequisites: ["issue", "implementationPlan", "reviewA", "reviewB", fixLogRef(pass)],
+    prerequisites: ["issue", "implementationPlan", reviewARef(Math.max(0, pass - 1)), reviewBRef(Math.max(0, pass - 1)), fixLogRef(pass)],
     prompt: (context) => finalReviewPrompt(context, pass),
   };
 }

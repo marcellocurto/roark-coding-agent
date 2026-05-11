@@ -1,7 +1,9 @@
 export type StaticArtifactName =
   | "issue"
   | "triage"
+  | "implementationPlanDraft"
   | "implementationPlan"
+  | "preImplementationBaseline"
   | "implementationLog"
   | "reviewA"
   | "reviewB"
@@ -11,7 +13,15 @@ export type StaticArtifactName =
   | "issueCurationPlan"
   | "issueCreationResults";
 
-export type NumberedArtifactName = "fixLog" | "finalReview" | "verificationBeforeFix";
+export type NumberedArtifactName =
+  | "fixLog"
+  | "finalReview"
+  | "verificationBeforeFix"
+  | "implementationRestartLog"
+  | "refinementLog"
+  | "reviewA"
+  | "reviewB"
+  | "baselineResetLog";
 
 export type ArtifactRef = StaticArtifactName | { name: NumberedArtifactName; pass: number };
 
@@ -41,10 +51,14 @@ export type ArtifactContract = {
   readonly requiresReadyForImplementation?: true;
 };
 
+export const REVIEW_VERDICTS = ["approve", "fixes-required", "restart-required", "blocked"] as const;
+
 export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "issue", filename: "issue.md", displayName: "Issue" },
   { name: "triage", filename: "triage.md", displayName: "Triage" },
+  { name: "implementationPlanDraft", filename: "implementation-plan-draft.md", displayName: "Implementation Plan Draft" },
   { name: "implementationPlan", filename: "implementation-plan.md", displayName: "Implementation Plan" },
+  { name: "preImplementationBaseline", filename: "pre-implementation-baseline.json", displayName: "Pre-implementation Baseline" },
   { name: "implementationLog", filename: "implementation-log.md", displayName: "Implementation Log" },
   { name: "reviewA", filename: "review-a.md", displayName: "Review A" },
   { name: "reviewB", filename: "review-b.md", displayName: "Review B" },
@@ -59,12 +73,18 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   { name: "fixLog", filenamePrefix: "fix-log", displayName: "Fix Log" },
   { name: "finalReview", filenamePrefix: "final-review", displayName: "Final Review" },
   { name: "verificationBeforeFix", filenamePrefix: "verification-before-fix", displayName: "Verification Before Fix" },
+  { name: "implementationRestartLog", filenamePrefix: "implementation-restart-log", displayName: "Implementation Restart Log" },
+  { name: "refinementLog", filenamePrefix: "refinement-log", displayName: "Refinement Log" },
+  { name: "reviewA", filenamePrefix: "review-a", displayName: "Review A" },
+  { name: "reviewB", filenamePrefix: "review-b", displayName: "Review B" },
+  { name: "baselineResetLog", filenamePrefix: "baseline-reset", displayName: "Baseline Reset" },
 ] as const;
 
 export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] = [
   "issue",
   "metadata",
   "triage",
+  "implementationPlanDraft",
   "implementationPlan",
   "implementationLog",
   "reviewA",
@@ -83,19 +103,28 @@ const numberedArtifactByName = Object.fromEntries(
 
 const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> = {
   triage: { allowedVerdicts: ["proceed", "blocked", "reject", "needs-human-decision"] },
+  implementationPlanDraft: {
+    requiredHeading: "Implementation Plan Draft",
+    requiresReadyForImplementation: true,
+  },
   implementationPlan: {
     requiredHeading: "Implementation Plan",
     requiresReadyForImplementation: true,
   },
   implementationLog: { requiredHeading: "Implementation Log" },
-  reviewA: { allowedVerdicts: ["approve", "fixes-required", "blocked"] },
-  reviewB: { allowedVerdicts: ["approve", "fixes-required", "blocked"] },
+  reviewA: { allowedVerdicts: REVIEW_VERDICTS },
+  reviewB: { allowedVerdicts: REVIEW_VERDICTS },
 };
 
 const numberedContracts: Record<NumberedArtifactName, (pass: number) => ArtifactContract> = {
   fixLog: (pass) => ({ requiredHeading: `Fix Log Pass ${pass}` }),
   finalReview: () => ({ allowedVerdicts: ["ready-for-pr", "fixes-required", "blocked"] }),
   verificationBeforeFix: () => ({}),
+  implementationRestartLog: (pass) => ({ requiredHeading: `Implementation Restart Log Pass ${pass}` }),
+  refinementLog: (pass) => ({ requiredHeading: `Refinement Log Pass ${pass}` }),
+  reviewA: (pass) => ({ requiredHeading: `Review A Pass ${pass}`, allowedVerdicts: REVIEW_VERDICTS }),
+  reviewB: (pass) => ({ requiredHeading: `Review B Pass ${pass}`, allowedVerdicts: REVIEW_VERDICTS }),
+  baselineResetLog: (pass) => ({ requiredHeading: `Baseline Reset Pass ${pass}` }),
 };
 
 export function fixLogRef(pass: number): ArtifactRef {
@@ -108,6 +137,26 @@ export function finalReviewRef(pass: number): ArtifactRef {
 
 export function verificationBeforeFixRef(pass: number): ArtifactRef {
   return { name: "verificationBeforeFix", pass };
+}
+
+export function implementationRestartLogRef(pass: number): ArtifactRef {
+  return { name: "implementationRestartLog", pass };
+}
+
+export function refinementLogRef(pass: number): ArtifactRef {
+  return { name: "refinementLog", pass };
+}
+
+export function reviewARef(pass: number): ArtifactRef {
+  return { name: "reviewA", pass };
+}
+
+export function reviewBRef(pass: number): ArtifactRef {
+  return { name: "reviewB", pass };
+}
+
+export function baselineResetLogRef(pass: number): ArtifactRef {
+  return { name: "baselineResetLog", pass };
 }
 
 export function artifactFilename(artifact: ArtifactRef): string {

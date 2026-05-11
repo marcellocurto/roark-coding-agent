@@ -1,5 +1,11 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 
+export type PreImplementationBaseline = {
+  head: string;
+  capturedAt: string;
+  excludes: readonly [".roark"];
+};
+
 export async function assertCleanGit(context: { cwd: string; yes: boolean }): Promise<void> {
   const dirtyLines = await gitDirtyLinesOutsideRoark(context.cwd);
 
@@ -41,6 +47,28 @@ export async function gitDirtyLines(cwd: string): Promise<string[]> {
     .split("\n")
     .map((line) => line.trimEnd())
     .filter(Boolean);
+}
+
+export async function capturePreImplementationBaseline(context: { cwd: string; yes: boolean }): Promise<PreImplementationBaseline> {
+  await assertCleanGit({ cwd: context.cwd, yes: context.yes });
+  const head = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: context.cwd, label: "git rev-parse HEAD" })).trim();
+  return {
+    head,
+    capturedAt: new Date().toISOString(),
+    excludes: [".roark"],
+  };
+}
+
+export async function resetWorktreeToPreImplementationBaseline(context: { cwd: string; baseline: PreImplementationBaseline }): Promise<void> {
+  const baselineHead = context.baseline.head || "HEAD";
+  await runProcessOrThrow(
+    ["git", "restore", "--source", baselineHead, "--staged", "--worktree", "--", ".", ":(exclude).roark"],
+    { cwd: context.cwd, label: "git restore pre-implementation baseline" },
+  );
+  await runProcessOrThrow(
+    ["git", "clean", "-fd", "--", ".", ":(exclude).roark"],
+    { cwd: context.cwd, label: "git clean pre-implementation baseline" },
+  );
 }
 
 async function gitDirtyLinesOutsideRoark(cwd: string): Promise<string[]> {

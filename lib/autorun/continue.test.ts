@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { ContinueCliOptions } from "../cli/args.ts";
-import { writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { refinementLogRef, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
@@ -149,10 +149,13 @@ describe("runAutoContinue", () => {
       issue: { number: 24, title: "Ledger comments", url: "https://github.com/owner/repo/issues/24", labels: [] },
     });
     await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await writeArtifact(workflowContext, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
     await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeArtifact(workflowContext, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
     await writeArtifact(workflowContext, "implementationLog", "# Implementation Log\n\nDone.\n");
-    await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n");
-    await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+    await writeArtifact(workflowContext, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+    await writeArtifact(workflowContext, reviewARef(0), "# Review A Pass 0\n\n## Verdict\nfixes-required\n");
+    await writeArtifact(workflowContext, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
     await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -172,8 +175,8 @@ describe("runAutoContinue", () => {
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
     expect(metadata.outcome).toBe("errored");
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
-    expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(4242);
-    expect(metadata.githubComments?.issue?.["review-b"]?.id).toBe(4242);
+    expect(metadata.githubComments?.issue?.["review-a-0"]?.id).toBe(4242);
+    expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
   });
 });
 
