@@ -92,7 +92,7 @@ export function classifyVerificationFailure(result: VerificationResult): Verific
   }
 
   const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
-  if (result.exitCode === 127 || /command not found|not found/.test(output)) {
+  if (result.exitCode === 127 || looksLikeCommandUnavailable(output)) {
     return {
       repairable: false,
       reason: `verification command exited ${result.exitCode} because a required command was not found`,
@@ -136,6 +136,11 @@ export function parseVerificationArtifact(markdown: string): VerificationResult 
     stdout: extractFencedSection(markdown, "Stdout"),
     stderr: extractFencedSection(markdown, "Stderr"),
   };
+}
+
+function looksLikeCommandUnavailable(output: string): boolean {
+  return /(^|\n)\s*(?:\/[^\s:\n]*(?:sh|bash|zsh|fish|dash)|sh|bash|zsh|fish|dash|env):\s*(?:(?:line\s*)?\d+:\s*)?[^:\n]+:\s*(?:command not found|not found)\s*(?:\n|$)/.test(output)
+    || /(^|\n)\s*(?:zsh|fish):\s*command not found:\s*[^:\n]+\s*(?:\n|$)/.test(output);
 }
 
 function extractFencedSection(markdown: string, headingPrefix: string): string {
