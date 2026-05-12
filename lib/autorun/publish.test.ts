@@ -53,7 +53,7 @@ describe("autorun publish defaults", () => {
 });
 
 describe("autorun publish argv builders", () => {
-  test("buildStageAllArgv stages target changes but excludes run artifacts", () => {
+  test("buildStageAllArgv stages target changes but excludes roark control state", () => {
     expect(buildStageAllArgv()).toEqual(["git", "add", "-A", "--", ".", ":(exclude).roark"]);
   });
 

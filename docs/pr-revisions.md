@@ -14,12 +14,12 @@ roark revise-pr 123 --repo owner/repo
 1. Fetch PR metadata, unresolved review threads, and relevant PR comments with GitHub GraphQL.
 2. Exclude prior Roark revision summary comments from planner input.
 3. Prepare an isolated managed clone workspace and check out the existing PR head branch there. The caller/control checkout stays on its current branch.
-4. Allocate canonical artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/` in the control checkout and mirror them into the revision workspace for agent prompts and commits.
+4. Allocate canonical artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/` in the control checkout and mirror them into the revision workspace for agent prompts.
 5. Plan feedback handling in the revision workspace.
 6. Apply only feedback classified as `must-fix-current` in the revision workspace.
 7. Run one revision reviewer and optional fix/review passes in the revision workspace.
 8. Run verification in the revision workspace.
-9. On success, create one revision commit from the revision workspace, force-add only that revision's `.roark/runs/pr/...` artifacts, push to the PR head branch, and post one summary comment from the control checkout.
+9. On success, create one revision commit from the revision workspace while excluding `.roark` control-plane artifacts, push to the PR head branch, and post one summary comment from the control checkout.
 
 ## Feedback classifications
 

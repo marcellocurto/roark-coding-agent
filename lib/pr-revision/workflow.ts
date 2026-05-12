@@ -480,7 +480,6 @@ function isRoarkPath(filePath: string): boolean {
 async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<void> {
   await ensurePushRemote(context);
   await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
-  await runProcessOrThrow(["git", "add", "-f", "--", context.agentRevisionDirRelative], { cwd: context.agentCwd, label: "git add revision artifacts" });
   await runProcessOrThrow(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
     cwd: context.agentCwd,
     label: "git commit",

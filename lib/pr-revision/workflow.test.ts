@@ -346,7 +346,7 @@ describe("runPrRevision", () => {
     expect(metadata.verificationFailureReason).toContain("Verification failed after 1 fix passes");
   });
 
-  test("successful isolated revision preserves the control checkout, uses configured remote, and force-adds ignored run artifacts", async () => {
+  test("successful isolated revision preserves the control checkout, uses configured remote, and excludes ignored run artifacts", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-isolated-"));
     const seed = path.join(root, "seed");
     const remote = path.join(root, "remote.git");
@@ -411,7 +411,8 @@ describe("runPrRevision", () => {
 
     const pushedTree = await runOutput(["git", "--git-dir", remote, "ls-tree", "-r", "--name-only", "feature/pr-12"], root);
     expect(pushedTree).toContain("fixed.txt");
-    expect(pushedTree).toContain(".roark/runs/pr/12/revision-1/metadata.json");
+    expect(pushedTree).not.toContain(".roark/runs/pr/12/revision-1/metadata.json");
+    expect(pushedTree).not.toContain(".roark/runs");
   });
 
   test("successful verification commits, pushes, and comments once", async () => {

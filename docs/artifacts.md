@@ -96,7 +96,7 @@ PR revision artifacts include fetched feedback, revision plan, revision log, rev
 
 Issue run artifacts are useful for inspection and recovery. Publishing flows generally avoid including issue run artifacts in the PR commit.
 
-PR revision workflows commit revision artifacts with the successful revision.
+PR revision workflows keep revision artifacts local and exclude `.roark` control-plane state from successful revision commits.
 
 ## Artifact Durability
 
