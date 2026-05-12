@@ -44,7 +44,7 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
 export async function postPrRevisionSummaryComment(input: RevisionSummaryInput): Promise<void> {
   if (!input.context.comment) return;
   await postIssueComment({
-    cwd: input.context.cwd,
+    cwd: input.context.controlCwd,
     repo: input.context.repo,
     issueNumber: input.context.prNumber,
     body: formatPrRevisionSummaryComment(input),

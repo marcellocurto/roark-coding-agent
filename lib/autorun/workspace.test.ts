@@ -12,6 +12,7 @@ import {
   runLifecycleHook,
   sanitizeWorkspaceSegment,
   workspacePathForIssue,
+  workspacePathForPrRevision,
   workspaceStateFile,
   type ProcessRunner,
 } from "./workspace.ts";
@@ -22,9 +23,10 @@ const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stder
 const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({ stdout: "", stderr, exitCode: 1 });
 
 describe("managed clone workspaces", () => {
-  test("computes sanitized issue workspace paths inside the configured root", () => {
+  test("computes sanitized issue and PR revision workspace paths inside the configured root", () => {
     const workspacePath = workspacePathForIssue({ root: "/tmp/roark-root", repo: "Owner/Repo.Name", issueNumber: 207 });
     expect(workspacePath).toBe(path.resolve("/tmp/roark-root/owner-repo.name/issue-207"));
+    expect(workspacePathForPrRevision({ root: "/tmp/roark-root", repo: "Owner/Repo.Name", prNumber: 12 })).toBe(path.resolve("/tmp/roark-root/owner-repo.name/pr-12"));
     expect(sanitizeWorkspaceSegment("../Bad Value!")).toBe("bad-value");
   });
 

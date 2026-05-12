@@ -206,15 +206,24 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.maxFixPasses).toBe(4);
   });
 
-  test("revise-pr defaults to the shared max fix pass budget", async () => {
+  test("revise-pr defaults to the shared max fix pass budget and hydrates managed workspace config", async () => {
     const repo = await tempGitRepo();
-    const raw = parseArgs(["revise-pr", "12", "--cwd", repo, "--repo", "owner/repo"]);
+    await writeConfig(repo, {
+      repo: "owner/repo",
+      workspace: { root: "~/revision-workspaces", cloneRemote: "upstream" },
+      hooks: { beforeRun: "echo before", timeoutMs: 2222 },
+    });
+    const raw = parseArgs(["revise-pr", "12", "--cwd", repo]);
     if ("help" in raw) throw new Error("expected options");
 
     const hydrated = await hydrateCliOptions(raw);
     expect(hydrated.command).toBe("revise-pr");
     if (hydrated.command !== "revise-pr") throw new Error("expected revise-pr options");
     expect(hydrated.maxFixPasses).toBe(defaultMaxFixPasses);
+    expect(hydrated.workspace?.root).toBe("~/revision-workspaces");
+    expect(hydrated.workspace?.cloneRemote).toBe("upstream");
+    expect(hydrated.hooks?.beforeRun).toBe("echo before");
+    expect(hydrated.hooks?.timeoutMs).toBe(2222);
   });
 
   test("preserves fully-qualified issue refs over config repo unless --repo is explicit", async () => {

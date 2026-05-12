@@ -115,6 +115,8 @@ export interface RevisePrCliOptions {
   force: boolean;
   yes: boolean;
   comment: boolean;
+  workspace?: WorkspaceConfig | undefined;
+  hooks?: LifecycleHooksConfig | undefined;
 }
 
 export interface StatusCliOptions {

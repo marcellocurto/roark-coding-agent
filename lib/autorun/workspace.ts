@@ -84,6 +84,15 @@ export function workspacePathForIssue(input: { root: string; repo?: string | und
   return workspacePath;
 }
 
+export function workspacePathForPrRevision(input: { root: string; repo?: string | undefined; prNumber: number; controlCwd?: string | undefined }): string {
+  const root = normalizeWorkspaceRoot(input.root);
+  const repoSegment = repoSegmentForWorkspace(input.repo, input.controlCwd);
+  const prSegment = `pr-${sanitizeWorkspaceSegment(String(input.prNumber))}`;
+  const workspacePath = path.resolve(root, repoSegment, prSegment);
+  assertPathInsideRoot({ root, target: workspacePath });
+  return workspacePath;
+}
+
 export async function assertWorkspacePathSafe(input: { root: string; workspacePath: string }): Promise<void> {
   const root = normalizeWorkspaceRoot(input.root);
   const workspacePath = path.resolve(input.workspacePath);
@@ -169,6 +178,71 @@ export async function prepareCloneWorkspace(input: {
         );
       }
       await updateWorkspaceFromBase({ cwd: workspacePath, baseBranch: input.plan.baseBranch, preserveUncommitted: input.mode === "continue", runner });
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
+    }
+
+    return {
+      path: workspacePath,
+      metadata: {
+        path: workspacePath,
+        strategy: "clone",
+        cloneRemote: remote.remote,
+        cloneUrl: remote.url,
+        createdNow,
+      },
+      releaseLock,
+    };
+  } catch (error) {
+    await releaseLock();
+    throw error;
+  }
+}
+
+export async function preparePrRevisionWorkspace(input: {
+  controlCwd: string;
+  repo?: string | undefined;
+  prNumber: number;
+  headRefName: string;
+  workspace: WorkspaceConfig;
+  hooks: LifecycleHooksConfig;
+  workspacePath?: string | undefined;
+  runner?: ProcessRunner | undefined;
+}): Promise<PreparedWorkspace> {
+  const runner = input.runner ?? runProcess;
+  const root = normalizeWorkspaceRoot(input.workspace.root);
+  const workspacePath = path.resolve(input.workspacePath ?? workspacePathForPrRevision({
+    root,
+    repo: input.repo,
+    prNumber: input.prNumber,
+    controlCwd: input.controlCwd,
+  }));
+  await assertWorkspacePathSafe({ root, workspacePath });
+  const releaseLock = await acquireWorkspaceLock(workspacePath);
+
+  try {
+    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+    const createdNow = !existsSync(workspacePath);
+
+    if (createdNow) {
+      await mkdir(path.dirname(workspacePath), { recursive: true });
+      await runProcessOrThrowWithRunner(runner, buildCloneArgs({ url: remote.url, target: workspacePath, clone: input.workspace.clone }), {
+        cwd: input.controlCwd,
+        label: "git clone",
+      });
+      try {
+        await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner });
+        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
+        await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
+      } catch (error) {
+        await writePoisonState(workspacePath, error);
+        throw error;
+      }
+    } else {
+      await assertNotPoisoned(workspacePath);
+      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath });
+      if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") throw new Error(`Workspace '${workspacePath}' is not a git work tree.`);
+      if (await hasGitChanges(workspacePath, runner)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before revising PR #${input.prNumber}.`);
+      await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner });
       await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
     }
 
@@ -398,6 +472,17 @@ async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranch
   } else {
     await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.plan.branchName, `origin/${input.plan.baseBranch}`], { cwd: input.cwd, label: "git checkout issue branch from base" });
   }
+}
+
+async function checkoutPrWorkspaceBranch(input: { cwd: string; headRefName: string; runner: ProcessRunner }): Promise<void> {
+  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/heads/${input.headRefName}:refs/remotes/origin/${input.headRefName}`], {
+    cwd: input.cwd,
+    label: "git fetch PR head",
+  });
+  await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.headRefName, `origin/${input.headRefName}`], {
+    cwd: input.cwd,
+    label: "git checkout PR head",
+  });
 }
 
 async function updateWorkspaceFromBase(input: { cwd: string; baseBranch: string; preserveUncommitted: boolean; runner: ProcessRunner }): Promise<void> {
