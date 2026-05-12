@@ -6,8 +6,7 @@ import { describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import { runPrRevision } from "./workflow.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 async function tempGitRepo(): Promise<string> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-workflow-"));
@@ -64,9 +63,6 @@ function feedback(): PullRequestFeedback {
 describe("runPrRevision", () => {
   test("no-action-needed writes artifacts without code mutation, push, or comment", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     let checkoutCalled = false;
     let commentCalled = false;
@@ -74,7 +70,6 @@ describe("runPrRevision", () => {
     const result = await runPrRevision(options(cwd), {
       fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
-        await tick();
         await tick();
         checkoutCalled = true;
       },
@@ -93,9 +88,6 @@ describe("runPrRevision", () => {
 
   test("allocates revision after checking out the PR head branch", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
 
     const result = await runPrRevision(options(cwd), {
@@ -117,9 +109,6 @@ describe("runPrRevision", () => {
 
   test("needs-human stops before writable implementation and posts one summary by default", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     const writableCalls: boolean[] = [];
     let commentCalled = false;
@@ -146,9 +135,6 @@ describe("runPrRevision", () => {
 
   test("uses centralized thinking profiles for revision agents", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     const thinkingLevels: string[] = [];
 
@@ -174,9 +160,6 @@ describe("runPrRevision", () => {
 
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     let commentCalled = false;
     let calls = 0;
@@ -185,7 +168,6 @@ describe("runPrRevision", () => {
     const result = await runPrRevision(options(cwd, { maxFixPasses: 3 }), {
       fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
-        await tick();
         await tick();},
       agentRunner: async (request) => {
         await tick();
@@ -212,9 +194,6 @@ describe("runPrRevision", () => {
 
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -265,9 +244,6 @@ describe("runPrRevision", () => {
 
   test("review and verification repairs share the fix-pass budget", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     let calls = 0;
     let writableCalls = 0;
@@ -311,9 +287,6 @@ describe("runPrRevision", () => {
 
   test("successful verification commits, pushes, and comments once", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;

@@ -11,8 +11,7 @@ import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -23,8 +22,6 @@ afterEach(async () => {
 describe("runAutorunAttemptLifecycle", () => {
   test("marks attempts in-progress before workflow and records terminal completion outcomes", async () => {
   await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
 
     await runAutorunAttemptLifecycle({
@@ -57,9 +54,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("runs fix, refinement, reviews, readiness, and completion again for verification repair", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -69,7 +63,6 @@ describe("runAutorunAttemptLifecycle", () => {
       ...fixture,
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
-        await tick();
         await tick();
         phases.push(request.phase ?? "unknown");
         expect(request.prompt).toContain("failed_verification");
@@ -111,9 +104,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("continues verification repair when final review requests another fix pass", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -123,7 +113,6 @@ describe("runAutorunAttemptLifecycle", () => {
       ...fixture,
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
-        await tick();
         await tick();
         phases.push(request.phase ?? "unknown");
         if (request.phase === "fixLog-1") {
@@ -176,9 +165,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("classifies output-contract failures and includes failing artifact details in the failure comment", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     await writeArtifact(fixture.workflowContext, "implementationLog", "# Implementation Log\n\ninvalid output\n");
     const comments: string[] = [];
@@ -226,9 +212,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("includes direct artifact validation error artifact details in the failure comment", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     await writeArtifact(fixture.workflowContext, "implementationLog", "# Implementation Log\n\ninvalid direct validation output\n");
     const comments: string[] = [];
@@ -266,9 +249,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("runs fatal beforeRun after metadata is persisted and before workflow", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     const calls: string[] = [];
 
@@ -305,9 +285,6 @@ describe("runAutorunAttemptLifecycle", () => {
 
   test("classifies generic failures as errored and records terminal metadata from finally", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const fixture = await createFixture();
     const comments: string[] = [];
 

@@ -8,8 +8,7 @@ import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
 import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
@@ -60,9 +59,6 @@ describe("runAutoContinue", () => {
 
   test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-managed-"));
     tempDirs.push(cwd, workspacePath);
@@ -106,9 +102,6 @@ describe("runAutoContinue", () => {
       ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
       prepareCloneWorkspace: async (input) => {
         await tick();
-  await tick();
-        await tick();
-        await tick();
         calls.push(`prepare:${input.workspacePath ?? ""}`);
         expect(input.mode).toBe("continue");
         expect(input.workspacePath).toBe(workspacePath);
@@ -116,7 +109,6 @@ describe("runAutoContinue", () => {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
           releaseLock: async () => {
-        await tick();
         await tick(); calls.push("release"); },
         };
       },
@@ -137,9 +129,6 @@ describe("runAutoContinue", () => {
 
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
     tempDirs.push(cwd);
     await initGitRepo(cwd, "roark/issue-24");

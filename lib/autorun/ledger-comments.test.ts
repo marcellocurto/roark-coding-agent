@@ -6,13 +6,13 @@ import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
 
-const tick = () => Promise.resolve();
 import {
   formatAttemptStartComment,
   formatPrCreatedComment,
   formatReviewLedgerComment,
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -23,9 +23,6 @@ afterEach(async () => {
 describe("autorun ledger comment publishing", () => {
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {

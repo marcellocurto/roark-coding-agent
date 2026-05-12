@@ -6,8 +6,7 @@ import { finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowCo
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -49,8 +48,6 @@ describe("verification repair planning", () => {
 
   test("terminal command-unavailable failures include setup guidance", async () => {
   await tick();
-    await tick();
-    await tick();
     const context = await tempContext(1);
     await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
     let failureComment = "";
@@ -89,15 +86,14 @@ describe("verification repair planning", () => {
       refreshCopyToWorktree: async () => {
         await tick();},
       runLifecycleHook: async () => {
-        await tick();
         await tick();},
-      runVerification: async ({ command }) => (await tick(), (await tick(), ({
+      runVerification: async ({ command }) => (await tick(), ({
         ok: false,
         command,
         exitCode: 127,
         stdout: "",
         stderr: "/bin/bash: tsc: command not found",
-      }))),
+      })),
       handleNonPublish: async ({ decision }) => {
         await tick();
         failureComment = decision.reason;

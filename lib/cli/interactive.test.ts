@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { promptForInteractiveArgv, resolveInteractiveArgv } from "./interactive.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 function scriptedPrompt(responses: string[]) {
   const prompts: string[] = [];

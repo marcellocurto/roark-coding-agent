@@ -5,8 +5,7 @@ import path from "node:path";
 import type { AgentRunner } from "./agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import { issueArtifactHasRelationshipSnapshot, runFullWorkflow } from "./phases.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 

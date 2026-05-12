@@ -10,8 +10,7 @@ import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel, defaultAutorun
 import { defaultAutorunVerifyCommand } from "./verification.ts";
 import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 const noOpAutorunLock = {
@@ -29,13 +28,9 @@ describe("runAutoDiscovery", () => {
     let listed = false;
     const logs = await captureLogs(async () => {
         await tick();
-  await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async (input) => {
-        await tick();
         await tick();
           listed = true;
           expect(input.limit).toBe(100);
@@ -57,15 +52,10 @@ describe("runAutoDiscovery", () => {
 
   test("discovery auto acquires the local lock around selection", async () => {
   await tick();
-    await tick();
-    await tick();
     const calls: string[] = [];
 
     await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
       acquireAutorunLock: async () => {
-        await tick();
-  await tick();
-        await tick();
         await tick();
         calls.push("acquire-lock");
         return { lockDir: "test-lock", release: async () => {
@@ -92,9 +82,6 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
         await tick();
-  await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async () => (await tick(), [
@@ -121,8 +108,6 @@ describe("runAutoDiscovery", () => {
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
     const logs = await captureLogs(async () => {
   await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async () => (await tick(), [
@@ -143,8 +128,6 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
   await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async () => (await tick(), [
@@ -176,8 +159,6 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
   await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async () => (await tick(), [
@@ -207,8 +188,6 @@ describe("runAutoDiscovery", () => {
 
     const logs = await captureLogs(async () => {
   await tick();
-      await tick();
-      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true, limit: 2 }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async () => (await tick(), [
@@ -236,9 +215,6 @@ describe("runAutoDiscovery", () => {
 
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     let preflighted = false;
     let claimed = false;
 
@@ -256,11 +232,9 @@ describe("runAutoDiscovery", () => {
       })),
       assertCleanAutorunGit: async () => {
         await tick();
-        await tick();
         preflighted = true;
       },
       claimGitHubIssue: async () => {
-        await tick();
         await tick();
         claimed = true;
       },
@@ -272,20 +246,15 @@ describe("runAutoDiscovery", () => {
 
   test("targeted auto ensures labels before fetching the requested issue", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const calls: string[] = [];
     await runAutoDiscovery({ ...baseOptions(), issue: "owner/repo#29", dryRun: true }, {
       ...noOpAutorunLock,
       ensureAutorunLabelContract: async () => {
         await tick();
-        await tick();
         calls.push("ensure-labels");
         return { existing: [], missing: [], created: [] };
       },
       listOpenGitHubIssues: async () => {
-        await tick();
         await tick();
         throw new Error("targeted auto should not list issues");
       },
@@ -301,9 +270,6 @@ describe("runAutoDiscovery", () => {
 
   test("targeted auto refuses skip labels before claim", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     let claimed = false;
     let preflighted = false;
 
@@ -326,8 +292,6 @@ describe("runAutoDiscovery", () => {
 
   test("dirty autorun preflight runs before claim", async () => {
   await tick();
-    await tick();
-    await tick();
     const order: string[] = [];
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
@@ -335,12 +299,10 @@ describe("runAutoDiscovery", () => {
       fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
         await tick();
-        await tick();
         order.push("preflight");
         throw new Error("dirty worktree");
       },
       claimGitHubIssue: async () => {
-        await tick();
         await tick();
         order.push("claim");
       },
@@ -351,9 +313,6 @@ describe("runAutoDiscovery", () => {
 
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-recheck-"));
     tempDirs.push(cwd);
     const workspacePath = path.join(cwd, "managed-workspace");
@@ -380,9 +339,6 @@ describe("runAutoDiscovery", () => {
       },
       prepareCloneWorkspace: async () => {
         await tick();
-  await tick();
-        await tick();
-        await tick();
         calls.push("workspace");
         return {
           path: workspacePath,
@@ -407,9 +363,6 @@ describe("runAutoDiscovery", () => {
 
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-clone-workspace-"));
@@ -436,8 +389,6 @@ describe("runAutoDiscovery", () => {
       },
       prepareCloneWorkspace: async (input) => {
   await tick();
-        await tick();
-        await tick();
         calls.push(`workspace:${input.plan.branchName}`);
         expect(input.controlCwd).toBe(cwd);
         return {

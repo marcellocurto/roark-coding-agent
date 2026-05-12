@@ -5,8 +5,7 @@ import path from "node:path";
 import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 const fixedClock = { now: () => new Date("2026-05-06T12:00:00.000Z") };

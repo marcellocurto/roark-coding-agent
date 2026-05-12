@@ -7,12 +7,12 @@ import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
 import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
 
-const tick = () => Promise.resolve();
 import {
   buildIssueCreateArgv,
   createIssuesFromCurationPlan,
   type ProcessRunner,
 } from "./create-issues.ts";
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
@@ -49,9 +49,6 @@ describe("buildIssueCreateArgv", () => {
 describe("createIssuesFromCurationPlan", () => {
   test("dry-run reports approved plan items without calling GitHub or writing results", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: false });
     const plan = basePlan();
     plan.blockingIssuesToCreate.push({ planItemId: "bad", proposedTitle: "Bad" } as never);
@@ -62,7 +59,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       runner: async () => {
-        await tick();
         await tick();
         calls += 1;
         return okProcess("unexpected");
@@ -118,9 +114,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved run uses the resolved issue-create skill through the agent runner", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const requests: AgentRunRequest[] = [];
@@ -154,9 +147,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved publishing agent uses centralized thinking profiles", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     for (const [profile, expected] of [["fast", "low"], ["deep", "high"]] as const) {
       const context = await tempContext({ yes: true, thinkingProfile: profile });
       await writeJsonArtifact(context, "issueCurationPlan", basePlan());
@@ -186,8 +176,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved agent response must cover every creatable plan item exactly once", async () => {
   await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -209,9 +197,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved agent response rejects duplicate plan item results", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -236,9 +221,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved agent relationship outcomes must reference approved plan items with status and message", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -263,9 +245,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("approved agent relationship outcomes must include status and message", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -289,8 +268,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("missing resolved skill fails before invoking the publishing agent", async () => {
   await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     let agentCalls = 0;
@@ -333,9 +310,6 @@ describe("createIssuesFromCurationPlan", () => {
 
   test("rerun skips already-created plan item IDs unless forced", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     await writeJsonArtifact(context, "issueCreationResults", {

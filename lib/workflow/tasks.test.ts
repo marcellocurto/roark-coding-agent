@@ -6,8 +6,7 @@ import { artifactExists, baselineResetLogRef, createWorkflowContext, implementat
 import type { AgentRunner } from "./agent-runner.ts";
 import { AgentTaskRunError, codeRefinementTask, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
-
-const tick = () => Promise.resolve();
+import { tick } from "../test-utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -190,9 +189,6 @@ async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof creat
 describe("runAgentTask transient agent retry", () => {
   test("retries transient connection errors before writing the phase artifact", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await createContext();
     const validTriage = "# Triage\n\n## Verdict\nproceed\n";
     let calls = 0;
@@ -271,9 +267,6 @@ describe("runAgentTask transient agent retry", () => {
 
   test("exhausts immediate, one minute, and three minute retries before failing", async () => {
         await tick();
-  await tick();
-    await tick();
-    await tick();
     const context = await createContext();
     let calls = 0;
     const sleeps: number[] = [];
