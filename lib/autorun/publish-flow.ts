@@ -1,5 +1,7 @@
 import path from "node:path";
 import { artifactExists, artifactRelativePath, fixLogRef, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
+import { createIssuesFromCurationPlan } from "../issue-curation/create-issues.ts";
+import { issueCurationPhase } from "../workflow/issue-curation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishAutorunResult, type AutorunPublishOptions } from "./publish.ts";
@@ -35,6 +37,9 @@ export interface RunPublishGateInjected {
   runVerification?: typeof runVerification | undefined;
   writeVerificationArtifact?: typeof writeVerificationArtifact | undefined;
   handleNonPublish?: typeof handleNonPublish | undefined;
+  publishAutorunResult?: typeof publishAutorunResult | undefined;
+  postPrIssueCreation?: typeof createReviewerIssuesAfterPr | undefined;
+  publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
 }
 
 export async function runPublishGate(input: {
@@ -53,6 +58,9 @@ export async function runPublishGate(input: {
   const verify = injected.runVerification ?? runVerification;
   const writeVerification = injected.writeVerificationArtifact ?? writeVerificationArtifact;
   const nonPublish = injected.handleNonPublish ?? handleNonPublish;
+  const publishResult = injected.publishAutorunResult ?? publishAutorunResult;
+  const postPrIssueCreation = injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
+  const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
 
   const readinessMarkdown = await readReadinessArtifact(workflowContext);
   const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
@@ -73,7 +81,7 @@ export async function runPublishGate(input: {
   let decision = decidePublish({ readinessStatus, verification });
 
   if (decision.publish) {
-    const prUrl = await publishAutorunResult({
+    const prUrl = await publishResult({
       options,
       issue,
       branchPlan,
@@ -83,7 +91,7 @@ export async function runPublishGate(input: {
       attemptMetadataPath,
     });
     if (prUrl) {
-      await publishIssueLedgerComment({
+      await publishLedger({
         cwd: options.cwd,
         repo: options.repo,
         issueNumber: issue.number,
@@ -96,6 +104,11 @@ export async function runPublishGate(input: {
           attemptMetadataPath,
         }),
       });
+      try {
+        await postPrIssueCreation({ workflowContext, prUrl });
+      } catch (error) {
+        console.warn(`Reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
     return { outcome: "published", outcomeDetail: null };
   }
@@ -125,6 +138,21 @@ export async function runPublishGate(input: {
     outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
     outcomeDetail: decision.reason,
   };
+}
+
+export async function createReviewerIssuesAfterPr(input: {
+  workflowContext: WorkflowContext;
+  prUrl: string;
+}): Promise<void> {
+  await issueCurationPhase(input.workflowContext, undefined, { prUrl: input.prUrl });
+  const result = await createIssuesFromCurationPlan({
+    context: input.workflowContext,
+    approved: true,
+    approvalReason: "Roark opened the autorun pull request successfully",
+  });
+  if (result.failed.length > 0) {
+    console.warn(`Reviewer-generated issue creation reported ${result.failed.length} failure(s). See ${artifactRelativePath(input.workflowContext, "issueCreationResults")}.`);
+  }
 }
 
 export async function planVerificationRepair(

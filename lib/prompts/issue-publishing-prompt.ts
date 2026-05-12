@@ -2,7 +2,7 @@ import { artifactRelativePath, type WorkflowContext } from "../workflow/artifact
 
 export interface IssuePublishingPromptItem {
   planItemId: string;
-  kind: "blocking" | "follow-up";
+  kind: "blocking" | "external-blocker" | "follow-up" | "suggestion";
   title: string;
   labels: string[];
 }
@@ -15,6 +15,7 @@ export function issuePublishingPrompt(input: {
   context: WorkflowContext;
   sourcePlanPath?: string | undefined;
   resultPath?: string | undefined;
+  approvalReason?: string | undefined;
   allowedItems: IssuePublishingPromptItem[];
 }): string {
   const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");
@@ -23,7 +24,7 @@ export function issuePublishingPrompt(input: {
 
   return `<workflow_phase name="create_issues">
   <role>You are the approved issue-publishing agent for Roark.</role>
-  <approval_boundary>The user passed --yes. This approves publishing only the accepted plan items listed below.</approval_boundary>
+  <approval_boundary>${input.approvalReason ?? "The user passed --yes"}. This approves publishing only the accepted plan items listed below.</approval_boundary>
   <resolved_skill>Read and follow the available \`github-issue-create\` skill before taking any GitHub mutation. Use its duplicate-search, label, body-file, parent/sub-issue, blocked-by relationship, and relationship-reporting rules.</resolved_skill>
   <source_of_truth>The curation plan at \`${sourcePlanPath}\` is the only source of truth for what may be created. Do not create issues for rejected candidates, duplicate groups, parser warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
   <target_repo>${input.context.repo ?? "Use gh's current default repository after preflight."}</target_repo>
@@ -33,7 +34,7 @@ ${allowedItemsJson}
   <instructions>
     <instruction>Read \`${sourcePlanPath}\` and create issues only for the allowed planItemId values above.</instruction>
     <instruction>Before creating each issue, perform the duplicate search required by the resolved skill.</instruction>
-    <instruction>Use the issue bodies and labels from the plan. Preserve the existing triage label vocabulary, including \`needs-triage\`.</instruction>
+    <instruction>Use the issue bodies and labels from the plan. Preserve the human-review labels (\`needs-triage\`, \`needs-human\`) and classification labels (\`external-blocker\`, \`follow-up\`, \`suggestion\`).</instruction>
     <instruction>Use body files for \`gh issue create\` rather than putting long bodies directly in shell arguments.</instruction>
     <instruction>Create approved native GitHub parent/sub-issue and blocked-by relationships only when the plan explicitly approves them; body links are not a substitute for native relationships.</instruction>
     <instruction>Report relationship creation and verification outcomes in the JSON response. Each relationship outcome must include planItemId, status, and message.</instruction>

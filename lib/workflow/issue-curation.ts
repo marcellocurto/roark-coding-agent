@@ -1,11 +1,16 @@
 import path from "node:path";
+import { reviewerIssueClassificationLabels, reviewerIssueHumanLabels, type ReviewerIssueClassificationLabel } from "../issue-curation/labels.ts";
 import { ISSUE_CURATION_STATIC_ARTIFACT_REFS } from "./artifact-catalog.ts";
 import {
   artifactExists,
   artifactRelativePath,
   finalReviewRef,
   fixLogRef,
+  latestCompleteReviewCycle,
   readArtifact,
+  reviewARef,
+  reviewBRef,
+  type ArtifactRef,
   type WorkflowContext,
   writeJsonArtifact,
 } from "./artifacts.ts";
@@ -17,8 +22,10 @@ import {
   type ReviewFindingSource,
 } from "./findings.ts";
 
+export type IssuePlanClassification = ReviewerIssueClassificationLabel;
+
 export interface IssueCurationPlan {
-  version: 1;
+  version: 2;
   sourceIssue: {
     number: number;
     title: string;
@@ -29,9 +36,13 @@ export interface IssueCurationPlan {
     attempt?: number | undefined;
     generatedAt: string;
     artifactPaths: string[];
+    prUrl?: string | undefined;
   };
-  blockingIssuesToCreate: IssuePlanItem[];
-  followUpIssuesToCreate: IssuePlanItem[];
+  issuesToCreate: IssuePlanItem[];
+  /** Read compatibility for pre-v2 curation plans. New plans do not emit this field. */
+  blockingIssuesToCreate?: IssuePlanItem[] | undefined;
+  /** Read compatibility for pre-v2 curation plans. New plans do not emit this field. */
+  followUpIssuesToCreate?: IssuePlanItem[] | undefined;
   rejectedCandidates: RejectedCandidate[];
   duplicatesMerged: DuplicateGroup[];
   warnings: string[];
@@ -39,6 +50,7 @@ export interface IssueCurationPlan {
 
 export interface IssuePlanItem {
   planItemId: string;
+  classification: IssuePlanClassification;
   proposedTitle: string;
   proposedBody: string;
   sourceFindingIds: string[];
@@ -48,12 +60,14 @@ export interface IssuePlanItem {
   confidenceSummary: string;
   evidence: string[];
   impact: string;
+  recommendedHandling: string[];
   whyBlockingOrNonBlocking: string;
   sourceIssueContext: IssueCurationPlan["sourceIssue"];
   runContext: {
     runDirRelative: string;
     attempt?: number | undefined;
     artifactPaths: string[];
+    prUrl?: string | undefined;
   };
   proposedLabels: string[];
 }
@@ -78,13 +92,18 @@ export interface DuplicateGroup {
 
 export interface Clock { now(): Date }
 
+export interface IssueCurationOptions {
+  prUrl?: string | undefined;
+}
+
 export const issueCurationDefaultClock: Clock = { now: () => new Date() };
 
 export async function issueCurationPhase(
   context: WorkflowContext,
   clock: Clock = issueCurationDefaultClock,
+  options: IssueCurationOptions = {},
 ): Promise<IssueCurationPlan> {
-  const plan = await buildIssueCurationPlan(context, clock);
+  const plan = await buildIssueCurationPlan(context, clock, options);
   await writeJsonArtifact(context, "issueCurationPlan", plan);
   console.log(`✓ Issue curation: wrote ${artifactRelativePath(context, "issueCurationPlan")}`);
   return plan;
@@ -93,17 +112,19 @@ export async function issueCurationPhase(
 export async function buildIssueCurationPlan(
   context: WorkflowContext,
   clock: Clock = issueCurationDefaultClock,
+  options: IssueCurationOptions = {},
 ): Promise<IssueCurationPlan> {
   const warnings: string[] = [];
   const sourceIssue = await loadSourceIssueContext(context, warnings);
   const artifactPaths = collectAvailableArtifactPaths(context);
-  const reviewA = await readOptionalArtifact(context, "reviewA", warnings);
-  const reviewB = await readOptionalArtifact(context, "reviewB", warnings);
+  const reviewArtifacts = latestReviewArtifacts(context);
+  const reviewA = await readOptionalArtifact(context, reviewArtifacts.reviewA, warnings);
+  const reviewB = await readOptionalArtifact(context, reviewArtifacts.reviewB, warnings);
   const parsed = parseReviewPairFindings({ reviewA: reviewA ?? "", reviewB: reviewB ?? "" });
 
   warnings.push(...parsed.reviewA.warnings, ...parsed.reviewB.warnings);
-  if (!parsed.reviewA.hasLedger && reviewA !== undefined) warnings.push("review-a.md does not contain a Findings Ledger.");
-  if (!parsed.reviewB.hasLedger && reviewB !== undefined) warnings.push("review-b.md does not contain a Findings Ledger.");
+  if (!parsed.reviewA.hasLedger && reviewA !== undefined) warnings.push(`${artifactDisplayPath(context, reviewArtifacts.reviewA)} does not contain a Findings Ledger.`);
+  if (!parsed.reviewB.hasLedger && reviewB !== undefined) warnings.push(`${artifactDisplayPath(context, reviewArtifacts.reviewB)} does not contain a Findings Ledger.`);
 
   const rejectedCandidates: RejectedCandidate[] = [
     ...parsed.reviewA.rejected.map(rejectedParserFindingToCandidate),
@@ -123,37 +144,27 @@ export async function buildIssueCurationPlan(
   }
 
   const duplicateGroups: DuplicateGroup[] = [];
-  const blockingGroups = groupDuplicateFindings(accepted.filter((finding) => finding.classification === "external-blocker"));
-  const followUpGroups = groupDuplicateFindings(accepted.filter((finding) => finding.classification === "follow-up"));
-
-  const blockingIssuesToCreate = buildIssuePlanItems({
-    groups: blockingGroups,
-    kind: "blocking",
+  const issuesToCreate = reviewerIssueClassificationLabels.flatMap((classification) => buildIssuePlanItems({
+    groups: groupDuplicateFindings(accepted.filter((finding) => finding.classification === classification)),
+    classification,
     sourceIssue,
     context,
     artifactPaths,
     duplicateGroups,
-  });
-  const followUpIssuesToCreate = buildIssuePlanItems({
-    groups: followUpGroups,
-    kind: "follow-up",
-    sourceIssue,
-    context,
-    artifactPaths,
-    duplicateGroups,
-  });
+    prUrl: options.prUrl,
+  }));
 
   return {
-    version: 1,
+    version: 2,
     sourceIssue,
     run: {
       runDirRelative: toPosix(context.runDirRelative),
       ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
       generatedAt: clock.now().toISOString(),
       artifactPaths,
+      ...(options.prUrl ? { prUrl: options.prUrl } : {}),
     },
-    blockingIssuesToCreate,
-    followUpIssuesToCreate,
+    issuesToCreate,
     rejectedCandidates,
     duplicatesMerged: duplicateGroups,
     warnings,
@@ -161,7 +172,6 @@ export async function buildIssueCurationPlan(
 }
 
 function issueCandidateRejectionReason(finding: NormalizedReviewerFinding): string | undefined {
-  if (finding.classification === "suggestion") return "suggestions are not issue candidates by default";
   if (finding.classification === "must-fix-current") return "must-fix-current findings belong to the current issue/fix pass and are not promoted by default";
   if (!hasConcreteContent(finding.evidence)) return "missing concrete evidence";
   if (!hasConcreteContent(finding.currentIssueImpact)) return "missing current-issue or future-user impact";
@@ -216,17 +226,18 @@ function areDuplicateFindings(left: NormalizedReviewerFinding, right: Normalized
 
 function buildIssuePlanItems(input: {
   groups: NormalizedReviewerFinding[][];
-  kind: "blocking" | "follow-up";
+  classification: IssuePlanClassification;
   sourceIssue: IssueCurationPlan["sourceIssue"];
   context: WorkflowContext;
   artifactPaths: string[];
   duplicateGroups: DuplicateGroup[];
+  prUrl?: string | undefined;
 }): IssuePlanItem[] {
   return input.groups.map((group, index) => {
     const representative = group[0];
     if (!representative) throw new Error("empty issue curation group");
 
-    const planItemId = `${input.kind}-${index + 1}`;
+    const planItemId = `${input.classification}-${index + 1}`;
     const sourceFindingIds = unique(group.map((finding) => finding.workflowId));
     const reviewerSources = unique(group.map((finding) => finding.source));
     const sourceClassifications = unique(group.map((finding) => finding.classification));
@@ -234,12 +245,11 @@ function buildIssuePlanItems(input: {
     const impacts = unique(group.map((finding) => finding.currentIssueImpact));
     const handling = unique(group.map((finding) => finding.recommendedHandling));
     const proposedTitle = representative.suggestedIssueTitle ?? representative.title;
-    const whyBlockingOrNonBlocking = input.kind === "blocking"
-      ? "Blocking: the reviewers classified this as an external-blocker needed to explain why the current issue cannot proceed."
-      : "Non-blocking follow-up: the reviewers classified this as future work separate from the current issue.";
+    const whyBlockingOrNonBlocking = classificationExplanation(input.classification);
 
     const item: IssuePlanItem = {
       planItemId,
+      classification: input.classification,
       proposedTitle,
       proposedBody: "",
       sourceFindingIds,
@@ -249,16 +259,18 @@ function buildIssuePlanItems(input: {
       confidenceSummary: summarizeField("confidence", group.map((finding) => finding.confidence)),
       evidence,
       impact: impacts.join("\n\n"),
+      recommendedHandling: handling,
       whyBlockingOrNonBlocking,
       sourceIssueContext: input.sourceIssue,
       runContext: {
         runDirRelative: toPosix(input.context.runDirRelative),
         ...(input.context.attempt !== undefined ? { attempt: input.context.attempt } : {}),
         artifactPaths: input.artifactPaths,
+        ...(input.prUrl ? { prUrl: input.prUrl } : {}),
       },
-      proposedLabels: input.kind === "blocking" ? ["needs-triage", "external-blocker"] : ["needs-triage", "follow-up"],
+      proposedLabels: unique([...reviewerIssueHumanLabels, input.classification]),
     };
-    item.proposedBody = buildProposedIssueBody({ item, handling, kind: input.kind });
+    item.proposedBody = buildProposedIssueBody({ item });
 
     if (group.length > 1) {
       input.duplicateGroups.push({
@@ -273,39 +285,57 @@ function buildIssuePlanItems(input: {
   });
 }
 
-function buildProposedIssueBody(input: {
-  item: IssuePlanItem;
-  handling: string[];
-  kind: "blocking" | "follow-up";
-}): string {
+function classificationExplanation(classification: IssuePlanClassification): string {
+  if (classification === "external-blocker") return "External blocker: reviewers classified this as prerequisite or external work needed to explain why the current issue could not proceed normally.";
+  if (classification === "suggestion") return "Suggestion: reviewers classified this as optional improvement work that should be triaged by a human before implementation.";
+  return "Non-blocking follow-up: reviewers classified this as future work separate from the current issue.";
+}
+
+function buildProposedIssueBody(input: { item: IssuePlanItem }): string {
   const issue = input.item.sourceIssueContext;
   const issueLink = issue.url ? ` (${issue.url})` : "";
   const attempt = input.item.runContext.attempt === undefined ? "not specified" : String(input.item.runContext.attempt);
-  const classification = input.item.sourceClassifications.join(", ");
-  const nonGoals = input.kind === "follow-up"
-    ? "\n## Non-goals\n- Do not rework the already-completed source issue beyond this follow-up scope.\n- Do not broaden this into an unrelated repository audit.\n"
+  const prLine = input.item.runContext.prUrl ? `- Pull request: ${input.item.runContext.prUrl}\n` : "";
+  const nonGoals = input.item.classification === "follow-up" || input.item.classification === "suggestion"
+    ? "\n## Non-goals\n- Do not rework the already-completed source issue beyond this generated issue's scope.\n- Do not broaden this into an unrelated repository audit.\n"
     : "";
 
-  return `## Source\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n- Source finding IDs: ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${classification}\n\n## Why this is ${input.kind === "blocking" ? "blocking" : "non-blocking"}\n${input.item.whyBlockingOrNonBlocking}\n\n## Evidence\n${input.item.evidence.map((evidence) => `- ${evidence}`).join("\n")}\n\n## Impact\n${input.item.impact}\n\n## Recommended handling\n${input.handling.map((handling) => `- ${handling}`).join("\n")}\n\n## Run artifacts\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n${nonGoals}`;
+  return `## Source\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n- Source finding IDs: ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n\n## Why Roark created this candidate\n${input.item.whyBlockingOrNonBlocking}\n\n## Evidence\n${input.item.evidence.map((evidence) => `- ${evidence}`).join("\n")}\n\n## Impact\n${input.item.impact}\n\n## Recommended handling\n${input.item.recommendedHandling.map((handling) => `- ${handling}`).join("\n")}\n\n## Run artifacts\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n${nonGoals}`;
 }
 
 async function readOptionalArtifact(
   context: WorkflowContext,
-  artifact: "issue" | "metadata" | "reviewA" | "reviewB",
+  artifact: ArtifactRef,
   warnings: string[],
 ): Promise<string | undefined> {
   if (!artifactExists(context, artifact)) {
-    if (artifact === "reviewA") warnings.push("review-a.md is missing; treating Review Agent A findings as empty.");
-    if (artifact === "reviewB") warnings.push("review-b.md is missing; treating Review Agent B findings as empty.");
+    if (isReviewArtifact(artifact, "reviewA")) warnings.push(`${artifactDisplayPath(context, artifact)} is missing; treating Review Agent A findings as empty.`);
+    if (isReviewArtifact(artifact, "reviewB")) warnings.push(`${artifactDisplayPath(context, artifact)} is missing; treating Review Agent B findings as empty.`);
     return undefined;
   }
 
   try {
     return await readArtifact(context, artifact);
   } catch (error) {
-    warnings.push(`Could not read ${artifactRelativePath(context, artifact)}: ${error instanceof Error ? error.message : String(error)}`);
+    warnings.push(`Could not read ${artifactDisplayPath(context, artifact)}: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
+}
+
+function latestReviewArtifacts(context: WorkflowContext): { reviewA: ArtifactRef; reviewB: ArtifactRef } {
+  const latestReviewCycle = latestCompleteReviewCycle(context);
+  if (latestReviewCycle !== undefined) {
+    return { reviewA: reviewARef(latestReviewCycle), reviewB: reviewBRef(latestReviewCycle) };
+  }
+  return { reviewA: "reviewA", reviewB: "reviewB" };
+}
+
+function isReviewArtifact(artifact: ArtifactRef, name: "reviewA" | "reviewB"): boolean {
+  return artifact === name || (typeof artifact !== "string" && artifact.name === name);
+}
+
+function artifactDisplayPath(context: WorkflowContext, artifact: ArtifactRef): string {
+  return toPosix(artifactRelativePath(context, artifact));
 }
 
 async function loadSourceIssueContext(
@@ -363,6 +393,13 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
     if (artifactExists(context, artifact)) artifacts.push(toPosix(artifactRelativePath(context, artifact)));
   }
 
+  for (let pass = 0; pass <= Math.max(context.maxFixPasses, 0) || artifactExists(context, reviewARef(pass)) || artifactExists(context, reviewBRef(pass)); pass++) {
+    const reviewA = reviewARef(pass);
+    const reviewB = reviewBRef(pass);
+    if (artifactExists(context, reviewA)) artifacts.push(toPosix(artifactRelativePath(context, reviewA)));
+    if (artifactExists(context, reviewB)) artifacts.push(toPosix(artifactRelativePath(context, reviewB)));
+  }
+
   for (let pass = 1; pass <= Math.max(context.maxFixPasses, 1) || artifactExists(context, fixLogRef(pass)) || artifactExists(context, finalReviewRef(pass)); pass++) {
     const fixLog = fixLogRef(pass);
     const finalReview = finalReviewRef(pass);
@@ -370,7 +407,7 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
     if (artifactExists(context, finalReview)) artifacts.push(toPosix(artifactRelativePath(context, finalReview)));
   }
 
-  return artifacts;
+  return unique(artifacts);
 }
 
 function rejectedParserFindingToCandidate(finding: RejectedReviewerFinding): RejectedCandidate {

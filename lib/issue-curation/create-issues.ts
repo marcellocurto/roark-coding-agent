@@ -4,13 +4,15 @@ import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/i
 import { resolveGithubIssueCreateSkillPath } from "../skills/skill-resolver.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import {
+  artifactAgentPath,
   artifactExists,
   artifactRelativePath,
   readArtifact,
   type WorkflowContext,
   writeJsonArtifact,
 } from "../workflow/artifacts.ts";
-import type { DuplicateGroup, IssueCurationPlan } from "../workflow/issue-curation.ts";
+import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
+import { ensureReviewerIssueLabels, reviewerIssueClassificationLabels, reviewerIssueHumanLabels } from "./labels.ts";
 
 export interface IssueCreateArgvOptions {
   repo?: string | undefined  ;
@@ -40,7 +42,7 @@ export interface IssueCreationFailedEntry {
 
 export interface IssueCreationSkippedEntry {
   planItemId: string;
-  kind: IssuePlanKind;
+  kind: IssueCreationSkippedKind;
   title?: string | undefined;
   reason: "already-created" | "malformed";
   message: string;
@@ -103,9 +105,13 @@ export interface CreateIssuesOptions {
   agentRunner?: AgentRunner | undefined;
   skillResolver?: ((cwd: string) => Promise<string>) | undefined;
   clock?: { now(): Date } | undefined;
+  approved?: boolean | undefined;
+  approvalReason?: string | undefined;
+  labelEnsurer?: ((options: { cwd: string; repo?: string | undefined }) => Promise<unknown>) | false | undefined;
 }
 
-type IssuePlanKind = "blocking" | "follow-up";
+type IssuePlanKind = IssuePlanClassification | "blocking";
+type IssueCreationSkippedKind = IssuePlanKind | "unknown";
 
 interface ValidPlanItem {
   kind: IssuePlanKind;
@@ -116,10 +122,9 @@ interface ValidPlanItem {
 }
 
 const issueCreationDefaultClock = { now: () => new Date() };
-const requiredTriageLabel = "needs-triage";
 
 export function buildIssueCreateArgv(options: IssueCreateArgvOptions): string[] {
-  const labels = normalizeLabels([requiredTriageLabel, ...(options.labels ?? [])]);
+  const labels = normalizeLabels([...reviewerIssueHumanLabels, ...(options.labels ?? [])]);
   const labelArgs = labels.flatMap((label) => ["--label", label]);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return [
@@ -145,6 +150,8 @@ export async function createIssuesPhase(context: WorkflowContext, agentRunner: A
 
 export async function createIssuesFromCurationPlan(options: CreateIssuesOptions): Promise<IssueCreationResults> {
   const { context, runner, agentRunner = runPiAgent, skillResolver = resolveGithubIssueCreateSkillPath, clock = issueCreationDefaultClock } = options;
+  const approved = options.approved ?? context.yes;
+  const approvalReason = options.approvalReason ?? (context.yes ? "The user passed --yes" : "An internal caller explicitly approved publishing");
   const plan = await readIssueCurationPlan(context);
   const sourcePlanPath = artifactRelativePath(context, "issueCurationPlan");
   const resultPath = artifactRelativePath(context, "issueCreationResults");
@@ -167,12 +174,12 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     return true;
   });
 
-  if (!context.yes) {
+  if (!approved) {
     const wouldCreate = creatable.map((item) => ({
       planItemId: item.planItemId,
       kind: item.kind,
       title: item.title,
-      labels: normalizeLabels([requiredTriageLabel, ...item.labels]),
+      labels: labelsForPlanItem(item),
     }));
     const result = buildResult({
       context,
@@ -194,15 +201,47 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     return result;
   }
 
+  if (creatable.length > 0 && !runner) {
+    const labelEnsurer = options.labelEnsurer ?? ensureReviewerIssueLabels;
+    if (labelEnsurer !== false) {
+      try {
+        await labelEnsurer({ cwd: context.agentCwd, repo: context.repo });
+      } catch (error) {
+        const message = `Required reviewer-generated issue labels could not be ensured: ${error instanceof Error ? error.message : String(error)}`;
+        const result = buildResult({
+          context,
+          plan,
+          sourcePlanPath,
+          resultPath,
+          generatedAt: clock.now().toISOString(),
+          dryRun: false,
+          approved: true,
+          existingCreated,
+          createdCurrentRun: [],
+          failed: creatable.map((item) => ({ planItemId: item.planItemId, kind: item.kind, title: item.title, message })),
+          skipped,
+          wouldCreate: [],
+          relationshipOutcomes: [],
+          countsInput: collected.counts,
+        });
+        await writeJsonArtifact(context, "issueCreationResults", result);
+        printApprovedSummary(context, result);
+        return result;
+      }
+    }
+  }
+
   const publishResult = runner
     ? await publishIssuesDirectlyWithProcessRunner(context, creatable, runner)
     : await publishIssuesWithResolvedSkill({
       context,
       sourcePlanPath,
-      resultPath,
+      promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
+      promptResultPath: artifactAgentPath(context, "issueCreationResults"),
       creatable,
       agentRunner,
       skillResolver,
+      approvalReason,
     });
 
   const result = buildResult({
@@ -242,7 +281,7 @@ async function publishIssuesDirectlyWithProcessRunner(
 
   console.log(`\n=== Create issues from ${artifactRelativePath(context, "issueCurationPlan")} ===`);
   for (const item of creatable) {
-    const argv = buildIssueCreateArgv({ repo: context.repo, title: item.title, body: item.body, labels: item.labels });
+    const argv = buildIssueCreateArgv({ repo: context.repo, title: item.title, body: item.body, labels: labelsForPlanItem(item) });
     console.log(`- Creating ${item.planItemId}: ${item.title}`);
     try {
       const processResult = await runner(argv, { cwd: context.agentCwd });
@@ -282,12 +321,14 @@ async function publishIssuesDirectlyWithProcessRunner(
 async function publishIssuesWithResolvedSkill(input: {
   context: WorkflowContext;
   sourcePlanPath: string;
-  resultPath: string;
+  promptSourcePlanPath: string;
+  promptResultPath: string;
   creatable: ValidPlanItem[];
   agentRunner: AgentRunner;
   skillResolver: (cwd: string) => Promise<string>;
+  approvalReason: string;
 }): Promise<PublishResult> {
-  const { context, sourcePlanPath, resultPath, creatable, agentRunner, skillResolver } = input;
+  const { context, sourcePlanPath, promptSourcePlanPath, promptResultPath, creatable, agentRunner, skillResolver, approvalReason } = input;
   if (creatable.length === 0) return { createdCurrentRun: [], failed: [], relationshipOutcomes: [] };
 
   const skillPath = await skillResolver(context.agentCwd);
@@ -301,13 +342,14 @@ async function publishIssuesWithResolvedSkill(input: {
       systemPrompt: issuePublishingSystemPrompt(),
       prompt: issuePublishingPrompt({
         context,
-        sourcePlanPath,
-        resultPath,
+        sourcePlanPath: promptSourcePlanPath,
+        resultPath: promptResultPath,
+        approvalReason,
         allowedItems: creatable.map((item) => ({
           planItemId: item.planItemId,
           kind: item.kind,
           title: item.title,
-          labels: normalizeLabels([requiredTriageLabel, ...item.labels]),
+          labels: labelsForPlanItem(item),
         })),
       }),
       writable: false,
@@ -467,7 +509,7 @@ async function readExistingCreatedEntries(context: WorkflowContext): Promise<Iss
       if (!isRecord(entry)) return [];
       const planItemId = asNonEmptyString(entry["planItemId"]);
       const title = asNonEmptyString(entry["title"]);
-      const kind = entry["kind"] === "blocking" || entry["kind"] === "follow-up" ? entry["kind"] : undefined;
+      const kind = parseIssuePlanKind(entry["kind"]);
       if (!planItemId || !title || !kind) return [];
       return [{
         planItemId,
@@ -490,15 +532,31 @@ function collectPlanItems(plan: IssueCurationPlan): {
   malformed: IssueCreationSkippedEntry[];
   counts: Pick<IssueCreationResults["counts"], "acceptedPlanItems" | "skippedRejectedCandidates" | "skippedDuplicateGroups" | "skippedDuplicateSourceFindings" | "skippedParserWarnings" | "skippedMalformed">;
 } {
-  const blocking = asArray((plan as Partial<IssueCurationPlan>).blockingIssuesToCreate);
-  const followUps = asArray((plan as Partial<IssueCurationPlan>).followUpIssuesToCreate);
-  const accepted = [
-    ...blocking.map((item, index) => ({ raw: item, kind: "blocking" as const, index })),
-    ...followUps.map((item, index) => ({ raw: item, kind: "follow-up" as const, index })),
-  ];
+  const normalized = (plan as Partial<IssueCurationPlan>).issuesToCreate;
+  const classificationMalformed: IssueCreationSkippedEntry[] = [];
+  const accepted = Array.isArray(normalized)
+    ? normalized.flatMap((item, index) => {
+      const record = isRecord(item) ? item : undefined;
+      const classification = parseIssuePlanClassification(record?.classification);
+      if (!classification) {
+        classificationMalformed.push(malformedSkip(
+          record ? asNonEmptyString(record.planItemId) ?? `unclassified-${index + 1}` : `unclassified-${index + 1}`,
+          "unknown",
+          record ? asNonEmptyString(record.proposedTitle) : undefined,
+          "Missing or invalid required field(s): classification. Expected one of: external-blocker, follow-up, suggestion.",
+        ));
+        return [];
+      }
+      return [{ raw: item, kind: classification, index }];
+    })
+    : [
+      ...asArray((plan as Partial<IssueCurationPlan>).blockingIssuesToCreate).map((item, index) => ({ raw: item, kind: "blocking" as const, index })),
+      ...asArray((plan as Partial<IssueCurationPlan>).followUpIssuesToCreate).map((item, index) => ({ raw: item, kind: "follow-up" as const, index })),
+    ];
+  const acceptedPlanItemCount = Array.isArray(normalized) ? normalized.length : accepted.length;
 
   const valid: ValidPlanItem[] = [];
-  const malformed: IssueCreationSkippedEntry[] = [];
+  const malformed: IssueCreationSkippedEntry[] = [...classificationMalformed];
   for (const entry of accepted) {
     const parsed = parseValidPlanItem(entry.raw, entry.kind, entry.index);
     if ("item" in parsed) valid.push(parsed.item);
@@ -512,7 +570,7 @@ function collectPlanItems(plan: IssueCurationPlan): {
     valid,
     malformed,
     counts: {
-      acceptedPlanItems: accepted.length,
+      acceptedPlanItems: acceptedPlanItemCount,
       skippedRejectedCandidates: rejectedCandidates.length,
       skippedDuplicateGroups: duplicatesMerged.length,
       skippedDuplicateSourceFindings: duplicatesMerged.reduce((total, group) => {
@@ -554,7 +612,7 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
   };
 }
 
-function malformedSkip(planItemId: string, kind: IssuePlanKind, title: string | undefined, message: string): IssueCreationSkippedEntry {
+function malformedSkip(planItemId: string, kind: IssueCreationSkippedKind, title: string | undefined, message: string): IssueCreationSkippedEntry {
   return {
     planItemId,
     kind,
@@ -562,6 +620,15 @@ function malformedSkip(planItemId: string, kind: IssuePlanKind, title: string | 
     reason: "malformed",
     message,
   };
+}
+
+function parseIssuePlanKind(value: unknown): IssuePlanKind | undefined {
+  if (value === "blocking") return value;
+  return parseIssuePlanClassification(value);
+}
+
+function parseIssuePlanClassification(value: unknown): IssuePlanClassification | undefined {
+  return reviewerIssueClassificationLabels.find((label) => label === value);
 }
 
 function buildResult(input: {
@@ -606,6 +673,14 @@ function buildResult(input: {
   };
 }
 
+function labelsForPlanItem(item: Pick<ValidPlanItem, "kind" | "labels">): string[] {
+  return normalizeLabels([...reviewerIssueHumanLabels, classificationLabelForKind(item.kind), ...item.labels]);
+}
+
+function classificationLabelForKind(kind: IssuePlanKind): IssuePlanClassification {
+  return kind === "blocking" ? "external-blocker" : kind;
+}
+
 function normalizeLabels(labels: string[]): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -633,7 +708,7 @@ function printDryRunSummary(context: WorkflowContext, result: IssueCreationResul
   console.log("No GitHub issues were created. Pass --yes to create approved plan items.");
   console.log(`Target repo: ${context.repo ?? "gh default repository"}`);
   if (result.wouldCreate.length === 0) {
-    console.log("No approved plan items would be created.");
+    console.log(`No approved plan items would be created. ${zeroCreatedExplanation(result)}`);
   } else {
     for (const item of result.wouldCreate) {
       console.log(`- ${item.planItemId} [${item.kind}]: ${item.title}`);
@@ -646,6 +721,7 @@ function printDryRunSummary(context: WorkflowContext, result: IssueCreationResul
 function printApprovedSummary(context: WorkflowContext, result: IssueCreationResults): void {
   console.log(`\n✓ Issue creation: wrote ${artifactRelativePath(context, "issueCreationResults")}`);
   console.log(`Created this run: ${result.counts.createdCurrentRun}; failed: ${result.failed.length}; skipped already-created: ${result.counts.skippedAlreadyCreated}; malformed: ${result.counts.skippedMalformed}.`);
+  if (result.counts.createdCurrentRun === 0) console.log(`Zero created explanation: ${zeroCreatedExplanation(result)}`);
   for (const entry of result.created.filter((created) => created.source === "current-run")) {
     console.log(`- created ${entry.planItemId}${entry.url ? `: ${entry.url}` : ""}`);
   }
@@ -657,6 +733,18 @@ function printApprovedSummary(context: WorkflowContext, result: IssueCreationRes
 
 function printSkippedCounts(result: IssueCreationResults): void {
   console.log(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; parser warnings: ${result.counts.skippedParserWarnings}.`);
+}
+
+function zeroCreatedExplanation(result: IssueCreationResults): string {
+  if (result.counts.acceptedPlanItems === 0) {
+    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review parser warnings and missing artifacts in the curation plan.";
+    if (result.counts.skippedRejectedCandidates > 0) return "All parsed candidates were rejected by curation policy; inspect rejectedCandidates for reasons.";
+    return "The curation plan contains no accepted reviewer findings.";
+  }
+  if (result.counts.skippedAlreadyCreated >= result.counts.acceptedPlanItems) return "All accepted plan items were already recorded as created; use --force only if you intentionally want duplicates.";
+  if (result.counts.skippedMalformed > 0) return "Accepted plan items were malformed and skipped; inspect skipped entries in issue-creation-results.json.";
+  if (result.failed.length > 0) return "Publishing or label setup failed; inspect failed entries in issue-creation-results.json.";
+  return "No creatable plan items remained after idempotence and validation checks.";
 }
 
 function asArray(value: unknown): unknown[] {
