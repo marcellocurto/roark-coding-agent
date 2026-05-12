@@ -40,6 +40,7 @@ export interface AttemptWorkspaceMetadata {
 export interface PreparedWorkspace {
   path: string;
   metadata: AttemptWorkspaceMetadata;
+  releaseLock?: (() => Promise<void>) | undefined;
 }
 
 export type WorkspaceCommandOptions =
@@ -58,6 +59,12 @@ export const defaultWorkspaceConfig: WorkspaceConfig = {
 export const defaultLifecycleHooks: LifecycleHooksConfig = { timeoutMs: 600_000 };
 
 export type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
+
+interface WorkspaceLockOwner {
+  token: string;
+  pid: number;
+  createdAt: string;
+}
 
 export function expandHome(input: string): string {
   if (input === "~") return os.homedir();
@@ -444,6 +451,62 @@ export async function removeWorkspace(input: { workspacePath: string; force: boo
   await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath);
   await rm(input.workspacePath, { recursive: true, force: true });
   await rm(legacyLockPath, { recursive: true, force: true });
+}
+
+async function acquireWorkspaceLock(workspacePath: string): Promise<() => Promise<void>> {
+  const lockDir = `${workspacePath}.lock`;
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  await mkdir(path.dirname(lockDir), { recursive: true });
+
+  for (;;) {
+    try {
+      await mkdir(lockDir);
+      const owner: WorkspaceLockOwner = { token, pid: process.pid, createdAt: new Date().toISOString() };
+      await writeFile(path.join(lockDir, "owner.json"), JSON.stringify(owner, null, 2), "utf8");
+      return async () => {
+        if (await lockOwnerToken(lockDir) !== token) return;
+        await rm(lockDir, { recursive: true, force: true });
+      };
+    } catch (error) {
+      if (!isErrorWithCode(error, "EEXIST")) throw error;
+      if (await removeStaleWorkspaceLock(lockDir)) continue;
+      throw new Error(`Workspace '${workspacePath}' is already locked (lock: ${lockDir}).`);
+    }
+  }
+}
+
+async function lockOwnerToken(lockDir: string): Promise<string | undefined> {
+  try {
+    const owner = JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8")) as Partial<WorkspaceLockOwner>;
+    return owner.token;
+  } catch {
+    return undefined;
+  }
+}
+
+async function removeStaleWorkspaceLock(lockDir: string): Promise<boolean> {
+  let owner: Partial<WorkspaceLockOwner>;
+  try {
+    owner = JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8")) as Partial<WorkspaceLockOwner>;
+  } catch {
+    return false;
+  }
+  if (typeof owner.pid !== "number" || isProcessAlive(owner.pid)) return false;
+  await rm(lockDir, { recursive: true, force: true });
+  return true;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !isErrorWithCode(error, "ESRCH");
+  }
+}
+
+function isErrorWithCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code;
 }
 
 async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranchPlan; runner: ProcessRunner }): Promise<void> {
