@@ -181,7 +181,6 @@ See [PR revisions](pr-revisions.md).
 Symptoms:
 
 - issue claiming races
-- workspace lock errors
 - dirty workspace surprises
 
 Use scheduler-level serialization:

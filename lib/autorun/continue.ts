@@ -116,39 +116,35 @@ export async function runAutoContinue(
     runArtifactPath: workflowContext.runDirRelative,
   });
 
-  try {
-    const continuationPlan = await planContinuation(workflowContext, { attemptOutcome: attemptMetadata.outcome });
-    const initialVerificationRepairPass = verificationRepairPassFromPlan(continuationPlan);
-    if (isTerminalContinuationNoop(continuationPlan) && !options.force) {
+  const continuationPlan = await planContinuation(workflowContext, { attemptOutcome: attemptMetadata.outcome });
+  const initialVerificationRepairPass = verificationRepairPassFromPlan(continuationPlan);
+  if (isTerminalContinuationNoop(continuationPlan) && !options.force) {
+    console.log("\nContinuation plan:");
+    for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
+    return;
+  }
+
+  await runAutorunAttemptLifecycle({
+    issueDir,
+    workflowContext,
+    branchPlan,
+    gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
+    attemptMetadata,
+    loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
+    runner,
+    logPrefix: "Continue",
+    inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
+    initialVerificationRepairPass,
+    beforeWorkflow: () => {
       console.log("\nContinuation plan:");
       for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
-      return;
-    }
-
-    await runAutorunAttemptLifecycle({
-      issueDir,
-      workflowContext,
-      branchPlan,
-      gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
-      attemptMetadata,
-      loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
-      runner,
-      logPrefix: "Continue",
-      inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
-      initialVerificationRepairPass,
-      beforeWorkflow: () => {
-        console.log("\nContinuation plan:");
-        for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
-      },
-      beforeRun: async () => {
-        await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
-        await runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd);
-      },
-      afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
-    }, { clock });
-  } finally {
-    await preparedWorkspace?.releaseLock();
-  }
+    },
+    beforeRun: async () => {
+      await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
+      await runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd);
+    },
+    afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
+  }, { clock });
 
   console.log("\nContinue workflow complete.");
 }

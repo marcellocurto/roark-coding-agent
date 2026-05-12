@@ -40,7 +40,6 @@ export interface AttemptWorkspaceMetadata {
 export interface PreparedWorkspace {
   path: string;
   metadata: AttemptWorkspaceMetadata;
-  releaseLock: () => Promise<void>;
 }
 
 export type WorkspaceCommandOptions =
@@ -142,10 +141,7 @@ export async function prepareCloneWorkspace(input: {
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForIssue({ root, repo: input.repo, issueNumber: input.issueNumber, controlCwd: input.controlCwd }));
   await assertWorkspacePathSafe({ root, workspacePath });
-  const releaseLock = await acquireWorkspaceLock(workspacePath);
-
-  try {
-    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+  const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
     const createdNow = !existsSync(workspacePath);
 
     if (createdNow) {
@@ -181,12 +177,7 @@ export async function prepareCloneWorkspace(input: {
         cloneUrl: remote.url,
         createdNow,
       },
-      releaseLock,
     };
-  } catch (error) {
-    await releaseLock();
-    throw error;
-  }
 }
 
 export async function refreshCopyToWorktree(input: {
@@ -371,23 +362,6 @@ export async function removeWorkspace(input: { workspacePath: string; force: boo
   }
   await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath);
   await rm(input.workspacePath, { recursive: true, force: true });
-  await rm(`${input.workspacePath}.lock`, { recursive: true, force: true });
-}
-
-async function acquireWorkspaceLock(workspacePath: string): Promise<() => Promise<void>> {
-  const lockPath = `${workspacePath}.lock`;
-  await mkdir(path.dirname(lockPath), { recursive: true });
-  try {
-    await mkdir(lockPath);
-  } catch {
-    throw new Error(`Workspace '${workspacePath}' is locked by another Roark process.`);
-  }
-  let released = false;
-  return async () => {
-    if (released) return;
-    released = true;
-    await rm(lockPath, { recursive: true, force: true });
-  };
 }
 
 async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranchPlan; runner: ProcessRunner }): Promise<void> {

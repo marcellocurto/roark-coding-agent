@@ -54,6 +54,37 @@ describe("managed clone workspaces", () => {
     ]);
   });
 
+  test("existing legacy lock directory does not block workspace preparation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-stale-lock-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 75 });
+    await mkdir(`${workspacePath}.lock`, { recursive: true });
+    const runner: ProcessRunner = async (args) => {
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "clone") {
+        await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+        return ok();
+      }
+      return ok();
+    };
+
+    const prepared = await prepareCloneWorkspace({
+      controlCwd: root,
+      repo: "owner/repo",
+      issueNumber: 75,
+      plan: { issueNumber: 75, branchName: "roark/issue-75", baseBranch: "main" },
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      mode: "auto",
+      runner,
+    });
+
+    expect(prepared.path).toBe(workspacePath);
+    expect((await lstat(`${workspacePath}.lock`)).isDirectory()).toBe(true);
+    await rm(root, { recursive: true, force: true });
+  });
+
   test("fatal afterCreate hook poisons a fresh workspace", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-poison-"));
     const workspaceRoot = path.join(root, "managed");
@@ -204,7 +235,7 @@ describe("managed clone workspaces", () => {
       hooks: { ...defaultLifecycleHooks, afterCreate: "test -f local.env" },
       mode: "auto",
       runner,
-    }).then((prepared) => prepared.releaseLock());
+    });
     expect(calls.some((args) => args[0] === "sh")).toBe(true);
     await rm(root, { recursive: true, force: true });
   });

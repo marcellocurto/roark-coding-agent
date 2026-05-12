@@ -108,8 +108,6 @@ describe("runAutoContinue", () => {
         return {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
-          releaseLock: async () => {
-        await tick(); calls.push("release"); },
         };
       },
       runner: async () => {
@@ -119,7 +117,7 @@ describe("runAutoContinue", () => {
       },
     })).rejects.toThrow("Triage failed: triage failed");
 
-    expect(calls).toEqual([`prepare:${workspacePath}`, "runner", "release"]);
+    expect(calls).toEqual([`prepare:${workspacePath}`, "runner"]);
     expect(await Bun.file(path.join(workspacePath, "before-run.txt")).text()).toBe("before");
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
     expect(metadata.worktreePath).toBe(workspacePath);
