@@ -101,6 +101,34 @@ describe("runPrRevision", () => {
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-1");
   });
 
+  test("non-published isolated revisions remove mirrored workspace artifacts", async () => {
+    await tick();
+    const control = await tempGitRepo();
+    const workspace = await tempGitRepo();
+
+    const result = await runPrRevision(options(control), {
+      fetchFeedback: async () => (await tick(), feedback()),
+      prepareWorkspace: async () => {
+        await tick();
+        return {
+          path: workspace,
+          metadata: { path: workspace, strategy: "clone", cloneRemote: "origin", createdNow: false },
+          releaseLock: async () => { await Promise.resolve(); },
+        };
+      },
+      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      postSummaryComment: async () => {
+        await tick();
+        throw new Error("summary comment should not be posted for no-action-needed");
+      },
+    });
+
+    expect(result.outcome).toBe("no-action-needed");
+    expect(await Bun.file(path.join(result.context.revisionDir, "metadata.json")).exists()).toBe(true);
+    expect(await Bun.file(path.join(result.context.agentRevisionDir, "metadata.json")).exists()).toBe(false);
+    expect((await runOutput(["git", "status", "--porcelain"], workspace)).trim()).toBe("");
+  });
+
   test("allocates revision after checking out the PR head branch", async () => {
         await tick();
     const cwd = await tempGitRepo();
@@ -300,7 +328,7 @@ describe("runPrRevision", () => {
     expect(metadata.verificationFailureReason).toContain("Verification failed after 1 fix passes");
   });
 
-  test("successful isolated revision preserves the control checkout and force-adds ignored run artifacts", async () => {
+  test("successful isolated revision preserves the control checkout, uses configured remote, and force-adds ignored run artifacts", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-isolated-"));
     const seed = path.join(root, "seed");
     const remote = path.join(root, "remote.git");
@@ -325,12 +353,14 @@ describe("runPrRevision", () => {
     await run(["git", "push", "origin", "main", "feature/pr-12"], seed);
     await run(["git", "clone", remote, control], root);
     await run(["git", "checkout", "main"], control);
+    await run(["git", "remote", "add", "upstream", remote], control);
 
     const verificationCwds: string[] = [];
     const agentCwds: string[] = [];
     let calls = 0;
 
     const result = await runPrRevision(options(control, {
+      remote: "upstream",
       workspace: { root: workspaceRoot, strategy: "clone", cloneRemote: "origin", clone: { filter: null, depth: null }, copyToWorktree: [] },
       hooks: { timeoutMs: 10_000, afterCreate: "git config user.email roark@example.invalid && git config user.name 'Roark Test'" },
     }), {

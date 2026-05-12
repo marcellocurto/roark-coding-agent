@@ -1,6 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
@@ -22,6 +22,7 @@ import {
   formatPrFeedbackMarkdown,
   inferIssueFromPrBody,
   prRevisionArtifactRelativePath,
+  removeAgentPrRevisionArtifacts,
   type PrRevisionContext,
   writePrRevisionArtifact,
   writePrRevisionJsonArtifact,
@@ -107,11 +108,13 @@ export async function runPrRevision(
     if (planStatus === "no-action-needed") {
       await updateMetadata(context, feedback, { outcome: "no-action-needed", planStatus, endedAt: new Date().toISOString() });
       console.log("No action needed; not mutating code, committing, pushing, or commenting.");
+      await removeAgentPrRevisionArtifacts(context);
       return { outcome: "no-action-needed", context, planStatus };
     }
 
     if (planStatus === "needs-human") {
       await updateMetadata(context, feedback, { outcome: "needs-human", planStatus, endedAt: new Date().toISOString() });
+      await removeAgentPrRevisionArtifacts(context);
       await postSummary({
         context,
         outcome: "needs-human",
@@ -149,6 +152,7 @@ export async function runPrRevision(
       if (reviewVerdict === "fixes-required") {
         if (fixPassesUsed >= context.maxFixPasses) {
           await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
+          await removeAgentPrRevisionArtifacts(context);
           await postSummary({
             context,
             outcome: "review-blocked",
@@ -186,6 +190,7 @@ export async function runPrRevision(
 
       if (reviewVerdict === "blocked") {
         await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
+        await removeAgentPrRevisionArtifacts(context);
         await postSummary({
           context,
           outcome: "review-blocked",
@@ -219,6 +224,7 @@ export async function runPrRevision(
           fixPassesUsed,
           endedAt: new Date().toISOString(),
         });
+        await removeAgentPrRevisionArtifacts(context);
         await postSummary({
           context,
           outcome: "verification-failed",
@@ -262,6 +268,7 @@ export async function runPrRevision(
 
     if ((await dirtyLinesOutsideRoark(context.agentCwd)).length === 0) {
       await updateMetadata(context, feedback, { outcome: "no-code-changes", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
+      await removeAgentPrRevisionArtifacts(context);
       await postSummary({
         context,
         outcome: "no-code-changes",
@@ -471,6 +478,7 @@ function isRoarkPath(filePath: string): boolean {
 }
 
 async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<void> {
+  await ensurePushRemote(context);
   await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
   await runProcessOrThrow(["git", "add", "-f", "--", context.agentRevisionDirRelative], { cwd: context.agentCwd, label: "git add revision artifacts" });
   await runProcessOrThrow(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
@@ -478,6 +486,32 @@ async function commitAndPushRevision(context: PrRevisionContext, branchName: str
     label: "git commit",
   });
   await runProcessOrThrow(["git", "push", context.remote, `HEAD:${branchName}`], { cwd: context.agentCwd, label: `git push ${context.remote}` });
+}
+
+async function ensurePushRemote(context: PrRevisionContext): Promise<void> {
+  const agentRemote = await runProcess(["git", "remote", "get-url", context.remote], { cwd: context.agentCwd });
+  if (path.resolve(context.agentCwd) === path.resolve(context.controlCwd)) {
+    if (agentRemote.exitCode === 0 && agentRemote.stdout.trim()) return;
+    throw new Error(`Git remote '${context.remote}' is not configured in '${context.agentCwd}'.`);
+  }
+
+  const fetchUrl = (await runProcessOrThrow(["git", "remote", "get-url", context.remote], {
+    cwd: context.controlCwd,
+    label: `git remote get-url ${context.remote}`,
+  })).trim();
+  const pushUrl = (await runProcessOrThrow(["git", "remote", "get-url", "--push", context.remote], {
+    cwd: context.controlCwd,
+    label: `git remote get-url --push ${context.remote}`,
+  })).trim();
+
+  if (agentRemote.exitCode !== 0 || !agentRemote.stdout.trim()) {
+    await runProcessOrThrow(["git", "remote", "add", context.remote, fetchUrl], { cwd: context.agentCwd, label: `git remote add ${context.remote}` });
+  }
+
+  const agentPushUrl = await runProcess(["git", "remote", "get-url", "--push", context.remote], { cwd: context.agentCwd });
+  if (pushUrl && (agentPushUrl.exitCode !== 0 || agentPushUrl.stdout.trim() !== pushUrl)) {
+    await runProcessOrThrow(["git", "remote", "set-url", "--push", context.remote, pushUrl], { cwd: context.agentCwd, label: `git remote set-url --push ${context.remote}` });
+  }
 }
 
 function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): string[] {

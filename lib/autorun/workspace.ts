@@ -479,10 +479,23 @@ async function checkoutPrWorkspaceBranch(input: { cwd: string; headRefName: stri
     cwd: input.cwd,
     label: "git fetch PR head",
   });
+  await assertNoUnpushedBranchCommits({ cwd: input.cwd, branchName: input.headRefName, upstreamRef: `origin/${input.headRefName}`, runner: input.runner });
   await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.headRefName, `origin/${input.headRefName}`], {
     cwd: input.cwd,
     label: "git checkout PR head",
   });
+}
+
+async function assertNoUnpushedBranchCommits(input: { cwd: string; branchName: string; upstreamRef: string; runner: ProcessRunner }): Promise<void> {
+  const localBranch = await input.runner(["git", "show-ref", "--verify", "--quiet", `refs/heads/${input.branchName}`], { cwd: input.cwd });
+  if (localBranch.exitCode !== 0) return;
+  const ahead = await input.runner(["git", "rev-list", "--count", input.branchName, "--not", input.upstreamRef], { cwd: input.cwd });
+  if (ahead.exitCode !== 0) throw new Error(`Unable to inspect local commits on '${input.branchName}': ${tail(ahead.stderr || ahead.stdout)}`);
+  const aheadCount = Number(ahead.stdout.trim());
+  if (!Number.isFinite(aheadCount)) throw new Error(`Unable to inspect local commits on '${input.branchName}': unexpected rev-list output '${ahead.stdout.trim()}'.`);
+  if (aheadCount > 0) {
+    throw new Error(`Workspace '${input.cwd}' has ${aheadCount} unpushed local commit(s) on '${input.branchName}'. Refusing to reset it to '${input.upstreamRef}'. Push, remove, or repair the workspace before revising this PR.`);
+  }
 }
 
 async function updateWorkspaceFromBase(input: { cwd: string; baseBranch: string; preserveUncommitted: boolean; runner: ProcessRunner }): Promise<void> {

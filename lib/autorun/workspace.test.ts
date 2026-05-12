@@ -7,6 +7,7 @@ import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
   prepareCloneWorkspace,
+  preparePrRevisionWorkspace,
   refreshCopyToWorktree,
   resolveCloneRemote,
   runLifecycleHook,
@@ -88,6 +89,47 @@ describe("managed clone workspaces", () => {
     const state = JSON.parse(await readFile(path.join(workspacePath, workspaceStateFile), "utf8")) as { hook: string; stderrTail: string };
     expect(state.hook).toBe("afterCreate");
     expect(state.stderrTail).toContain("install failed");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("reused PR revision workspace refuses to reset unpushed local commits", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-workspace-unpushed-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 12 });
+    await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+    const calls: string[][] = [];
+    const runner: ProcessRunner = async (args) => {
+      await tick();
+      calls.push(args);
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "rev-parse") return ok("true\n");
+      if (args[0] === "git" && args[1] === "status") return ok("");
+      if (args[0] === "git" && args[1] === "fetch") return ok();
+      if (args[0] === "git" && args[1] === "show-ref") return ok();
+      if (args[0] === "git" && args[1] === "rev-list") return ok("1\n");
+      if (args[0] === "git" && args[1] === "checkout") return fail("checkout should not run");
+      return ok();
+    };
+
+    let error: unknown;
+    try {
+      await preparePrRevisionWorkspace({
+        controlCwd: root,
+        repo: "owner/repo",
+        prNumber: 12,
+        headRefName: "feature/pr-12",
+        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+        hooks: defaultLifecycleHooks,
+        runner,
+      });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error instanceof Error ? error.message : String(error)).toContain("unpushed local commit");
+    expect(calls.some((args) => args[0] === "git" && args[1] === "checkout")).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 

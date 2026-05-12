@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "../workflow/thinking.ts";
@@ -137,6 +137,11 @@ export async function writePrRevisionArtifact(context: PrRevisionContext, artifa
 
 export async function readPrRevisionArtifact(context: PrRevisionContext, artifact: string): Promise<string> {
   return readFile(prRevisionArtifactPath(context, artifact), "utf8");
+}
+
+export async function removeAgentPrRevisionArtifacts(context: PrRevisionContext): Promise<void> {
+  if (path.resolve(context.agentRevisionDir) === path.resolve(context.revisionDir)) return;
+  await rm(context.agentRevisionDir, { recursive: true, force: true });
 }
 
 export async function writePrRevisionJsonArtifact(context: PrRevisionContext, artifact: string, value: unknown): Promise<void> {
