@@ -16,7 +16,7 @@ import {
 } from "./verification.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { formatPrCreatedComment, publishIssueLedgerComment } from "./ledger-comments.ts";
-import { updateIssueBranchFromBase, type AutorunBranchPlan } from "./branch.ts";
+import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
 
@@ -31,7 +31,6 @@ export type PublishGateOutcome =
   | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
 
 export interface RunPublishGateInjected {
-  updateIssueBranchFromBase?: typeof updateIssueBranchFromBase | undefined;
   refreshCopyToWorktree?: typeof refreshCopyToWorktree | undefined;
   runLifecycleHook?: typeof runLifecycleHook | undefined;
   runVerification?: typeof runVerification | undefined;
@@ -52,7 +51,6 @@ export async function runPublishGate(input: {
   recoveryCommand?: string | undefined  ;
 }, injected: RunPublishGateInjected = {}): Promise<PublishGateOutcome> {
   const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
-  const updateBranch = injected.updateIssueBranchFromBase ?? updateIssueBranchFromBase;
   const refreshWorkspace = injected.refreshCopyToWorktree ?? refreshCopyToWorktree;
   const runHook = injected.runLifecycleHook ?? runLifecycleHook;
   const verify = injected.runVerification ?? runVerification;
@@ -67,11 +65,6 @@ export async function runPublishGate(input: {
 
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
-    await updateBranch({
-      agentCwd: workflowContext.agentCwd,
-      baseBranch: branchPlan.baseBranch,
-      preserveUncommitted: true,
-    });
     await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
     await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
     verification = await verify({ command: options.verifyCommand, cwd: workflowContext.agentCwd });

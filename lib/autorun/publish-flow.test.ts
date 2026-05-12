@@ -68,7 +68,6 @@ describe("verification repair planning", () => {
       attemptMetadata: attemptMetadata(context),
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      updateIssueBranchFromBase: async () => { await noopAsync(); },
       refreshCopyToWorktree: async () => { await noopAsync(); },
       runLifecycleHook: async () => { await noopAsync(); },
       runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
@@ -134,7 +133,6 @@ describe("verification repair planning", () => {
       attemptMetadata: attemptMetadata(context),
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      updateIssueBranchFromBase: async () => { await noopAsync(); },
       refreshCopyToWorktree: async () => { await noopAsync(); },
       runLifecycleHook: async () => { await noopAsync(); },
       runVerification: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
@@ -202,8 +200,6 @@ describe("verification repair planning", () => {
       },
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      updateIssueBranchFromBase: async () => {
-        await noopAsync();},
       refreshCopyToWorktree: async () => {
         await noopAsync();},
       runLifecycleHook: async () => {

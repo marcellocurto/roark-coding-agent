@@ -91,6 +91,39 @@ describe("managed clone workspaces", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  test("reused issue clone workspace does not merge or stash a moved origin base", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-no-base-sync-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 77 });
+    await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+    const calls: string[][] = [];
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      calls.push(args);
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "rev-parse") return ok("true\n");
+      if (args[0] === "git" && args[1] === "branch") return ok("roark/issue-77\n");
+      if (args[0] === "git" && ["fetch", "merge", "stash"].includes(args[1] ?? "")) return fail(`${args[1] ?? "git command"} should not run`);
+      return ok();
+    };
+
+    const prepared = await prepareCloneWorkspace({
+      controlCwd: root,
+      repo: "owner/repo",
+      issueNumber: 77,
+      plan: { issueNumber: 77, branchName: "roark/issue-77", baseBranch: "main" },
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      mode: "continue",
+      runner,
+    });
+
+    expect(prepared.path).toBe(workspacePath);
+    expect(calls.some((args) => args[0] === "git" && ["fetch", "merge", "stash"].includes(args[1] ?? ""))).toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
   test("legacy lock sidecars are not listed and are removed with workspaces", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-legacy-lock-"));
     const workspaceRoot = path.join(root, "managed");
