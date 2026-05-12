@@ -1,16 +1,16 @@
 import { ensureGitHubLabels, type EnsureGitHubLabelsResult, type RequiredGitHubLabel } from "../github/labels.ts";
 
-export type AutorunLabelContractInput = {
-  readyLabel?: string;
+export interface AutorunLabelContractInput {
+  readyLabel?: string | undefined;
   inProgressLabel: string;
   failureLabel: string;
   successLabel: string;
-};
+}
 
 export type EnsureAutorunLabelContractOptions = AutorunLabelContractInput & {
   cwd: string;
-  repo?: string;
-  dryRun?: boolean;
+  repo?: string | undefined  ;
+  dryRun?: boolean | undefined;
 };
 
 export const autorunBlockedLabel = "blocked";
@@ -84,7 +84,7 @@ export function mergeLifecycleSkipLabels(input: {
   ]);
 }
 
-function uniqueLabels(labels: Array<RequiredGitHubLabel | undefined>): RequiredGitHubLabel[] {
+function uniqueLabels(labels: (RequiredGitHubLabel | undefined)[]): RequiredGitHubLabel[] {
   const seen = new Set<string>();
   const result: RequiredGitHubLabel[] = [];
   for (const label of labels) {

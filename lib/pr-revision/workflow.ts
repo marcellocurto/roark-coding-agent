@@ -38,24 +38,24 @@ export type PrRevisionOutcome =
   | "no-code-changes"
   | "published";
 
-export type PrRevisionResult = {
+export interface PrRevisionResult {
   outcome: PrRevisionOutcome;
   context: PrRevisionContext;
-  planStatus?: RevisionPlanStatus;
-  reviewVerdict?: RevisionReviewVerdict;
-  verification?: VerificationResult;
-};
+  planStatus?: RevisionPlanStatus | undefined;
+  reviewVerdict?: RevisionReviewVerdict | undefined;
+  verification?: VerificationResult | undefined;
+}
 
 type RevisionPlanStatus = "revise" | "needs-human" | "no-action-needed";
 type RevisionReviewVerdict = "approve" | "fixes-required" | "blocked";
 
-export type RunPrRevisionDependencies = {
-  fetchFeedback?: typeof fetchPullRequestFeedback;
-  checkout?: typeof checkoutPrHeadBranch;
-  agentRunner?: AgentRunner;
-  verificationRunner?: VerificationRunner;
-  postSummaryComment?: typeof postPrRevisionSummaryComment;
-};
+export interface RunPrRevisionDependencies {
+  fetchFeedback?: typeof fetchPullRequestFeedback | undefined;
+  checkout?: typeof checkoutPrHeadBranch | undefined;
+  agentRunner?: AgentRunner | undefined;
+  verificationRunner?: VerificationRunner | undefined;
+  postSummaryComment?: typeof postPrRevisionSummaryComment | undefined;
+}
 
 export async function runPrRevision(
   options: RevisePrCliOptions,
@@ -131,7 +131,7 @@ export async function runPrRevision(
   let fixPassesUsed = 0;
   let verification: VerificationResult | undefined;
 
-  while (true) {
+  for (;;) {
     if (reviewVerdict === "fixes-required") {
       if (fixPassesUsed >= context.maxFixPasses) {
         await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
@@ -244,8 +244,6 @@ export async function runPrRevision(
     artifactFilenames.push(reviewArtifact);
     reviewVerdict = parseReviewVerdict(review);
   }
-
-  if (!verification) throw new Error("Revision verification did not run.");
 
   if ((await dirtyLinesOutsideRoark(cwd)).length === 0) {
     await updateMetadata(context, feedback, { outcome: "no-code-changes", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
@@ -374,20 +372,20 @@ function parseReviewVerdict(markdown: string): RevisionReviewVerdict {
 }
 
 function extractToken<const T extends readonly string[]>(markdown: string, section: string, allowed: T): T[number] | undefined {
-  const match = markdown.match(new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n\\s*([^\\s]+)`, "i"));
+  const match = new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n\\s*([^\\s]+)`, "i").exec(markdown);
   const token = match?.[1]?.toLowerCase();
   return allowed.find((value) => value === token);
 }
 
 function extractSectionBullets(markdown: string, section: string): string[] {
-  const match = markdown.match(new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i"));
+  const match = new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i").exec(markdown);
   if (!match?.[1]) return [];
   return match[1]
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("- "))
     .map((line) => line.slice(2).trim())
-    .filter((line) => line && !/^none\.?$/i.test(line));
+    .filter((line) => line !== "" && !/^none\.?$/i.test(line));
 }
 
 async function safeReadLog(context: PrRevisionContext, artifact: string): Promise<string> {

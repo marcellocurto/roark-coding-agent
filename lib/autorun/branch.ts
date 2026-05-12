@@ -5,16 +5,16 @@ import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 
 export const defaultAutorunBaseBranch = "main";
 
-export type AutorunBranchPlan = {
+export interface AutorunBranchPlan {
   issueNumber: number;
   branchName: string;
   baseBranch: string;
-};
+}
 
 export function createBranchPlan(options: {
   issueNumber: number;
   branchName: string;
-  baseBranch?: string;
+  baseBranch?: string | undefined;
 }): AutorunBranchPlan {
   const baseBranch = options.baseBranch ?? defaultAutorunBaseBranch;
   assertSafeWorkBranch({ branchName: options.branchName, baseBranch });
@@ -91,7 +91,7 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
 export async function updateIssueBranchFromBase(options: {
   agentCwd: string;
   baseBranch: string;
-  preserveUncommitted?: boolean;
+  preserveUncommitted?: boolean | undefined;
 }): Promise<void> {
   await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.agentCwd, label: "git fetch origin" });
 

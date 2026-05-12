@@ -11,10 +11,10 @@ import {
 } from "./labels.ts";
 
 const tempDirs: string[] = [];
-const originalPath = process.env.PATH;
+const originalPath = process.env["PATH"];
 
 afterEach(async () => {
-  process.env.PATH = originalPath;
+  process.env["PATH"] = originalPath;
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -108,6 +108,6 @@ fi
 exit 1
 `, "utf8");
   await chmod(path.join(binDir, "gh"), 0o755);
-  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
   return cwd;
 }

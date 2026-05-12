@@ -6,7 +6,7 @@ export type FindingClassification =
   | "follow-up"
   | "suggestion";
 
-export type NormalizedReviewerFinding = {
+export interface NormalizedReviewerFinding {
   source: ReviewFindingSource;
   sourceLocalId: string;
   workflowId: string;
@@ -17,32 +17,32 @@ export type NormalizedReviewerFinding = {
   evidence: string;
   currentIssueImpact: string;
   recommendedHandling: string;
-  suggestedIssueTitle?: string;
+  suggestedIssueTitle?: string | undefined  ;
   warnings: string[];
   rawExcerpt: string;
-};
+}
 
-export type RejectedReviewerFinding = {
+export interface RejectedReviewerFinding {
   source: ReviewFindingSource;
-  sourceLocalId?: string;
-  workflowId?: string;
-  classification?: string;
+  sourceLocalId?: string | undefined;
+  workflowId?: string | undefined;
+  classification?: string | undefined  ;
   reason: string;
   rawExcerpt: string;
-};
+}
 
-export type ParsedReviewFindings = {
+export interface ParsedReviewFindings {
   source: ReviewFindingSource;
   hasLedger: boolean;
   findings: NormalizedReviewerFinding[];
   rejected: RejectedReviewerFinding[];
   warnings: string[];
-};
+}
 
-export type ParsedReviewFindingsPair = {
+export interface ParsedReviewFindingsPair {
   reviewA: ParsedReviewFindings;
   reviewB: ParsedReviewFindings;
-};
+}
 
 const classifications = new Set<FindingClassification>([
   "must-fix-current",
@@ -71,10 +71,10 @@ type FieldKey =
   | "recommendedHandling"
   | "suggestedIssueTitle";
 
-type RawEntry = {
+interface RawEntry {
   fields: Partial<Record<FieldKey, string>>;
   raw: string;
-};
+}
 
 export function parseReviewPairFindings(input: { reviewA: string; reviewB: string }): ParsedReviewFindingsPair {
   return {
@@ -224,7 +224,7 @@ function parseRawEntries(ledger: string): RawEntry[] {
 }
 
 function parseFieldLine(line: string): { key: FieldKey; value: string } | undefined {
-  const match = line.match(/^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*)?\s*(Identifier|Classification|Title|Severity|Confidence|Evidence|Current[-\s]+issue impact|Recommended handling|Suggested issue title(?:\s*\(optional\))?)(?:\*\*)?\s*:\s*(.*)$/i);
+  const match = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*)?\s*(Identifier|Classification|Title|Severity|Confidence|Evidence|Current[-\s]+issue impact|Recommended handling|Suggested issue title(?:\s*\(optional\))?)(?:\*\*)?\s*:\s*(.*)$/i.exec(line);
   if (!match) return undefined;
 
   const label = match[1];
@@ -243,7 +243,7 @@ function labelToFieldKey(label: string): FieldKey {
 }
 
 function hasAnyField(entry: RawEntry): boolean {
-  return Object.values(entry.fields).some((value) => value !== undefined && value.trim() !== "");
+  return Object.values(entry.fields).some((value) => value.trim() !== "");
 }
 
 function normalizeClassification(value: string): FindingClassification | undefined {

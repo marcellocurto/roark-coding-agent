@@ -25,10 +25,10 @@ import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, r
 export async function runAutoContinue(
   options: ContinueCliOptions,
   injected: {
-    clock?: Clock;
-    runner?: AgentRunner;
-    prepareCloneWorkspace?: typeof prepareCloneWorkspace;
-    ensureAutorunLabelContract?: typeof ensureAutorunLabelContract;
+    clock?: Clock | undefined;
+    runner?: AgentRunner | undefined  ;
+    prepareCloneWorkspace?: typeof prepareCloneWorkspace | undefined;
+    ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
   } = {},
 ): Promise<void> {
   const clock = injected.clock ?? defaultClock;
@@ -136,7 +136,7 @@ export async function runAutoContinue(
       logPrefix: "Continue",
       inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
       initialVerificationRepairPass,
-      beforeWorkflow: async () => {
+      beforeWorkflow: () => {
         console.log("\nContinuation plan:");
         for (const line of formatContinuationPlan(continuationPlan)) console.log(line);
       },
@@ -174,7 +174,7 @@ function createGateOptions(
   options: ContinueCliOptions,
   cwd: string,
   baseBranch: string,
-  repo?: string,
+  repo?: string  ,
 ): AutorunGateOptions {
   return {
     cwd,
@@ -210,7 +210,7 @@ async function loadIssueCandidateFromMetadata(context: ReturnType<typeof createW
   try {
     const raw = await readArtifact(context, "metadata");
     const parsed = JSON.parse(raw) as { issue?: GitHubIssue };
-    if (!parsed.issue?.number || !parsed.issue.title) return undefined;
+    if (parsed.issue?.number === undefined || parsed.issue.title === "") return undefined;
     return toIssueCandidate(parsed.issue);
   } catch {
     return undefined;

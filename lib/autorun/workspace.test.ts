@@ -17,6 +17,8 @@ import {
 } from "./workspace.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 
+const tick = () => Promise.resolve();
+
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({ stdout: "", stderr, exitCode: 1 });
 
@@ -29,19 +31,21 @@ describe("managed clone workspaces", () => {
 
   test("rejects workspace path escapes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-root-"));
-    await expect(assertWorkspacePathSafe({ root, workspacePath: path.join(root, "../escape") })).rejects.toThrow("must stay inside");
+    expect(assertWorkspacePathSafe({ root, workspacePath: path.join(root, "../escape") })).rejects.toThrow("must stay inside");
   });
 
   test("resolves remote names and preflights the resulting URL", async () => {
+    await tick();
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
+      await tick();
       calls.push(args);
       if (args.join(" ") === "git remote get-url upstream") return ok("git@github.com:owner/repo.git\n");
       if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
       return fail();
     };
 
-    await expect(resolveCloneRemote({ cwd: "/repo", cloneRemote: "upstream", runner })).resolves.toEqual({
+    expect(resolveCloneRemote({ cwd: "/repo", cloneRemote: "upstream", runner })).resolves.toEqual({
       remote: "upstream",
       url: "git@github.com:owner/repo.git",
     });
@@ -69,7 +73,7 @@ describe("managed clone workspaces", () => {
       return ok(options?.cwd ?? "");
     };
 
-    await expect(prepareCloneWorkspace({
+    expect(prepareCloneWorkspace({
       controlCwd: root,
       repo: "owner/repo",
       issueNumber: 74,
@@ -80,7 +84,7 @@ describe("managed clone workspaces", () => {
       runner,
     })).rejects.toThrow("afterCreate hook failed");
 
-    const state = JSON.parse(await readFile(path.join(workspacePath, workspaceStateFile), "utf8"));
+    const state = JSON.parse(await readFile(path.join(workspacePath, workspaceStateFile), "utf8")) as { hook: string; stderrTail: string };
     expect(state.hook).toBe("afterCreate");
     expect(state.stderrTail).toContain("install failed");
     await rm(root, { recursive: true, force: true });
@@ -126,10 +130,10 @@ describe("managed clone workspaces", () => {
     await writeFile(path.join(outside, "env", "stale.txt"), "outside stale\n", "utf8");
     await symlink(outside, path.join(worktree, ".secrets"));
 
-    await expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: [".secrets/env"] })).rejects.toThrow("destination parent");
+    expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: [".secrets/env"] })).rejects.toThrow("destination parent");
 
     expect(await readFile(path.join(outside, "env", "stale.txt"), "utf8")).toBe("outside stale\n");
-    await expect(Bun.file(path.join(outside, "env", "local.env")).exists()).resolves.toBe(false);
+    expect(Bun.file(path.join(outside, "env", "local.env")).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -141,12 +145,12 @@ describe("managed clone workspaces", () => {
     await writeFile(path.join(control, "ignored"), "copy me\n", "utf8");
     await initGitRepo(worktree, "ignored\nmissing\n");
 
-    await expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["ignored", "missing"] })).rejects.toThrow("source 'missing' is missing");
-    await expect(Bun.file(path.join(worktree, "ignored")).exists()).resolves.toBe(false);
+    expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["ignored", "missing"] })).rejects.toThrow("source 'missing' is missing");
+    expect(Bun.file(path.join(worktree, "ignored")).exists()).resolves.toBe(false);
 
     await writeFile(path.join(worktree, "ignored"), "stale\n", "utf8");
     await initGitRepo(worktree, "");
-    await expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["ignored"] })).rejects.toThrow("destination must be ignored");
+    expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["ignored"] })).rejects.toThrow("destination must be ignored");
     expect(await readFile(path.join(worktree, "ignored"), "utf8")).toBe("stale\n");
     await rm(root, { recursive: true, force: true });
   });
@@ -159,12 +163,13 @@ describe("managed clone workspaces", () => {
     await mkdir(worktree, { recursive: true });
     await writeFile(path.join(control, "visible"), "copy me\n", "utf8");
     const runner: ProcessRunner = async (args) => {
+      await tick();
       if (args[1] === "check-ignore") return ok();
       if (args[1] === "status") return ok("?? visible\n");
       return ok();
     };
 
-    await expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["visible"], runner })).rejects.toThrow("visible to Git");
+    expect(refreshCopyToWorktree({ controlCwd: control, worktreePath: worktree, copyToWorktree: ["visible"], runner })).rejects.toThrow("visible to Git");
     await rm(root, { recursive: true, force: true });
   });
 
@@ -208,7 +213,7 @@ describe("managed clone workspaces", () => {
   test("non-fatal afterRun hook warns without throwing", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-hook-"));
     await writeFile(path.join(root, "file"), "ok");
-    await expect(runLifecycleHook("afterRun", { timeoutMs: 1000, afterRun: "false" }, root, async () => fail("after failed"))).resolves.toBeUndefined();
+    expect(runLifecycleHook("afterRun", { timeoutMs: 1000, afterRun: "false" }, root, ()=> Promise.resolve(fail("after failed")))).resolves.toBeUndefined();
     await rm(root, { recursive: true, force: true });
   });
 });

@@ -90,15 +90,15 @@ async function readSummary(summaryPath: string): Promise<RunSummary | undefined>
 }
 
 function compareSummaryRecency(a: RunSummary, b: RunSummary): number {
-  const at = Date.parse(a.endedAt ?? a.startedAt ?? "") || 0;
-  const bt = Date.parse(b.endedAt ?? b.startedAt ?? "") || 0;
+  const at = Date.parse(a.endedAt ?? a.startedAt ?? "");
+  const bt = Date.parse(b.endedAt ?? b.startedAt ?? "");
   if (at !== bt) return at - bt;
   return (a.attempt ?? 0) - (b.attempt ?? 0);
 }
 
 function comparePhases(a: PhaseSummary, b: PhaseSummary): number {
-  const at = Date.parse(a.startedAt ?? "") || 0;
-  const bt = Date.parse(b.startedAt ?? "") || 0;
+  const at = Date.parse(a.startedAt ?? "");
+  const bt = Date.parse(b.startedAt ?? "");
   if (at !== bt) return at - bt;
   return a.phase.localeCompare(b.phase);
 }

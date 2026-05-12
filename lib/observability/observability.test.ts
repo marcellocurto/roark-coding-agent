@@ -44,7 +44,7 @@ describe("observability event writing", () => {
     await writer.write({ type: "tool_started", toolName: "bash", args: { command: "secret" }, result: "hidden" });
     await writer.write({ type: "phase_completed", phase: "triage" });
 
-    const lines = (await readFile(path.join(runDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const lines = (await readFile(path.join(runDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
     expect(lines).toEqual([
       { type: "tool_started", timestamp: "2026-01-01T00:00:00.000Z", toolName: "bash" },
       { type: "phase_completed", timestamp: "2026-01-01T00:00:00.000Z", phase: "triage" },
@@ -57,7 +57,7 @@ describe("observability event writing", () => {
     await writeFile(runDir, "file");
     const warnings: string[] = [];
 
-    await expect(createEventWriter(runDir, { warn: (message) => warnings.push(message) }).write({ type: "run_started" })).resolves.toBeUndefined();
+    expect(createEventWriter(runDir, { warn: (message) => warnings.push(message) }).write({ type: "run_started" })).resolves.toBeUndefined();
     expect(warnings.join("\n")).toContain("observability event write failed");
   });
 });
@@ -83,7 +83,12 @@ describe("observability summary writing", () => {
     await observer.phaseCompleted({ phase: "triage", label: "Triage", artifact: "triage" });
     await observer.runCompleted({ status: "completed" });
 
-    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
+    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8")) as {
+      status: string;
+      attempt: number;
+      phases: { triage: { status: string; artifactPath: string; sessionId: string } };
+      totals: Record<string, unknown>;
+    };
     expect(summary.status).toBe("completed");
     expect(summary.attempt).toBe(2);
     expect(summary.phases.triage.status).toBe("completed");
@@ -105,7 +110,11 @@ describe("observability summary writing", () => {
 
     await observer.runStarted({ command: "triage" });
 
-    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
+    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8")) as {
+      status: string;
+      phases: Record<string, unknown>;
+      totals: Record<string, unknown>;
+    };
     expect(summary.status).toBe("running");
     expect(summary.phases).toEqual({});
     expect(summary.totals).toMatchObject({ totalTokens: 0, toolCalls: 0, cost: 0 });
@@ -129,7 +138,7 @@ describe("observability summary writing", () => {
       endedAt: "2026-05-07T00:00:05.000Z",
     });
 
-    const events = (await readFile(path.join(runContext.runDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const events = (await readFile(path.join(runContext.runDir, "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line) as unknown);
     expect(events.at(-1)).toMatchObject({
       type: "attempt_failed",
       timestamp: "2026-05-07T00:00:05.000Z",
@@ -138,7 +147,12 @@ describe("observability summary writing", () => {
       outcomeDetail: "verification failed",
     });
 
-    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
+    const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8")) as {
+      status: string;
+      endedAt: string;
+      durationMs: number;
+      lastError: string;
+    };
     expect(summary.status).toBe("failed");
     expect(summary.endedAt).toBe("2026-05-07T00:00:05.000Z");
     expect(summary.durationMs).toBe(5000);
@@ -152,7 +166,7 @@ describe("observability summary writing", () => {
     const runContext = { ...context(cwd), runDir: badRunDir };
     const warnings: string[] = [];
 
-    await expect(updateRunSummary(runContext, (summary) => {
+    expect(updateRunSummary(runContext, (summary) => {
       summary.status = "running";
     }, { warn: (message) => warnings.push(message) })).resolves.toBeUndefined();
     expect(warnings.join("\n")).toContain("observability summary write failed");

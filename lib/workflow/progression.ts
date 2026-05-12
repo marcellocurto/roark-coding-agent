@@ -35,7 +35,7 @@ export type WorkflowRunPhase =
   | "final-review";
 
 export type WorkflowProgressionAction =
-  | { type: "run"; phase: WorkflowRunPhase; pass?: number; reason: string }
+  | { type: "run"; phase: WorkflowRunPhase; pass?: number | undefined; reason: string }
   | { type: "write-readiness"; reason: string }
   | { type: "publish-gate"; reason: string }
   | { type: "noop"; reason: string };
@@ -46,23 +46,23 @@ export type WorkflowTerminalStatus =
   | { status: "review-blocked" }
   | { status: "completed" };
 
-export type WorkflowProgressionPlan = {
+export interface WorkflowProgressionPlan {
   actions: WorkflowProgressionAction[];
-  terminalStatus?: WorkflowTerminalStatus;
-};
+  terminalStatus?: WorkflowTerminalStatus | undefined;
+}
 
-export type WorkflowProgressionOptions = {
-  includePublishGate?: boolean;
-  force?: boolean;
-  completedActions?: readonly WorkflowProgressionAction[];
-};
+export interface WorkflowProgressionOptions {
+  includePublishGate?: boolean | undefined;
+  force?: boolean | undefined;
+  completedActions?: readonly WorkflowProgressionAction[] | undefined;
+}
 
-type Inspection = {
+interface Inspection {
   exists: boolean;
   valid: boolean;
   reason: string;
-  content?: string;
-};
+  content?: string | undefined;
+}
 
 export function issueArtifactHasRelationshipSnapshot(content: string): boolean {
   return /<github_issue_relationships\b/.test(content);
@@ -281,7 +281,7 @@ async function inspect(
   if (!exists) return { exists: false, valid: false, reason: "artifact is missing" };
 
   const forcedAction = forceActionForArtifact(artifact);
-  if (options.force && forcedAction && !hasCompletedAction(options.completedActions ?? [], forcedAction)) {
+  if (options.force === true && forcedAction !== undefined && !hasCompletedAction(options.completedActions ?? [], forcedAction)) {
     return { exists: true, valid: false, reason: "forced rerun requested" };
   }
 
@@ -369,7 +369,7 @@ function readiness(reason: string): WorkflowProgressionAction {
 }
 
 function publishGate(options: WorkflowProgressionOptions, reason: string): WorkflowProgressionAction[] {
-  return options.includePublishGate ? [{ type: "publish-gate", reason }] : [];
+  return options.includePublishGate === true ? [{ type: "publish-gate", reason }] : [];
 }
 
 function noop(reason: string): WorkflowProgressionAction {

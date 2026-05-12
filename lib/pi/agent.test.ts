@@ -25,27 +25,27 @@ describe("Pi agent settings", () => {
   });
 
   test("surfaces resource loading errors before an agent session starts", () => {
-    expect(() => assertNoResourceLoadErrors([{ type: "error", message: "missing skill", path: "/repo/skills/github-issue-create" }], "skill"))
+    expect(() => { assertNoResourceLoadErrors([{ type: "error", message: "missing skill", path: "/repo/skills/github-issue-create" }], "skill"); })
       .toThrow("Pi skill loading failed: error: missing skill (/repo/skills/github-issue-create)");
   });
 
   test("fails before an agent session starts when a requested skill path did not load", () => {
-    expect(() => assertRequestedSkillsLoaded([], ["/repo/skills/github-issue-create"], [{
+    expect(() => { assertRequestedSkillsLoaded([], ["/repo/skills/github-issue-create"], [{
       type: "warning",
       message: "Flow sequence in block collection must be sufficiently indented",
       path: "/repo/skills/github-issue-create/SKILL.md",
-    }])).toThrow("requested skill path(s) did not load: /repo/skills/github-issue-create");
+    }]); }).toThrow("requested skill path(s) did not load: /repo/skills/github-issue-create");
   });
 
   test("accepts requested skill paths that loaded at least one skill", () => {
-    expect(() => assertRequestedSkillsLoaded([{
+    expect(() => { assertRequestedSkillsLoaded([{
       name: "github-issue-create",
       description: "Create GitHub issues.",
       filePath: "/repo/skills/github-issue-create/SKILL.md",
       baseDir: "/repo/skills/github-issue-create",
       sourceInfo: {} as never,
       disableModelInvocation: false,
-    }], ["/repo/skills/github-issue-create"])).not.toThrow();
+    }], ["/repo/skills/github-issue-create"]); }).not.toThrow();
   });
 });
 

@@ -32,21 +32,21 @@ import {
 } from "../prompts/workflow-prompts.ts";
 import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
 
-export type AgentTask = {
+export interface AgentTask {
   artifact: ArtifactRef;
   label: string;
   writable: boolean;
   thinkingStage: WorkflowThinkingStage;
   prerequisites: ArtifactRef[];
   prompt: (context: WorkflowContext) => string;
-};
+}
 
 export type AgentTaskFailurePhase = "agent-error" | "output-contract";
 
-export type AgentTaskRetryOptions = {
-  delaysMs?: readonly number[];
-  sleep?: (ms: number) => Promise<void>;
-};
+export interface AgentTaskRetryOptions {
+  delaysMs?: readonly number[] | undefined;
+  sleep?: ((ms: number) => Promise<void>) | undefined;
+}
 
 export type CodeRefinementSource = "initial" | "fix" | "restart";
 

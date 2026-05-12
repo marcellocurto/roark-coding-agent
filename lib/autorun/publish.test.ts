@@ -212,10 +212,10 @@ describe("publishAutorunResult", () => {
     await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
     await runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], { cwd: agentCwd });
 
-    const oldPath = process.env.PATH;
-    const oldGhLog = process.env.ROARK_GH_LOG;
-    process.env.PATH = `${binDir}:${oldPath ?? ""}`;
-    process.env.ROARK_GH_LOG = ghLog;
+    const oldPath = process.env["PATH"];
+    const oldGhLog = process.env["ROARK_GH_LOG"];
+    process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
+    process.env["ROARK_GH_LOG"] = ghLog;
     try {
       const prUrl = await publishAutorunResult({
         options: {
@@ -247,9 +247,9 @@ describe("publishAutorunResult", () => {
 
       expect(prUrl).toBe("https://github.com/owner/repo/pull/1");
     } finally {
-      process.env.PATH = oldPath;
-      if (oldGhLog === undefined) delete process.env.ROARK_GH_LOG;
-      else process.env.ROARK_GH_LOG = oldGhLog;
+      process.env["PATH"] = oldPath;
+      if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
+      else process.env["ROARK_GH_LOG"] = oldGhLog;
     }
 
     const ghCalls = await readFile(ghLog, "utf8");
@@ -292,10 +292,10 @@ describe("publishAutorunResult", () => {
     await mkdir(path.join(agentCwd, ".roark/runs/issue/9/attempts/1"), { recursive: true });
     await writeFile(path.join(agentCwd, ".roark/runs/issue/9/attempts/1/attempt.json"), "{}\n", "utf8");
 
-    const oldPath = process.env.PATH;
-    const oldGhLog = process.env.ROARK_GH_LOG;
-    process.env.PATH = `${binDir}:${oldPath ?? ""}`;
-    process.env.ROARK_GH_LOG = ghLog;
+    const oldPath = process.env["PATH"];
+    const oldGhLog = process.env["ROARK_GH_LOG"];
+    process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
+    process.env["ROARK_GH_LOG"] = ghLog;
     try {
       await publishAutorunResult({
         options: {
@@ -325,9 +325,9 @@ describe("publishAutorunResult", () => {
         },
       });
     } finally {
-      process.env.PATH = oldPath;
-      if (oldGhLog === undefined) delete process.env.ROARK_GH_LOG;
-      else process.env.ROARK_GH_LOG = oldGhLog;
+      process.env["PATH"] = oldPath;
+      if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
+      else process.env["ROARK_GH_LOG"] = oldGhLog;
     }
 
     const afterCommitCount = Number(await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]));

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { promptForInteractiveArgv, resolveInteractiveArgv } from "./interactive.ts";
 
+const tick = () => Promise.resolve();
+
 function scriptedPrompt(responses: string[]) {
   const prompts: string[] = [];
   const output: string[] = [];
@@ -12,6 +14,7 @@ function scriptedPrompt(responses: string[]) {
         output.push(text);
       },
       async question(prompt: string): Promise<string> {
+        await tick();
         prompts.push(prompt);
         const response = responses.shift();
         if (response === undefined) throw new Error(`No scripted response for ${prompt}`);
@@ -23,28 +26,32 @@ function scriptedPrompt(responses: string[]) {
 
 describe("promptForInteractiveArgv", () => {
   test("maps confirmed auto discover to argv", async () => {
+    await tick();
     const { prompt, output } = scriptedPrompt(["1", "yes"]);
 
-    await expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto"]);
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto"]);
     expect(output.join("")).toContain("1. Auto discover");
   });
 
   test("maps confirmed auto issue to argv and retries empty issue input", async () => {
+    await tick();
     const { prompt, output } = scriptedPrompt(["2", "", "42", "y"]);
 
-    await expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto", "42"]);
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto", "42"]);
     expect(output.join("")).toContain("Issue is required.");
   });
 
   test("declined auto confirmation exits cleanly", async () => {
+    await tick();
     const { prompt, output } = scriptedPrompt(["1", "no"]);
 
-    await expect(promptForInteractiveArgv(prompt)).resolves.toBeUndefined();
+    expect(promptForInteractiveArgv(prompt)).resolves.toBeUndefined();
     expect(output.join("")).toContain("Cancelled.");
   });
 
   test("maps issue commands without confirmation", async () => {
-    const cases: Array<[string, string[]]> = [
+    await tick();
+    const cases: [string, string[]][] = [
       ["3", ["continue", "42"]],
       ["4", ["do", "42"]],
       ["5", ["status", "42"]],
@@ -52,32 +59,35 @@ describe("promptForInteractiveArgv", () => {
 
     for (const [choice, argv] of cases) {
       const { prompt, prompts } = scriptedPrompt([choice, "42"]);
-      await expect(promptForInteractiveArgv(prompt)).resolves.toEqual(argv);
+      expect(promptForInteractiveArgv(prompt)).resolves.toEqual(argv);
       expect(prompts).toEqual(["Select an option: ", "Issue: "]);
     }
   });
 
   test("maps help to argv", async () => {
+    await tick();
     const { prompt } = scriptedPrompt(["6"]);
 
-    await expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
   });
 
   test("retries invalid menu choices", async () => {
+    await tick();
     const { prompt, output } = scriptedPrompt(["bad", "6"]);
 
-    await expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
     expect(output.join("")).toContain("Invalid choice. Please choose 1-6.");
   });
 });
 
 describe("resolveInteractiveArgv", () => {
   test("returns help argv for no-args non-TTY mode without waiting for input", async () => {
+    await tick();
     const stdin = { isTTY: false } as NodeJS.ReadStream & { isTTY?: boolean };
     const writes: string[] = [];
     const stdout = { write: (text: string) => writes.push(text) };
 
-    await expect(resolveInteractiveArgv({ stdin, stdout })).resolves.toEqual(["--help"]);
+    expect(resolveInteractiveArgv({ stdin, stdout })).resolves.toEqual(["--help"]);
     expect(writes).toEqual([]);
   });
 });

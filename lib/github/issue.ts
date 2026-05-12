@@ -1,99 +1,99 @@
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 
-export type ParsedIssueRef = {
+export interface ParsedIssueRef {
   issueNumber: string;
-  repo?: string;
-};
+  repo?: string | undefined  ;
+}
 
-export type GitHubIssue = {
+export interface GitHubIssue {
   number: number;
   title: string;
-  body?: string;
-  state?: string;
-  labels?: Array<{ name: string }>;
-  assignees?: Array<{ login: string }>;
-  milestone?: { title: string } | null;
-  url?: string;
-  comments?: Array<{
-    author?: { login: string };
-    body?: string;
-    createdAt?: string;
-  }>;
-};
+  body?: string | undefined;
+  state?: string | undefined;
+  labels?: { name: string }[] | undefined;
+  assignees?: { login: string }[] | undefined;
+  milestone?: { title: string } | null | undefined;
+  url?: string | undefined  ;
+  comments?: {
+    author?: { login: string } | undefined;
+    body?: string | undefined;
+    createdAt?: string | undefined;
+  }[];
+}
 
-export type GitHubIssueListItem = {
+export interface GitHubIssueListItem {
   number: number;
   title: string;
-  body?: string;
-  url?: string;
-  createdAt?: string;
-  labels?: Array<{ name: string }>;
-};
+  body?: string | undefined;
+  url?: string | undefined  ;
+  createdAt?: string | undefined;
+  labels?: { name: string }[] | undefined;
+}
 
-export type GitHubIssueDependency = {
+export interface GitHubIssueDependency {
   number: number;
   title: string;
-  url?: string;
-  state: "OPEN" | "CLOSED" | string;
-  stateReason?: string | null;
-  closedAt?: string | null;
-};
+  url?: string | undefined  ;
+  state: string;
+  stateReason?: string | null | undefined;
+  closedAt?: string | null | undefined;
+}
 
-export type GitHubIssueDependenciesSummary = {
+export interface GitHubIssueDependenciesSummary {
   blockedBy: number;
   blocking: number;
   totalBlockedBy: number;
   totalBlocking: number;
-};
+}
 
-export type BodyDeclaredBlocker = {
+export interface BodyDeclaredBlocker {
   raw: string;
   repo: string;
   number: number;
   verified: boolean;
-  title?: string;
-  url?: string;
-  state?: "OPEN" | "CLOSED" | string;
-  stateReason?: string | null;
-  closed?: boolean;
-  closedAt?: string | null;
-  unavailableReason?: string;
-};
+  title?: string | undefined;
+  url?: string | undefined  ;
+  state?: string | undefined;
+  stateReason?: string | null | undefined;
+  closed?: boolean | undefined;
+  closedAt?: string | null | undefined;
+  unavailableReason?: string | undefined;
+}
 
-export type GitHubIssueRelationships = {
+export interface GitHubIssueRelationships {
   fetchedAt: string;
-  repo?: string;
+  repo?: string | undefined  ;
   nativeDependenciesAvailable: boolean;
-  issueDependenciesSummary?: GitHubIssueDependenciesSummary;
+  issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
   blockedBy: GitHubIssueDependency[];
   blocking: GitHubIssueDependency[];
   bodyDeclaredBlockers: BodyDeclaredBlocker[];
-  unavailableReason?: string;
-};
+  unavailableReason?: string | undefined;
+}
 
-type BodyBlockerRef = {
+interface BodyBlockerRef {
   raw: string;
   repo: string;
   number: number;
-};
+}
 
 export function parseIssueRef(input: string, explicitRepo?: string): ParsedIssueRef {
-  const urlMatch = input.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i);
+  const urlMatch = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(input);
   if (urlMatch?.[1] && urlMatch[2]) return { repo: explicitRepo ?? urlMatch[1], issueNumber: urlMatch[2] };
 
-  const shorthandMatch = input.match(/^([^/\s]+\/[^#\s]+)#(\d+)$/);
+  const shorthandMatch = /^([^/\s]+\/[^#\s]+)#(\d+)$/.exec(input);
   if (shorthandMatch?.[1] && shorthandMatch[2]) {
     return { repo: explicitRepo ?? shorthandMatch[1], issueNumber: shorthandMatch[2] };
   }
 
-  const numberMatch = input.match(/^#?(\d+)$/);
+  const numberMatch = /^#?(\d+)$/.exec(input);
   if (numberMatch?.[1]) return { repo: explicitRepo, issueNumber: numberMatch[1] };
 
   throw new Error(`Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`);
 }
 
-export async function listOpenGitHubIssues(options: { cwd: string; repo?: string; limit: number }): Promise<GitHubIssueListItem[]> {
+export async function listOpenGitHubIssues(options: { cwd: string; repo?: string | undefined; limit: number }): Promise<GitHubIssueListItem[]> {
   const args = [
     "gh",
     "issue",
@@ -115,7 +115,7 @@ export async function getCurrentGitHubLogin(options: { cwd: string }): Promise<s
   return (await runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" })).trim();
 }
 
-export async function claimGitHubIssue(options: { cwd: string; repo?: string; plan: AutorunClaimPlan; postComment?: boolean }): Promise<void> {
+export async function claimGitHubIssue(options: { cwd: string; repo?: string | undefined; plan: AutorunClaimPlan; postComment?: boolean }): Promise<void> {
   const issueNumber = String(options.plan.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
 
@@ -164,10 +164,10 @@ export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "num
   ];
 }
 
-export async function fetchGitHubIssue(input: string, options: { cwd: string; repo?: string }): Promise<{
+export async function fetchGitHubIssue(input: string, options: { cwd: string; repo?: string  | undefined}): Promise<{
   issue: GitHubIssue;
   issueNumber: string;
-  repo?: string;
+  repo?: string | undefined  ;
   relationships: GitHubIssueRelationships;
 }> {
   const parsed = parseIssueRef(input, options.repo);
@@ -199,7 +199,7 @@ export async function fetchGitHubIssue(input: string, options: { cwd: string; re
   };
 }
 
-export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string; issueUrl?: string }): Promise<string | undefined> {
+export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string | undefined; issueUrl?: string  | undefined}): Promise<string | undefined> {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;
@@ -216,7 +216,7 @@ export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRep
 
 export async function fetchGitHubIssueRelationships(options: {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issueNumber: string | number;
   body: string;
 }): Promise<GitHubIssueRelationships> {
@@ -268,7 +268,7 @@ export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string):
       inDependencySection = false;
     }
 
-    const inlineMatch = line.match(/^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i);
+    const inlineMatch = /^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i.exec(line);
     if (inlineMatch?.[1]) refs.push(...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo));
     else if (inDependencySection) refs.push(...extractExplicitIssueRefsFromStart(line.replace(/^\s*[-*]\s*/, ""), currentRepo));
   }
@@ -292,10 +292,10 @@ export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDepen
 
 async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: string; issueNumber: string | number }): Promise<{
   nativeDependenciesAvailable: boolean;
-  issueDependenciesSummary?: GitHubIssueDependenciesSummary;
+  issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
   blockedBy: GitHubIssueDependency[];
   blocking: GitHubIssueDependency[];
-  unavailableReason?: string;
+  unavailableReason?: string | undefined;
 }> {
   try {
     const [issueRaw, blockedByRaw, blockingRaw] = await Promise.all([
@@ -394,7 +394,7 @@ function extractExplicitIssueRefsFromStart(text: string, currentRepo: string): B
   let remainder = text.trim();
 
   while (remainder.length > 0) {
-    const match = remainder.match(/^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i);
+    const match = /^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i.exec(remainder);
     if (!match?.[1]) break;
 
     const repo = match[2] ?? match[4] ?? currentRepo;
@@ -402,7 +402,7 @@ function extractExplicitIssueRefsFromStart(text: string, currentRepo: string): B
     if (Number.isInteger(number) && number > 0) refs.push({ raw: match[1], repo, number });
 
     remainder = remainder.slice(match[1].length).trimStart();
-    const separator = remainder.match(/^(?:[,;]|\band\b|&)\s*/i);
+    const separator = /^(?:[,;]|\band\b|&)\s*/i.exec(remainder);
     if (!separator?.[0]) break;
     remainder = remainder.slice(separator[0].length).trimStart();
   }

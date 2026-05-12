@@ -291,10 +291,10 @@ describe("updateAttemptIndex", () => {
     });
     expect(second.map((entry) => entry.attempt)).toEqual([1, 2]);
 
-    const persisted = JSON.parse(await readFile(attemptIndexPath(issueDir), "utf8"));
+    const persisted = JSON.parse(await readFile(attemptIndexPath(issueDir), "utf8")) as { attempt: number }[];
     expect(Array.isArray(persisted)).toBe(true);
     expect(persisted).toHaveLength(2);
-    expect(persisted[1].attempt).toBe(2);
+    expect(persisted[1]?.attempt).toBe(2);
   });
 
   test("upserts an existing attempt without changing order", async () => {

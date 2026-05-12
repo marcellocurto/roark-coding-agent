@@ -16,14 +16,14 @@ describe("assertCleanAutorunGit", () => {
     await mkdir(path.join(cwd, ".roark/runs"), { recursive: true });
     await writeFile(path.join(cwd, ".roark/runs/note.md"), "artifact\n", "utf8");
 
-    await expect(assertCleanAutorunGit({ cwd })).resolves.toBeUndefined();
+    expect(assertCleanAutorunGit({ cwd })).resolves.toBeUndefined();
   });
 
   test("refuses dirty files outside .roark without --yes bypass", async () => {
     const cwd = await initGitRepo();
     await writeFile(path.join(cwd, "dirty.txt"), "dirty\n", "utf8");
 
-    await expect(assertCleanAutorunGit({ cwd })).rejects.toThrow("Autorun needs a clean git working tree");
+    expect(assertCleanAutorunGit({ cwd })).rejects.toThrow("Autorun needs a clean git working tree");
   });
 
   test("baseline reset restores worktree changes while preserving .roark artifacts", async () => {
@@ -38,7 +38,7 @@ describe("assertCleanAutorunGit", () => {
 
     expect(await readFile(path.join(cwd, "README.md"), "utf8")).toBe("test\n");
     expect(await readFile(path.join(cwd, ".roark/runs/refinement-log-0.md"), "utf8")).toBe("keep\n");
-    await expect(readFile(path.join(cwd, "new-file.txt"), "utf8")).rejects.toThrow();
+    expect(readFile(path.join(cwd, "new-file.txt"), "utf8")).rejects.toThrow();
   });
 });
 

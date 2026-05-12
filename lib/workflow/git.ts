@@ -1,10 +1,10 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 
-export type PreImplementationBaseline = {
+export interface PreImplementationBaseline {
   head: string;
   capturedAt: string;
   excludes: readonly [".roark"];
-};
+}
 
 export async function assertCleanGit(context: { cwd: string; yes: boolean }): Promise<void> {
   const dirtyLines = await gitDirtyLinesOutsideRoark(context.cwd);

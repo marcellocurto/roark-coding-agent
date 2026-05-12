@@ -2,19 +2,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
+import type { RunObserver } from "../observability/observer.ts";
 import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "./thinking.ts";
 import { parseIssueRef } from "../github/issue.ts";
 import {
   artifactFilename,
-  baselineResetLogRef,
   finalReviewRef,
   fixLogRef,
   formatArtifactRef,
-  implementationRestartLogRef,
   refinementLogRef,
   reviewARef,
   reviewBRef,
-  verificationBeforeFixRef,
 } from "./artifact-catalog.ts";
 import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
 export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./artifact-catalog.ts";
@@ -31,7 +29,7 @@ export {
   verificationBeforeFixRef,
 } from "./artifact-catalog.ts";
 
-export type WorkflowContext = {
+export interface WorkflowContext {
   controlCwd: string;
   agentCwd: string;
   outDir: string;
@@ -39,22 +37,22 @@ export type WorkflowContext = {
   runDirRelative: string;
   issueInput: string;
   issueNumber: string;
-  attempt?: number;
-  repo?: string;
-  model?: string;
-  thinkingLevel?: ThinkingLevel;
-  thinkingProfile?: ThinkingProfileName;
+  attempt?: number | undefined;
+  repo?: string | undefined  ;
+  model?: string | undefined  ;
+  thinkingLevel?: ThinkingLevel | undefined  ;
+  thinkingProfile?: ThinkingProfileName | undefined  ;
   thinkingConfig: WorkflowThinkingConfig;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
-  fixPass?: number;
-  observer?: import("../observability/observer.ts").RunObserver;
-};
+  fixPass?: number | undefined;
+  observer?: RunObserver | undefined;
+}
 
 export function createWorkflowContext(
   options: IssueCliOptions,
-  overrides: { agentCwd?: string } = {},
+  overrides: { agentCwd?: string  | undefined} = {},
 ): WorkflowContext {
   const controlCwd = path.resolve(options.cwd);
   const agentCwd = path.resolve(overrides.agentCwd ?? controlCwd);
@@ -186,4 +184,3 @@ export function inferNextRefinementPass(context: WorkflowContext): number {
     if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) return pass;
   }
 }
-

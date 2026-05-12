@@ -5,42 +5,42 @@ export const defaultAutorunFailureLabel = "roark-failed";
 
 const failureArtifactExcerptMaxChars = 6_000;
 
-export type FailureCommentInput = {
+export interface FailureCommentInput {
   issueNumber: number;
-  issueUrl?: string;
+  issueUrl?: string | undefined  ;
   phase: string;
   reason: string;
-  branchName?: string;
-  worktreePath?: string;
-  workspacePath?: string;
-  artifactPath?: string;
-  artifactContent?: string;
-  attemptMetadataPath?: string;
-  recoveryCommand?: string;
-};
+  branchName?: string | undefined;
+  worktreePath?: string | undefined;
+  workspacePath?: string | undefined  ;
+  artifactPath?: string | undefined;
+  artifactContent?: string | undefined;
+  attemptMetadataPath?: string | undefined;
+  recoveryCommand?: string | undefined  ;
+}
 
-export type MarkIssueFailedOptions = {
+export interface MarkIssueFailedOptions {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issueNumber: number;
   label: string;
   comment: string;
-  removeLabels?: string[];
-  marker?: string;
-  existingCommentId?: number;
-};
+  removeLabels?: string[] | undefined;
+  marker?: string | undefined;
+  existingCommentId?: number | undefined  ;
+}
 
-export type FailureLabelArgvOptions = {
-  repo?: string;
+export interface FailureLabelArgvOptions {
+  repo?: string | undefined  ;
   issueNumber: number;
   label: string;
-};
+}
 
-export type FailureCommentArgvOptions = {
-  repo?: string;
+export interface FailureCommentArgvOptions {
+  repo?: string | undefined  ;
   issueNumber: number;
   comment: string;
-};
+}
 
 export function formatFailureComment(input: FailureCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;

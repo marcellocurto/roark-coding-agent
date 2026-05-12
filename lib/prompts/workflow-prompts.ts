@@ -46,28 +46,28 @@ const workClassificationValues = "frontend, backend, full-stack, docs-config, te
 const workClassificationLine = `One of: ${workClassificationValues}`;
 const reviewVerdictLine = "One of: approve, fixes-required, restart-required, blocked";
 
-type WorkflowArtifactInput = {
+interface WorkflowArtifactInput {
   kind: string;
   artifact: ArtifactRef;
-};
+}
 
-type WorkflowPhasePrompt = {
+interface WorkflowPhasePrompt {
   name: string;
-  pass?: number;
+  pass?: number | undefined;
   role: string;
   successCriteria: string;
   inputs: readonly string[];
   blocks: readonly string[];
   outputContract: string;
-};
+}
 
-type XmlBlockOptions = {
-  blockIndent?: string;
-};
+interface XmlBlockOptions {
+  blockIndent?: string | undefined;
+}
 
 type MarkdownSection = string | {
   heading: string;
-  body?: string;
+  body?: string | undefined;
 };
 
 function renderWorkflowPhase(config: WorkflowPhasePrompt): string {
@@ -262,7 +262,7 @@ export function implementationPrompt(context: WorkflowContext, restartPass = 0):
   });
 }
 
-type ReviewPromptConfig = {
+interface ReviewPromptConfig {
   phase: string;
   reviewerLabel: string;
   role: string;
@@ -271,7 +271,7 @@ type ReviewPromptConfig = {
   focusItems: readonly string[];
   requiredFixesPolicy: string;
   extraConstraints: readonly string[];
-};
+}
 
 const reviewAConfig: ReviewPromptConfig = {
   phase: "review_a",

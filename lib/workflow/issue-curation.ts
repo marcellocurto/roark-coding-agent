@@ -17,16 +17,16 @@ import {
   type ReviewFindingSource,
 } from "./findings.ts";
 
-export type IssueCurationPlan = {
+export interface IssueCurationPlan {
   version: 1;
   sourceIssue: {
     number: number;
     title: string;
-    url?: string;
+    url?: string | undefined  ;
   };
   run: {
     runDirRelative: string;
-    attempt?: number;
+    attempt?: number | undefined;
     generatedAt: string;
     artifactPaths: string[];
   };
@@ -35,9 +35,9 @@ export type IssueCurationPlan = {
   rejectedCandidates: RejectedCandidate[];
   duplicatesMerged: DuplicateGroup[];
   warnings: string[];
-};
+}
 
-export type IssuePlanItem = {
+export interface IssuePlanItem {
   planItemId: string;
   proposedTitle: string;
   proposedBody: string;
@@ -52,31 +52,31 @@ export type IssuePlanItem = {
   sourceIssueContext: IssueCurationPlan["sourceIssue"];
   runContext: {
     runDirRelative: string;
-    attempt?: number;
+    attempt?: number | undefined;
     artifactPaths: string[];
   };
   proposedLabels: string[];
-};
+}
 
-export type RejectedCandidate = {
+export interface RejectedCandidate {
   sourceFindingIds: string[];
   reviewerSources: ReviewFindingSource[];
   sourceClassifications: string[];
-  title?: string;
+  title?: string | undefined;
   reason: string;
-  evidence?: string;
-  impact?: string;
-  rawExcerpt?: string;
-};
+  evidence?: string | undefined;
+  impact?: string | undefined;
+  rawExcerpt?: string | undefined;
+}
 
-export type DuplicateGroup = {
+export interface DuplicateGroup {
   winningPlanItemId: string;
   mergedSourceFindingIds: string[];
   reviewerSources: ReviewFindingSource[];
   reason: string;
-};
+}
 
-export type Clock = { now(): Date };
+export interface Clock { now(): Date }
 
 export const issueCurationDefaultClock: Clock = { now: () => new Date() };
 
@@ -198,9 +198,11 @@ function groupDuplicateFindings(findings: NormalizedReviewerFinding[]): Normaliz
 }
 
 function compareFindingsForGrouping(left: NormalizedReviewerFinding, right: NormalizedReviewerFinding): number {
-  return normalizeTitle(left).localeCompare(normalizeTitle(right))
-    || left.source.localeCompare(right.source)
-    || left.workflowId.localeCompare(right.workflowId);
+  const titleComparison = normalizeTitle(left).localeCompare(normalizeTitle(right));
+  if (titleComparison !== 0) return titleComparison;
+  const sourceComparison = left.source.localeCompare(right.source);
+  if (sourceComparison !== 0) return sourceComparison;
+  return left.workflowId.localeCompare(right.workflowId);
 }
 
 function areDuplicateFindings(left: NormalizedReviewerFinding, right: NormalizedReviewerFinding): boolean {
@@ -231,7 +233,7 @@ function buildIssuePlanItems(input: {
     const evidence = unique(group.map((finding) => finding.evidence));
     const impacts = unique(group.map((finding) => finding.currentIssueImpact));
     const handling = unique(group.map((finding) => finding.recommendedHandling));
-    const proposedTitle = representative.suggestedIssueTitle || representative.title;
+    const proposedTitle = representative.suggestedIssueTitle ?? representative.title;
     const whyBlockingOrNonBlocking = input.kind === "blocking"
       ? "Blocking: the reviewers classified this as an external-blocker needed to explain why the current issue cannot proceed."
       : "Non-blocking follow-up: the reviewers classified this as future work separate from the current issue.";
@@ -321,15 +323,15 @@ async function loadSourceIssueContext(
   if (metadata) {
     try {
       const parsed = JSON.parse(metadata) as {
-        issueNumber?: number | string;
-        repo?: string;
-        issue?: { number?: number; title?: string; url?: string; html_url?: string; htmlUrl?: string };
+        issueNumber?: number | string | undefined;
+        repo?: string | undefined  ;
+        issue?: { number?: number; title?: string; url?: string | undefined; html_url?: string; htmlUrl?: string };
       };
       const rawNumber = parsed.issue?.number ?? parsed.issueNumber;
       const parsedNumber = typeof rawNumber === "number" ? rawNumber : Number(rawNumber);
       const number = Number.isInteger(parsedNumber) ? parsedNumber : fallback.number;
-      const title = parsed.issue?.title || fallback.title;
-      const url = parsed.issue?.html_url || parsed.issue?.htmlUrl || parsed.issue?.url || (parsed.repo ? `https://github.com/${parsed.repo}/issues/${number}` : fallback.url);
+      const title = parsed.issue?.title ?? fallback.title;
+      const url = parsed.issue?.html_url ?? parsed.issue?.htmlUrl ?? parsed.issue?.url ?? (parsed.repo ? `https://github.com/${parsed.repo}/issues/${number}` : fallback.url);
       return { number, title, ...(url ? { url } : {}) };
     } catch (error) {
       warnings.push(`Could not parse ${artifactRelativePath(context, "metadata")}: ${error instanceof Error ? error.message : String(error)}`);
@@ -344,13 +346,13 @@ async function loadSourceIssueContext(
 }
 
 function parseIssueArtifact(markdown: string, fallback: IssueCurationPlan["sourceIssue"]): IssueCurationPlan["sourceIssue"] {
-  const numberMatch = markdown.match(/<github_issue\s+[^>]*number="(\d+)"/i);
-  const titleMatch = markdown.match(/<title>([\s\S]*?)<\/title>/i);
-  const urlMatch = markdown.match(/<url>([\s\S]*?)<\/url>/i);
-  const markdownTitleMatch = markdown.match(/^#\s+GitHub Issue\s+#(\d+)(?:\s*[-:]\s*(.+))?\s*$/im);
+  const numberMatch = /<github_issue\s+[^>]*number="(\d+)"/i.exec(markdown);
+  const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(markdown);
+  const urlMatch = /<url>([\s\S]*?)<\/url>/i.exec(markdown);
+  const markdownTitleMatch = /^#\s+GitHub Issue\s+#(\d+)(?:\s*[-:]\s*(.+))?\s*$/im.exec(markdown);
 
-  const number = numberMatch?.[1] ? Number(numberMatch[1]) : markdownTitleMatch?.[1] ? Number(markdownTitleMatch[1]) : fallback.number;
-  const title = titleMatch?.[1] ? decodeXmlText(titleMatch[1].trim()) : markdownTitleMatch?.[2]?.trim() || fallback.title;
+  const number = numberMatch?.[1] !== undefined ? Number(numberMatch[1]) : markdownTitleMatch?.[1] !== undefined ? Number(markdownTitleMatch[1]) : fallback.number;
+  const title = titleMatch?.[1] !== undefined ? decodeXmlText(titleMatch[1].trim()) : markdownTitleMatch?.[2]?.trim() ?? fallback.title;
   const url = urlMatch?.[1] ? decodeXmlText(urlMatch[1].trim()) : fallback.url;
   return { number, title, ...(url ? { url } : {}) };
 }
@@ -373,7 +375,7 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
 
 function rejectedParserFindingToCandidate(finding: RejectedReviewerFinding): RejectedCandidate {
   return {
-    sourceFindingIds: [finding.workflowId || finding.sourceLocalId || `${finding.source}:unparseable`],
+    sourceFindingIds: [finding.workflowId ?? finding.sourceLocalId ?? `${finding.source}:unparseable`],
     reviewerSources: [finding.source],
     sourceClassifications: finding.classification ? [finding.classification] : [],
     reason: finding.reason,
@@ -386,7 +388,7 @@ function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding
     sourceFindingIds: [finding.workflowId],
     reviewerSources: [finding.source],
     sourceClassifications: [finding.classification],
-    title: finding.suggestedIssueTitle || finding.title,
+    title: finding.suggestedIssueTitle ?? finding.title,
     reason,
     evidence: finding.evidence,
     impact: finding.currentIssueImpact,
@@ -395,7 +397,7 @@ function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding
 }
 
 function normalizeTitle(finding: NormalizedReviewerFinding): string {
-  return normalizeText(finding.suggestedIssueTitle || finding.title);
+  return normalizeText(finding.suggestedIssueTitle ?? finding.title);
 }
 
 function normalizeText(value: string): string {

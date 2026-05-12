@@ -8,9 +8,9 @@ import { classifyVerificationFailure, parseVerificationArtifact } from "./verifi
 
 export type ContinuePlanStep = WorkflowProgressionAction;
 
-export type PlanContinuationOptions = {
-  attemptOutcome?: AttemptOutcome;
-};
+export interface PlanContinuationOptions {
+  attemptOutcome?: AttemptOutcome | undefined;
+}
 
 export async function planContinuation(
   context: WorkflowContext,

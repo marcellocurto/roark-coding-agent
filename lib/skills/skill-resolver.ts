@@ -64,7 +64,7 @@ async function pathExists(filePath: string): Promise<boolean> {
     await stat(filePath);
     return true;
   } catch (error) {
-    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
     if (code === "ENOENT" || code === "ENOTDIR") return false;
     throw error;
   }
@@ -74,19 +74,19 @@ async function isFile(filePath: string): Promise<boolean> {
   try {
     return (await stat(filePath)).isFile();
   } catch (error) {
-    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
     if (code === "ENOENT" || code === "ENOTDIR") return false;
     throw error;
   }
 }
 
-function parseSkillFrontmatter(markdown: string, skillName: string, skillPath: string, sourceLabel: string): { name?: string; description: string } {
+function parseSkillFrontmatter(markdown: string, skillName: string, skillPath: string, sourceLabel: string): { name?: string | undefined; description: string } {
   try {
     const { frontmatter } = parsePiFrontmatter(markdown);
-    if (!isRecord(frontmatter)) return { name: undefined, description: "" };
+    if (!isRecord(frontmatter)) return { description: "" };
     return {
-      name: typeof frontmatter.name === "string" ? frontmatter.name : undefined,
-      description: typeof frontmatter.description === "string" ? frontmatter.description : "",
+      ...(typeof frontmatter["name"] === "string" ? { name: frontmatter["name"] } : {}),
+      description: typeof frontmatter["description"] === "string" ? frontmatter["description"] : "",
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

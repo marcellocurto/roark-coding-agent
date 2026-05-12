@@ -12,14 +12,14 @@ export type AttemptOutcome =
   | "failed-output-contract"
   | "errored";
 
-export type AttemptGitHubCommentRef = {
+export interface AttemptGitHubCommentRef {
   id: number;
-  url?: string;
+  url?: string | undefined  ;
   marker: string;
   updatedAt: string;
-};
+}
 
-export type AttemptMetadata = {
+export interface AttemptMetadata {
   attempt: number;
   issueNumber: number;
   branch: string;
@@ -30,22 +30,22 @@ export type AttemptMetadata = {
   endedAt: string | null;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
-  workspace?: AttemptWorkspaceMetadata;
+  workspace?: AttemptWorkspaceMetadata | undefined  ;
   githubComments?: {
-    issue?: Record<string, AttemptGitHubCommentRef>;
+    issue?: Record<string, AttemptGitHubCommentRef> | undefined;
   };
-};
+}
 
 export type AttemptSummary = Pick<
   AttemptMetadata,
   "attempt" | "branch" | "startedAt" | "endedAt" | "outcome" | "runArtifactPath"
 >;
 
-export type Clock = { now(): Date };
+export interface Clock { now(): Date }
 
 export const defaultClock: Clock = { now: () => new Date() };
 
-export type FormatAttemptMetadataInput = {
+export interface FormatAttemptMetadataInput {
   attempt: number;
   issueNumber: number;
   branch: string;
@@ -53,12 +53,12 @@ export type FormatAttemptMetadataInput = {
   worktreePath: string;
   runArtifactPath: string;
   startedAt: Date | string;
-  endedAt?: Date | string | null;
-  outcome?: AttemptOutcome;
-  outcomeDetail?: string | null;
-  githubComments?: AttemptMetadata["githubComments"];
-  workspace?: AttemptWorkspaceMetadata;
-};
+  endedAt?: Date | string | null | undefined;
+  outcome?: AttemptOutcome | undefined;
+  outcomeDetail?: string | null | undefined;
+  githubComments?: AttemptMetadata["githubComments"] | undefined;
+  workspace?: AttemptWorkspaceMetadata | undefined  ;
+}
 
 export function attemptsRootDir(issueDir: string): string {
   return path.join(issueDir, "attempts");
@@ -112,7 +112,7 @@ export function formatAttemptMetadata(input: FormatAttemptMetadataInput): Attemp
 export function recordAttemptIssueComment(
   metadata: AttemptMetadata,
   phase: string,
-  ref: { id: number; url?: string; marker: string },
+  ref: { id: number; url?: string | undefined; marker: string },
   updatedAt: Date | string = new Date(),
 ): AttemptMetadata {
   metadata.githubComments ??= {};
@@ -173,7 +173,7 @@ export async function readAttemptIndex(issueDir: string): Promise<AttemptSummary
 
   try {
     const raw = await readFile(indexPath, "utf8");
-    const parsed = JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed as AttemptSummary[] : [];
   } catch {
     return [];
@@ -210,7 +210,7 @@ export async function updateAttemptIndex(
   await mkdir(issueDir, { recursive: true });
   const indexPath = attemptIndexPath(issueDir);
 
-  let current = await readAttemptIndex(issueDir);
+  const current = await readAttemptIndex(issueDir);
 
   const existingIndex = current.findIndex((entry) => entry.attempt === summary.attempt);
   if (existingIndex >= 0) {

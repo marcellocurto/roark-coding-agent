@@ -14,18 +14,18 @@ export type PrRevisionArtifactName =
   | "revisionReview"
   | "verification";
 
-export type PrRevisionContext = {
+export interface PrRevisionContext {
   cwd: string;
   outDir: string;
-  repo?: string;
+  repo?: string | undefined  ;
   prNumber: number;
   revision: number;
   prDir: string;
   revisionDir: string;
   revisionDirRelative: string;
-  model?: string;
-  thinkingLevel?: RevisePrCliOptions["thinkingLevel"];
-  thinkingProfile?: ThinkingProfileName;
+  model?: string | undefined  ;
+  thinkingLevel?: RevisePrCliOptions["thinkingLevel"] | undefined  ;
+  thinkingProfile?: ThinkingProfileName | undefined  ;
   thinkingConfig: WorkflowThinkingConfig;
   force: boolean;
   yes: boolean;
@@ -33,7 +33,7 @@ export type PrRevisionContext = {
   verifyCommand: string;
   remote: string;
   comment: boolean;
-};
+}
 
 const artifactFilenames: Record<PrRevisionArtifactName, string> = {
   metadata: "metadata.json",
@@ -78,33 +78,33 @@ export async function allocateNextRevision(prDir: string): Promise<number> {
   const entries = await readdir(prDir, { withFileTypes: true });
   const revisions = entries
     .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name.match(/^revision-(\d+)$/)?.[1])
+    .map((entry) => (/^revision-(\d+)$/.exec(entry.name))?.[1])
     .filter((value): value is string => value !== undefined)
     .map((value) => Number(value))
     .filter((value) => Number.isInteger(value) && value > 0);
   return revisions.length === 0 ? 1 : Math.max(...revisions) + 1;
 }
 
-export function prRevisionArtifactPath(context: PrRevisionContext, artifact: PrRevisionArtifactName | string): string {
+export function prRevisionArtifactPath(context: PrRevisionContext, artifact: string): string {
   const filename = artifact in artifactFilenames ? artifactFilenames[artifact as PrRevisionArtifactName] : artifact;
   return path.join(context.revisionDir, filename);
 }
 
-export function prRevisionArtifactRelativePath(context: PrRevisionContext, artifact: PrRevisionArtifactName | string): string {
+export function prRevisionArtifactRelativePath(context: PrRevisionContext, artifact: string): string {
   const filename = artifact in artifactFilenames ? artifactFilenames[artifact as PrRevisionArtifactName] : artifact;
   return path.join(context.revisionDirRelative, filename);
 }
 
-export async function writePrRevisionArtifact(context: PrRevisionContext, artifact: PrRevisionArtifactName | string, content: string): Promise<void> {
+export async function writePrRevisionArtifact(context: PrRevisionContext, artifact: string, content: string): Promise<void> {
   await mkdir(context.revisionDir, { recursive: true });
   await writeFile(prRevisionArtifactPath(context, artifact), content.endsWith("\n") ? content : `${content}\n`, "utf8");
 }
 
-export async function readPrRevisionArtifact(context: PrRevisionContext, artifact: PrRevisionArtifactName | string): Promise<string> {
+export async function readPrRevisionArtifact(context: PrRevisionContext, artifact: string): Promise<string> {
   return readFile(prRevisionArtifactPath(context, artifact), "utf8");
 }
 
-export async function writePrRevisionJsonArtifact(context: PrRevisionContext, artifact: PrRevisionArtifactName | string, value: unknown): Promise<void> {
+export async function writePrRevisionJsonArtifact(context: PrRevisionContext, artifact: string, value: unknown): Promise<void> {
   await writePrRevisionArtifact(context, artifact, JSON.stringify(value, null, 2));
 }
 
@@ -142,7 +142,7 @@ export function formatPrFeedbackMarkdown(feedback: PullRequestFeedback): string 
 }
 
 export function inferIssueFromPrBody(body: string): number | undefined {
-  const match = body.match(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:[^\n#]+\/[^\n#]+)?#(\d+)/i);
+  const match = /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:[^\n#]+\/[^\n#]+)?#(\d+)/i.exec(body);
   return match?.[1] ? Number(match[1]) : undefined;
 }
 

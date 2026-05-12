@@ -17,40 +17,38 @@ import {
   defaultClock,
 } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
-import { completeAutorunWorkflow, type AutorunCompletionOutcome } from "./completion.ts";
+import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
-export type RunAutorunAttemptLifecycleInput = {
+export interface RunAutorunAttemptLifecycleInput {
   issueDir: string;
   workflowContext: WorkflowContext;
   branchPlan: AutorunBranchPlan;
   gateOptions: AutorunGateOptions;
   attemptMetadata: AttemptMetadata;
-  issue?: AutorunIssueCandidate;
-  loadIssue?: () => Promise<AutorunIssueCandidate>;
-  beforeWorkflow?: (attemptMetadata: AttemptMetadata) => Promise<void>;
-  beforeRun?: (attemptMetadata: AttemptMetadata) => Promise<void>;
-  afterRun?: (attemptMetadata: AttemptMetadata) => Promise<void>;
-  runner?: AgentRunner;
-  logPrefix?: string;
-  inProgressOutcomeDetail?: string | null;
-  initialVerificationRepairPass?: number;
-};
+  issue?: AutorunIssueCandidate | undefined;
+  loadIssue?: (() => Promise<AutorunIssueCandidate>) | undefined;
+  beforeWorkflow?: ((attemptMetadata: AttemptMetadata) => void | Promise<void>) | undefined;
+  beforeRun?: ((attemptMetadata: AttemptMetadata) => Promise<void>) | undefined;
+  afterRun?: ((attemptMetadata: AttemptMetadata) => Promise<void>) | undefined;
+  runner?: AgentRunner | undefined  ;
+  logPrefix?: string | undefined;
+  inProgressOutcomeDetail?: string | null | undefined;
+  initialVerificationRepairPass?: number | undefined  ;
+}
 
-export type RunAutorunAttemptLifecycleInjected = {
-  clock?: Clock;
-  runFullWorkflow?: (context: WorkflowContext, runner?: AgentRunner) => Promise<WorkflowRunResult>;
-  completeAutorunWorkflow?: typeof completeAutorunWorkflow;
-  publishReviewLedgerComments?: typeof publishReviewLedgerComments;
-  markIssueFailed?: typeof markIssueFailed;
-  finalizeAttemptObservability?: typeof finalizeAttemptObservability;
-};
-
-type TerminalCompletionOutcome = Exclude<AutorunCompletionOutcome, { outcome: "verification-needs-fix" }>;
+export interface RunAutorunAttemptLifecycleInjected {
+  clock?: Clock | undefined;
+  runFullWorkflow?: ((context: WorkflowContext, runner?: AgentRunner) => Promise<WorkflowRunResult>) | undefined;
+  completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
+  publishReviewLedgerComments?: typeof publishReviewLedgerComments | undefined;
+  markIssueFailed?: typeof markIssueFailed | undefined;
+  finalizeAttemptObservability?: typeof finalizeAttemptObservability | undefined;
+}
 
 export async function runAutorunAttemptLifecycle(
   input: RunAutorunAttemptLifecycleInput,
@@ -111,7 +109,7 @@ export async function runAutorunAttemptLifecycle(
       });
     }
 
-    const terminalOutcome = completionOutcome as TerminalCompletionOutcome;
+    const terminalOutcome = completionOutcome;
     outcome = terminalOutcome.outcome;
     outcomeDetail = terminalOutcome.outcomeDetail;
   } catch (error) {
@@ -145,7 +143,7 @@ export async function runAutorunAttemptLifecycle(
 async function runVerificationRepairWorkflow(
   context: WorkflowContext,
   initialPass: number,
-  runner?: AgentRunner,
+  runner?: AgentRunner  ,
 ): Promise<WorkflowRunResult> {
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
     console.log(`\n=== Verification repair pass ${pass} ===`);
@@ -240,7 +238,7 @@ async function readErrorArtifact(
   const artifact = error instanceof AgentTaskRunError || error instanceof ArtifactValidationError
     ? error.artifact
     : undefined;
-  if (!artifact) return undefined;
+  if (artifact === undefined) return undefined;
   try {
     return {
       path: artifactRelativePath(context, artifact),

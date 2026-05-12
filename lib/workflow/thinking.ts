@@ -67,8 +67,8 @@ export const workflowThinkingProfiles: Record<ThinkingProfileName, WorkflowThink
 };
 
 export function getWorkflowThinkingConfig(input: {
-  profile?: ThinkingProfileName;
-  explicitThinkingLevel?: ThinkingLevel;
+  profile?: ThinkingProfileName | undefined  ;
+  explicitThinkingLevel?: ThinkingLevel | undefined  ;
 } = {}): WorkflowThinkingConfig {
   if (input.explicitThinkingLevel) return uniformWorkflowThinkingConfig(input.explicitThinkingLevel);
   return { ...workflowThinkingProfiles[input.profile ?? "default"] };

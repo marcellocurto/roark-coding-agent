@@ -14,19 +14,19 @@ import { defaultLifecycleHooks, defaultWorkspaceConfig, type WorkspaceConfig } f
 import { inferRepoFromOrigin, inferVerifyCommand, type RoarkConfig } from "./hydrate.ts";
 import { runProcess, type ProcessResult } from "./process.ts";
 
-type ProcessRunner = (args: string[], options?: { cwd?: string }) => Promise<ProcessResult>;
+type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
 
-export type InitResult = {
+export interface InitResult {
   root: string;
   files: string[];
-  verify?: string;
+  verify?: string | undefined;
   repo: string;
   guidance: string[];
-};
+}
 
-type InitDependencies = {
-  runner?: ProcessRunner;
-};
+interface InitDependencies {
+  runner?: ProcessRunner | undefined  ;
+}
 
 type InitRoarkConfig = Omit<RoarkConfig, "workspace"> & { workspace: Omit<WorkspaceConfig, "copyToWorktree"> };
 
@@ -91,8 +91,13 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   };
 }
 
-function buildInitConfig(input: { repo: string; verify?: string; setupHook?: string }): InitRoarkConfig {
-  const { copyToWorktree: _copyToWorktree, ...workspaceDefaults } = defaultWorkspaceConfig;
+function buildInitConfig(input: { repo: string; verify?: string | undefined; setupHook?: string | undefined }): InitRoarkConfig {
+  const workspaceDefaults = {
+    root: defaultWorkspaceConfig.root,
+    strategy: defaultWorkspaceConfig.strategy,
+    cloneRemote: defaultWorkspaceConfig.cloneRemote,
+    clone: defaultWorkspaceConfig.clone,
+  };
   return {
     repo: input.repo,
     baseBranch: defaultAutorunBaseBranch,

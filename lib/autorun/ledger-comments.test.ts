@@ -5,6 +5,8 @@ import path from "node:path";
 import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
+
+const tick = () => Promise.resolve();
 import {
   formatAttemptStartComment,
   formatPrCreatedComment,
@@ -20,6 +22,10 @@ afterEach(async () => {
 
 describe("autorun ledger comment publishing", () => {
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -47,7 +53,7 @@ describe("autorun ledger comment publishing", () => {
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     });
-    const calls: Array<{ phase: string; body: string }> = [];
+    const calls: { phase: string; body: string }[] = [];
 
     await publishReviewLedgerComments({
       cwd,
@@ -57,6 +63,7 @@ describe("autorun ledger comment publishing", () => {
       attemptMetadata,
     }, {
       publishIssueLedgerComment: async (input) => {
+        await tick();
         calls.push({ phase: input.phase, body: input.body });
         recordAttemptIssueComment(input.attemptMetadata, input.phase, {
           id: input.phase === "review-a" ? 101 : 102,

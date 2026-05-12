@@ -79,8 +79,8 @@ describe("runInit", () => {
     await initFromArgv(["init", "--cwd", repo]);
 
     const config = await readConfig(repo);
-    expect(config.repo).toBe("owner/ssh-repo");
-    expect(config.verify).toBe("bun run test");
+    expect(config["repo"]).toBe("owner/ssh-repo");
+    expect(config["verify"]).toBe("bun run test");
   });
 
   test("--repo overrides origin and Makefile test target is inferred", async () => {
@@ -91,8 +91,8 @@ describe("runInit", () => {
     await initFromArgv(["init", "--cwd", repo, "--repo", "override/repo"]);
 
     const config = await readConfig(repo);
-    expect(config.repo).toBe("override/repo");
-    expect(config.verify).toBe("make test");
+    expect(config["repo"]).toBe("override/repo");
+    expect(config["verify"]).toBe("make test");
   });
 
   test("omits verify and returns guidance when no verify command is obvious", async () => {
@@ -102,7 +102,7 @@ describe("runInit", () => {
     const result = await initFromArgv(["init", "--cwd", repo]);
 
     const config = await readConfig(repo);
-    expect(config.verify).toBeUndefined();
+    expect(config["verify"]).toBeUndefined();
     expect(result.guidance.join("\n")).toContain("No obvious verification command");
   });
 
@@ -119,7 +119,7 @@ describe("runInit", () => {
     const raw = parseArgs(["init", "--cwd", dir, "--repo", "owner/repo"]);
     if ("help" in raw) throw new Error("expected options");
 
-    await expect(hydrateCliOptions(raw)).rejects.toThrow("must be run inside a git repository");
+    expect(hydrateCliOptions(raw)).rejects.toThrow("must be run inside a git repository");
   });
 
   test("refuses to overwrite existing managed files without partial writes", async () => {
@@ -127,7 +127,7 @@ describe("runInit", () => {
     await mkdir(path.join(repo, ".roark"), { recursive: true });
     await writeFile(path.join(repo, ".roark", "config.json"), "old", "utf8");
 
-    await expect(initFromArgv(["init", "--cwd", repo, "--repo", "owner/repo"])).rejects.toThrow("Refusing to overwrite");
+    expect(initFromArgv(["init", "--cwd", repo, "--repo", "owner/repo"])).rejects.toThrow("Refusing to overwrite");
 
     expect(await readFile(path.join(repo, ".roark", "config.json"), "utf8")).toBe("old");
     expect(existsSync(path.join(repo, ".roark", "WORKFLOW.md"))).toBe(false);
@@ -143,7 +143,7 @@ describe("runInit", () => {
     await initFromArgv(["init", "--cwd", repo, "--repo", "owner/repo", "--force"]);
 
     const config = await readConfig(repo);
-    expect(config.repo).toBe("owner/repo");
+    expect(config["repo"]).toBe("owner/repo");
     expect(await readFile(path.join(repo, ".roark", "custom", "note.txt"), "utf8")).toBe("keep");
     expect(existsSync(path.join(repo, ".roark", "skills"))).toBe(false);
   });
@@ -151,7 +151,7 @@ describe("runInit", () => {
   test("fails when repo cannot be inferred and --repo is omitted", async () => {
     const repo = await tempGitRepo();
 
-    await expect(initFromArgv(["init", "--cwd", repo])).rejects.toThrow("Pass --repo owner/repo");
+    expect(initFromArgv(["init", "--cwd", repo])).rejects.toThrow("Pass --repo owner/repo");
   });
 });
 
@@ -168,7 +168,7 @@ async function expectConfig(repo: string, expected: Record<string, unknown>): Pr
 }
 
 async function readConfig(repo: string): Promise<Record<string, unknown>> {
-  return JSON.parse(await readFile(path.join(repo, ".roark", "config.json"), "utf8"));
+  return JSON.parse(await readFile(path.join(repo, ".roark", "config.json"), "utf8")) as Record<string, unknown>;
 }
 
 async function tempDir(): Promise<string> {

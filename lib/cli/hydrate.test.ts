@@ -129,45 +129,45 @@ describe("hydrateCliOptions", () => {
     await writeConfig(withUnknownNested, { workspace: { unknown: true }, verify: "bun test", repo: "owner/repo" });
     const unknownRaw = parseArgs(["auto", "--cwd", withUnknownNested]);
     if ("help" in unknownRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'workspace.unknown'");
+    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'workspace.unknown'");
 
     const withWorktreeStrategy = await tempGitRepo();
     await writeConfig(withWorktreeStrategy, { workspace: { strategy: "worktree" }, verify: "bun test", repo: "owner/repo" });
     const strategyRaw = parseArgs(["auto", "--cwd", withWorktreeStrategy]);
     if ("help" in strategyRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(strategyRaw)).rejects.toThrow("workspace.strategy' must be 'clone'");
+    expect(hydrateCliOptions(strategyRaw)).rejects.toThrow("workspace.strategy' must be 'clone'");
 
     const withInvalidCopy = await tempGitRepo();
     await writeConfig(withInvalidCopy, { workspace: { copyToWorktree: [".secrets/env", "../escape"] }, verify: "bun test", repo: "owner/repo" });
     const invalidCopyRaw = parseArgs(["auto", "--cwd", withInvalidCopy]);
     if ("help" in invalidCopyRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(invalidCopyRaw)).rejects.toThrow("workspace.copyToWorktree[1]");
+    expect(hydrateCliOptions(invalidCopyRaw)).rejects.toThrow("workspace.copyToWorktree[1]");
 
     const withGlobCopy = await tempGitRepo();
     await writeConfig(withGlobCopy, { workspace: { copyToWorktree: ["secrets/*"] }, verify: "bun test", repo: "owner/repo" });
     const globCopyRaw = parseArgs(["auto", "--cwd", withGlobCopy]);
     if ("help" in globCopyRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(globCopyRaw)).rejects.toThrow("globs are not supported");
+    expect(hydrateCliOptions(globCopyRaw)).rejects.toThrow("globs are not supported");
 
     for (const [entry, message] of [["/abs", "must be a relative path"], [".git/config", "must not target .git"], ["", "non-empty"], [42, "non-empty string"]] as const) {
       const repo = await tempGitRepo();
       await writeConfig(repo, { workspace: { copyToWorktree: [entry] }, verify: "bun test", repo: "owner/repo" });
       const raw = parseArgs(["auto", "--cwd", repo]);
       if ("help" in raw) throw new Error("expected options");
-      await expect(hydrateCliOptions(raw)).rejects.toThrow(message);
+      expect(hydrateCliOptions(raw)).rejects.toThrow(message);
     }
 
     const withInvalidHook = await tempGitRepo();
     await writeConfig(withInvalidHook, { hooks: { beforeRun: "" }, verify: "bun test", repo: "owner/repo" });
     const hookRaw = parseArgs(["auto", "--cwd", withInvalidHook]);
     if ("help" in hookRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(hookRaw)).rejects.toThrow("hooks.beforeRun' must be a non-empty string");
+    expect(hydrateCliOptions(hookRaw)).rejects.toThrow("hooks.beforeRun' must be a non-empty string");
 
     const withSandbox = await tempGitRepo();
     await writeConfig(withSandbox, { sandbox: { provider: "docker" }, verify: "bun test", repo: "owner/repo" });
     const sandboxRaw = parseArgs(["auto", "--cwd", withSandbox]);
     if ("help" in sandboxRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
+    expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
   });
 
   test("preserves CLI thinking profile selection", async () => {
@@ -292,20 +292,20 @@ describe("hydrateCliOptions", () => {
     await writeConfig(withUnsupported, { model: "provider/model" });
     const unsupportedRaw = parseArgs(["auto", "--cwd", withUnsupported]);
     if ("help" in unsupportedRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(unsupportedRaw)).rejects.toThrow("Unsupported Roark config key 'model'");
+    expect(hydrateCliOptions(unsupportedRaw)).rejects.toThrow("Unsupported Roark config key 'model'");
 
     const withUnknown = await tempGitRepo();
     await writeConfig(withUnknown, { notAKey: true });
     const unknownRaw = parseArgs(["auto", "--cwd", withUnknown]);
     if ("help" in unknownRaw) throw new Error("expected options");
-    await expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'notAKey'");
+    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'notAKey'");
   });
 
   test("fails clearly outside git repositories", async () => {
     const dir = await tempDir();
     const raw = parseArgs(["auto", "--cwd", dir]);
     if ("help" in raw) throw new Error("expected options");
-    await expect(hydrateCliOptions(raw)).rejects.toThrow("must be run inside a git repository");
+    expect(hydrateCliOptions(raw)).rejects.toThrow("must be run inside a git repository");
   });
 
   test("auto and continue fail before running when verify cannot be configured or inferred", async () => {
@@ -315,7 +315,7 @@ describe("hydrateCliOptions", () => {
     for (const argv of [["auto", "--cwd", repo], ["continue", "1", "--cwd", repo]]) {
       const raw = parseArgs(argv);
       if ("help" in raw) throw new Error("expected options");
-      await expect(hydrateCliOptions(raw)).rejects.toThrow("Could not determine verification command");
+      expect(hydrateCliOptions(raw)).rejects.toThrow("Could not determine verification command");
     }
   });
 });

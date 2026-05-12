@@ -2,16 +2,16 @@ import type { VerificationResult } from "../autorun/verification.ts";
 import { postIssueComment } from "../github/comments.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 
-export type RevisionSummaryInput = {
+export interface RevisionSummaryInput {
   context: PrRevisionContext;
   outcome: string;
-  planStatus?: string;
-  reviewVerdict?: string;
-  verification?: VerificationResult;
-  addressed?: string[];
-  skipped?: string[];
+  planStatus?: string | undefined;
+  reviewVerdict?: string | undefined;
+  verification?: VerificationResult | undefined;
+  addressed?: string[] | undefined;
+  skipped?: string[] | undefined;
   artifactPaths: string[];
-};
+}
 
 export function buildPrRevisionSummaryMarker(input: { prNumber: number; revision: number }): string {
   return `<!-- roark:pr=${input.prNumber} revision=${input.revision} phase=revision-summary -->`;

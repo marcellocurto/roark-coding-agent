@@ -1,20 +1,20 @@
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { isTransientAgentConnectionError } from "../workflow/transient-agent-errors.ts";
 
-export type ContinueCommandInput = {
+export interface ContinueCommandInput {
   issueNumber: number | string;
-  cwd?: string;
-  repo?: string;
-  attempt?: number;
-  yes?: boolean;
-};
+  cwd?: string | undefined  ;
+  repo?: string | undefined  ;
+  attempt?: number | undefined;
+  yes?: boolean | undefined;
+}
 
 export function formatContinueCommand(input: ContinueCommandInput): string {
   const args = ["roark", "continue", String(input.issueNumber)];
   if (input.cwd) args.push("--cwd", input.cwd);
   if (input.repo) args.push("--repo", input.repo);
   if (input.attempt !== undefined) args.push("--attempt", String(input.attempt));
-  if (input.yes) args.push("--yes");
+  if (input.yes === true) args.push("--yes");
   return args.map(shellQuote).join(" ");
 }
 

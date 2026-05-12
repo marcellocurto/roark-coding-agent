@@ -1,23 +1,23 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 
-export type ObservabilityEvent = {
+export interface ObservabilityEvent {
   type: string;
-  timestamp?: string;
-  issueNumber?: string;
-  attempt?: number;
+  timestamp?: string | undefined;
+  issueNumber?: string | undefined;
+  attempt?: number | undefined;
   [key: string]: unknown;
-};
+}
 
-export type EventWriter = {
+export interface EventWriter {
   readonly eventsPath: string;
   write(event: ObservabilityEvent): Promise<void>;
-};
+}
 
-export type EventWriterOptions = {
-  now?: () => Date;
-  warn?: (message: string) => void;
-};
+export interface EventWriterOptions {
+  now?: (() => Date) | undefined;
+  warn?: ((message: string) => void) | undefined;
+}
 
 const redactedKeys = new Set([
   "args",
@@ -56,7 +56,7 @@ export function createEventWriter(runDir: string, options: EventWriterOptions = 
 }
 
 export function sanitizeEvent(event: ObservabilityEvent): ObservabilityEvent {
-  const sanitized: ObservabilityEvent = { type: String(event.type) };
+  const sanitized: ObservabilityEvent = { type: event.type };
   for (const [key, value] of Object.entries(event)) {
     if (key === "type") continue;
     if (redactedKeys.has(key)) continue;

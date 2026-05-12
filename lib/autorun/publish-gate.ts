@@ -2,17 +2,17 @@ import type { VerificationResult } from "./verification.ts";
 
 export type ReadinessStatus = "ready-for-pr" | "not-ready";
 
-export type PublishGateInput = {
+export interface PublishGateInput {
   readinessStatus: string | undefined;
-  verification?: VerificationResult;
-};
+  verification?: VerificationResult | undefined;
+}
 
 export type PublishGateDecision =
   | { publish: true }
   | { publish: false; phase: "readiness" | "verification"; reason: string; artifactPath: string };
 
 export function parseReadinessStatus(markdown: string): ReadinessStatus | undefined {
-  const match = markdown.match(/##\s*Status\s*\r?\n+\s*([^\r\n]+)/i);
+  const match = /##\s*Status\s*\r?\n+\s*([^\r\n]+)/i.exec(markdown);
   const candidate = match?.[1];
   if (!candidate) return undefined;
 

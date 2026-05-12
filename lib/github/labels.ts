@@ -1,24 +1,24 @@
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 
-export type RequiredGitHubLabel = {
+export interface RequiredGitHubLabel {
   name: string;
   role: string;
   color: string;
   description: string;
-};
+}
 
-export type EnsureGitHubLabelsOptions = {
+export interface EnsureGitHubLabelsOptions {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   labels: readonly RequiredGitHubLabel[];
-  dryRun?: boolean;
-};
+  dryRun?: boolean | undefined;
+}
 
-export type EnsureGitHubLabelsResult = {
+export interface EnsureGitHubLabelsResult {
   existing: string[];
   missing: RequiredGitHubLabel[];
   created: RequiredGitHubLabel[];
-};
+}
 
 export function buildListGitHubLabelsArgv(options: { repo: string }): string[] {
   return ["gh", "api", `repos/${options.repo}/labels`, "--paginate", "--jq", ".[].name"];
@@ -51,7 +51,7 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
   const existingSet = normalizedSet(existing);
   const missing = required.filter((label) => !existingSet.has(normalizeLabelName(label.name)));
 
-  if (options.dryRun) {
+  if (options.dryRun === true) {
     if (missing.length > 0) {
       console.log("\nRequired GitHub labels missing:");
       for (const label of missing) console.log(`- ${label.name} (${label.role})`);

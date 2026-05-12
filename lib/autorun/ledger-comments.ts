@@ -6,14 +6,14 @@ import type { AutorunIssueCandidate } from "./selection.ts";
 
 const reviewExcerptMaxChars = 24_000;
 
-export type LedgerCommentPhase = "attempt-start" | "review-a" | "review-b" | "readiness" | "verification" | "triage" | "pr-created" | string;
+export type LedgerCommentPhase = string;
 
 export function formatAttemptStartComment(input: {
   issueNumber: number;
   attempt: number;
   branchName: string;
-  assignee?: string;
-  attemptMetadataPath?: string;
+  assignee?: string | undefined  ;
+  attemptMetadataPath?: string | undefined;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "attempt-start" });
   const actor = input.assignee ? `@${input.assignee}` : "Roark";
@@ -31,7 +31,7 @@ export type PublishIssueLedgerCommentFn = typeof publishIssueLedgerComment;
 
 export async function publishReviewLedgerComments(input: {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
@@ -58,7 +58,7 @@ export async function publishReviewLedgerComments(input: {
 
 export async function publishIssueLedgerComment(input: {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issueNumber: number;
   attemptMetadata: AttemptMetadata;
   phase: LedgerCommentPhase;
@@ -88,7 +88,7 @@ export function formatReviewLedgerComment(input: {
   issueNumber: number;
   attempt: number;
   phase: string;
-  markerPhase?: "review-a" | "review-b";
+  markerPhase?: "review-a" | "review-b" | undefined;
   title: string;
   artifactPath: string;
   artifactContent: string;
@@ -113,7 +113,7 @@ export function formatPrCreatedComment(input: {
   issueNumber: number;
   attempt: number;
   prUrl: string;
-  attemptMetadataPath?: string;
+  attemptMetadataPath?: string | undefined;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "pr-created" });
   const lines = [
@@ -128,13 +128,13 @@ export function formatPrCreatedComment(input: {
 
 async function publishReviewLedgerComment(input: {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
   artifact: ArtifactRef;
   phase: string;
-  markerPhase?: "review-a" | "review-b";
+  markerPhase?: "review-a" | "review-b" | undefined;
   title: string;
   publishLedgerComment: PublishIssueLedgerCommentFn;
 }): Promise<void> {

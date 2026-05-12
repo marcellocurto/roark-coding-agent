@@ -7,6 +7,8 @@ import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import { runPrRevision } from "./workflow.ts";
 
+const tick = () => Promise.resolve();
+
 async function tempGitRepo(): Promise<string> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-workflow-"));
   await Bun.spawn(["git", "init"], { cwd }).exited;
@@ -61,17 +63,24 @@ function feedback(): PullRequestFeedback {
 
 describe("runPrRevision", () => {
   test("no-action-needed writes artifacts without code mutation, push, or comment", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     let checkoutCalled = false;
     let commentCalled = false;
 
     const result = await runPrRevision(options(cwd), {
-      fetchFeedback: async () => feedback(),
+      fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
+        await tick();
+        await tick();
         checkoutCalled = true;
       },
-      agentRunner: async () => "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n",
+      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
+        await tick();
         commentCalled = true;
       },
     });
@@ -83,15 +92,20 @@ describe("runPrRevision", () => {
   });
 
   test("allocates revision after checking out the PR head branch", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
 
     const result = await runPrRevision(options(cwd), {
-      fetchFeedback: async () => feedback(),
+      fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
         await mkdir(path.join(cwd, ".roark", "runs", "pr", "12", "revision-1"), { recursive: true });
       },
-      agentRunner: async () => "# Revision Plan\n\n## Status\nno-action-needed\n",
+      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
       postSummaryComment: async () => {
+        await tick();
         throw new Error("summary comment should not be posted for no-action-needed");
       },
     });
@@ -102,18 +116,25 @@ describe("runPrRevision", () => {
   });
 
   test("needs-human stops before writable implementation and posts one summary by default", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     const writableCalls: boolean[] = [];
     let commentCalled = false;
 
     const result = await runPrRevision(options(cwd), {
-      fetchFeedback: async () => feedback(),
-      checkout: async () => {},
+      fetchFeedback: async () => (await tick(), feedback()),
+      checkout: async () => {
+        await tick();},
       agentRunner: async (request) => {
+        await tick();
         writableCalls.push(request.writable);
         return "# Revision Plan\n\n## Status\nneeds-human\n\n## Human Needs\n- Please decide.\n";
       },
       postSummaryComment: async () => {
+        await tick();
         commentCalled = true;
       },
     });
@@ -124,20 +145,27 @@ describe("runPrRevision", () => {
   });
 
   test("uses centralized thinking profiles for revision agents", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     const thinkingLevels: string[] = [];
 
     const result = await runPrRevision(options(cwd, { thinkingProfile: "fast" }), {
-      fetchFeedback: async () => feedback(),
-      checkout: async () => {},
+      fetchFeedback: async () => (await tick(), feedback()),
+      checkout: async () => {
+        await tick();},
       agentRunner: async (request) => {
+        await tick();
         thinkingLevels.push(request.thinkingLevel);
         if (request.writable) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" }),
-      postSummaryComment: async () => {},
+      verificationRunner: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
+      postSummaryComment: async () => {
+        await tick();},
     });
 
     expect(result.outcome).toBe("verification-failed");
@@ -145,15 +173,22 @@ describe("runPrRevision", () => {
   });
 
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     let commentCalled = false;
     let calls = 0;
     let writableCalls = 0;
 
     const result = await runPrRevision(options(cwd, { maxFixPasses: 3 }), {
-      fetchFeedback: async () => feedback(),
-      checkout: async () => {},
+      fetchFeedback: async () => (await tick(), feedback()),
+      checkout: async () => {
+        await tick();
+        await tick();},
       agentRunner: async (request) => {
+        await tick();
         calls++;
         if (request.writable) {
           writableCalls++;
@@ -162,8 +197,9 @@ describe("runPrRevision", () => {
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" }),
+      verificationRunner: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
+        await tick();
         commentCalled = true;
       },
     });
@@ -175,6 +211,10 @@ describe("runPrRevision", () => {
   });
 
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -185,11 +225,12 @@ describe("runPrRevision", () => {
     const writableArtifacts: string[] = [];
 
     const result = await runPrRevision(options(cwd, { maxFixPasses: 3 }), {
-      fetchFeedback: async () => feedback(),
+      fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
         await run(["git", "checkout", "-b", "feature/pr-12"], cwd);
       },
       agentRunner: async (request) => {
+        await tick();
         calls++;
         if (request.writable) {
           writableArtifacts.push(request.prompt);
@@ -200,12 +241,14 @@ describe("runPrRevision", () => {
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
       verificationRunner: async ({ command }) => {
+        await tick();
         verificationCalls++;
         return verificationCalls === 1
           ? { ok: false, command, exitCode: 1, stdout: "", stderr: "type error" }
           : { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
       },
       postSummaryComment: async () => {
+        await tick();
         commentCalls++;
       },
     });
@@ -221,6 +264,10 @@ describe("runPrRevision", () => {
   });
 
   test("review and verification repairs share the fix-pass budget", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     let calls = 0;
     let writableCalls = 0;
@@ -228,9 +275,11 @@ describe("runPrRevision", () => {
     let commentCalls = 0;
 
     const result = await runPrRevision(options(cwd, { maxFixPasses: 1 }), {
-      fetchFeedback: async () => feedback(),
-      checkout: async () => {},
+      fetchFeedback: async () => (await tick(), feedback()),
+      checkout: async () => {
+        await tick();},
       agentRunner: async (request) => {
+        await tick();
         calls++;
         if (request.writable) {
           writableCalls++;
@@ -241,10 +290,12 @@ describe("runPrRevision", () => {
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
       verificationRunner: async ({ command }) => {
+        await tick();
         verificationCalls++;
         return { ok: false, command, exitCode: 1, stdout: "", stderr: "test failed" };
       },
       postSummaryComment: async () => {
+        await tick();
         commentCalls++;
       },
     });
@@ -254,11 +305,15 @@ describe("runPrRevision", () => {
     expect(verificationCalls).toBe(1);
     expect(commentCalls).toBe(1);
     expect(existsSync(path.join(result.context.revisionDir, "verification-before-fix-1.md"))).toBe(false);
-    const metadata = JSON.parse(await readFile(path.join(result.context.revisionDir, "metadata.json"), "utf8"));
+    const metadata = JSON.parse(await readFile(path.join(result.context.revisionDir, "metadata.json"), "utf8")) as { verificationFailureReason: string };
     expect(metadata.verificationFailureReason).toContain("Verification failed after 1 fix passes");
   });
 
   test("successful verification commits, pushes, and comments once", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -267,7 +322,7 @@ describe("runPrRevision", () => {
     let commentCalls = 0;
 
     const result = await runPrRevision(options(cwd), {
-      fetchFeedback: async () => feedback(),
+      fetchFeedback: async () => (await tick(), feedback()),
       checkout: async () => {
         await run(["git", "checkout", "-b", "feature/pr-12"], cwd);
       },
@@ -280,8 +335,9 @@ describe("runPrRevision", () => {
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }),
+      verificationRunner: async ({ command }) => (await tick(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       postSummaryComment: async () => {
+        await tick();
         commentCalls++;
       },
     });

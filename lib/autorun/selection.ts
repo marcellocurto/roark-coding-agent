@@ -1,17 +1,17 @@
-export type AutorunIssueCandidate = {
+export interface AutorunIssueCandidate {
   number: number;
   title: string;
-  body?: string;
-  url?: string;
-  createdAt?: string;
-  labels?: Array<{ name: string }>;
-};
+  body?: string | undefined;
+  url?: string | undefined  ;
+  createdAt?: string | undefined;
+  labels?: { name: string }[] | undefined;
+}
 
-export type IssueSelectionOptions = {
+export interface IssueSelectionOptions {
   readyLabel: string;
   skipLabels: readonly string[];
   limit: number;
-};
+}
 
 export const defaultAutorunReadyLabel = "afk";
 export const defaultAutorunInProgressLabel = "roark-in-progress";

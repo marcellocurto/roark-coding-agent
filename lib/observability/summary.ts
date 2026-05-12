@@ -5,7 +5,7 @@ import type { WorkflowContext } from "../workflow/artifacts.ts";
 export type RunStatus = "running" | "completed" | "failed" | "stopped";
 export type PhaseStatus = "running" | "completed" | "failed" | "skipped";
 
-export type ObservabilityTotals = {
+export interface ObservabilityTotals {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
@@ -13,55 +13,55 @@ export type ObservabilityTotals = {
   totalTokens: number;
   cost: number;
   toolCalls: number;
-};
+}
 
-export type PhaseSummary = {
+export interface PhaseSummary {
   phase: string;
-  label?: string;
+  label?: string | undefined;
   status: PhaseStatus;
-  startedAt?: string;
-  endedAt?: string;
-  durationMs?: number;
-  artifactPath?: string;
-  model?: string;
-  thinkingLevel?: string;
-  sessionId?: string;
-  reused?: boolean;
-  errorMessage?: string;
-  totals?: ObservabilityTotals;
-};
+  startedAt?: string | undefined;
+  endedAt?: string | undefined;
+  durationMs?: number | undefined  ;
+  artifactPath?: string | undefined;
+  model?: string | undefined  ;
+  thinkingLevel?: string | undefined  ;
+  sessionId?: string | undefined;
+  reused?: boolean | undefined;
+  errorMessage?: string | undefined;
+  totals?: ObservabilityTotals | undefined;
+}
 
-export type RunSummary = {
+export interface RunSummary {
   version: 1;
   issueNumber: string;
-  attempt?: number;
+  attempt?: number | undefined;
   runDir: string;
   status: RunStatus;
-  startedAt?: string;
-  endedAt?: string;
-  durationMs?: number;
+  startedAt?: string | undefined;
+  endedAt?: string | undefined;
+  durationMs?: number | undefined  ;
   phases: Record<string, PhaseSummary>;
   totals: ObservabilityTotals;
-  lastError?: string;
-  recoveryCommand?: string;
-};
+  lastError?: string | undefined;
+  recoveryCommand?: string | undefined  ;
+}
 
-export type SessionStatsLike = {
-  sessionId?: string;
-  toolCalls?: number;
+export interface SessionStatsLike {
+  sessionId?: string | undefined;
+  toolCalls?: number | undefined;
   tokens?: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    total?: number;
+    input?: number | undefined;
+    output?: number | undefined;
+    cacheRead?: number | undefined;
+    cacheWrite?: number | undefined;
+    total?: number | undefined;
   };
-  cost?: number;
-};
+  cost?: number | undefined;
+}
 
-export type SummaryOptions = {
-  warn?: (message: string) => void;
-};
+export interface SummaryOptions {
+  warn?: ((message: string) => void) | undefined;
+}
 
 export function emptyTotals(): ObservabilityTotals {
   return {

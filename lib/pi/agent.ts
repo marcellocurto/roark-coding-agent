@@ -75,7 +75,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   const toolStarts = new Map<string, { startedAt: number; args: unknown }>();
   const completedTools: CompletedToolRunForLog[] = [];
   const emit = (promise: Promise<void> | undefined) => {
-    if (promise) pendingObservability.push(promise.catch(() => {}));
+    if (promise !== undefined) pendingObservability.push(promise.catch(() => undefined));
   };
   emit(options.observer?.agentSessionStarted({
     phase,
@@ -193,7 +193,11 @@ export function assertRequestedSkillsLoaded(
   const missing = requestedSkillPaths.filter((skillPath) => !loadedSkills.some((skill) => skillLoadedFromPath(skill, skillPath)));
   if (missing.length === 0) return;
 
-  const relevantDiagnostics = diagnostics.filter((diagnostic) => diagnostic.path && missing.some((skillPath) => isSameOrWithin(diagnostic.path!, skillPath)));
+  const relevantDiagnostics = diagnostics.filter((diagnostic) => {
+    const diagnosticPath = diagnostic.path;
+    if (diagnosticPath === undefined) return false;
+    return missing.some((skillPath) => isSameOrWithin(diagnosticPath, skillPath));
+  });
   const diagnosticDetails = relevantDiagnostics.length > 0 ? ` Diagnostics: ${formatResourceDiagnostics(relevantDiagnostics)}` : "";
   throw new Error(`Pi skill loading failed: requested skill path(s) did not load: ${missing.join(", ")}.${diagnosticDetails}`);
 }
@@ -218,9 +222,9 @@ function isSameOrWithin(candidatePath: string, parentPath: string): boolean {
 
 export function extractAgentErrorMessage(messages: readonly unknown[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as { role?: string; stopReason?: string; errorMessage?: unknown; provider?: string; model?: string };
+    const message = messages[index] as { role?: string; stopReason?: string; errorMessage?: unknown; provider?: string; model?: string  | undefined};
     if (message.role !== "assistant") continue;
-    if (message.stopReason !== "error" && !message.errorMessage) continue;
+    if (message.stopReason !== "error" && message.errorMessage === undefined) continue;
 
     const providerModel = [message.provider, message.model].filter(Boolean).join("/");
     const detail = typeof message.errorMessage === "string" && message.errorMessage.trim()
@@ -244,10 +248,11 @@ function extractTextContent(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
 
-  return content
+  return (content as unknown[])
     .map((part) => {
-      if (part && typeof part === "object" && "type" in part && part.type === "text" && "text" in part) {
-        return String(part.text);
+      if (typeof part === "object" && part !== null && "type" in part && "text" in part) {
+        const record = part as { type?: unknown; text?: unknown };
+        if (record.type === "text" && typeof record.text === "string") return record.text;
       }
       return "";
     })

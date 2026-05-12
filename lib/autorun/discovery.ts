@@ -13,7 +13,7 @@ import {
 } from "../github/issue.ts";
 import { ensureRunDir } from "../workflow/artifacts.ts";
 import { assertCleanAutorunGit } from "../workflow/git.ts";
-import { runFullWorkflow } from "../workflow/phases.ts";
+import { type runFullWorkflow } from "../workflow/phases.ts";
 import {
   allocateNextAttempt,
   attemptMetadataRelativePath,
@@ -25,7 +25,7 @@ import {
 import { createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
-import { completeAutorunWorkflow } from "./completion.ts";
+import { type completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
 import { acquireRepoAutorunLock, type AutorunLock } from "./lock.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
@@ -35,22 +35,22 @@ import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, r
 
 const discoveryFetchLimit = 100;
 
-type AutoRunInjected = {
-  clock?: Clock;
-  listOpenGitHubIssues?: typeof listOpenGitHubIssues;
-  fetchGitHubIssue?: typeof fetchGitHubIssue;
-  fetchGitHubIssueRelationships?: typeof fetchGitHubIssueRelationships;
-  resolveGitHubIssueRepo?: typeof resolveGitHubIssueRepo;
-  assertCleanAutorunGit?: typeof assertCleanAutorunGit;
-  getCurrentGitHubLogin?: typeof getCurrentGitHubLogin;
-  claimGitHubIssue?: typeof claimGitHubIssue;
-  prepareCloneWorkspace?: typeof prepareCloneWorkspace;
-  runFullWorkflow?: typeof runFullWorkflow;
-  completeAutorunWorkflow?: typeof completeAutorunWorkflow;
-  publishIssueLedgerComment?: typeof publishIssueLedgerComment;
-  acquireAutorunLock?: typeof acquireRepoAutorunLock;
-  ensureAutorunLabelContract?: typeof ensureAutorunLabelContract;
-};
+interface AutoRunInjected {
+  clock?: Clock | undefined;
+  listOpenGitHubIssues?: typeof listOpenGitHubIssues | undefined;
+  fetchGitHubIssue?: typeof fetchGitHubIssue | undefined;
+  fetchGitHubIssueRelationships?: typeof fetchGitHubIssueRelationships | undefined;
+  resolveGitHubIssueRepo?: typeof resolveGitHubIssueRepo | undefined;
+  assertCleanAutorunGit?: typeof assertCleanAutorunGit | undefined;
+  getCurrentGitHubLogin?: typeof getCurrentGitHubLogin | undefined;
+  claimGitHubIssue?: typeof claimGitHubIssue | undefined;
+  prepareCloneWorkspace?: typeof prepareCloneWorkspace | undefined;
+  runFullWorkflow?: typeof runFullWorkflow | undefined;
+  completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
+  publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
+  acquireAutorunLock?: typeof acquireRepoAutorunLock | undefined;
+  ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
+}
 
 export async function runAutoDiscovery(
   options: AutoCliOptions,
@@ -120,10 +120,10 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
   await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true });
 }
 
-type SkippedBlockedIssue = {
+interface SkippedBlockedIssue {
   issue: AutorunIssueCandidate;
   blockers: GitHubIssueDependency[];
-};
+}
 
 async function selectDependencyClearIssues(
   candidates: readonly AutorunIssueCandidate[],

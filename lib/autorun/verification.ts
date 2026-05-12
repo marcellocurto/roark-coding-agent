@@ -5,21 +5,21 @@ export const defaultAutorunVerifyCommand = "bun run typecheck";
 
 const verificationOutputTailBytes = 4_000;
 
-export type VerificationResult = {
+export interface VerificationResult {
   ok: boolean;
   command: string;
   exitCode: number;
   stdout: string;
   stderr: string;
-};
+}
 
 export type VerificationRunner = (request: { command: string; cwd: string }) => Promise<VerificationResult>;
 
-export type VerificationFailureClassification = {
+export interface VerificationFailureClassification {
   repairable: boolean;
   reason: string;
-  recoveryGuidance?: string;
-};
+  recoveryGuidance?: string | undefined;
+}
 
 export const defaultVerificationRunner: VerificationRunner = async ({ command, cwd }) => {
   const result = await runProcess(["sh", "-c", command], { cwd });
@@ -35,7 +35,7 @@ export const defaultVerificationRunner: VerificationRunner = async ({ command, c
 export async function runVerification(options: {
   command: string;
   cwd: string;
-  runner?: VerificationRunner;
+  runner?: VerificationRunner | undefined  ;
 }): Promise<VerificationResult> {
   const runner = options.runner ?? defaultVerificationRunner;
   console.log(`\n=== Verification ===`);
@@ -122,11 +122,11 @@ export function verificationFailureReason(result: VerificationResult): string {
 }
 
 export function parseVerificationArtifact(markdown: string): VerificationResult | undefined {
-  const exitCodeMatch = markdown.match(/##\s*Exit Code\s*\r?\n+\s*(-?\d+)/i);
+  const exitCodeMatch = /##\s*Exit Code\s*\r?\n+\s*(-?\d+)/i.exec(markdown);
   const exitCode = exitCodeMatch?.[1] === undefined ? undefined : Number(exitCodeMatch[1]);
   if (exitCode === undefined || !Number.isFinite(exitCode)) return undefined;
 
-  const commandMatch = markdown.match(/##\s*Command\s*\r?\n+\s*`([^`]+)`/i);
+  const commandMatch = /##\s*Command\s*\r?\n+\s*`([^`]+)`/i.exec(markdown);
   const command = commandMatch?.[1] ?? "unknown verification command";
 
   return {
@@ -145,7 +145,7 @@ function looksLikeCommandUnavailable(output: string): boolean {
 
 function extractFencedSection(markdown: string, headingPrefix: string): string {
   const heading = new RegExp(`##\\s*${headingPrefix}[^\\r\\n]*`, "i").exec(markdown);
-  if (!heading || heading.index === undefined) return "";
+  if (heading?.index === undefined) return "";
   const afterHeading = markdown.slice(heading.index + heading[0].length);
   const fenceStart = afterHeading.indexOf("```");
   if (fenceStart === -1) return "";

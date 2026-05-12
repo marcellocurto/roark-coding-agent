@@ -3,22 +3,22 @@ import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../gith
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
 
-export type TriageStoppedVerdict = "blocked" | "reject" | "needs-human-decision" | string;
+export type TriageStoppedVerdict = string;
 
-export type FormatTriageStoppedCommentInput = {
+export interface FormatTriageStoppedCommentInput {
   issueNumber: number;
-  issueUrl?: string;
+  issueUrl?: string | undefined  ;
   triageVerdict: TriageStoppedVerdict;
-  triageArtifactPath?: string;
-  attemptMetadataPath?: string;
-};
+  triageArtifactPath?: string | undefined;
+  attemptMetadataPath?: string | undefined;
+}
 
 export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
   cwd: string;
-  repo?: string;
-  removeLabels?: string[];
-  marker?: string;
-  existingCommentId?: number;
+  repo?: string | undefined  ;
+  removeLabels?: string[] | undefined;
+  marker?: string | undefined;
+  existingCommentId?: number | undefined  ;
 };
 
 export async function readTriageStoppedVerdict(context: WorkflowContext): Promise<TriageStoppedVerdict> {
@@ -42,7 +42,7 @@ export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInpu
     "This is a clean terminal triage outcome, so Roark did not run verification, push the branch, or create a PR.",
   ];
 
-  if (input.triageArtifactPath || input.attemptMetadataPath) {
+  if (input.triageArtifactPath !== undefined || input.attemptMetadataPath !== undefined) {
     lines.push("");
     if (input.triageArtifactPath) lines.push(`Triage artifact: \`${input.triageArtifactPath}\``);
     if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
@@ -51,17 +51,17 @@ export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInpu
   return `${lines.join("\n")}\n`;
 }
 
-export function buildTriageStopAddLabelArgv(options: { repo?: string; issueNumber: number; label: string }): string[] {
+export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
 }
 
-export function buildTriageStopRemoveLabelArgv(options: { repo?: string; issueNumber: number; label: string }): string[] {
+export function buildTriageStopRemoveLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
-export function buildTriageStopCommentArgv(options: { repo?: string; issueNumber: number; comment: string }): string[] {
+export function buildTriageStopCommentArgv(options: { repo?: string | undefined; issueNumber: number; comment: string }): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "comment", String(options.issueNumber), "--body", options.comment, ...repoArgs];
 }

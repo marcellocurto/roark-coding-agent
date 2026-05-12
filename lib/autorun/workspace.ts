@@ -7,46 +7,46 @@ import type { AutorunBranchPlan } from "./branch.ts";
 
 export type WorkspaceStrategy = "clone";
 
-export type WorkspaceCloneConfig = {
-  filter?: string | null;
-  depth?: number | null;
-};
+export interface WorkspaceCloneConfig {
+  filter?: string | null | undefined;
+  depth?: number | null | undefined;
+}
 
-export type WorkspaceConfig = {
+export interface WorkspaceConfig {
   root: string;
   strategy: WorkspaceStrategy;
   cloneRemote: string;
   clone: WorkspaceCloneConfig;
   copyToWorktree: string[];
-};
+}
 
-export type LifecycleHooksConfig = {
-  afterCreate?: string;
-  beforeRun?: string;
-  beforeVerify?: string;
-  afterRun?: string;
-  beforeRemove?: string;
+export interface LifecycleHooksConfig {
+  afterCreate?: string | undefined;
+  beforeRun?: string | undefined;
+  beforeVerify?: string | undefined;
+  afterRun?: string | undefined;
+  beforeRemove?: string | undefined;
   timeoutMs: number;
-};
+}
 
-export type AttemptWorkspaceMetadata = {
+export interface AttemptWorkspaceMetadata {
   path: string;
   strategy: WorkspaceStrategy;
   cloneRemote: string;
-  cloneUrl?: string;
+  cloneUrl?: string | undefined;
   createdNow: boolean;
-};
+}
 
-export type PreparedWorkspace = {
+export interface PreparedWorkspace {
   path: string;
   metadata: AttemptWorkspaceMetadata;
   releaseLock: () => Promise<void>;
-};
+}
 
 export type WorkspaceCommandOptions =
-  | { command: "workspace"; action: "list"; cwd: string; repo?: string; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
-  | { command: "workspace"; action: "remove"; issue: number; cwd: string; repo?: string; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
-  | { command: "workspace"; action: "prune"; olderThan: string; cwd: string; repo?: string; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig };
+  | { command: "workspace"; action: "list"; cwd: string; repo?: string | undefined; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
+  | { command: "workspace"; action: "remove"; issue: number; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
+  | { command: "workspace"; action: "prune"; olderThan: string; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig };
 
 export const workspaceStateFile = ".roark-workspace-state.json";
 export const defaultWorkspaceConfig: WorkspaceConfig = {
@@ -58,7 +58,7 @@ export const defaultWorkspaceConfig: WorkspaceConfig = {
 };
 export const defaultLifecycleHooks: LifecycleHooksConfig = { timeoutMs: 600_000 };
 
-export type ProcessRunner = (args: string[], options?: { cwd?: string }) => Promise<ProcessResult>;
+export type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
 
 export function expandHome(input: string): string {
   if (input === "~") return os.homedir();
@@ -75,7 +75,7 @@ export function sanitizeWorkspaceSegment(value: string): string {
   return sanitized || "unknown";
 }
 
-export function workspacePathForIssue(input: { root: string; repo?: string; issueNumber: number; controlCwd?: string }): string {
+export function workspacePathForIssue(input: { root: string; repo?: string | undefined; issueNumber: number; controlCwd?: string  | undefined}): string {
   const root = normalizeWorkspaceRoot(input.root);
   const repoSegment = repoSegmentForWorkspace(input.repo, input.controlCwd);
   const issueSegment = `issue-${sanitizeWorkspaceSegment(String(input.issueNumber))}`;
@@ -105,9 +105,9 @@ export async function assertWorkspacePathSafe(input: { root: string; workspacePa
   }
 }
 
-export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: string; runner?: ProcessRunner }): Promise<{ remote: string; url: string }> {
+export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: string; runner?: ProcessRunner  | undefined}): Promise<{ remote: string; url: string }> {
   const runner = input.runner ?? runProcess;
-  const remote = input.cloneRemote?.trim() || "origin";
+  const remote = input.cloneRemote?.trim() ?? "origin";
   const remoteResult = await runner(["git", "remote", "get-url", remote], { cwd: input.cwd });
   const url = remoteResult.exitCode === 0 && remoteResult.stdout.trim() ? remoteResult.stdout.trim() : remote;
 
@@ -118,7 +118,7 @@ export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: str
         `Unable to access clone remote '${remote}' (${url}).`,
         `Command: git ls-remote ${url} HEAD`,
         `Exit code: ${preflight.exitCode}`,
-        `stderr: ${tail(preflight.stderr || preflight.stdout) || "(empty)"}`,
+        `stderr: ${tail(preflight.stderr || preflight.stdout)}`,
         "Suggested fixes: check workspace.cloneRemote in .roark/config.json, verify the git remote URL, and ensure credentials allow cloning.",
       ].join("\n"),
     );
@@ -129,16 +129,15 @@ export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: str
 
 export async function prepareCloneWorkspace(input: {
   controlCwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issueNumber: number;
   plan: AutorunBranchPlan;
   workspace: WorkspaceConfig;
   hooks: LifecycleHooksConfig;
   mode: "auto" | "continue";
-  workspacePath?: string;
-  runner?: ProcessRunner;
+  workspacePath?: string | undefined  ;
+  runner?: ProcessRunner | undefined  ;
 }): Promise<PreparedWorkspace> {
-  if (input.workspace.strategy !== "clone") throw new Error(`Unsupported workspace strategy '${input.workspace.strategy}'. Only 'clone' is supported.`);
   const runner = input.runner ?? runProcess;
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForIssue({ root, repo: input.repo, issueNumber: input.issueNumber, controlCwd: input.controlCwd }));
@@ -193,13 +192,13 @@ export async function prepareCloneWorkspace(input: {
 export async function refreshCopyToWorktree(input: {
   controlCwd: string;
   worktreePath: string;
-  copyToWorktree?: readonly string[];
-  runner?: ProcessRunner;
+  copyToWorktree?: readonly string[] | undefined  ;
+  runner?: ProcessRunner | undefined  ;
 }): Promise<void> {
   const entries = input.copyToWorktree ?? [];
   if (entries.length === 0) return;
   const runner = input.runner ?? runProcess;
-  const preflight: Array<{ entry: string; source: string; destination: string }> = [];
+  const preflight: { entry: string; source: string; destination: string }[] = [];
 
   for (const rawEntry of entries) {
     const entry = validateCopyToWorktreeEntry(rawEntry, "workspace.copyToWorktree");
@@ -304,17 +303,17 @@ export async function runLifecycleHook(
   cwd: string,
   runner: ProcessRunner = runProcess,
 ): Promise<void> {
-  const command = typeof hooks?.[name] === "string" ? String(hooks[name]).trim() : "";
+  const command = typeof hooks?.[name] === "string" ? hooks[name].trim() : "";
   if (!command) return;
   const timeoutMs = hooks?.timeoutMs ?? defaultLifecycleHooks.timeoutMs;
   const result = await runHookCommand(command, cwd, timeoutMs, runner);
   if (result.exitCode === 0) return;
-  const message = `${String(name)} hook failed with exit code ${result.exitCode}: ${command}\n${tail(result.stderr || result.stdout)}`;
+  const message = `${name} hook failed with exit code ${result.exitCode}: ${command}\n${tail(result.stderr || result.stdout)}`;
   if (name === "afterRun" || name === "beforeRemove") {
     console.warn(message);
     return;
   }
-  throw new WorkspaceHookError(message, { hook: String(name), command, result });
+  throw new WorkspaceHookError(message, { hook: name, command, result });
 }
 
 export class WorkspaceHookError extends Error {
@@ -330,7 +329,7 @@ export class WorkspaceHookError extends Error {
   }
 }
 
-export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo?: string; cwd?: string }): Promise<string[]> {
+export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo?: string | undefined; cwd?: string  | undefined}): Promise<string[]> {
   const repoRoot = path.dirname(workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: 1, controlCwd: options.cwd }));
   if (!existsSync(repoRoot)) return [];
   const entries = await readdir(repoRoot, { withFileTypes: true });
@@ -433,11 +432,11 @@ async function writePoisonState(workspacePath: string, error: unknown): Promise<
   await mkdir(workspacePath, { recursive: true });
   const payload: Record<string, unknown> = { failedAt: new Date().toISOString(), message: error instanceof Error ? error.message : String(error) };
   if (error instanceof WorkspaceHookError) {
-    payload.hook = error.hook;
-    payload.command = error.command;
-    payload.exitCode = error.result.exitCode;
-    payload.stdoutTail = tail(error.result.stdout);
-    payload.stderrTail = tail(error.result.stderr);
+    payload["hook"] = error.hook;
+    payload["command"] = error.command;
+    payload["exitCode"] = error.result.exitCode;
+    payload["stdoutTail"] = tail(error.result.stdout);
+    payload["stderrTail"] = tail(error.result.stderr);
   }
   await writeFile(path.join(workspacePath, workspaceStateFile), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
@@ -453,7 +452,7 @@ async function gitRemoteBranchExists(input: { cwd: string; branchName: string; r
   return result.exitCode === 0;
 }
 
-async function runProcessOrThrowWithRunner(runner: ProcessRunner, args: string[], options: { cwd?: string; label?: string }): Promise<string> {
+async function runProcessOrThrowWithRunner(runner: ProcessRunner, args: string[], options: { cwd?: string | undefined; label?: string }): Promise<string> {
   if (runner === runProcess) return runProcessOrThrow(args, options);
   const result = await runner(args, { cwd: options.cwd });
   if (result.exitCode !== 0) throw new Error(`${options.label ?? args.join(" ")} failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
@@ -463,9 +462,9 @@ async function runProcessOrThrowWithRunner(runner: ProcessRunner, args: string[]
 async function runHookCommand(command: string, cwd: string, timeoutMs: number, runner: ProcessRunner): Promise<ProcessResult> {
   if (runner !== runProcess) return runner(["sh", "-lc", command], { cwd });
   const child = Bun.spawn(["sh", "-lc", command], { cwd, stdout: "pipe", stderr: "pipe" });
-  let timedOut = false;
+  const timeoutState = { timedOut: false };
   const timer = setTimeout(() => {
-    timedOut = true;
+    timeoutState.timedOut = true;
     child.kill();
   }, timeoutMs);
   try {
@@ -474,7 +473,7 @@ async function runHookCommand(command: string, cwd: string, timeoutMs: number, r
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    return { stdout, stderr: timedOut ? `${stderr}\nTimed out after ${timeoutMs}ms.` : stderr, exitCode: timedOut && exitCode === 0 ? 124 : exitCode };
+    return { stdout, stderr: timeoutState.timedOut ? `${stderr}\nTimed out after ${timeoutMs}ms.` : stderr, exitCode };
   } finally {
     clearTimeout(timer);
   }
@@ -494,7 +493,7 @@ function assertPathInsideRoot(input: { root: string; target: string }): void {
   throw new Error(`Workspace path '${input.target}' must stay inside workspace root '${input.root}'.`);
 }
 
-function repoSegmentForWorkspace(repo?: string, controlCwd?: string): string {
+function repoSegmentForWorkspace(repo?: string  , controlCwd?: string): string {
   if (repo && /^[^/\s]+\/[^/\s]+$/.test(repo)) {
     const [owner, name] = repo.split("/");
     return `${sanitizeWorkspaceSegment(owner ?? "unknown")}-${sanitizeWorkspaceSegment(name ?? "repo")}`;
@@ -504,7 +503,7 @@ function repoSegmentForWorkspace(repo?: string, controlCwd?: string): string {
 }
 
 function parseDurationMs(value: string): number {
-  const match = value.trim().match(/^(\d+)([dhm])$/i);
+  const match = /^(\d+)([dhm])$/i.exec(value.trim());
   if (!match) throw new Error(`Invalid duration '${value}'. Use formats like 30d, 12h, or 60m.`);
   const amount = Number(match[1]);
   const unit = match[2]?.toLowerCase();

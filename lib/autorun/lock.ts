@@ -2,20 +2,20 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-export type AutorunLock = {
+export interface AutorunLock {
   lockDir: string;
   release: () => Promise<void>;
-};
+}
 
-export type AutorunLockMetadata = {
+export interface AutorunLockMetadata {
   pid: number;
   hostname: string;
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   acquiredAt: string;
-};
+}
 
-export async function acquireRepoAutorunLock(options: { cwd: string; repo?: string }): Promise<AutorunLock> {
+export async function acquireRepoAutorunLock(options: { cwd: string; repo?: string  | undefined}): Promise<AutorunLock> {
   const locksDir = path.resolve(options.cwd, ".roark/locks");
   const lockDir = path.join(locksDir, "autorun.lock");
   await mkdir(locksDir, { recursive: true });
@@ -26,7 +26,7 @@ export async function acquireRepoAutorunLock(options: { cwd: string; repo?: stri
     if (isNodeError(error) && error.code === "EEXIST") {
       throw new Error(
         `Another roark auto run appears to hold the local repo lock at ${lockDir}.` +
-          `${await formatExistingLockMetadata(lockDir)}` +
+          (await formatExistingLockMetadata(lockDir)) +
           `\nIf no roark auto process is active for this checkout, remove that lock directory and retry.`,
       );
     }

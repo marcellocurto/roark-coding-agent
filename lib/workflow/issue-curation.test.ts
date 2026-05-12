@@ -6,6 +6,8 @@ import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readA
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 
+const tick = () => Promise.resolve();
+
 const tempDirs: string[] = [];
 const fixedClock = { now: () => new Date("2026-05-06T12:00:00.000Z") };
 
@@ -255,6 +257,7 @@ describe("issue curation phase", () => {
     await writeArtifact(context, "reviewB", reviewWithLedger("None"));
 
     await runSinglePhase(context, "curate-issues", async () => {
+      await tick();
       throw new Error("curation should not invoke an agent");
     });
 

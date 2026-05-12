@@ -15,14 +15,14 @@ const basePr: PullRequestMetadata = {
 
 describe("PR revision branch safety", () => {
   test("accepts open same-repository non-base head branch", () => {
-    expect(() => validatePrBranchSafety(basePr, "owner/repo")).not.toThrow();
+    expect(() => { validatePrBranchSafety(basePr, "owner/repo"); }).not.toThrow();
   });
 
   test("rejects unsafe PR states and branches", () => {
-    expect(() => validatePrBranchSafety({ ...basePr, state: "CLOSED" }, "owner/repo")).toThrow("must be open");
-    expect(() => validatePrBranchSafety({ ...basePr, headRefName: "main" }, "owner/repo")).toThrow("matches base branch");
-    expect(() => validatePrBranchSafety({ ...basePr, baseRefName: "develop", headRefName: "main" }, "owner/repo")).toThrow("unsafe shared/base branch");
-    expect(() => validatePrBranchSafety({ ...basePr, headRepository: "someone/fork" }, "owner/repo")).toThrow("Fork PR revision");
+    expect(() => { validatePrBranchSafety({ ...basePr, state: "CLOSED" }, "owner/repo"); }).toThrow("must be open");
+    expect(() => { validatePrBranchSafety({ ...basePr, headRefName: "main" }, "owner/repo"); }).toThrow("matches base branch");
+    expect(() => { validatePrBranchSafety({ ...basePr, baseRefName: "develop", headRefName: "main" }, "owner/repo"); }).toThrow("unsafe shared/base branch");
+    expect(() => { validatePrBranchSafety({ ...basePr, headRepository: "someone/fork" }, "owner/repo"); }).toThrow("Fork PR revision");
   });
 
   test("builds gh pr checkout argv", () => {

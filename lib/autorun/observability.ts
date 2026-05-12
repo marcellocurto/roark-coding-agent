@@ -3,12 +3,12 @@ import { updateRunSummary, type RunStatus } from "../observability/summary.ts";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 import type { AttemptOutcome } from "./attempts.ts";
 
-export type FinalizeAttemptObservabilityInput = {
+export interface FinalizeAttemptObservabilityInput {
   context: WorkflowContext;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
-  endedAt?: Date | string;
-};
+  endedAt?: Date | string | undefined;
+}
 
 export async function finalizeAttemptObservability(input: FinalizeAttemptObservabilityInput): Promise<void> {
   const { context, outcome, outcomeDetail } = input;

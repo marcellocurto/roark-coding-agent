@@ -5,16 +5,17 @@ import path from "node:path";
 import type { ContinueCliOptions } from "../cli/args.ts";
 import { refinementLogRef, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
 import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
 
+const tick = () => Promise.resolve();
+
 const tempDirs: string[] = [];
-const originalPath = process.env.PATH;
+const originalPath = process.env["PATH"];
 
 afterEach(async () => {
-  process.env.PATH = originalPath;
+  process.env["PATH"] = originalPath;
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
@@ -58,6 +59,10 @@ describe("runAutoContinue", () => {
   });
 
   test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-managed-"));
     tempDirs.push(cwd, workspacePath);
@@ -91,25 +96,32 @@ describe("runAutoContinue", () => {
     }));
 
     const calls: string[] = [];
-    await expect(runAutoContinue({
+    expect(runAutoContinue({
       ...continueOptions,
       issue: "24",
       cwd,
       attempt: 2,
       hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
     }, {
-      ensureAutorunLabelContract: async () => ({ existing: [], missing: [], created: [] }),
+      ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
       prepareCloneWorkspace: async (input) => {
-        calls.push(`prepare:${input.workspacePath}`);
+        await tick();
+  await tick();
+        await tick();
+        await tick();
+        calls.push(`prepare:${input.workspacePath ?? ""}`);
         expect(input.mode).toBe("continue");
         expect(input.workspacePath).toBe(workspacePath);
         return {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
-          releaseLock: async () => { calls.push("release"); },
+          releaseLock: async () => {
+        await tick();
+        await tick(); calls.push("release"); },
         };
       },
-      runner: async (_request: AgentRunRequest) => {
+      runner: async () => {
+        await tick();
         calls.push("runner");
         throw new Error("triage failed");
       },
@@ -124,6 +136,10 @@ describe("runAutoContinue", () => {
   });
 
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
     tempDirs.push(cwd);
     await initGitRepo(cwd, "roark/issue-24");
@@ -166,8 +182,9 @@ describe("runAutoContinue", () => {
       startedAt: "2026-05-07T00:00:00.000Z",
     }));
 
-    await expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
-      runner: async (_request: AgentRunRequest) => {
+    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
+      runner: async () => {
+        await tick();
         throw new Error("fix failed after reviews");
       },
     })).rejects.toThrow("Fix pass 1 failed");
@@ -217,7 +234,7 @@ echo "gh should not be called" >&2
 exit 99
 `, "utf8");
   await chmod(path.join(binDir, "gh"), 0o755);
-  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
 
 async function installFakeGh(cwd: string): Promise<void> {
@@ -235,7 +252,7 @@ fi
 exit 0
 `, "utf8");
   await chmod(path.join(binDir, "gh"), 0o755);
-  process.env.PATH = `${binDir}${path.delimiter}${originalPath ?? ""}`;
+  process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
 
 async function run(cwd: string, args: string[]): Promise<void> {

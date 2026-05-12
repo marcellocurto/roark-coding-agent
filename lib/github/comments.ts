@@ -2,35 +2,35 @@ import { runProcessOrThrow } from "../cli/process.ts";
 
 export type RoarkCommentPhase = string;
 
-export type RoarkMarkerInput = {
+export interface RoarkMarkerInput {
   issueNumber: number | string;
   attempt: number;
   phase: RoarkCommentPhase;
-};
+}
 
-export type GitHubCommentRef = {
+export interface GitHubCommentRef {
   id: number;
-  url?: string;
+  url?: string | undefined  ;
   marker: string;
-};
+}
 
-type GitHubIssueComment = {
-  id?: number;
-  body?: string;
-  html_url?: string;
-  url?: string;
-};
+interface GitHubIssueComment {
+  id?: number | undefined;
+  body?: string | undefined;
+  html_url?: string | undefined;
+  url?: string | undefined  ;
+}
 
-export type IssueCommentOptions = {
+export interface IssueCommentOptions {
   cwd: string;
-  repo?: string;
+  repo?: string | undefined  ;
   issueNumber: number | string;
   body: string;
-};
+}
 
 export type IssueCommentByMarkerOptions = IssueCommentOptions & {
   marker: string;
-  existingCommentId?: number;
+  existingCommentId?: number | undefined  ;
 };
 
 export function buildRoarkMarker(input: RoarkMarkerInput): string {
@@ -76,7 +76,7 @@ export function buildCurrentRepoArgv(): string[] {
 export function parseGitHubCommentRef(raw: string, marker: string): GitHubCommentRef {
   const parsed = JSON.parse(raw) as unknown;
   const comment = normalizeComment(parsed);
-  if (!comment.id) throw new Error("GitHub comment response did not include a numeric id.");
+  if (comment.id === undefined) throw new Error("GitHub comment response did not include a numeric id.");
   return { id: comment.id, url: comment.html_url ?? comment.url, marker };
 }
 
@@ -86,7 +86,7 @@ export function parseIssueComments(raw: string): GitHubIssueComment[] {
 }
 
 export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker: string): GitHubIssueComment | undefined {
-  return comments.find((comment) => comment.body?.includes(marker) && typeof comment.id === "number");
+  return comments.find((comment) => comment.body?.includes(marker) === true && typeof comment.id === "number");
 }
 
 export async function postIssueComment(options: IssueCommentOptions): Promise<GitHubCommentRef> {
@@ -99,7 +99,7 @@ export async function postIssueComment(options: IssueCommentOptions): Promise<Gi
   return parseGitHubCommentRef(stdout, marker);
 }
 
-export async function updateIssueComment(options: { cwd: string; repo?: string; commentId: number; body: string; marker?: string }): Promise<GitHubCommentRef> {
+export async function updateIssueComment(options: { cwd: string; repo?: string | undefined; commentId: number; body: string; marker?: string }): Promise<GitHubCommentRef> {
   const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo });
   const marker = options.marker ?? markerFromBody(options.body) ?? "";
   const stdout = await runProcessOrThrow(
@@ -143,7 +143,7 @@ export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMa
   return parseGitHubCommentRef(stdout, options.marker);
 }
 
-async function resolveCommentRepo(options: { cwd: string; repo?: string }): Promise<string> {
+async function resolveCommentRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
   if (options.repo) return options.repo;
   const stdout = await runProcessOrThrow(buildCurrentRepoArgv(), { cwd: options.cwd, label: "gh repo view" });
   const repo = stdout.trim();
@@ -152,22 +152,22 @@ async function resolveCommentRepo(options: { cwd: string; repo?: string }): Prom
 }
 
 function markerFromBody(body: string): string | undefined {
-  return body.match(/^<!--\s*roark:[\s\S]*?-->/)?.[0];
+  return (/^<!--\s*roark:[\s\S]*?-->/.exec(body))?.[0];
 }
 
 function normalizeComment(value: unknown): GitHubIssueComment {
   if (!isRecord(value)) return {};
   return {
-    id: typeof value.id === "number" ? value.id : undefined,
-    body: typeof value.body === "string" ? value.body : undefined,
-    html_url: typeof value.html_url === "string" ? value.html_url : undefined,
-    url: typeof value.url === "string" ? value.url : undefined,
+    id: typeof value["id"] === "number" ? value["id"] : undefined,
+    body: typeof value["body"] === "string" ? value["body"] : undefined,
+    html_url: typeof value["html_url"] === "string" ? value["html_url"] : undefined,
+    url: typeof value["url"] === "string" ? value["url"] : undefined,
   };
 }
 
 function flattenComments(value: unknown): GitHubIssueComment[] {
   if (!Array.isArray(value)) return [];
-  const flattened = value.flatMap((entry) => Array.isArray(entry) ? entry : [entry]);
+  const flattened: unknown[] = value.flatMap((entry: unknown) => Array.isArray(entry) ? entry as unknown[] : [entry]);
   return flattened.map(normalizeComment).filter((comment) => comment.id !== undefined);
 }
 

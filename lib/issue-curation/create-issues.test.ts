@@ -6,6 +6,8 @@ import type { ProcessResult } from "../cli/process.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
 import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
+
+const tick = () => Promise.resolve();
 import {
   buildIssueCreateArgv,
   createIssuesFromCurationPlan,
@@ -46,6 +48,10 @@ describe("buildIssueCreateArgv", () => {
 
 describe("createIssuesFromCurationPlan", () => {
   test("dry-run reports approved plan items without calling GitHub or writing results", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: false });
     const plan = basePlan();
     plan.blockingIssuesToCreate.push({ planItemId: "bad", proposedTitle: "Bad" } as never);
@@ -56,13 +62,17 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       runner: async () => {
+        await tick();
+        await tick();
         calls += 1;
         return okProcess("unexpected");
       },
       agentRunner: async () => {
+        await tick();
         throw new Error("dry-run should not invoke an agent");
       },
       skillResolver: async () => {
+        await tick();
         throw new Error("dry-run should not resolve skills");
       },
     });
@@ -84,6 +94,7 @@ describe("createIssuesFromCurationPlan", () => {
     await writeJsonArtifact(context, "issueCurationPlan", plan);
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
+      await tick();
       calls.push(args);
       return okProcess(`https://github.com/owner/repo/issues/${100 + calls.length}\n`);
     };
@@ -102,10 +113,14 @@ describe("createIssuesFromCurationPlan", () => {
     expect(calls[0]?.[calls[0].indexOf("--body") + 1]).toContain("Reviewer source(s): review-a");
     expect(result.created.map((entry) => entry.number)).toEqual([101, 102]);
     expect(result.failed).toEqual([]);
-    expect(JSON.parse(await readArtifact(context, "issueCreationResults")).created).toHaveLength(2);
+    expect((JSON.parse(await readArtifact(context, "issueCreationResults")) as { created: unknown[] }).created).toHaveLength(2);
   });
 
   test("approved run uses the resolved issue-create skill through the agent runner", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const requests: AgentRunRequest[] = [];
@@ -113,8 +128,9 @@ describe("createIssuesFromCurationPlan", () => {
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
+      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
+        await tick();
         requests.push(request);
         return JSON.stringify({
           created: [
@@ -137,6 +153,10 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved publishing agent uses centralized thinking profiles", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     for (const [profile, expected] of [["fast", "low"], ["deep", "high"]] as const) {
       const context = await tempContext({ yes: true, thinkingProfile: profile });
       await writeJsonArtifact(context, "issueCurationPlan", basePlan());
@@ -145,8 +165,9 @@ describe("createIssuesFromCurationPlan", () => {
       await createIssuesFromCurationPlan({
         context,
         clock,
-        skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
+        skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
         agentRunner: async (request) => {
+        await tick();
           thinkingLevels.push(request.thinkingLevel);
           return JSON.stringify({
             created: [
@@ -164,18 +185,21 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent response must cover every creatable plan item exactly once", async () => {
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
-      agentRunner: async () => JSON.stringify({
+      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await tick(), JSON.stringify({
         created: [{ planItemId: "blocking-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [],
         relationshipOutcomes: [],
-      }),
+      })),
     });
 
     expect(result.created).toEqual([]);
@@ -184,21 +208,25 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent response rejects duplicate plan item results", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
-      agentRunner: async () => JSON.stringify({
+      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await tick(), JSON.stringify({
         created: [{ planItemId: "blocking-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [
           { planItemId: "blocking-1", message: "duplicate status" },
           { planItemId: "follow-up-1", message: "not created" },
         ],
         relationshipOutcomes: [],
-      }),
+      })),
     });
 
     expect(result.created).toEqual([]);
@@ -207,21 +235,25 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent relationship outcomes must reference approved plan items with status and message", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
-      agentRunner: async () => JSON.stringify({
+      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await tick(), JSON.stringify({
         created: [
           { planItemId: "blocking-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
           { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
         ],
         failed: [],
         relationshipOutcomes: [{ planItemId: "outside-plan", status: "created", message: "Created a relationship." }],
-      }),
+      })),
     });
 
     expect(result.created).toEqual([]);
@@ -230,21 +262,25 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent relationship outcomes must include status and message", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      skillResolver: async (cwd) => path.join(cwd, "skills", "github-issue-create"),
-      agentRunner: async () => JSON.stringify({
+      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await tick(), JSON.stringify({
         created: [
           { planItemId: "blocking-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
           { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
         ],
         failed: [],
         relationshipOutcomes: [{ planItemId: "blocking-1", status: "created" }],
-      }),
+      })),
     });
 
     expect(result.failed).toHaveLength(2);
@@ -252,17 +288,22 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("missing resolved skill fails before invoking the publishing agent", async () => {
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     let agentCalls = 0;
 
-    await expect(createIssuesFromCurationPlan({
+    expect(createIssuesFromCurationPlan({
       context,
       clock,
       skillResolver: async () => {
+        await tick();
         throw new Error("Repo override skill 'github-issue-create' is missing or incomplete at /repo/.roark/skills/github-issue-create: missing SKILL.md.");
       },
       agentRunner: async () => {
+        await tick();
         agentCalls += 1;
         return "{}";
       },
@@ -272,9 +313,11 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("records partial failures from an injected process runner while preserving successes", async () => {
+        await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const runner: ProcessRunner = async (_args) => {
+      await tick();
       if (_args.includes("Follow-up tracker")) return { stdout: "", stderr: "rate limited", exitCode: 1 };
       return okProcess("https://github.com/owner/repo/issues/200\n");
     };
@@ -283,12 +326,16 @@ describe("createIssuesFromCurationPlan", () => {
 
     expect(result.created.map((entry) => entry.planItemId)).toEqual(["blocking-1"]);
     expect(result.failed).toEqual([{ planItemId: "follow-up-1", kind: "follow-up", title: "Follow-up tracker", message: "rate limited" }]);
-    const written = JSON.parse(await readArtifact(context, "issueCreationResults"));
+    const written = JSON.parse(await readArtifact(context, "issueCreationResults")) as { created: unknown[]; failed: unknown[] };
     expect(written.created).toHaveLength(1);
     expect(written.failed).toHaveLength(1);
   });
 
   test("rerun skips already-created plan item IDs unless forced", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     await writeJsonArtifact(context, "issueCreationResults", {
@@ -301,6 +348,7 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       runner: async (args) => {
+        await tick();
         calls.push(args);
         return okProcess("https://github.com/owner/repo/issues/11\n");
       },
@@ -314,6 +362,7 @@ describe("createIssuesFromCurationPlan", () => {
       context: forcedContext,
       clock,
       runner: async (args) => {
+        await tick();
         forcedCalls.push(args);
         return okProcess("https://github.com/owner/repo/issues/12\n");
       },
@@ -322,7 +371,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 });
 
-async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; thinkingProfile?: "fast" | "deep" }) {
+async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; thinkingProfile?: "fast" | "deep"  | undefined}) {
   const dir = options.reuseDir ?? await mkdtemp(path.join(tmpdir(), "roark-create-issues-"));
   if (!options.reuseDir) tempDirs.push(dir);
   return createWorkflowContext({

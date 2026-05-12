@@ -1,4 +1,3 @@
-import type { ThinkingLevel } from "../cli/args.ts";
 import { createEventWriter, type EventWriter } from "./events.ts";
 import type { ArtifactRef, WorkflowContext } from "../workflow/artifacts.ts";
 import { artifactRelativePath, formatArtifactRef } from "../workflow/artifacts.ts";
@@ -11,8 +10,8 @@ import {
   type SessionStatsLike,
 } from "./summary.ts";
 
-export type RunObserver = {
-  runStarted(input?: { command?: string; recoveryCommand?: string }): Promise<void>;
+export interface RunObserver {
+  runStarted(input?: { command?: string; recoveryCommand?: string  | undefined}): Promise<void>;
   runCompleted(input?: { status?: string }): Promise<void>;
   runFailed(error: unknown): Promise<void>;
   phaseStarted(input: PhaseObservation): Promise<void>;
@@ -21,50 +20,50 @@ export type RunObserver = {
   agentSessionStarted(input: AgentSessionObservation): Promise<void>;
   agentSessionStats(input: AgentSessionStatsObservation): Promise<void>;
   toolStarted(input: ToolObservation): Promise<void>;
-  toolCompleted(input: ToolObservation & { durationMs?: number; isError?: boolean }): Promise<void>;
+  toolCompleted(input: ToolObservation & { durationMs?: number | undefined; isError?: boolean }): Promise<void>;
   autoRetryStarted(input: AutoRetryObservation): Promise<void>;
-  autoRetryCompleted(input: AutoRetryObservation & { success?: boolean; finalError?: string }): Promise<void>;
-};
+  autoRetryCompleted(input: AutoRetryObservation & { success?: boolean; finalError?: string  | undefined}): Promise<void>;
+}
 
-export type PhaseObservation = {
+export interface PhaseObservation {
   phase: string;
-  label?: string;
-  artifact?: ArtifactRef;
-  artifactPath?: string;
-  model?: string;
-  thinkingLevel?: ThinkingLevel | string;
-};
+  label?: string | undefined;
+  artifact?: ArtifactRef | undefined;
+  artifactPath?: string | undefined;
+  model?: string | undefined  ;
+  thinkingLevel?: string | undefined  ;
+}
 
-export type AgentSessionObservation = {
+export interface AgentSessionObservation {
   phase: string;
   sessionId: string;
-  model?: string;
-  thinkingLevel?: ThinkingLevel | string;
-};
+  model?: string | undefined  ;
+  thinkingLevel?: string | undefined  ;
+}
 
-export type AgentSessionStatsObservation = {
+export interface AgentSessionStatsObservation {
   phase: string;
   stats: SessionStatsLike;
-};
+}
 
-export type ToolObservation = {
-  phase?: string;
-  sessionId?: string;
+export interface ToolObservation {
+  phase?: string | undefined;
+  sessionId?: string | undefined;
   toolCallId: string;
   toolName: string;
-};
+}
 
-export type AutoRetryObservation = {
-  phase?: string;
-  sessionId?: string;
+export interface AutoRetryObservation {
+  phase?: string | undefined;
+  sessionId?: string | undefined;
   attempt: number;
-  maxAttempts?: number;
-  delayMs?: number;
-  errorMessage?: string;
-};
+  maxAttempts?: number | undefined;
+  delayMs?: number | undefined;
+  errorMessage?: string | undefined;
+}
 
 export function createNoopRunObserver(): RunObserver {
-  const noop = async () => {};
+  const noop = () => Promise.resolve();
   return {
     runStarted: noop,
     runCompleted: noop,
@@ -155,7 +154,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           durationMs: undefined,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ? String(input.thinkingLevel) : existing?.thinkingLevel,
+          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
           totals: existing?.totals ?? emptyTotals(),
         };
       });
@@ -164,7 +163,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
       const timestamp = new Date().toISOString();
       const artifactPath = observationArtifactPath(context, input);
       await writer.write({
-        type: input.reused ? "phase_skipped" : "phase_completed",
+        type: input.reused === true ? "phase_skipped" : "phase_completed",
         timestamp,
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -181,12 +180,12 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           ...existing,
           phase: input.phase,
           label: input.label ?? existing?.label,
-          status: input.reused ? "skipped" : "completed",
+          status: input.reused === true ? "skipped" : "completed",
           startedAt: existing?.startedAt ?? timestamp,
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ? String(input.thinkingLevel) : existing?.thinkingLevel,
+          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
           reused: input.reused,
           totals: existing?.totals ?? emptyTotals(),
         };
@@ -219,7 +218,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ? String(input.thinkingLevel) : existing?.thinkingLevel,
+          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
           errorMessage,
           totals: existing?.totals ?? emptyTotals(),
         };
@@ -244,7 +243,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           ...existing,
           sessionId: input.sessionId,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ? String(input.thinkingLevel) : existing?.thinkingLevel,
+          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
         };
       });
     },
@@ -322,8 +321,8 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
 }
 
 function observationArtifactPath(context: WorkflowContext, input: PhaseObservation): string | undefined {
-  if (input.artifactPath) return input.artifactPath;
-  if (!input.artifact) return undefined;
+  if (input.artifactPath !== undefined) return input.artifactPath;
+  if (input.artifact === undefined) return undefined;
   return artifactRelativePath(context, input.artifact);
 }
 

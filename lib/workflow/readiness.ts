@@ -21,7 +21,7 @@ export async function buildReadinessMarkdown(context: WorkflowContext): Promise<
   const reviewB = artifactExists(context, reviewBArtifact) ? await readArtifact(context, reviewBArtifact) : "";
   const useLegacyFinalReview = latestReviewCycle === undefined;
   const finalReviewPass = useLegacyFinalReview ? latestFinalReviewPass(context) : undefined;
-  const finalReview = finalReviewPass ? await readArtifact(context, finalReviewRef(finalReviewPass)) : "";
+  const finalReview = finalReviewPass !== undefined ? await readArtifact(context, finalReviewRef(finalReviewPass)) : "";
   const decision = decideReadiness({ triage, plan, reviewA, reviewB, finalReview, allowLegacyFinalReview: useLegacyFinalReview });
 
   return `# PR Readiness
@@ -89,8 +89,8 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[]): string 
       finding.recommendedHandling ? `Handling: ${finding.recommendedHandling}` : undefined,
       finding.evidence ? `Evidence: ${finding.evidence}` : undefined,
       finding.suggestedIssueTitle ? `Suggested issue: ${finding.suggestedIssueTitle}` : undefined,
-    ].filter((value): value is string => Boolean(value));
-    return `- ${finding.workflowId} — ${finding.title} (${details})${suffixes.length ? `. ${suffixes.join(" ")}` : ""}`;
+    ].filter((value): value is string => value !== undefined);
+    return `- ${finding.workflowId} — ${finding.title} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
   }).join("\n");
 }
 

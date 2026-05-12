@@ -1,16 +1,16 @@
 import type { AutorunIssueCandidate } from "./selection.ts";
 
-export type AutorunClaimPlan = {
+export interface AutorunClaimPlan {
   issueNumber: number;
   branchName: string;
   inProgressLabel: string;
-  assignee?: string;
+  assignee?: string | undefined  ;
   commentBody: string;
-};
+}
 
 export function createClaimPlan(
   issue: AutorunIssueCandidate,
-  options: { inProgressLabel: string; assignee?: string },
+  options: { inProgressLabel: string; assignee?: string  | undefined},
 ): AutorunClaimPlan {
   const branchName = plannedIssueBranchName(issue.number);
   return {
@@ -26,7 +26,7 @@ export function plannedIssueBranchName(issueNumber: number): string {
   return `roark/issue-${issueNumber}`;
 }
 
-export function buildClaimComment(options: { issueNumber: number; branchName: string; assignee?: string }): string {
+export function buildClaimComment(options: { issueNumber: number; branchName: string; assignee?: string  | undefined}): string {
   const actor = options.assignee ? `@${options.assignee}` : "Roark";
   return `${actor} is attempting this issue in branch \`${options.branchName}\`.`;
 }

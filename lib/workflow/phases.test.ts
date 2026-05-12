@@ -6,6 +6,8 @@ import type { AgentRunner } from "./agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import { issueArtifactHasRelationshipSnapshot, runFullWorkflow } from "./phases.ts";
 
+const tick = () => Promise.resolve();
+
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -49,6 +51,7 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     const prompts: string[] = [];
     const runner: AgentRunner = async (request) => {
+      await tick();
       prompts.push(request.prompt);
       return "# Triage\n\n## Verdict\nblocked\n\n## Reasoning\nWaiting.\n\n## Evidence\n#7 is open.\n\n## Blocking Questions\nNone.\n\n## Recommended Next Step\nWait.\n";
     };
@@ -68,6 +71,7 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     const phases: string[] = [];
     const runner: AgentRunner = async (request) => {
+      await tick();
       if (request.prompt.includes('name="triage"')) {
         phases.push("triage");
         return proceedTriage();
@@ -84,7 +88,7 @@ describe("runFullWorkflow", () => {
       throw new Error("unexpected prompt");
     };
 
-    await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "planning-stopped" });
+    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "planning-stopped" });
     expect(phases).toEqual(["triage", "plan-draft", "plan"]);
     expect(artifactExists(context, "readiness")).toBe(true);
     expect(artifactExists(context, "implementationLog")).toBe(false);
@@ -95,6 +99,7 @@ describe("runFullWorkflow", () => {
     await seedBaselineAndImplementation(context);
 
     const runner: AgentRunner = async (request) => {
+      await tick();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
@@ -104,7 +109,7 @@ describe("runFullWorkflow", () => {
       throw new Error("unexpected prompt");
     };
 
-    await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
   });
 
   test("does not run fix for follow-up and suggestion-only ledgers", async () => {
@@ -113,6 +118,7 @@ describe("runFullWorkflow", () => {
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
+      await tick();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
@@ -129,7 +135,7 @@ describe("runFullWorkflow", () => {
       throw new Error("unexpected prompt");
     };
 
-    await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
     expect(phases).toEqual(["review-a", "review-b"]);
     expect(await readArtifact(context, "readiness")).toContain("## Status\nready-for-pr");
   });
@@ -140,6 +146,7 @@ describe("runFullWorkflow", () => {
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
+      await tick();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
@@ -156,7 +163,7 @@ describe("runFullWorkflow", () => {
       throw new Error("unexpected prompt");
     };
 
-    await expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "review-blocked" });
+    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "review-blocked" });
     expect(phases).toEqual(["review-a", "review-b"]);
     expect(await readArtifact(context, "readiness")).toContain("## External Blockers\n- review-a:B1");
   });

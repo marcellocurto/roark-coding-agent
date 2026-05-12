@@ -23,11 +23,11 @@ export function validatePrBranchSafety(pr: PullRequestMetadata, repo: string): v
   }
 }
 
-export function buildPrCheckoutArgv(input: { prNumber: number; repo?: string }): string[] {
+export function buildPrCheckoutArgv(input: { prNumber: number; repo?: string  | undefined}): string[] {
   return ["gh", "pr", "checkout", String(input.prNumber), ...(input.repo ? ["--repo", input.repo] : [])];
 }
 
-export async function checkoutPrHeadBranch(options: { cwd: string; repo?: string; pr: PullRequestMetadata }): Promise<void> {
+export async function checkoutPrHeadBranch(options: { cwd: string; repo?: string | undefined; pr: PullRequestMetadata }): Promise<void> {
   await runProcessOrThrow(buildPrCheckoutArgv({ prNumber: options.pr.number, repo: options.repo }), {
     cwd: options.cwd,
     label: "gh pr checkout",

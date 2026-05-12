@@ -11,10 +11,13 @@ import { defaultAutorunVerifyCommand } from "./verification.ts";
 import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
 
+const tick = () => Promise.resolve();
+
 const tempDirs: string[] = [];
 const noOpAutorunLock = {
-  acquireAutorunLock: async () => ({ lockDir: "test-lock", release: async () => {} }),
-  ensureAutorunLabelContract: async () => ({ existing: [], missing: [], created: [] }),
+  acquireAutorunLock: async () => (await tick(), { lockDir: "test-lock", release: async () => {
+    await tick();} }),
+  ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
 };
 
 afterEach(async () => {
@@ -25,9 +28,15 @@ describe("runAutoDiscovery", () => {
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
     const logs = await captureLogs(async () => {
+        await tick();
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
         listOpenGitHubIssues: async (input) => {
+        await tick();
+        await tick();
           listed = true;
           expect(input.limit).toBe(100);
           return [
@@ -37,7 +46,7 @@ describe("runAutoDiscovery", () => {
             issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
           ];
         },
-        fetchGitHubIssueRelationships: async (input) => dependencyClearRelationships(Number(input.issueNumber)),
+        fetchGitHubIssueRelationships: async (input) => (await tick(), dependencyClearRelationships(Number(input.issueNumber))),
       });
     });
 
@@ -47,18 +56,28 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto acquires the local lock around selection", async () => {
+  await tick();
+    await tick();
+    await tick();
     const calls: string[] = [];
 
     await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
       acquireAutorunLock: async () => {
+        await tick();
+  await tick();
+        await tick();
+        await tick();
         calls.push("acquire-lock");
-        return { lockDir: "test-lock", release: async () => { calls.push("release-lock"); } };
+        return { lockDir: "test-lock", release: async () => {
+        await tick(); calls.push("release-lock"); } };
       },
       ensureAutorunLabelContract: async () => {
+        await tick();
         calls.push("ensure-labels");
         return { existing: [], missing: [], created: [] };
       },
       listOpenGitHubIssues: async () => {
+        await tick();
         calls.push("list");
         return [];
       },
@@ -68,16 +87,22 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
+        await tick();
     const checkedBodies: string[] = [];
 
     const logs = await captureLogs(async () => {
+        await tick();
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
-        listOpenGitHubIssues: async () => [
+        listOpenGitHubIssues: async () => (await tick(), [
           { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Depends on #99" },
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-        ],
+        ]),
         fetchGitHubIssueRelationships: async (input) => {
+        await tick();
           checkedBodies.push(input.body);
           return Number(input.issueNumber) === 1
             ? dependencyClearRelationships(1, [], [bodyBlocker(99, "Body blocker", "OPEN")])
@@ -95,12 +120,15 @@ describe("runAutoDiscovery", () => {
 
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
     const logs = await captureLogs(async () => {
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
-        listOpenGitHubIssues: async () => [
+        listOpenGitHubIssues: async () => (await tick(), [
           { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Blocked by #99" },
-        ],
-        fetchGitHubIssueRelationships: async () => dependencyClearRelationships(1, [], [bodyBlocker(99, "Closed body blocker", "CLOSED")]),
+        ]),
+        fetchGitHubIssueRelationships: async () => (await tick(), dependencyClearRelationships(1, [], [bodyBlocker(99, "Closed body blocker", "CLOSED")])),
       });
     });
 
@@ -110,16 +138,21 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
+        await tick();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
-        listOpenGitHubIssues: async () => [
+        listOpenGitHubIssues: async () => (await tick(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-        ],
+        ]),
         fetchGitHubIssueRelationships: async (input) => {
+        await tick();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -138,16 +171,21 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
+        await tick();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpAutorunLock,
-        listOpenGitHubIssues: async () => [
+        listOpenGitHubIssues: async () => (await tick(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-        ],
+        ]),
         fetchGitHubIssueRelationships: async (input) => {
+        await tick();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -164,17 +202,22 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto selection limit counts unblocked issues", async () => {
+        await tick();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
+  await tick();
+      await tick();
+      await tick();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true, limit: 2 }, {
         ...noOpAutorunLock,
-        listOpenGitHubIssues: async () => [
+        listOpenGitHubIssues: async () => (await tick(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
-        ],
+        ]),
         fetchGitHubIssueRelationships: async (input) => {
+        await tick();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -192,13 +235,17 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     let preflighted = false;
     let claimed = false;
 
-    await expect(runAutoDiscovery({ ...baseOptions() }, {
+    expect(runAutoDiscovery({ ...baseOptions() }, {
       ...noOpAutorunLock,
-      listOpenGitHubIssues: async () => [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])],
-      fetchGitHubIssueRelationships: async () => ({
+      listOpenGitHubIssues: async () => (await tick(), [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]),
+      fetchGitHubIssueRelationships: async () => (await tick(), ({
         fetchedAt: "2026-05-07T00:00:00.000Z",
         repo: "owner/repo",
         nativeDependenciesAvailable: false,
@@ -206,11 +253,15 @@ describe("runAutoDiscovery", () => {
         blocking: [],
         bodyDeclaredBlockers: [],
         unavailableReason: "GitHub dependency API unavailable",
-      }),
+      })),
       assertCleanAutorunGit: async () => {
+        await tick();
+        await tick();
         preflighted = true;
       },
       claimGitHubIssue: async () => {
+        await tick();
+        await tick();
         claimed = true;
       },
     })).rejects.toThrow("Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable");
@@ -220,17 +271,26 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto ensures labels before fetching the requested issue", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const calls: string[] = [];
     await runAutoDiscovery({ ...baseOptions(), issue: "owner/repo#29", dryRun: true }, {
       ...noOpAutorunLock,
       ensureAutorunLabelContract: async () => {
+        await tick();
+        await tick();
         calls.push("ensure-labels");
         return { existing: [], missing: [], created: [] };
       },
       listOpenGitHubIssues: async () => {
+        await tick();
+        await tick();
         throw new Error("targeted auto should not list issues");
       },
       fetchGitHubIssue: async (input) => {
+        await tick();
         calls.push(`fetch:${input}`);
         return fetchedGitHubIssue(29, []);
       },
@@ -240,16 +300,22 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto refuses skip labels before claim", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     let claimed = false;
     let preflighted = false;
 
-    await expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
+    expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpAutorunLock,
-      fetchGitHubIssue: async () => fetchedGitHubIssue(29, ["roark-in-progress"]),
+      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, ["roark-in-progress"])),
       assertCleanAutorunGit: async () => {
+        await tick();
         preflighted = true;
       },
       claimGitHubIssue: async () => {
+        await tick();
         claimed = true;
       },
     })).rejects.toThrow("Issue #29 has skip label roark-in-progress");
@@ -259,16 +325,23 @@ describe("runAutoDiscovery", () => {
   });
 
   test("dirty autorun preflight runs before claim", async () => {
+  await tick();
+    await tick();
+    await tick();
     const order: string[] = [];
 
-    await expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
+    expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpAutorunLock,
-      fetchGitHubIssue: async () => fetchedGitHubIssue(29, []),
+      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
+        await tick();
+        await tick();
         order.push("preflight");
         throw new Error("dirty worktree");
       },
       claimGitHubIssue: async () => {
+        await tick();
+        await tick();
         order.push("claim");
       },
     })).rejects.toThrow("dirty worktree");
@@ -277,6 +350,10 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-recheck-"));
     tempDirs.push(cwd);
     const workspacePath = path.join(cwd, "managed-workspace");
@@ -291,26 +368,35 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpAutorunLock,
       fetchGitHubIssue: async () => {
+        await tick();
         fetchCount += 1;
         return fetchCount === 1
           ? fetchedGitHubIssue(29, [])
           : fetchedGitHubIssue(29, ["roark-in-progress"]);
       },
       assertCleanAutorunGit: async () => {
+        await tick();
         calls.push("preflight");
       },
       prepareCloneWorkspace: async () => {
+        await tick();
+  await tick();
+        await tick();
+        await tick();
         calls.push("workspace");
         return {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "origin", createdNow: true },
-          releaseLock: async () => { calls.push("release"); },
+          releaseLock: async () => {
+        await tick(); calls.push("release"); },
         };
       },
       claimGitHubIssue: async () => {
+        await tick();
         calls.push("claim");
       },
       runFullWorkflow: async () => {
+        await tick();
         calls.push("workflow");
         return { status: "completed" };
       },
@@ -320,6 +406,10 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
+        await tick();
+  await tick();
+    await tick();
+    await tick();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-clone-workspace-"));
@@ -334,15 +424,20 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpAutorunLock,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-      fetchGitHubIssue: async () => fetchedGitHubIssue(29, []),
+      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
+        await tick();
         calls.push("preflight");
       },
       claimGitHubIssue: async (input) => {
+        await tick();
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
       },
       prepareCloneWorkspace: async (input) => {
+  await tick();
+        await tick();
+        await tick();
         calls.push(`workspace:${input.plan.branchName}`);
         expect(input.controlCwd).toBe(cwd);
         return {
@@ -354,10 +449,12 @@ describe("runAutoDiscovery", () => {
             cloneUrl: "git@github.com:owner/repo.git",
             createdNow: true,
           },
-          releaseLock: async () => { calls.push("release"); },
+          releaseLock: async () => {
+        await tick(); calls.push("release"); },
         };
       },
       publishIssueLedgerComment: async () => {
+        await tick();
         calls.push("ledger");
       },
       runFullWorkflow: async (context) => {
@@ -368,6 +465,7 @@ describe("runAutoDiscovery", () => {
         return { status: "completed" };
       },
       completeAutorunWorkflow: async (input) => {
+        await tick();
         calls.push(`complete:${input.branchPlan.branchName}`);
         return { outcome: "published", outcomeDetail: null };
       },
@@ -428,8 +526,8 @@ function issue(number: number, createdAt: string, labels: string[]) {
 
 function dependencyClearRelationships(
   issueNumber: number,
-  blockedBy: Array<{ number: number; title: string; state: string; url: string }> = [],
-  bodyDeclaredBlockers: Array<ReturnType<typeof bodyBlocker>> = [],
+  blockedBy: { number: number; title: string; state: string; url: string }[] = [],
+  bodyDeclaredBlockers: ReturnType<typeof bodyBlocker>[] = [],
 ) {
   return {
     fetchedAt: "2026-05-07T00:00:00.000Z",
@@ -495,7 +593,7 @@ async function captureLogs(fn: () => Promise<void>): Promise<string[]> {
   const original = console.log;
   const logs: string[] = [];
   console.log = (message?: unknown) => {
-    logs.push(String(message ?? ""));
+    logs.push(typeof message === "string" ? message : JSON.stringify(message ?? ""));
   };
   try {
     await fn();

@@ -20,25 +20,25 @@ describe("Roark skill resolver", () => {
   test("resolves the bundled github issue creation skill from an unrelated workspace", async () => {
     const workspaceRoot = await tempWorkspace();
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(bundledGithubIssueCreateSkillPath);
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(bundledGithubIssueCreateSkillPath);
   });
 
   test("resolves a repo override before the bundled github issue creation skill", async () => {
     const workspaceRoot = await tempWorkspaceWithOverrideSkill();
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(path.join(workspaceRoot, ".roark", "skills", "github-issue-create"));
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(path.join(workspaceRoot, ".roark", "skills", "github-issue-create"));
   });
 
   test("ignores legacy workspace skills and falls back to the bundled skill", async () => {
     const workspaceRoot = await tempWorkspaceWithLegacySkill();
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(bundledGithubIssueCreateSkillPath);
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(bundledGithubIssueCreateSkillPath);
   });
 
   test("resolves when override supporting templates, examples, and references are absent", async () => {
     const workspaceRoot = await tempWorkspaceWithOverrideSkill();
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(path.join(workspaceRoot, ".roark", "skills", "github-issue-create"));
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).resolves.toBe(path.join(workspaceRoot, ".roark", "skills", "github-issue-create"));
   });
 
   test("fails clearly when an override skill exists but SKILL.md is missing", async () => {
@@ -46,26 +46,26 @@ describe("Roark skill resolver", () => {
     const overridePath = path.join(workspaceRoot, ".roark", "skills", "github-issue-create");
     await mkdir(overridePath, { recursive: true });
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("Repo override skill 'github-issue-create' is missing or incomplete");
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("SKILL.md");
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("Repo override skill 'github-issue-create' is missing or incomplete");
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("SKILL.md");
   });
 
   test("fails when override SKILL.md does not declare the expected skill name", async () => {
     const workspaceRoot = await tempWorkspaceWithOverrideSkill({ skillMarkdown: "---\nname: other-skill\ndescription: test\n---\n" });
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must include 'name: github-issue-create'");
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must include 'name: github-issue-create'");
   });
 
   test("fails when override SKILL.md does not declare a non-empty description", async () => {
     const workspaceRoot = await tempWorkspaceWithOverrideSkill({ skillMarkdown: "---\nname: github-issue-create\n---\n# Skill\n" });
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must include a non-empty 'description'");
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must include a non-empty 'description'");
   });
 
   test("fails when override SKILL.md frontmatter is not valid YAML", async () => {
     const workspaceRoot = await tempWorkspaceWithOverrideSkill({ skillMarkdown: "---\nname: github-issue-create\ndescription: test\nbad: [unclosed\n---\n# Skill\n" });
 
-    await expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must be valid YAML");
+    expect(resolveGithubIssueCreateSkillPath(workspaceRoot)).rejects.toThrow("frontmatter must be valid YAML");
   });
 });
 
@@ -91,8 +91,7 @@ async function writeSkill(skillDir: string, skillMarkdown?: string): Promise<voi
   for (const relativePath of githubIssueCreateRequiredFiles) {
     const filePath = path.join(skillDir, relativePath);
     await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, relativePath === "SKILL.md"
-      ? skillMarkdown ?? "---\nname: github-issue-create\ndescription: test\n---\n# Skill\n"
-      : `${relativePath}\n`, "utf8");
+    const content = skillMarkdown ?? "---\nname: github-issue-create\ndescription: test\n---\n# Skill\n";
+    await writeFile(filePath, content, "utf8");
   }
 }

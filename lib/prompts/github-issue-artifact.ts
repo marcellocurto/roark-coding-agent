@@ -34,7 +34,7 @@ function formatIssueRelationships(relationships: GitHubIssueRelationships): stri
   const nativeAttrs = [
     `source="gh"`,
     `fetched_at="${escapePromptXmlAttribute(relationships.fetchedAt)}"`,
-    `native_dependencies_available="${relationships.nativeDependenciesAvailable}"`,
+    `native_dependencies_available="${String(relationships.nativeDependenciesAvailable)}"`,
   ];
   if (relationships.repo) nativeAttrs.push(`repo="${escapePromptXmlAttribute(relationships.repo)}"`);
 
@@ -70,11 +70,11 @@ function formatIssueRelationships(relationships: GitHubIssueRelationships): stri
         `raw="${escapePromptXmlAttribute(blocker.raw)}"`,
         `repo="${escapePromptXmlAttribute(blocker.repo)}"`,
         `number="${blocker.number}"`,
-        `verified="${blocker.verified}"`,
+        `verified="${String(blocker.verified)}"`,
       ];
       if (blocker.state) attrs.push(`state="${escapePromptXmlAttribute(blocker.state)}"`);
       if (blocker.stateReason !== undefined) attrs.push(`state_reason="${escapePromptXmlAttribute(blocker.stateReason ?? "")}"`);
-      if (blocker.closed !== undefined) attrs.push(`closed="${blocker.closed}"`);
+      if (blocker.closed !== undefined) attrs.push(`closed="${String(blocker.closed)}"`);
       if (blocker.closedAt !== undefined) attrs.push(`closed_at="${escapePromptXmlAttribute(blocker.closedAt ?? "")}"`);
       if (blocker.url) attrs.push(`url="${escapePromptXmlAttribute(blocker.url)}"`);
       if (blocker.title) attrs.push(`title="${escapePromptXmlAttribute(blocker.title)}"`);
@@ -88,7 +88,7 @@ function formatIssueRelationships(relationships: GitHubIssueRelationships): stri
 }
 
 function formatIssueComments(issue: GitHubIssue): string {
-  if (!issue.comments?.length) return "<no_comments />";
+  if (issue.comments === undefined || issue.comments.length === 0) return "<no_comments />";
 
   return issue.comments
     .map((comment, index) => `<comment index="${index + 1}" author="${escapePromptXmlAttribute(comment.author?.login ?? "unknown")}" created_at="${escapePromptXmlAttribute(comment.createdAt ?? "unknown time")}">

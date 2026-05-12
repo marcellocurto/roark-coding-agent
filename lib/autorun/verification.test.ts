@@ -16,13 +16,13 @@ describe("autorun verification", () => {
   });
 
   test("runVerification reports ok when the runner exits 0", async () => {
-    const runner: VerificationRunner = async ({ command, cwd }) => ({
+    const runner: VerificationRunner = ({ command, cwd })=> Promise.resolve(({
       ok: true,
       command,
       exitCode: 0,
       stdout: `ran in ${cwd}`,
       stderr: "",
-    });
+    }));
 
     const result = await runVerification({ command: "noop", cwd: "/tmp/wt", runner });
     expect(result.ok).toBe(true);
@@ -32,13 +32,13 @@ describe("autorun verification", () => {
   });
 
   test("runVerification reports failure when the runner exits non-zero", async () => {
-    const runner: VerificationRunner = async ({ command }) => ({
+    const runner: VerificationRunner = ({ command })=> Promise.resolve(({
       ok: false,
       command,
       exitCode: 2,
       stdout: "",
       stderr: "boom",
-    });
+    }));
 
     const result = await runVerification({ command: "fail", cwd: "/tmp/wt", runner });
     expect(result.ok).toBe(false);

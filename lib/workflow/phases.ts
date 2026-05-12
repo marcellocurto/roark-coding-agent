@@ -262,8 +262,7 @@ async function runProgressionPhase(
   else if (action.phase === "review-b") await runAgentTask(context, runner, reviewBTaskForPass(action.pass ?? 0));
   else if (action.phase === "fix") await fixPhase(context, action.pass, runner);
   else if (action.phase === "reset-baseline") await resetBaselinePhase(context, action.pass ?? 1);
-  else if (action.phase === "final-review") await finalReviewPhase(context, action.pass, runner);
-  else assertNever(action.phase);
+  else await finalReviewPhase(context, action.pass, runner);
 }
 
 function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
@@ -271,10 +270,6 @@ function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
   else if (result.status === "planning-stopped") console.log("\nStopped after planning: plan is not ready for implementation.");
   else if (result.status === "review-blocked") console.log("\nStopped after review: at least one review is blocked.");
   return result;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unexpected workflow progression phase '${String(value)}'.`);
 }
 
 function inferNextReviewPass(context: WorkflowContext): number {

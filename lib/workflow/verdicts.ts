@@ -7,16 +7,16 @@ import {
   type ReviewFindingSource,
 } from "./findings.ts";
 
-export type ReadinessDecisionInput = {
+export interface ReadinessDecisionInput {
   triage: string;
   plan: string;
   reviewA: string;
   reviewB: string;
   finalReview: string;
-  allowLegacyFinalReview?: boolean;
-};
+  allowLegacyFinalReview?: boolean | undefined;
+}
 
-export type ReadinessDecision = {
+export interface ReadinessDecision {
   status: "ready-for-pr" | "not-ready";
   triageVerdict: string;
   reviewAVerdict: string;
@@ -32,11 +32,11 @@ export type ReadinessDecision = {
   suggestions: NormalizedReviewerFinding[];
   parserWarnings: string[];
   rejectedFindings: RejectedReviewerFinding[];
-};
+}
 
 export function parseVerdict(markdown: string): string | undefined {
-  const sectionMatch = markdown.match(/##\s*(?:Verdict|Status)\s*\n+([^\n]+)/i);
-  const candidate = sectionMatch?.[1] ?? markdown.match(/(?:Verdict|Status):\s*([^\n]+)/i)?.[1];
+  const sectionMatch = /##\s*(?:Verdict|Status)\s*\n+([^\n]+)/i.exec(markdown);
+  const candidate = sectionMatch?.[1] ?? (/(?:Verdict|Status):\s*([^\n]+)/i.exec(markdown))?.[1];
   if (!candidate) return undefined;
 
   const normalized = candidate
@@ -61,7 +61,7 @@ export function parseVerdict(markdown: string): string | undefined {
 }
 
 export function parseReadyForImplementationValue(markdown: string): "yes" | "no" | undefined {
-  const match = markdown.match(/##\s*Ready For Implementation\s*\n+([^\n]+)/i);
+  const match = /##\s*Ready For Implementation\s*\n+([^\n]+)/i.exec(markdown);
   const answer = match?.[1]?.replace(/[`*_]/g, "").trim().toLowerCase();
   if (!answer) return undefined;
   if (answer.startsWith("yes")) return "yes";

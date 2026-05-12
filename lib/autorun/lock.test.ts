@@ -20,7 +20,7 @@ describe("acquireRepoAutorunLock", () => {
     const metadataPath = path.join(lock.lockDir, "metadata.json");
 
     expect(existsSync(lock.lockDir)).toBe(true);
-    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as { pid: number; repo?: string; cwd: string };
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as { pid: number; repo?: string | undefined; cwd: string };
     expect(metadata.pid).toBe(process.pid);
     expect(metadata.repo).toBe("owner/repo");
     expect(metadata.cwd).toBe(cwd);
@@ -34,7 +34,7 @@ describe("acquireRepoAutorunLock", () => {
     tempDirs.push(cwd);
     const lock = await acquireRepoAutorunLock({ cwd });
 
-    await expect(acquireRepoAutorunLock({ cwd })).rejects.toThrow("Another roark auto run appears to hold the local repo lock");
+    expect(acquireRepoAutorunLock({ cwd })).rejects.toThrow("Another roark auto run appears to hold the local repo lock");
 
     await lock.release();
   });

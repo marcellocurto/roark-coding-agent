@@ -12,7 +12,7 @@ export type AutorunCompletionOutcome =
   | PublishGateOutcome
   | { outcome: "triage-stopped"; outcomeDetail: string | null };
 
-export type CompleteAutorunWorkflowInput = {
+export interface CompleteAutorunWorkflowInput {
   workflowResult: WorkflowRunResult;
   options: AutorunGateOptions;
   issue: AutorunIssueCandidate;
@@ -20,13 +20,13 @@ export type CompleteAutorunWorkflowInput = {
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
-  recoveryCommand?: string;
-};
+  recoveryCommand?: string | undefined  ;
+}
 
-export type CompleteAutorunWorkflowInjected = {
-  publishGate?: typeof runPublishGate;
-  markTriageStopped?: (options: MarkIssueTriageStoppedOptions) => Promise<unknown>;
-};
+export interface CompleteAutorunWorkflowInjected {
+  publishGate?: typeof runPublishGate | undefined;
+  markTriageStopped?: ((options: MarkIssueTriageStoppedOptions) => Promise<unknown>) | undefined;
+}
 
 export async function completeAutorunWorkflow(
   input: CompleteAutorunWorkflowInput,
@@ -76,7 +76,7 @@ export async function completeAutorunWorkflow(
   });
 }
 
-function isCommentRef(value: unknown): value is { id: number; url?: string; marker: string } {
+function isCommentRef(value: unknown): value is { id: number; url?: string | undefined; marker: string } {
   return typeof value === "object" && value !== null &&
     typeof (value as { id?: unknown }).id === "number" &&
     typeof (value as { marker?: unknown }).marker === "string";

@@ -20,22 +20,22 @@ import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, typ
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
-  hooks?: LifecycleHooksConfig;
-  workspace?: WorkspaceConfig;
+  hooks?: LifecycleHooksConfig | undefined  ;
+  workspace?: WorkspaceConfig | undefined  ;
 };
 
 export type PublishGateOutcome =
   | { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null }
   | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
 
-export type RunPublishGateInjected = {
-  updateIssueBranchFromBase?: typeof updateIssueBranchFromBase;
-  refreshCopyToWorktree?: typeof refreshCopyToWorktree;
-  runLifecycleHook?: typeof runLifecycleHook;
-  runVerification?: typeof runVerification;
-  writeVerificationArtifact?: typeof writeVerificationArtifact;
-  handleNonPublish?: typeof handleNonPublish;
-};
+export interface RunPublishGateInjected {
+  updateIssueBranchFromBase?: typeof updateIssueBranchFromBase | undefined;
+  refreshCopyToWorktree?: typeof refreshCopyToWorktree | undefined;
+  runLifecycleHook?: typeof runLifecycleHook | undefined;
+  runVerification?: typeof runVerification | undefined;
+  writeVerificationArtifact?: typeof writeVerificationArtifact | undefined;
+  handleNonPublish?: typeof handleNonPublish | undefined;
+}
 
 export async function runPublishGate(input: {
   options: AutorunGateOptions;
@@ -44,7 +44,7 @@ export async function runPublishGate(input: {
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
-  recoveryCommand?: string;
+  recoveryCommand?: string | undefined  ;
 }, injected: RunPublishGateInjected = {}): Promise<PublishGateOutcome> {
   const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
   const updateBranch = injected.updateIssueBranchFromBase ?? updateIssueBranchFromBase;
@@ -155,7 +155,7 @@ export async function handleNonPublish(input: {
   decision: Extract<PublishGateDecision, { publish: false }>;
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
-  recoveryCommand?: string;
+  recoveryCommand?: string | undefined  ;
 }): Promise<void> {
   const { options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
   const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);

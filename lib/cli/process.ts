@@ -1,12 +1,12 @@
-export type ProcessResult = {
+export interface ProcessResult {
   stdout: string;
   stderr: string;
   exitCode: number;
-};
+}
 
-export async function runProcess(args: string[], options: { cwd?: string } = {}): Promise<ProcessResult> {
+export async function runProcess(args: string[], options: { cwd?: string  | undefined} = {}): Promise<ProcessResult> {
   const process = Bun.spawn(args, {
-    cwd: options.cwd,
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     env: processEnv(),
     stdout: "pipe",
     stderr: "pipe",
@@ -21,7 +21,7 @@ export async function runProcess(args: string[], options: { cwd?: string } = {})
   return { stdout, stderr, exitCode };
 }
 
-export async function runProcessOrThrow(args: string[], options: { cwd?: string; label?: string } = {}): Promise<string> {
+export async function runProcessOrThrow(args: string[], options: { cwd?: string | undefined; label?: string } = {}): Promise<string> {
   const result = await runProcess(args, { cwd: options.cwd });
   if (result.exitCode !== 0) {
     const label = options.label ?? args.join(" ");

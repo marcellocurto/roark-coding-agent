@@ -1,11 +1,11 @@
 import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
 
-export type IssuePublishingPromptItem = {
+export interface IssuePublishingPromptItem {
   planItemId: string;
   kind: "blocking" | "follow-up";
   title: string;
   labels: string[];
-};
+}
 
 export function issuePublishingSystemPrompt(): string {
   return "You are the Roark issue-publishing agent. Create only approved GitHub issues from the curation plan and report machine-readable results.";
@@ -13,8 +13,8 @@ export function issuePublishingSystemPrompt(): string {
 
 export function issuePublishingPrompt(input: {
   context: WorkflowContext;
-  sourcePlanPath?: string;
-  resultPath?: string;
+  sourcePlanPath?: string | undefined;
+  resultPath?: string | undefined;
   allowedItems: IssuePublishingPromptItem[];
 }): string {
   const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");

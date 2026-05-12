@@ -136,7 +136,7 @@ function formatReadRange(offset: unknown, limit: unknown): string {
   const start = toPositiveInteger(offset);
   const length = toPositiveInteger(limit);
   if (start === undefined && length === undefined) return "";
-  if (start === undefined) return `:1-${length}`;
+  if (start === undefined) return `:1-${length ?? ""}`;
   if (length === undefined) return `:${start}`;
   return `:${start}-${start + length - 1}`;
 }
@@ -154,7 +154,7 @@ function truncate(value: string, maxLength: number): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function toPositiveInteger(value: unknown): number | undefined {

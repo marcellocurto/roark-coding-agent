@@ -25,31 +25,31 @@ export type NumberedArtifactName =
 
 export type ArtifactRef = StaticArtifactName | { name: NumberedArtifactName; pass: number };
 
-export type StaticArtifactDefinition = {
+export interface StaticArtifactDefinition {
   readonly name: StaticArtifactName;
   readonly filename: string;
   readonly displayName: string;
-};
+}
 
-export type NumberedArtifactDefinition = {
+export interface NumberedArtifactDefinition {
   readonly name: NumberedArtifactName;
   readonly filenamePrefix: string;
   readonly displayName: string;
-};
+}
 
-export type ArtifactIdentity = {
+export interface ArtifactIdentity {
   readonly name: StaticArtifactName | NumberedArtifactName;
   readonly kind: "static" | "numbered";
   readonly filename: string;
   readonly displayName: string;
-  readonly pass?: number;
-};
+  readonly pass?: number | undefined;
+}
 
-export type ArtifactContract = {
+export interface ArtifactContract {
   readonly allowedVerdicts?: readonly string[];
   readonly requiredHeading?: string;
   readonly requiresReadyForImplementation?: true;
-};
+}
 
 export const REVIEW_VERDICTS = ["approve", "fixes-required", "restart-required", "blocked"] as const;
 

@@ -44,13 +44,13 @@ describe("autorun branch planning", () => {
   });
 
   test("refuses to use the base branch as the work branch", () => {
-    expect(() => assertSafeWorkBranch({ branchName: "main", baseBranch: "main" })).toThrow(
+    expect(() => { assertSafeWorkBranch({ branchName: "main", baseBranch: "main" }); }).toThrow(
       "Autorun work branch cannot be the base branch 'main'",
     );
   });
 
   test("refuses main as a work branch even with a non-main base branch", () => {
-    expect(() => assertSafeWorkBranch({ branchName: "main", baseBranch: "develop" })).toThrow(
+    expect(() => { assertSafeWorkBranch({ branchName: "main", baseBranch: "develop" }); }).toThrow(
       "Autorun work branch cannot be 'main'",
     );
   });
@@ -115,7 +115,7 @@ describe("autorun issue worktrees", () => {
     const agentCwd = await ensureIssueWorktree({ controlCwd: repo, plan });
     await writeFile(path.join(agentCwd, "dirty.txt"), "failed work\n", "utf8");
 
-    await expect(ensureIssueWorktree({ controlCwd: repo, plan })).rejects.toThrow("has uncommitted changes");
+    expect(ensureIssueWorktree({ controlCwd: repo, plan })).rejects.toThrow("has uncommitted changes");
   });
 
   test("continue reuses an existing issue worktree and allows dirty state", async () => {
@@ -170,7 +170,7 @@ describe("autorun issue worktrees", () => {
     const { repo } = await createRepoWithRemote();
     const plan = createBranchPlan({ issueNumber: 130, branchName: "roark/issue-130", baseBranch: "main" });
 
-    await expect(checkoutExistingIssueBranch({ cwd: repo, plan })).rejects.toThrow("neither local branch 'roark/issue-130' nor remote branch 'origin/roark/issue-130' exists");
+    expect(checkoutExistingIssueBranch({ cwd: repo, plan })).rejects.toThrow("neither local branch 'roark/issue-130' nor remote branch 'origin/roark/issue-130' exists");
   });
 });
 

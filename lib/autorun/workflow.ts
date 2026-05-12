@@ -18,7 +18,7 @@ export function createAutorunWorkflowContext(
 
 export function createAutorunWorkflowOptions(
   issue: AutorunIssueCandidate,
-  branchPlan: AutorunBranchPlan,
+  _branchPlan: AutorunBranchPlan,
   options: AutoCliOptions,
   attempt?: number,
 ): IssueCliOptions {

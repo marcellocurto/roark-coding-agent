@@ -66,11 +66,11 @@ function requireVerdict(
 }
 
 function parseDiagnosticArtifactError(markdown: string): string | undefined {
-  const heading = markdown.match(/^#\s+(.+ Error)\s*$/im)?.[1]?.trim();
+  const heading = (/^#\s+(.+ Error)\s*$/im.exec(markdown))?.[1]?.trim();
   if (!heading) return undefined;
 
-  const phase = markdown.match(/##\s*Phase\s*\n+([^\n]+)/i)?.[1]?.trim();
-  const error = markdown.match(/##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i)?.[1]?.trim();
+  const phase = (/##\s*Phase\s*\n+([^\n]+)/i.exec(markdown))?.[1]?.trim();
+  const error = (/##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i.exec(markdown))?.[1]?.trim();
   const summary = [phase, error].filter(Boolean).join(": ");
   return summary ? `previous ${heading} diagnostic: ${summary}` : `previous ${heading} diagnostic`;
 }

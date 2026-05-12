@@ -24,50 +24,50 @@ import { parseVerdict } from "../workflow/verdicts.ts";
 export const defaultAutorunSuccessLabel = "roark-pr-opened";
 export const defaultAutorunRemote = "origin";
 
-export type CommitArgvOptions = { message: string };
-export type PushArgvOptions = { remote: string; branchName: string };
-export type PrCreateArgvOptions = {
-  repo?: string;
+export interface CommitArgvOptions { message: string }
+export interface PushArgvOptions { remote: string; branchName: string }
+export interface PrCreateArgvOptions {
+  repo?: string | undefined  ;
   baseBranch: string;
   branchName: string;
   title: string;
   body: string;
-};
-export type SuccessLabelArgvOptions = {
-  repo?: string;
+}
+export interface SuccessLabelArgvOptions {
+  repo?: string | undefined  ;
   issueNumber: number;
   label: string;
-};
+}
 
-export type ReviewVerdictSummary = {
-  reviewA?: string;
-  reviewB?: string;
-};
+export interface ReviewVerdictSummary {
+  reviewA?: string | undefined;
+  reviewB?: string | undefined;
+}
 
-export type FormatPrBodyInput = {
+export interface FormatPrBodyInput {
   issueNumber: number;
-  verification?: VerificationResult;
+  verification?: VerificationResult | undefined;
   runDirRelative: string;
   artifactPaths: string[];
-  attemptMetadata?: AttemptMetadata;
-  attemptMetadataPath?: string;
-  reviewVerdicts?: ReviewVerdictSummary;
-};
+  attemptMetadata?: AttemptMetadata | undefined;
+  attemptMetadataPath?: string | undefined;
+  reviewVerdicts?: ReviewVerdictSummary | undefined;
+}
 
 export type AutorunPublishOptions = Pick<
   AutoCliOptions,
   "cwd" | "repo" | "failureLabel" | "successLabel" | "inProgressLabel" | "remote" | "baseBranch"
 >;
 
-export type PublishAutorunResultInput = {
+export interface PublishAutorunResultInput {
   options: AutorunPublishOptions;
   issue: AutorunIssueCandidate;
   branchPlan: AutorunBranchPlan;
   workflowContext: WorkflowContext;
-  verification?: VerificationResult;
-  attemptMetadata?: AttemptMetadata;
-  attemptMetadataPath?: string;
-};
+  verification?: VerificationResult | undefined;
+  attemptMetadata?: AttemptMetadata | undefined;
+  attemptMetadataPath?: string | undefined;
+}
 
 export function buildStageAllArgv(): string[] {
   return ["git", "add", "-A", "--", ".", ":(exclude).roark/runs"];
