@@ -37,7 +37,6 @@ describe("runInit", () => {
 
     expect(result.root).toBe(repo);
     expect(existsSync(path.join(repo, ".roark", "config.json"))).toBe(true);
-    expect(existsSync(path.join(repo, ".roark", "WORKFLOW.md"))).toBe(true);
     expect(existsSync(path.join(repo, ".roark", ".gitignore"))).toBe(true);
     expect(existsSync(path.join(subdir, ".roark"))).toBe(false);
     expect(existsSync(path.join(repo, ".roark", "skills"))).toBe(false);
@@ -130,7 +129,6 @@ describe("runInit", () => {
     expect(initFromArgv(["init", "--cwd", repo, "--repo", "owner/repo"])).rejects.toThrow("Refusing to overwrite");
 
     expect(await readFile(path.join(repo, ".roark", "config.json"), "utf8")).toBe("old");
-    expect(existsSync(path.join(repo, ".roark", "WORKFLOW.md"))).toBe(false);
     expect(existsSync(path.join(repo, ".roark", ".gitignore"))).toBe(false);
   });
 

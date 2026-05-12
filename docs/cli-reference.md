@@ -34,7 +34,7 @@ owner/repo#123
 
 | Command | Purpose |
 | --- | --- |
-| `roark init` | Scaffold repo-local `.roark` configuration and workflow policy. |
+| `roark init` | Scaffold repo-local `.roark` configuration. |
 | `roark auto [issue]` | Discover and claim eligible issues, or target one issue, then run the full workflow. |
 | `roark do <issue>` | Run the full issue workflow without autorun discovery. |
 | `roark continue <issue>` | Continue a prior autorun attempt and publish if gates pass. |

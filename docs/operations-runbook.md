@@ -39,7 +39,6 @@ roark init
 Review:
 
 - `.roark/config.json`
-- `.roark/WORKFLOW.md`
 - `.roark/.gitignore`
 - verification command
 - lifecycle hooks

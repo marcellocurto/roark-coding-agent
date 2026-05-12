@@ -281,7 +281,7 @@ const thinkingProfileFlags = {
 export const usage = `roark <command> [issue] [options]
 
 Commands:
-  init                  Scaffold repo-local .roark configuration and workflow policy.
+  init                  Scaffold repo-local .roark configuration.
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
   revise-pr <number>     Manually revise an existing open PR from PR feedback.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.

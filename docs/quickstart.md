@@ -50,7 +50,6 @@ This writes:
 
 ```text
 .roark/config.json
-.roark/WORKFLOW.md
 .roark/.gitignore
 ```
 

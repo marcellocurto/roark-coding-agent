@@ -29,7 +29,6 @@ roark init
 
 ```text
 .roark/config.json
-.roark/WORKFLOW.md
 .roark/.gitignore
 ```
 
