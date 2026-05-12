@@ -299,7 +299,7 @@ export async function runPrRevision(
     try {
       await hookRunner("afterRun", hooks, preparedWorkspace.path);
     } finally {
-      await preparedWorkspace.releaseLock();
+      await preparedWorkspace.releaseLock?.();
     }
   }
 }
@@ -327,7 +327,6 @@ async function prepareRevisionWorkspace(input: {
     return {
       path: options.cwd,
       metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
-      releaseLock: async () => { await Promise.resolve(); },
     };
   }
 
