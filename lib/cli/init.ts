@@ -35,7 +35,6 @@ const managedFiles = [".roark/config.json", ".roark/WORKFLOW.md", ".roark/.gitig
 export const roarkGitignoreContent = `runs/
 worktrees/
 logs/
-locks/
 *.local.json
 `;
 

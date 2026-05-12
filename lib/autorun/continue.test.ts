@@ -108,8 +108,6 @@ describe("runAutoContinue", () => {
         return {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
-          releaseLock: async () => {
-        await tick(); calls.push("release"); },
         };
       },
       runner: async () => {
@@ -119,7 +117,7 @@ describe("runAutoContinue", () => {
       },
     })).rejects.toThrow("Triage failed: triage failed");
 
-    expect(calls).toEqual([`prepare:${workspacePath}`, "runner", "release"]);
+    expect(calls).toEqual([`prepare:${workspacePath}`, "runner"]);
     expect(await Bun.file(path.join(workspacePath, "before-run.txt")).text()).toBe("before");
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
     expect(metadata.worktreePath).toBe(workspacePath);
@@ -183,6 +181,76 @@ describe("runAutoContinue", () => {
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
     expect(metadata.githubComments?.issue?.["review-a-0"]?.id).toBe(4242);
     expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
+  });
+
+  test("serializes concurrent continues for the same attempt", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-"));
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-workspace-"));
+    tempDirs.push(cwd, workspacePath);
+    await installFakeGh(cwd);
+    const workflowContext: WorkflowContext = {
+      controlCwd: cwd,
+      agentCwd: workspacePath,
+      outDir: path.join(cwd, ".roark/runs"),
+      runDir: path.join(cwd, ".roark/runs/issue/24/attempts/2"),
+      runDirRelative: ".roark/runs/issue/24/attempts/2",
+      issueInput: "24",
+      issueNumber: "24",
+      repo: "owner/repo",
+      attempt: 2,
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+      thinkingConfig: getWorkflowThinkingConfig(),
+    };
+    await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
+    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
+      attempt: 2,
+      issueNumber: 24,
+      branch: "roark/issue-24",
+      baseBranch: "main",
+      worktreePath: workspacePath,
+      workspace: { path: workspacePath, strategy: "clone", cloneRemote: "origin", createdNow: false },
+      runArtifactPath: workflowContext.runDirRelative,
+      startedAt: "2026-05-07T00:00:00.000Z",
+    }));
+
+    let releaseFirst!: () => void;
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
+    const release = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const injected = {
+      ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
+      prepareCloneWorkspace: async () => {
+        await tick();
+        return {
+          path: workspacePath,
+          metadata: { path: workspacePath, strategy: "clone" as const, cloneRemote: "origin", createdNow: false },
+        };
+      },
+    };
+
+    const first = runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
+      ...injected,
+      runner: async () => {
+        enteredFirst();
+        await release;
+        throw new Error("stop first continue");
+      },
+    });
+
+    await firstEntered;
+
+    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
+      ...injected,
+      runner: async () => {
+        await tick();
+        throw new Error("second continue should not run lifecycle");
+      },
+    })).rejects.toThrow("roark continue issue #24 attempt 2 is already running");
+
+    releaseFirst();
+    expect(first).rejects.toThrow("stop first continue");
   });
 });
 

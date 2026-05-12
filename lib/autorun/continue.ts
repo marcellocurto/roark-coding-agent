@@ -19,6 +19,7 @@ import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
+import { withCheckoutLock } from "./lock.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
 
@@ -47,76 +48,76 @@ export async function runAutoContinue(
   console.log(`Attempt: ${attempt}`);
   console.log(`Recovery command: ${recoveryCommand}`);
 
-  let attemptMetadata = await readAttemptMetadata(issueDir, attempt);
-  assertAttemptMatchesIssue(attemptMetadata, parsed.issueNumber);
+  await withCheckoutLock({ cwd, name: `continue-issue-${parsed.issueNumber}-attempt-${attempt}`, description: `roark continue issue #${parsed.issueNumber} attempt ${attempt}` }, async () => {
+    let attemptMetadata = await readAttemptMetadata(issueDir, attempt);
+    assertAttemptMatchesIssue(attemptMetadata, parsed.issueNumber);
 
-  if (attemptMetadata.outcome === "published" && !options.force) {
-    console.log(`Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`);
-    return;
-  }
-  if (attemptMetadata.outcome === "triage-stopped" && !options.force) {
-    console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
-    return;
-  }
-
-  await ensureLabels({
-    cwd,
-    repo: parsed.repo ?? options.repo,
-    inProgressLabel: options.inProgressLabel,
-    failureLabel: options.failureLabel,
-    successLabel: options.successLabel,
-  });
-
-  const branchPlan: AutorunBranchPlan = {
-    issueNumber: attemptMetadata.issueNumber,
-    branchName: attemptMetadata.branch,
-    baseBranch: attemptMetadata.baseBranch,
-  };
-
-  let preparedWorkspace: PreparedWorkspace | undefined;
-  const legacyAgentCwd = attemptMetadata.worktreePath && existsSync(attemptMetadata.worktreePath)
-    ? attemptMetadata.worktreePath
-    : autorunWorktreePath(cwd, attemptMetadata.issueNumber);
-  let workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), {
-    agentCwd: attemptMetadata.workspace?.path ?? legacyAgentCwd,
-  });
-  await ensureRunDir(workflowContext);
-
-  if (attemptMetadata.workspace) {
-    console.log(`- Reusing workspace for branch ${branchPlan.branchName}`);
-    preparedWorkspace = await prepareWorkspace({
-      controlCwd: cwd,
-      repo: parsed.repo ?? options.repo,
-      issueNumber: attemptMetadata.issueNumber,
-      plan: branchPlan,
-      workspace: options.workspace ?? defaultWorkspaceConfig,
-      hooks: options.hooks ?? defaultLifecycleHooks,
-      mode: "continue",
-      workspacePath: attemptMetadata.workspace.path,
-    });
-    workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: preparedWorkspace.path });
-    await ensureRunDir(workflowContext);
-  } else {
-    console.log(`- Switching to legacy worktree branch ${branchPlan.branchName}`);
-    const recoveredAgentCwd = await checkoutExistingIssueBranch({
-      cwd: workflowContext.controlCwd,
-      plan: branchPlan,
-      worktreePath: workflowContext.agentCwd,
-    });
-    if (recoveredAgentCwd !== workflowContext.agentCwd) {
-      workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd });
-      await ensureRunDir(workflowContext);
+    if (attemptMetadata.outcome === "published" && !options.force) {
+      console.log(`Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`);
+      return;
     }
-  }
+    if (attemptMetadata.outcome === "triage-stopped" && !options.force) {
+      console.log(`Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`);
+      return;
+    }
 
-  attemptMetadata = formatAttemptMetadata({
-    ...attemptMetadata,
-    worktreePath: workflowContext.agentCwd,
-    workspace: preparedWorkspace?.metadata ?? attemptMetadata.workspace,
-    runArtifactPath: workflowContext.runDirRelative,
-  });
+    await ensureLabels({
+      cwd,
+      repo: parsed.repo ?? options.repo,
+      inProgressLabel: options.inProgressLabel,
+      failureLabel: options.failureLabel,
+      successLabel: options.successLabel,
+    });
 
-  try {
+    const branchPlan: AutorunBranchPlan = {
+      issueNumber: attemptMetadata.issueNumber,
+      branchName: attemptMetadata.branch,
+      baseBranch: attemptMetadata.baseBranch,
+    };
+
+    let preparedWorkspace: PreparedWorkspace | undefined;
+    const legacyAgentCwd = attemptMetadata.worktreePath && existsSync(attemptMetadata.worktreePath)
+      ? attemptMetadata.worktreePath
+      : autorunWorktreePath(cwd, attemptMetadata.issueNumber);
+    let workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), {
+      agentCwd: attemptMetadata.workspace?.path ?? legacyAgentCwd,
+    });
+    await ensureRunDir(workflowContext);
+
+    if (attemptMetadata.workspace) {
+      console.log(`- Reusing workspace for branch ${branchPlan.branchName}`);
+      preparedWorkspace = await prepareWorkspace({
+        controlCwd: cwd,
+        repo: parsed.repo ?? options.repo,
+        issueNumber: attemptMetadata.issueNumber,
+        plan: branchPlan,
+        workspace: options.workspace ?? defaultWorkspaceConfig,
+        hooks: options.hooks ?? defaultLifecycleHooks,
+        mode: "continue",
+        workspacePath: attemptMetadata.workspace.path,
+      });
+      workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: preparedWorkspace.path });
+      await ensureRunDir(workflowContext);
+    } else {
+      console.log(`- Switching to legacy worktree branch ${branchPlan.branchName}`);
+      const recoveredAgentCwd = await checkoutExistingIssueBranch({
+        cwd: workflowContext.controlCwd,
+        plan: branchPlan,
+        worktreePath: workflowContext.agentCwd,
+      });
+      if (recoveredAgentCwd !== workflowContext.agentCwd) {
+        workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd });
+        await ensureRunDir(workflowContext);
+      }
+    }
+
+    attemptMetadata = formatAttemptMetadata({
+      ...attemptMetadata,
+      worktreePath: workflowContext.agentCwd,
+      workspace: preparedWorkspace?.metadata ?? attemptMetadata.workspace,
+      runArtifactPath: workflowContext.runDirRelative,
+    });
+
     const continuationPlan = await planContinuation(workflowContext, { attemptOutcome: attemptMetadata.outcome });
     const initialVerificationRepairPass = verificationRepairPassFromPlan(continuationPlan);
     if (isTerminalContinuationNoop(continuationPlan) && !options.force) {
@@ -146,11 +147,9 @@ export async function runAutoContinue(
       },
       afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
     }, { clock });
-  } finally {
-    await preparedWorkspace?.releaseLock();
-  }
 
-  console.log("\nContinue workflow complete.");
+    console.log("\nContinue workflow complete.");
+  });
 }
 
 export function createContinueWorkflowOptions(options: ContinueCliOptions, attempt: number): IssueCliOptions {

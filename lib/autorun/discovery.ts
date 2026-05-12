@@ -27,8 +27,8 @@ import { createClaimPlan } from "./claim.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
 import { type completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
-import { acquireRepoAutorunLock, type AutorunLock } from "./lock.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
+import { withCheckoutLock } from "./lock.ts";
 import { findMatchingSkipLabel, isEligibleIssue, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook } from "./workspace.ts";
@@ -48,7 +48,6 @@ interface AutoRunInjected {
   runFullWorkflow?: typeof runFullWorkflow | undefined;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
-  acquireAutorunLock?: typeof acquireRepoAutorunLock | undefined;
   ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
 }
 
@@ -56,18 +55,12 @@ export async function runAutoDiscovery(
   options: AutoCliOptions,
   injected: AutoRunInjected = {},
 ): Promise<void> {
-  const acquireLock = injected.acquireAutorunLock ?? acquireRepoAutorunLock;
-  const lock = await acquireLock({ cwd: options.cwd, repo: options.repo });
-  try {
-    await ensureRequiredLabelsBeforeIssueWork(options, injected);
-    if (options.issue) {
-      await runTargetedAuto(options, injected);
-      return;
-    }
-    await runDiscoveryAuto(options, injected);
-  } finally {
-    await releaseAutorunLock(lock);
+  await ensureRequiredLabelsBeforeIssueWork(options, injected);
+  if (options.issue) {
+    await runTargetedAuto(options, injected);
+    return;
   }
+  await runDiscoveryAuto(options, injected);
 }
 
 async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
@@ -251,17 +244,19 @@ async function runManagedIssueAttempts(
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
 ): Promise<void> {
-  const assignee = await resolveAssignee(options, injected);
-  console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
-  if (assignee) console.log(`Assignee: ${assignee}`);
-  else console.log("Assignee: none");
+  await withCheckoutLock({ cwd: options.cwd, name: "auto", description: "roark auto" }, async () => {
+    const assignee = await resolveAssignee(options, injected);
+    console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
+    if (assignee) console.log(`Assignee: ${assignee}`);
+    else console.log("Assignee: none");
 
-  const clock = injected.clock ?? defaultClock;
-  for (const issue of issues) {
-    await runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
-  }
+    const clock = injected.clock ?? defaultClock;
+    for (const issue of issues) {
+      await runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
+    }
 
-  console.log("\nAuto workflow complete.");
+    console.log("\nAuto workflow complete.");
+  });
 }
 
 async function runManagedIssueAttempt(
@@ -293,76 +288,72 @@ async function runManagedIssueAttempt(
     mode: "auto",
   });
 
-  try {
-    const rechecked = await fetchLatestIssueForClaimRecheck(issue, options, injected);
-    const skipReason = claimRecheckSkipReason(rechecked.issue, options, claimOptions);
-    if (skipReason) {
-      console.log(`- Skipping #${issue.number} before claim: ${skipReason}`);
-      return;
-    }
-    assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
-
-    const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
-    const attempt = await allocateNextAttempt(issueDir);
-
-    console.log(`- Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
-    const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
-    await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
-
-    const workflowIssue = rechecked.issue;
-    console.log(`- Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
-    const workflowContext = createAutorunWorkflowContext(workflowIssue, branchPlan, options, attempt, preparedWorkspace.path);
-    await ensureRunDir(workflowContext);
-
-    const attemptMetadata: AttemptMetadata = formatAttemptMetadata({
-      attempt,
-      issueNumber: workflowIssue.number,
-      branch: branchPlan.branchName,
-      baseBranch: branchPlan.baseBranch,
-      worktreePath: workflowContext.agentCwd,
-      workspace: preparedWorkspace.metadata,
-      runArtifactPath: workflowContext.runDirRelative,
-      startedAt: clock.now(),
-    });
-
-    await runAutorunAttemptLifecycle({
-      issueDir,
-      workflowContext,
-      branchPlan,
-      gateOptions: options,
-      attemptMetadata,
-      issue: workflowIssue,
-      logPrefix: "Auto",
-      beforeWorkflow: async (metadata) => {
-        const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-        await publishLedger({
-          cwd: options.cwd,
-          repo: options.repo,
-          issueNumber: workflowIssue.number,
-          attemptMetadata: metadata,
-          phase: "attempt-start",
-          body: formatAttemptStartComment({
-            issueNumber: workflowIssue.number,
-            attempt,
-            branchName: branchPlan.branchName,
-            assignee,
-            attemptMetadataPath: attemptMetadataRelativePath(metadata),
-          }),
-        });
-      },
-      beforeRun: async () => {
-        await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: preparedWorkspace.path, copyToWorktree: options.workspace?.copyToWorktree });
-        await runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path);
-      },
-      afterRun: async () => runLifecycleHook("afterRun", options.hooks, preparedWorkspace.path),
-    }, {
-      clock,
-      runFullWorkflow: injected.runFullWorkflow,
-      completeAutorunWorkflow: injected.completeAutorunWorkflow,
-    });
-  } finally {
-    await preparedWorkspace.releaseLock();
+  const rechecked = await fetchLatestIssueForClaimRecheck(issue, options, injected);
+  const skipReason = claimRecheckSkipReason(rechecked.issue, options, claimOptions);
+  if (skipReason) {
+    console.log(`- Skipping #${issue.number} before claim: ${skipReason}`);
+    return;
   }
+  assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
+
+  const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
+  const attempt = await allocateNextAttempt(issueDir);
+
+  console.log(`- Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
+  const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
+  await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
+
+  const workflowIssue = rechecked.issue;
+  console.log(`- Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
+  const workflowContext = createAutorunWorkflowContext(workflowIssue, branchPlan, options, attempt, preparedWorkspace.path);
+  await ensureRunDir(workflowContext);
+
+  const attemptMetadata: AttemptMetadata = formatAttemptMetadata({
+    attempt,
+    issueNumber: workflowIssue.number,
+    branch: branchPlan.branchName,
+    baseBranch: branchPlan.baseBranch,
+    worktreePath: workflowContext.agentCwd,
+    workspace: preparedWorkspace.metadata,
+    runArtifactPath: workflowContext.runDirRelative,
+    startedAt: clock.now(),
+  });
+
+  await runAutorunAttemptLifecycle({
+    issueDir,
+    workflowContext,
+    branchPlan,
+    gateOptions: options,
+    attemptMetadata,
+    issue: workflowIssue,
+    logPrefix: "Auto",
+    beforeWorkflow: async (metadata) => {
+      const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
+      await publishLedger({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: workflowIssue.number,
+        attemptMetadata: metadata,
+        phase: "attempt-start",
+        body: formatAttemptStartComment({
+          issueNumber: workflowIssue.number,
+          attempt,
+          branchName: branchPlan.branchName,
+          assignee,
+          attemptMetadataPath: attemptMetadataRelativePath(metadata),
+        }),
+      });
+    },
+    beforeRun: async () => {
+      await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: preparedWorkspace.path, copyToWorktree: options.workspace?.copyToWorktree });
+      await runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path);
+    },
+    afterRun: async () => runLifecycleHook("afterRun", options.hooks, preparedWorkspace.path),
+  }, {
+    clock,
+    runFullWorkflow: injected.runFullWorkflow,
+    completeAutorunWorkflow: injected.completeAutorunWorkflow,
+  });
 }
 
 async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjected): Promise<string | undefined> {
@@ -401,14 +392,6 @@ function claimRecheckSkipReason(
   return undefined;
 }
 
-async function releaseAutorunLock(lock: AutorunLock): Promise<void> {
-  try {
-    await lock.release();
-  } catch (error) {
-    console.warn(`Failed to release local autorun lock: ${formatError(error)}`);
-  }
-}
-
 function printSkippedBlockedIssues(skipped: readonly SkippedBlockedIssue[]): void {
   if (skipped.length === 0) return;
 
@@ -438,7 +421,3 @@ function toAutorunIssueCandidate(issue: GitHubIssue): AutorunIssueCandidate {
   };
 }
 
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
-}
