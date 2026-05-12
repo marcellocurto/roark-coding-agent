@@ -71,7 +71,7 @@ export interface PublishAutorunResultInput {
 }
 
 export function buildStageAllArgv(): string[] {
-  return ["git", "add", "-A", "--", ".", ":(exclude).roark/runs"];
+  return ["git", "add", "-A", "--", ".", ":(exclude).roark"];
 }
 
 export function buildCommitArgv(options: CommitArgvOptions): string[] {
@@ -190,7 +190,7 @@ export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
 }
 
 export async function hasUncommittedChanges(options: { cwd: string }): Promise<boolean> {
-  const result = await runProcess(["git", "status", "--porcelain", "--", ".", ":(exclude).roark/runs"], { cwd: options.cwd });
+  const result = await runProcess(["git", "status", "--porcelain", "--", ".", ":(exclude).roark"], { cwd: options.cwd });
   if (result.exitCode !== 0) {
     throw new Error(
       `git status --porcelain failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`,
@@ -209,7 +209,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   if (await hasUncommittedChanges({ cwd: agentCwd })) {
     console.log("- Committing worktree changes");
     await runProcessOrThrow(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" });
-    await runProcess(["git", "reset", "-q", "--", ".roark/runs"], { cwd: agentCwd });
+    await runProcess(["git", "reset", "-q", "--", ".roark"], { cwd: agentCwd });
     await runProcessOrThrow(
       buildCommitArgv({ message: formatCommitMessage({ issueNumber: issue.number }) }),
       { cwd: agentCwd, label: "git commit" },

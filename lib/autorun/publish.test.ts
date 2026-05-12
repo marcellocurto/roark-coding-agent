@@ -54,7 +54,7 @@ describe("autorun publish defaults", () => {
 
 describe("autorun publish argv builders", () => {
   test("buildStageAllArgv stages target changes but excludes run artifacts", () => {
-    expect(buildStageAllArgv()).toEqual(["git", "add", "-A", "--", ".", ":(exclude).roark/runs"]);
+    expect(buildStageAllArgv()).toEqual(["git", "add", "-A", "--", ".", ":(exclude).roark"]);
   });
 
   test("buildCommitArgv composes a git commit command", () => {
@@ -166,7 +166,9 @@ describe("publish git staging", () => {
     await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: repo });
     await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: repo });
     await writeFile(path.join(repo, "README.md"), "hello\n", "utf8");
-    await runProcessOrThrow(["git", "add", "README.md"], { cwd: repo });
+    await mkdir(path.join(repo, ".roark"), { recursive: true });
+    await writeFile(path.join(repo, ".roark/.gitignore"), "runs/\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md", ".roark/.gitignore"], { cwd: repo });
     await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: repo });
 
     await mkdir(path.join(repo, ".roark/runs/issue/9/attempts/1"), { recursive: true });
@@ -281,7 +283,9 @@ describe("publishAutorunResult", () => {
     await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: agentCwd });
     await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
-    await runProcessOrThrow(["git", "add", "README.md"], { cwd: agentCwd });
+    await mkdir(path.join(agentCwd, ".roark"), { recursive: true });
+    await writeFile(path.join(agentCwd, ".roark/.gitignore"), "runs/\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md", ".roark/.gitignore"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "init", "--bare", remote]);
     await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
