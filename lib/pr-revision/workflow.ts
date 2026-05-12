@@ -15,6 +15,7 @@ import {
 import { fetchPullRequestFeedback, type PullRequestFeedback } from "../github/pr.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
+import { noopAsync } from "../utils/async.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { assertCleanGitTree, gitDirtyLines } from "../workflow/git.ts";
 import {
@@ -348,7 +349,7 @@ async function prepareRevisionWorkspace(input: {
     return {
       path: options.cwd,
       metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
-      releaseLock: () => Promise.resolve(),
+      releaseLock: noopAsync,
     };
   }
 
@@ -501,7 +502,6 @@ function isRoarkPath(filePath: string): boolean {
 async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<string | undefined> {
   await ensurePushRemote(context);
   await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
-  await runProcessOrThrow(["git", "add", "-f", "--", context.agentRevisionDirRelative], { cwd: context.agentCwd, label: "git add revision artifacts" });
   await runProcessOrThrow(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
     cwd: context.agentCwd,
     label: "git commit",

@@ -8,7 +8,7 @@ import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
 import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
@@ -58,7 +58,7 @@ describe("runAutoContinue", () => {
   });
 
   test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
-        await tick();
+        await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-managed-"));
     tempDirs.push(cwd, workspacePath);
@@ -99,9 +99,9 @@ describe("runAutoContinue", () => {
       attempt: 2,
       hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
     }, {
-      ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
+      ensureAutorunLabelContract: async () => (await noopAsync(), ({ existing: [], missing: [], created: [] })),
       prepareCloneWorkspace: async (input) => {
-        await tick();
+        await noopAsync();
         calls.push(`prepare:${input.workspacePath ?? ""}`);
         expect(input.mode).toBe("continue");
         expect(input.workspacePath).toBe(workspacePath);
@@ -111,7 +111,7 @@ describe("runAutoContinue", () => {
         };
       },
       runner: async () => {
-        await tick();
+        await noopAsync();
         calls.push("runner");
         throw new Error("triage failed");
       },
@@ -126,7 +126,7 @@ describe("runAutoContinue", () => {
   });
 
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
-        await tick();
+        await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
     tempDirs.push(cwd);
     await initGitRepo(cwd, "roark/issue-24");
@@ -171,7 +171,7 @@ describe("runAutoContinue", () => {
 
     expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
       runner: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("fix failed after reviews");
       },
     })).rejects.toThrow("Fix pass 1 failed");
@@ -220,9 +220,9 @@ describe("runAutoContinue", () => {
     const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
     const release = new Promise<void>((resolve) => { releaseFirst = resolve; });
     const injected = {
-      ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
+      ensureAutorunLabelContract: async () => (await noopAsync(), ({ existing: [], missing: [], created: [] })),
       prepareCloneWorkspace: async () => {
-        await tick();
+        await noopAsync();
         return {
           path: workspacePath,
           metadata: { path: workspacePath, strategy: "clone" as const, cloneRemote: "origin", createdNow: false },
@@ -244,7 +244,7 @@ describe("runAutoContinue", () => {
     expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 3 }, {
       ...injected,
       runner: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("second continue should not run lifecycle");
       },
     })).rejects.toThrow("roark continue issue #24 attempt 3 is already running");

@@ -11,7 +11,7 @@ import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -21,7 +21,7 @@ afterEach(async () => {
 
 describe("runAutorunAttemptLifecycle", () => {
   test("marks attempts in-progress before workflow and records terminal completion outcomes", async () => {
-  await tick();
+  await noopAsync();
     const fixture = await createFixture();
 
     await runAutorunAttemptLifecycle({
@@ -30,19 +30,19 @@ describe("runAutorunAttemptLifecycle", () => {
     }, {
       clock: { now: () => new Date("2026-05-07T01:00:00.000Z") },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         const duringWorkflow = await readAttemptMetadata(fixture.issueDir, 1);
         expect(duringWorkflow.outcome).toBe("in-progress");
         expect(duringWorkflow.endedAt).toBeNull();
         expect((await readAttemptIndex(fixture.issueDir))[0]?.outcome).toBe("in-progress");
         return { status: "completed" };
       },
-      completeAutorunWorkflow: async () => (await tick(), ({
+      completeAutorunWorkflow: async () => (await noopAsync(), ({
         outcome: "failed-verification",
         outcomeDetail: "verification failed",
       })),
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     });
 
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
@@ -53,7 +53,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("runs fix, refinement, reviews, readiness, and completion again for verification repair", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -63,7 +63,7 @@ describe("runAutorunAttemptLifecycle", () => {
       ...fixture,
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
-        await tick();
+        await noopAsync();
         phases.push(request.phase ?? "unknown");
         expect(request.prompt).toContain("failed_verification");
         if (request.phase === "fixLog-1") {
@@ -82,7 +82,7 @@ describe("runAutorunAttemptLifecycle", () => {
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:30:00.000Z") },
-      runFullWorkflow: async () => (await tick(), ({ status: "completed" })),
+      runFullWorkflow: async () => (await noopAsync(), ({ status: "completed" })),
       completeAutorunWorkflow: async () => {
         completions += 1;
         if (completions === 1) {
@@ -92,7 +92,7 @@ describe("runAutorunAttemptLifecycle", () => {
         return { outcome: "published", outcomeDetail: null };
       },
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     });
 
     expect(completions).toBe(2);
@@ -103,7 +103,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("continues verification repair when final review requests another fix pass", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -113,7 +113,7 @@ describe("runAutorunAttemptLifecycle", () => {
       ...fixture,
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
-        await tick();
+        await noopAsync();
         phases.push(request.phase ?? "unknown");
         if (request.phase === "fixLog-1") {
           return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nFinal review requested another fix.\n";
@@ -143,7 +143,7 @@ describe("runAutorunAttemptLifecycle", () => {
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:45:00.000Z") },
-      runFullWorkflow: async () => (await tick(), ({ status: "completed" })),
+      runFullWorkflow: async () => (await noopAsync(), ({ status: "completed" })),
       completeAutorunWorkflow: async () => {
         completions += 1;
         if (completions === 1) {
@@ -153,7 +153,7 @@ describe("runAutorunAttemptLifecycle", () => {
         return { outcome: "published", outcomeDetail: null };
       },
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     });
 
     expect(completions).toBe(2);
@@ -164,7 +164,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("classifies output-contract failures and includes failing artifact details in the failure comment", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     await writeArtifact(fixture.workflowContext, "implementationLog", "# Implementation Log\n\ninvalid output\n");
     const comments: string[] = [];
@@ -181,19 +181,19 @@ describe("runAutorunAttemptLifecycle", () => {
     }, {
       clock: { now: () => new Date("2026-05-07T02:00:00.000Z") },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         throw error;
       },
       publishReviewLedgerComments: async () => {
-        await tick();},
+        await noopAsync();},
       markIssueFailed: async (options) => {
-        await tick();
+        await noopAsync();
         comments.push(options.comment);
         expect(options.removeLabels).toEqual(["busy"]);
         return undefined;
       },
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     })).rejects.toThrow("Implementation failed: missing Summary section");
 
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
@@ -213,7 +213,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("includes direct artifact validation error artifact details in the failure comment", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     await writeArtifact(fixture.workflowContext, "implementationLog", "# Implementation Log\n\ninvalid direct validation output\n");
     const comments: string[] = [];
@@ -225,18 +225,18 @@ describe("runAutorunAttemptLifecycle", () => {
     }, {
       clock: { now: () => new Date("2026-05-07T02:30:00.000Z") },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         throw error;
       },
       publishReviewLedgerComments: async () => {
-        await tick();},
+        await noopAsync();},
       markIssueFailed: async (options) => {
-        await tick();
+        await noopAsync();
         comments.push(options.comment);
         return undefined;
       },
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     })).rejects.toThrow("implementationLog failed output contract: missing Summary section");
 
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
@@ -250,7 +250,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("runs fatal beforeRun after metadata is persisted and before workflow", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     const calls: string[] = [];
 
@@ -258,7 +258,7 @@ describe("runAutorunAttemptLifecycle", () => {
       ...fixture,
       issue: { number: 44, title: "Lifecycle" },
       beforeRun: async () => {
-        await tick();
+        await noopAsync();
         const persisted = await readAttemptMetadata(fixture.issueDir, 1);
         expect(persisted.outcome).toBe("in-progress");
         calls.push("beforeRun");
@@ -267,15 +267,15 @@ describe("runAutorunAttemptLifecycle", () => {
     }, {
       clock: { now: () => new Date("2026-05-07T02:45:00.000Z") },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         calls.push("workflow");
         return { status: "completed" };
       },
       publishReviewLedgerComments: async () => {
-        await tick();},
-      markIssueFailed: async () => (await tick(), undefined),
+        await noopAsync();},
+      markIssueFailed: async () => (await noopAsync(), undefined),
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     })).rejects.toThrow("setup failed");
 
     expect(calls).toEqual(["beforeRun"]);
@@ -286,7 +286,7 @@ describe("runAutorunAttemptLifecycle", () => {
   });
 
   test("classifies generic failures as errored and records terminal metadata from finally", async () => {
-        await tick();
+        await noopAsync();
     const fixture = await createFixture();
     const comments: string[] = [];
 
@@ -296,18 +296,18 @@ describe("runAutorunAttemptLifecycle", () => {
     }, {
       clock: { now: () => new Date("2026-05-07T03:00:00.000Z") },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("workflow exploded");
       },
       publishReviewLedgerComments: async () => {
-        await tick();},
+        await noopAsync();},
       markIssueFailed: async (options) => {
-        await tick();
+        await noopAsync();
         comments.push(options.comment);
         return undefined;
       },
       finalizeAttemptObservability: async () => {
-        await tick();},
+        await noopAsync();},
     })).rejects.toThrow("workflow exploded");
 
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);

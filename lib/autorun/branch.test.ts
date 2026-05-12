@@ -10,7 +10,6 @@ import {
   defaultAutorunBaseBranch,
   ensureIssueWorktree,
   checkoutExistingIssueBranch,
-  updateIssueBranchFromBase,
 } from "./branch.ts";
 
 const tempDirs: string[] = [];
@@ -90,23 +89,22 @@ describe("autorun issue worktrees", () => {
     expect(await gitOutput(agentCwd, ["log", "--format=%s", "-1"])).toBe("develop");
   });
 
-  test("updates from origin base before publish while preserving dirty worktree changes", async () => {
+  test("reuses an existing issue worktree without merging a moved origin base", async () => {
     const { repo } = await createRepoWithRemote();
     const plan = createBranchPlan({ issueNumber: 125, branchName: "roark/issue-125", baseBranch: "main" });
     const agentCwd = await ensureIssueWorktree({ controlCwd: repo, plan });
+    const originalHead = await gitOutput(agentCwd, ["rev-parse", "HEAD"]);
 
-    await writeFile(path.join(agentCwd, "dirty.txt"), "agent edit\n", "utf8");
     await writeFile(path.join(repo, "base.txt"), "base update\n", "utf8");
     await runProcessOrThrow(["git", "add", "base.txt"], { cwd: repo });
     await runProcessOrThrow(["git", "commit", "-m", "base update"], { cwd: repo });
     await runProcessOrThrow(["git", "push", "origin", "main"], { cwd: repo });
 
-    await updateIssueBranchFromBase({ agentCwd, baseBranch: "main", preserveUncommitted: true });
+    const reused = await ensureIssueWorktree({ controlCwd: repo, plan });
 
-    expect(await gitOutput(agentCwd, ["log", "--format=%s", "-1"])).toBe("base update");
-    expect(await readFile(path.join(agentCwd, "base.txt"), "utf8")).toBe("base update\n");
-    expect(await readFile(path.join(agentCwd, "dirty.txt"), "utf8")).toBe("agent edit\n");
-    expect(await gitOutput(agentCwd, ["status", "--porcelain"])).toContain("?? dirty.txt");
+    expect(reused).toBe(agentCwd);
+    expect(await gitOutput(agentCwd, ["rev-parse", "HEAD"])).toBe(originalHead);
+    expect(await Bun.file(path.join(agentCwd, "base.txt")).exists()).toBe(false);
   });
 
   test("fresh auto refuses a dirty existing issue worktree", async () => {

@@ -4,7 +4,7 @@ import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const options: AutorunGateOptions = {
   cwd: "/repo",
@@ -46,7 +46,7 @@ const attemptMetadata = formatAttemptMetadata({
 
 describe("completeAutorunWorkflow", () => {
   test("marks triage-stopped and does not run the publish gate", async () => {
-        await tick();
+        await noopAsync();
     let publishCalls = 0;
     const marked: unknown[] = [];
 
@@ -60,12 +60,12 @@ describe("completeAutorunWorkflow", () => {
       attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
     }, {
       publishGate: async () => {
-        await tick();
+        await noopAsync();
         publishCalls += 1;
         return { outcome: "published", outcomeDetail: null };
       },
       markTriageStopped: async (input) => {
-        await tick();
+        await noopAsync();
         marked.push(input);
       },
     });
@@ -86,7 +86,7 @@ describe("completeAutorunWorkflow", () => {
   });
 
   test("delegates completed workflow results to the publish gate unchanged", async () => {
-        await tick();
+        await noopAsync();
     let marked = false;
 
     const outcome = await completeAutorunWorkflow({
@@ -100,13 +100,13 @@ describe("completeAutorunWorkflow", () => {
       recoveryCommand: "roark continue 12 --attempt 1",
     }, {
       publishGate: async (input) => {
-        await tick();
+        await noopAsync();
         expect(input.issue).toBe(issue);
         expect(input.recoveryCommand).toBe("roark continue 12 --attempt 1");
         return { outcome: "failed-readiness", outcomeDetail: "readiness status is missing" };
       },
       markTriageStopped: async () => {
-        await tick();
+        await noopAsync();
         marked = true;
       },
     });

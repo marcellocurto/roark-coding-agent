@@ -21,7 +21,7 @@ import {
   type ProcessRunner,
 } from "./workspace.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({ stdout: "", stderr, exitCode: 1 });
@@ -40,10 +40,10 @@ describe("managed clone workspaces", () => {
   });
 
   test("resolves remote names and preflights the resulting URL", async () => {
-    await tick();
+    await noopAsync();
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       calls.push(args);
       if (args.join(" ") === "git remote get-url upstream") return ok("git@github.com:owner/repo.git\n");
       if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
@@ -88,6 +88,39 @@ describe("managed clone workspaces", () => {
 
     expect(prepared.path).toBe(workspacePath);
     expect((await lstat(`${workspacePath}.lock`)).isDirectory()).toBe(true);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("reused issue clone workspace does not merge or stash a moved origin base", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-no-base-sync-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 77 });
+    await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+    const calls: string[][] = [];
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      calls.push(args);
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "rev-parse") return ok("true\n");
+      if (args[0] === "git" && args[1] === "branch") return ok("roark/issue-77\n");
+      if (args[0] === "git" && ["fetch", "merge", "stash"].includes(args[1] ?? "")) return fail(`${args[1] ?? "git command"} should not run`);
+      return ok();
+    };
+
+    const prepared = await prepareCloneWorkspace({
+      controlCwd: root,
+      repo: "owner/repo",
+      issueNumber: 77,
+      plan: { issueNumber: 77, branchName: "roark/issue-77", baseBranch: "main" },
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      mode: "continue",
+      runner,
+    });
+
+    expect(prepared.path).toBe(workspacePath);
+    expect(calls.some((args) => args[0] === "git" && ["fetch", "merge", "stash"].includes(args[1] ?? ""))).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -173,7 +206,7 @@ describe("managed clone workspaces", () => {
     await mkdir(path.join(workspacePath, ".git"), { recursive: true });
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
@@ -205,6 +238,95 @@ describe("managed clone workspaces", () => {
     expect(error instanceof Error ? error.message : String(error)).toContain("unpushed local commit");
     expect(calls.some((args) => args[0] === "git" && args[1] === "checkout")).toBe(false);
     await rm(root, { recursive: true, force: true });
+  });
+
+  test("PR revision workspace preparation creates and releases a lock", async () => {
+    const fixture = await createPrRevisionWorkspaceFixture("roark-pr-workspace-lock-");
+    let prepared: Awaited<ReturnType<typeof preparePrRevisionWorkspace>> | undefined;
+    try {
+      prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
+      const owner = await readWorkspaceLockOwner(fixture.lockDir);
+
+      expect((await lstat(fixture.lockDir)).isDirectory()).toBe(true);
+      expect(owner.pid).toBe(process.pid);
+      expect(typeof owner.token).toBe("string");
+      expect(owner.token).not.toBe("");
+      expect(Number.isNaN(Date.parse(String(owner.createdAt)))).toBe(false);
+
+      await prepared.releaseLock();
+      prepared = undefined;
+      expect(await Bun.file(fixture.lockDir).exists()).toBe(false);
+    } finally {
+      await prepared?.releaseLock();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("PR revision workspace preparation refuses an active lock", async () => {
+    const fixture = await createPrRevisionWorkspaceFixture("roark-pr-workspace-active-lock-");
+    let prepared: Awaited<ReturnType<typeof preparePrRevisionWorkspace>> | undefined;
+    try {
+      prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
+
+      let error: unknown;
+      try {
+        await preparePrRevisionWorkspace(fixture.prepareInput);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(Error);
+      expect(error instanceof Error ? error.message : String(error)).toContain("already locked");
+      expect((await lstat(fixture.lockDir)).isDirectory()).toBe(true);
+    } finally {
+      await prepared?.releaseLock();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("PR revision workspace preparation replaces stale locks", async () => {
+    const fixture = await createPrRevisionWorkspaceFixture("roark-pr-workspace-stale-lock-");
+    await mkdir(fixture.lockDir, { recursive: true });
+    const staleOwner = { token: "stale-token", pid: findDeadPid(), createdAt: "2000-01-01T00:00:00.000Z" };
+    await writeFile(path.join(fixture.lockDir, "owner.json"), JSON.stringify(staleOwner), "utf8");
+    let prepared: Awaited<ReturnType<typeof preparePrRevisionWorkspace>> | undefined;
+    try {
+      prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
+      const owner = await readWorkspaceLockOwner(fixture.lockDir);
+
+      expect(owner.token).not.toBe("stale-token");
+      expect(owner.pid).toBe(process.pid);
+
+      await prepared.releaseLock();
+      prepared = undefined;
+      expect(await Bun.file(fixture.lockDir).exists()).toBe(false);
+    } finally {
+      await prepared?.releaseLock();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  test("PR revision workspace preparation releases its lock on failure", async () => {
+    const fixture = await createPrRevisionWorkspaceFixture("roark-pr-workspace-failed-lock-");
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      if (args[0] === "git" && args[1] === "remote") return ok(`${fixture.root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return fail("remote unavailable");
+      return fail("unexpected command");
+    };
+
+    try {
+      let error: unknown;
+      try {
+        await preparePrRevisionWorkspace({ ...fixture.prepareInput, runner });
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(Error);
+      expect(error instanceof Error ? error.message : String(error)).toContain("Unable to access clone remote");
+      expect(await Bun.file(fixture.lockDir).exists()).toBe(false);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
   });
 
   test("copies ignored host paths recursively, dereferences symlinks, preserves modes, and removes stale destinations", async () => {
@@ -280,7 +402,7 @@ describe("managed clone workspaces", () => {
     await mkdir(worktree, { recursive: true });
     await writeFile(path.join(control, "visible"), "copy me\n", "utf8");
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       if (args[1] === "check-ignore") return ok();
       if (args[1] === "status") return ok("?? visible\n");
       return ok();
@@ -334,6 +456,58 @@ describe("managed clone workspaces", () => {
     await rm(root, { recursive: true, force: true });
   });
 });
+
+async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
+  root: string;
+  lockDir: string;
+  prepareInput: Parameters<typeof preparePrRevisionWorkspace>[0];
+}> {
+  const root = await mkdtemp(path.join(tmpdir(), prefix));
+  const workspaceRoot = path.join(root, "managed");
+  const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 12 });
+  const runner: ProcessRunner = async (args) => {
+    await noopAsync();
+    if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+    if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+    if (args[0] === "git" && args[1] === "clone") {
+      await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+      return ok();
+    }
+    if (args[0] === "git" && args[1] === "fetch") return ok();
+    if (args[0] === "git" && args[1] === "show-ref") return fail("branch missing");
+    if (args[0] === "git" && args[1] === "checkout") return ok();
+    return fail(`unexpected command: ${args.join(" ")}`);
+  };
+
+  return {
+    root,
+    lockDir: `${workspacePath}.lock`,
+    prepareInput: {
+      controlCwd: root,
+      repo: "owner/repo",
+      prNumber: 12,
+      headRefName: "feature/pr-12",
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      runner,
+    },
+  };
+}
+
+async function readWorkspaceLockOwner(lockDir: string): Promise<{ token?: unknown; pid?: unknown; createdAt?: unknown }> {
+  return JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8")) as { token?: unknown; pid?: unknown; createdAt?: unknown };
+}
+
+function findDeadPid(): number {
+  for (const pid of [2147483647, 2147483646, 999999, 424242]) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH") return pid;
+    }
+  }
+  throw new Error("Unable to find a dead PID for stale lock test.");
+}
 
 async function initGitRepo(cwd: string, gitignore: string): Promise<void> {
   await mkdir(cwd, { recursive: true });

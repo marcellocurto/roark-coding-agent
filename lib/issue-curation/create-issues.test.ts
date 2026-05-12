@@ -12,7 +12,7 @@ import {
   createIssuesFromCurationPlan,
   type ProcessRunner,
 } from "./create-issues.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
@@ -50,7 +50,7 @@ describe("buildIssueCreateArgv", () => {
 
 describe("createIssuesFromCurationPlan", () => {
   test("dry-run reports approved plan items without calling GitHub or writing results", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: false });
     const plan = basePlan();
     plan.issuesToCreate.push({ planItemId: "bad", proposedTitle: "Bad" } as never);
@@ -61,16 +61,16 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       runner: async () => {
-        await tick();
+        await noopAsync();
         calls += 1;
         return okProcess("unexpected");
       },
       agentRunner: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("dry-run should not invoke an agent");
       },
       skillResolver: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("dry-run should not resolve skills");
       },
     });
@@ -140,7 +140,7 @@ describe("createIssuesFromCurationPlan", () => {
     await writeJsonArtifact(context, "issueCurationPlan", plan);
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       calls.push(args);
       return okProcess(`https://github.com/owner/repo/issues/${100 + calls.length}\n`);
     };
@@ -172,10 +172,10 @@ describe("createIssuesFromCurationPlan", () => {
       approved: true,
       approvalReason: "autorun PR was opened",
       clock,
-      labelEnsurer: async (options) => { await tick(); ensured.push(options); },
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      labelEnsurer: async (options) => { await noopAsync(); ensured.push(options); },
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         expect(request.prompt).toContain("autorun PR was opened");
         return JSON.stringify({
           created: [
@@ -195,7 +195,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved run uses the resolved issue-create skill through the agent runner", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const requests: AgentRunRequest[] = [];
@@ -204,9 +204,9 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         requests.push(request);
         return JSON.stringify({
           created: [
@@ -241,9 +241,9 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         requests.push(request);
         return JSON.stringify({
           created: [
@@ -265,7 +265,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved publishing agent uses centralized thinking profiles", async () => {
-        await tick();
+        await noopAsync();
     for (const [profile, expected] of [["fast", "low"], ["deep", "high"]] as const) {
       const context = await tempContext({ yes: true, thinkingProfile: profile });
       await writeJsonArtifact(context, "issueCurationPlan", basePlan());
@@ -275,9 +275,9 @@ describe("createIssuesFromCurationPlan", () => {
         context,
         clock,
         labelEnsurer: false,
-        skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
+        skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
         agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
           thinkingLevels.push(request.thinkingLevel);
           return JSON.stringify({
             created: [
@@ -295,7 +295,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent response must cover every creatable plan item exactly once", async () => {
-  await tick();
+  await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -303,8 +303,8 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
-      agentRunner: async () => (await tick(), JSON.stringify({
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [],
         relationshipOutcomes: [],
@@ -317,7 +317,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent response rejects duplicate plan item results", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -325,8 +325,8 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
-      agentRunner: async () => (await tick(), JSON.stringify({
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [
           { planItemId: "external-blocker-1", message: "duplicate status" },
@@ -342,7 +342,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent relationship outcomes must reference approved plan items with status and message", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -350,8 +350,8 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
-      agentRunner: async () => (await tick(), JSON.stringify({
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [
           { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
           { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
@@ -367,7 +367,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("approved agent relationship outcomes must include status and message", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -375,8 +375,8 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await tick(), path.join(cwd, "skills", "github-issue-create")),
-      agentRunner: async () => (await tick(), JSON.stringify({
+      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
+      agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [
           { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
           { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
@@ -391,7 +391,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("missing resolved skill fails before invoking the publishing agent", async () => {
-  await tick();
+  await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     let agentCalls = 0;
@@ -401,11 +401,11 @@ describe("createIssuesFromCurationPlan", () => {
       clock,
       labelEnsurer: false,
       skillResolver: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("Repo override skill 'github-issue-create' is missing or incomplete at /repo/.roark/skills/github-issue-create: missing SKILL.md.");
       },
       agentRunner: async () => {
-        await tick();
+        await noopAsync();
         agentCalls += 1;
         return "{}";
       },
@@ -415,11 +415,11 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("records partial failures from an injected process runner while preserving successes", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const runner: ProcessRunner = async (_args) => {
-      await tick();
+      await noopAsync();
       if (_args.includes("Follow-up tracker")) return { stdout: "", stderr: "rate limited", exitCode: 1 };
       return okProcess("https://github.com/owner/repo/issues/200\n");
     };
@@ -434,7 +434,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("rerun skips already-created plan item IDs unless forced", async () => {
-        await tick();
+        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     await writeJsonArtifact(context, "issueCreationResults", {
@@ -447,7 +447,7 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       runner: async (args) => {
-        await tick();
+        await noopAsync();
         calls.push(args);
         return okProcess("https://github.com/owner/repo/issues/11\n");
       },
@@ -461,7 +461,7 @@ describe("createIssuesFromCurationPlan", () => {
       context: forcedContext,
       clock,
       runner: async (args) => {
-        await tick();
+        await noopAsync();
         forcedCalls.push(args);
         return okProcess("https://github.com/owner/repo/issues/12\n");
       },

@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, realpath, rm, utimes, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
+import { noopAsync } from "../utils/async.ts";
 import { withCheckoutLock } from "./lock.ts";
 
 const tempDirs: string[] = [];
@@ -41,7 +42,7 @@ describe("withCheckoutLock", () => {
     let entered = false;
     await withCheckoutLock({ cwd, name: "ownerless-test", description: "ownerless test" }, () => {
       entered = true;
-      return Promise.resolve();
+      return noopAsync();
     });
 
     expect(entered).toBe(true);
@@ -60,7 +61,7 @@ describe("withCheckoutLock", () => {
     let entered = false;
     await withCheckoutLock({ cwd, name: "corrupt-test", description: "corrupt test" }, () => {
       entered = true;
-      return Promise.resolve();
+      return noopAsync();
     });
 
     expect(entered).toBe(true);

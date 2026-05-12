@@ -10,11 +10,11 @@ import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel, defaultAutorun
 import { defaultAutorunVerifyCommand } from "./verification.ts";
 import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 const noOpLabelContract = {
-  ensureAutorunLabelContract: async () => (await tick(), ({ existing: [], missing: [], created: [] })),
+  ensureAutorunLabelContract: async () => (await noopAsync(), ({ existing: [], missing: [], created: [] })),
 };
 
 afterEach(async () => {
@@ -25,11 +25,11 @@ describe("runAutoDiscovery", () => {
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
     const logs = await captureLogs(async () => {
-        await tick();
+        await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpLabelContract,
         listOpenGitHubIssues: async (input) => {
-        await tick();
+        await noopAsync();
           listed = true;
           expect(input.limit).toBe(100);
           return [
@@ -39,7 +39,7 @@ describe("runAutoDiscovery", () => {
             issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
           ];
         },
-        fetchGitHubIssueRelationships: async (input) => (await tick(), dependencyClearRelationships(Number(input.issueNumber))),
+        fetchGitHubIssueRelationships: async (input) => (await noopAsync(), dependencyClearRelationships(Number(input.issueNumber))),
       });
     });
 
@@ -49,19 +49,19 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
-        await tick();
+        await noopAsync();
     const checkedBodies: string[] = [];
 
     const logs = await captureLogs(async () => {
-        await tick();
+        await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpLabelContract,
-        listOpenGitHubIssues: async () => (await tick(), [
+        listOpenGitHubIssues: async () => (await noopAsync(), [
           { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Depends on #99" },
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
         ]),
         fetchGitHubIssueRelationships: async (input) => {
-        await tick();
+        await noopAsync();
           checkedBodies.push(input.body);
           return Number(input.issueNumber) === 1
             ? dependencyClearRelationships(1, [], [bodyBlocker(99, "Body blocker", "OPEN")])
@@ -79,13 +79,13 @@ describe("runAutoDiscovery", () => {
 
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
     const logs = await captureLogs(async () => {
-  await tick();
+  await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpLabelContract,
-        listOpenGitHubIssues: async () => (await tick(), [
+        listOpenGitHubIssues: async () => (await noopAsync(), [
           { ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), body: "Blocked by #99" },
         ]),
-        fetchGitHubIssueRelationships: async () => (await tick(), dependencyClearRelationships(1, [], [bodyBlocker(99, "Closed body blocker", "CLOSED")])),
+        fetchGitHubIssueRelationships: async () => (await noopAsync(), dependencyClearRelationships(1, [], [bodyBlocker(99, "Closed body blocker", "CLOSED")])),
       });
     });
 
@@ -95,19 +95,19 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
-        await tick();
+        await noopAsync();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
-  await tick();
+  await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpLabelContract,
-        listOpenGitHubIssues: async () => (await tick(), [
+        listOpenGitHubIssues: async () => (await noopAsync(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
         ]),
         fetchGitHubIssueRelationships: async (input) => {
-        await tick();
+        await noopAsync();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -126,19 +126,19 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
-        await tick();
+        await noopAsync();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
-  await tick();
+  await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
         ...noOpLabelContract,
-        listOpenGitHubIssues: async () => (await tick(), [
+        listOpenGitHubIssues: async () => (await noopAsync(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
         ]),
         fetchGitHubIssueRelationships: async (input) => {
-        await tick();
+        await noopAsync();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -155,20 +155,20 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto selection limit counts unblocked issues", async () => {
-        await tick();
+        await noopAsync();
     const checked: number[] = [];
 
     const logs = await captureLogs(async () => {
-  await tick();
+  await noopAsync();
       await runAutoDiscovery({ ...baseOptions(), dryRun: true, limit: 2 }, {
         ...noOpLabelContract,
-        listOpenGitHubIssues: async () => (await tick(), [
+        listOpenGitHubIssues: async () => (await noopAsync(), [
           issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
           issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
         ]),
         fetchGitHubIssueRelationships: async (input) => {
-        await tick();
+        await noopAsync();
           const issueNumber = Number(input.issueNumber);
           checked.push(issueNumber);
           return issueNumber === 1
@@ -186,14 +186,14 @@ describe("runAutoDiscovery", () => {
   });
 
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
-        await tick();
+        await noopAsync();
     let preflighted = false;
     let claimed = false;
 
     expect(runAutoDiscovery({ ...baseOptions() }, {
       ...noOpLabelContract,
-      listOpenGitHubIssues: async () => (await tick(), [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]),
-      fetchGitHubIssueRelationships: async () => (await tick(), ({
+      listOpenGitHubIssues: async () => (await noopAsync(), [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]),
+      fetchGitHubIssueRelationships: async () => (await noopAsync(), ({
         fetchedAt: "2026-05-07T00:00:00.000Z",
         repo: "owner/repo",
         nativeDependenciesAvailable: false,
@@ -203,11 +203,11 @@ describe("runAutoDiscovery", () => {
         unavailableReason: "GitHub dependency API unavailable",
       })),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
         preflighted = true;
       },
       claimGitHubIssue: async () => {
-        await tick();
+        await noopAsync();
         claimed = true;
       },
     })).rejects.toThrow("Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable");
@@ -217,21 +217,21 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto ensures labels before fetching the requested issue", async () => {
-        await tick();
+        await noopAsync();
     const calls: string[] = [];
     await runAutoDiscovery({ ...baseOptions(), issue: "owner/repo#29", dryRun: true }, {
       ...noOpLabelContract,
       ensureAutorunLabelContract: async () => {
-        await tick();
+        await noopAsync();
         calls.push("ensure-labels");
         return { existing: [], missing: [], created: [] };
       },
       listOpenGitHubIssues: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("targeted auto should not list issues");
       },
       fetchGitHubIssue: async (input) => {
-        await tick();
+        await noopAsync();
         calls.push(`fetch:${input}`);
         return fetchedGitHubIssue(29, []);
       },
@@ -241,19 +241,19 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto refuses skip labels before claim", async () => {
-        await tick();
+        await noopAsync();
     let claimed = false;
     let preflighted = false;
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, ["roark-in-progress"])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["roark-in-progress"])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
         preflighted = true;
       },
       claimGitHubIssue: async () => {
-        await tick();
+        await noopAsync();
         claimed = true;
       },
     })).rejects.toThrow("Issue #29 has skip label roark-in-progress");
@@ -263,19 +263,19 @@ describe("runAutoDiscovery", () => {
   });
 
   test("dirty autorun preflight runs before claim", async () => {
-  await tick();
+  await noopAsync();
     const order: string[] = [];
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
         order.push("preflight");
         throw new Error("dirty worktree");
       },
       claimGitHubIssue: async () => {
-        await tick();
+        await noopAsync();
         order.push("claim");
       },
     })).rejects.toThrow("dirty worktree");
@@ -284,7 +284,7 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
-        await tick();
+        await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-recheck-"));
     tempDirs.push(cwd);
     const workspacePath = path.join(cwd, "managed-workspace");
@@ -299,18 +299,18 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpLabelContract,
       fetchGitHubIssue: async () => {
-        await tick();
+        await noopAsync();
         fetchCount += 1;
         return fetchCount === 1
           ? fetchedGitHubIssue(29, [])
           : fetchedGitHubIssue(29, ["roark-in-progress"]);
       },
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
         calls.push("preflight");
       },
       prepareCloneWorkspace: async () => {
-        await tick();
+        await noopAsync();
         calls.push("workspace");
         return {
           path: workspacePath,
@@ -318,11 +318,11 @@ describe("runAutoDiscovery", () => {
         };
       },
       claimGitHubIssue: async () => {
-        await tick();
+        await noopAsync();
         calls.push("claim");
       },
       runFullWorkflow: async () => {
-        await tick();
+        await noopAsync();
         calls.push("workflow");
         return { status: "completed" };
       },
@@ -332,7 +332,7 @@ describe("runAutoDiscovery", () => {
   });
 
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
-        await tick();
+        await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-clone-workspace-"));
@@ -347,18 +347,18 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpLabelContract,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
         calls.push("preflight");
       },
       claimGitHubIssue: async (input) => {
-        await tick();
+        await noopAsync();
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
       },
       prepareCloneWorkspace: async (input) => {
-  await tick();
+  await noopAsync();
         calls.push(`workspace:${input.plan.branchName}`);
         expect(input.controlCwd).toBe(cwd);
         return {
@@ -373,7 +373,7 @@ describe("runAutoDiscovery", () => {
         };
       },
       publishIssueLedgerComment: async () => {
-        await tick();
+        await noopAsync();
         calls.push("ledger");
       },
       runFullWorkflow: async (context) => {
@@ -384,7 +384,7 @@ describe("runAutoDiscovery", () => {
         return { status: "completed" };
       },
       completeAutorunWorkflow: async (input) => {
-        await tick();
+        await noopAsync();
         calls.push(`complete:${input.branchPlan.branchName}`);
         return { outcome: "published", outcomeDetail: null };
       },
@@ -419,9 +419,9 @@ describe("runAutoDiscovery", () => {
 
     const first = runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
       },
       prepareCloneWorkspace: async () => {
         enteredFirst();
@@ -434,12 +434,12 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
       },
       prepareCloneWorkspace: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("second auto should not prepare a workspace");
       },
     })).rejects.toThrow("roark auto issue #29 is already running");
@@ -458,9 +458,9 @@ describe("runAutoDiscovery", () => {
 
     const first = runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
       },
       prepareCloneWorkspace: async () => {
         enteredFirst();
@@ -473,12 +473,12 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(cwd), issue: "30", noAssign: true }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(30, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(30, [])),
       assertCleanAutorunGit: async () => {
-        await tick();
+        await noopAsync();
       },
       prepareCloneWorkspace: async () => {
-        await tick();
+        await noopAsync();
         throw new Error("second auto reached workspace");
       },
     })).rejects.toThrow("second auto reached workspace");

@@ -30,7 +30,7 @@ interface InitDependencies {
 
 type InitRoarkConfig = Omit<RoarkConfig, "workspace"> & { workspace: Omit<WorkspaceConfig, "copyToWorktree"> };
 
-const managedFiles = [".roark/config.json", ".roark/WORKFLOW.md", ".roark/.gitignore"] as const;
+const managedFiles = [".roark/config.json", ".roark/.gitignore"] as const;
 
 export const roarkGitignoreContent = `runs/
 worktrees/
@@ -38,15 +38,6 @@ logs/
 *.local.json
 `;
 
-export const roarkWorkflowContent = `# Roark Workflow
-
-This repository uses Roark's repo-local workflow policy.
-
-- Keep generated run state under \`.roark/runs/\`; it is ignored by git.
-- Review implementation plans before broad or risky code changes.
-- Run the configured verification command before publishing work.
-- Use repo-local skills only when this repository needs explicit overrides.
-`;
 
 export async function runInit(options: InitCliOptions, deps: InitDependencies = {}): Promise<InitResult> {
   const runner = deps.runner ?? runProcess;
@@ -61,7 +52,6 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   const config = buildInitConfig({ repo, verify, setupHook });
   const writes = new Map<string, string>([
     [".roark/config.json", `${JSON.stringify(config, null, 2)}\n`],
-    [".roark/WORKFLOW.md", roarkWorkflowContent],
     [".roark/.gitignore", roarkGitignoreContent],
   ]);
 

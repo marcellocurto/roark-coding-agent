@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
 
 async function tempGitRepo(): Promise<string> {
@@ -25,11 +25,11 @@ async function isolatedWorkspace(setup?: (workspace: string) => Promise<void>): 
   return {
     workspace,
     prepareWorkspace: async () => {
-      await tick();
+      await noopAsync();
       return {
         path: workspace,
         metadata: { path: workspace, strategy: "clone", cloneRemote: "origin", createdNow: false },
-        releaseLock: () => Promise.resolve(),
+        releaseLock: noopAsync,
       };
     },
   };
@@ -96,20 +96,20 @@ function feedback(): PullRequestFeedback {
 
 describe("runPrRevision", () => {
   test("legacy checkout fallback uses the control checkout as the agent workspace", async () => {
-    await tick();
+    await noopAsync();
     const cwd = await tempGitRepo();
     let checkoutCalled = false;
     let commentCalled = false;
 
     const result = await runPrRevision(options(cwd), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       checkout: async () => {
-        await tick();
+        await noopAsync();
         checkoutCalled = true;
       },
-      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalled = true;
       },
     });
@@ -123,17 +123,17 @@ describe("runPrRevision", () => {
   });
 
   test("no-action-needed isolated revisions remove mirrored workspace artifacts", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { workspace, prepareWorkspace } = await isolatedWorkspace();
 
     let commentCalls = 0;
     const result = await runPrRevision(options(control), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalls++;
       },
     });
@@ -147,17 +147,17 @@ describe("runPrRevision", () => {
   });
 
   test("no-action-needed respects --no-comment", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
 
     const result = await runPrRevision(options(control, { comment: false }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalled = true;
       },
     });
@@ -167,7 +167,7 @@ describe("runPrRevision", () => {
   });
 
   test("allocates revisions across the control checkout and isolated workspace", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
       await mkdir(path.join(workspace, ".roark", "runs", "pr", "12", "revision-1"), { recursive: true });
@@ -175,11 +175,11 @@ describe("runPrRevision", () => {
 
     let commentCalls = 0;
     const result = await runPrRevision(options(control), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
+      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalls++;
       },
     });
@@ -191,22 +191,22 @@ describe("runPrRevision", () => {
   });
 
   test("needs-human stops before writable implementation and posts one summary by default", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const writableCalls: boolean[] = [];
     let commentCalled = false;
 
     const result = await runPrRevision(options(control), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         writableCalls.push(request.writable);
         return "# Revision Plan\n\n## Status\nneeds-human\n\n## Human Needs\n- Please decide.\n";
       },
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalled = true;
       },
     });
@@ -217,24 +217,24 @@ describe("runPrRevision", () => {
   });
 
   test("uses centralized thinking profiles for revision agents", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const thinkingLevels: string[] = [];
 
     const result = await runPrRevision(options(control, { thinkingProfile: "fast" }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         thinkingLevels.push(request.thinkingLevel);
         if (request.writable) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
+      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
       },
     });
 
@@ -243,7 +243,7 @@ describe("runPrRevision", () => {
   });
 
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
@@ -251,10 +251,10 @@ describe("runPrRevision", () => {
     let writableCalls = 0;
 
     const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         calls++;
         if (request.writable) {
           writableCalls++;
@@ -263,9 +263,9 @@ describe("runPrRevision", () => {
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
+      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalled = true;
       },
     });
@@ -277,7 +277,7 @@ describe("runPrRevision", () => {
   });
 
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -291,10 +291,10 @@ describe("runPrRevision", () => {
     const writableArtifacts: string[] = [];
 
     const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         calls++;
         if (request.writable) {
           writableArtifacts.push(request.prompt);
@@ -305,14 +305,14 @@ describe("runPrRevision", () => {
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
       verificationRunner: async ({ command }) => {
-        await tick();
+        await noopAsync();
         verificationCalls++;
         return verificationCalls === 1
           ? { ok: false, command, exitCode: 1, stdout: "", stderr: "type error" }
           : { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
       },
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalls++;
       },
     });
@@ -328,7 +328,7 @@ describe("runPrRevision", () => {
   });
 
   test("review and verification repairs share the fix-pass budget", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let calls = 0;
@@ -337,10 +337,10 @@ describe("runPrRevision", () => {
     let commentCalls = 0;
 
     const result = await runPrRevision(options(control, { maxFixPasses: 1 }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await tick();
+        await noopAsync();
         calls++;
         if (request.writable) {
           writableCalls++;
@@ -351,12 +351,12 @@ describe("runPrRevision", () => {
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
       verificationRunner: async ({ command }) => {
-        await tick();
+        await noopAsync();
         verificationCalls++;
         return { ok: false, command, exitCode: 1, stdout: "", stderr: "test failed" };
       },
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalls++;
       },
     });
@@ -370,7 +370,7 @@ describe("runPrRevision", () => {
     expect(metadata.verificationFailureReason).toContain("Verification failed after 1 fix passes");
   });
 
-  test("successful isolated revision preserves the control checkout, uses configured remote, and force-adds ignored run artifacts", async () => {
+  test("successful isolated revision preserves the control checkout, uses configured remote, and excludes ignored run artifacts", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-isolated-"));
     const seed = path.join(root, "seed");
     const remote = path.join(root, "remote.git");
@@ -406,7 +406,7 @@ describe("runPrRevision", () => {
       workspace: { root: workspaceRoot, strategy: "clone", cloneRemote: "origin", clone: { filter: null, depth: null }, copyToWorktree: [] },
       hooks: { timeoutMs: 10_000, afterCreate: "git config user.email roark@example.invalid && git config user.name 'Roark Test'" },
     }), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       agentRunner: async (request) => {
         calls++;
         agentCwds.push(request.cwd);
@@ -418,11 +418,11 @@ describe("runPrRevision", () => {
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
       verificationRunner: async ({ command, cwd }) => {
-        await tick();
+        await noopAsync();
         verificationCwds.push(cwd);
         return { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
       },
-      postSummaryComment: async () => { await tick(); },
+      postSummaryComment: async () => { await noopAsync(); },
     });
 
     expect(result.outcome).toBe("published");
@@ -435,11 +435,12 @@ describe("runPrRevision", () => {
 
     const pushedTree = await runOutput(["git", "--git-dir", remote, "ls-tree", "-r", "--name-only", "feature/pr-12"], root);
     expect(pushedTree).toContain("fixed.txt");
-    expect(pushedTree).toContain(".roark/runs/pr/12/revision-1/metadata.json");
+    expect(pushedTree).not.toContain(".roark/runs/pr/12/revision-1/metadata.json");
+    expect(pushedTree).not.toContain(".roark/runs");
   });
 
   test("successful verification commits, pushes, and comments once", async () => {
-    await tick();
+    await noopAsync();
     const control = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -451,7 +452,7 @@ describe("runPrRevision", () => {
     let commentCalls = 0;
 
     const result = await runPrRevision(options(control), {
-      fetchFeedback: async () => (await tick(), feedback()),
+      fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
         calls++;
@@ -462,9 +463,9 @@ describe("runPrRevision", () => {
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
-      verificationRunner: async ({ command }) => (await tick(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       postSummaryComment: async () => {
-        await tick();
+        await noopAsync();
         commentCalls++;
       },
     });

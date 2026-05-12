@@ -57,8 +57,6 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
   const agentCwd = autorunWorktreePath(options.controlCwd, options.plan.issueNumber);
   await ensureRoarkWorktreesIgnored(options.controlCwd);
   await mkdir(path.dirname(agentCwd), { recursive: true });
-  await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.controlCwd, label: "git fetch origin" });
-
   if (existsSync(agentCwd)) {
     await assertDirectory(agentCwd);
     await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
@@ -67,7 +65,6 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
         `Issue worktree '${agentCwd}' has uncommitted changes. Use 'roark continue ${options.plan.issueNumber} --cwd ${options.controlCwd}' to recover a failed attempt, or clean the worktree before starting fresh auto work.`,
       );
     }
-    await updateIssueBranchFromBase({ agentCwd, baseBranch: options.plan.baseBranch });
     return agentCwd;
   }
 
@@ -77,6 +74,7 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
       label: "git worktree add",
     });
   } else {
+    await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.controlCwd, label: "git fetch origin" });
     await runProcessOrThrow(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.baseBranch}`], {
       cwd: options.controlCwd,
       label: "git worktree add -b",
@@ -84,37 +82,7 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
   }
 
   await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
-  await updateIssueBranchFromBase({ agentCwd, baseBranch: options.plan.baseBranch });
   return agentCwd;
-}
-
-export async function updateIssueBranchFromBase(options: {
-  agentCwd: string;
-  baseBranch: string;
-  preserveUncommitted?: boolean | undefined;
-}): Promise<void> {
-  await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.agentCwd, label: "git fetch origin" });
-
-  const shouldStash = options.preserveUncommitted === true && (await hasGitChanges(options.agentCwd));
-  if (shouldStash) {
-    await runProcessOrThrow(
-      ["git", "stash", "push", "--include-untracked", "-m", "roark: preserve uncommitted changes before base merge"],
-      { cwd: options.agentCwd, label: "git stash push" },
-    );
-  }
-
-  let merged = false;
-  try {
-    await runProcessOrThrow(["git", "merge", `origin/${options.baseBranch}`], {
-      cwd: options.agentCwd,
-      label: `git merge origin/${options.baseBranch}`,
-    });
-    merged = true;
-  } finally {
-    if (shouldStash && merged) {
-      await runProcessOrThrow(["git", "stash", "pop"], { cwd: options.agentCwd, label: "git stash pop" });
-    }
-  }
 }
 
 export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {

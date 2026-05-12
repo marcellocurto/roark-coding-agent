@@ -188,7 +188,6 @@ export async function prepareCloneWorkspace(input: {
           `Workspace '${workspacePath}' has uncommitted changes. Use 'roark continue ${input.issueNumber} --cwd ${input.controlCwd}' to recover a failed attempt, or clean/remove the workspace before starting fresh auto work.`,
         );
       }
-      await updateWorkspaceFromBase({ cwd: workspacePath, baseBranch: input.plan.baseBranch, preserveUncommitted: input.mode === "continue", runner });
       await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
     }
 
@@ -550,19 +549,6 @@ async function assertNoUnpushedBranchCommits(input: { cwd: string; branchName: s
   if (!Number.isFinite(aheadCount)) throw new Error(`Unable to inspect local commits on '${input.branchName}': unexpected rev-list output '${ahead.stdout.trim()}'.`);
   if (aheadCount > 0) {
     throw new Error(`Workspace '${input.cwd}' has ${aheadCount} unpushed local commit(s) on '${input.branchName}'. Refusing to reset it to '${input.upstreamRef}'. Push, remove, or repair the workspace before revising this PR.`);
-  }
-}
-
-async function updateWorkspaceFromBase(input: { cwd: string; baseBranch: string; preserveUncommitted: boolean; runner: ProcessRunner }): Promise<void> {
-  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin"], { cwd: input.cwd, label: "git fetch origin" });
-  const shouldStash = input.preserveUncommitted && await hasGitChanges(input.cwd, input.runner);
-  if (shouldStash) await runProcessOrThrowWithRunner(input.runner, ["git", "stash", "push", "--include-untracked", "-m", "roark: preserve uncommitted changes before base merge"], { cwd: input.cwd, label: "git stash push" });
-  let merged = false;
-  try {
-    await runProcessOrThrowWithRunner(input.runner, ["git", "merge", `origin/${input.baseBranch}`], { cwd: input.cwd, label: `git merge origin/${input.baseBranch}` });
-    merged = true;
-  } finally {
-    if (shouldStash && merged) await runProcessOrThrowWithRunner(input.runner, ["git", "stash", "pop"], { cwd: input.cwd, label: "git stash pop" });
   }
 }
 

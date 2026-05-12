@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { promptForInteractiveArgv, resolveInteractiveArgv } from "./interactive.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 function scriptedPrompt(responses: string[]) {
   const prompts: string[] = [];
@@ -13,7 +13,7 @@ function scriptedPrompt(responses: string[]) {
         output.push(text);
       },
       async question(prompt: string): Promise<string> {
-        await tick();
+        await noopAsync();
         prompts.push(prompt);
         const response = responses.shift();
         if (response === undefined) throw new Error(`No scripted response for ${prompt}`);
@@ -25,7 +25,7 @@ function scriptedPrompt(responses: string[]) {
 
 describe("promptForInteractiveArgv", () => {
   test("maps confirmed auto discover to argv", async () => {
-    await tick();
+    await noopAsync();
     const { prompt, output } = scriptedPrompt(["1", "yes"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto"]);
@@ -33,7 +33,7 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("maps confirmed auto issue to argv and retries empty issue input", async () => {
-    await tick();
+    await noopAsync();
     const { prompt, output } = scriptedPrompt(["2", "", "42", "y"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto", "42"]);
@@ -41,7 +41,7 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("declined auto confirmation exits cleanly", async () => {
-    await tick();
+    await noopAsync();
     const { prompt, output } = scriptedPrompt(["1", "no"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toBeUndefined();
@@ -49,7 +49,7 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("maps issue commands without confirmation", async () => {
-    await tick();
+    await noopAsync();
     const cases: [string, string[]][] = [
       ["3", ["continue", "42"]],
       ["4", ["do", "42"]],
@@ -64,7 +64,7 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("maps revise PR to argv and retries empty PR input", async () => {
-    await tick();
+    await noopAsync();
     const { prompt, output, prompts } = scriptedPrompt(["5", "", "123"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["revise-pr", "123"]);
@@ -73,7 +73,7 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("maps workspace remove to argv and asks whether to force", async () => {
-    await tick();
+    await noopAsync();
     const forcePrompt = scriptedPrompt(["7", "issue", "42", "yes"]);
     expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
     expect(forcePrompt.prompts).toEqual(["Select an option: ", "Remove issue or PR workspace? [issue/pr] ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
@@ -83,14 +83,14 @@ describe("promptForInteractiveArgv", () => {
   });
 
   test("maps help to argv", async () => {
-    await tick();
+    await noopAsync();
     const { prompt } = scriptedPrompt(["8"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
   });
 
   test("retries invalid menu choices", async () => {
-    await tick();
+    await noopAsync();
     const { prompt, output } = scriptedPrompt(["bad", "8"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
@@ -100,7 +100,7 @@ describe("promptForInteractiveArgv", () => {
 
 describe("resolveInteractiveArgv", () => {
   test("returns help argv for no-args non-TTY mode without waiting for input", async () => {
-    await tick();
+    await noopAsync();
     const stdin = { isTTY: false } as NodeJS.ReadStream & { isTTY?: boolean };
     const writes: string[] = [];
     const stdout = { write: (text: string) => writes.push(text) };
