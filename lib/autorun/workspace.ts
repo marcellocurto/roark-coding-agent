@@ -324,7 +324,10 @@ export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo
   const repoRoot = path.dirname(workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: 1, controlCwd: options.cwd }));
   if (!existsSync(repoRoot)) return [];
   const entries = await readdir(repoRoot, { withFileTypes: true });
-  return entries.filter((entry) => entry.isDirectory() && entry.name.startsWith("issue-")).map((entry) => path.join(repoRoot, entry.name)).toSorted();
+  return entries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("issue-") && !entry.name.endsWith(".lock"))
+    .map((entry) => path.join(repoRoot, entry.name))
+    .toSorted();
 }
 
 export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Promise<void> {
@@ -356,12 +359,17 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
 }
 
 export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<void> {
-  if (!existsSync(input.workspacePath)) return;
+  const legacyLockPath = `${input.workspacePath}.lock`;
+  if (!existsSync(input.workspacePath)) {
+    await rm(legacyLockPath, { recursive: true, force: true });
+    return;
+  }
   if (!input.force && await hasGitChanges(input.workspacePath, runProcess)) {
     throw new Error(`Refusing to remove dirty workspace '${input.workspacePath}'. Pass --force to remove it anyway.`);
   }
   await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath);
   await rm(input.workspacePath, { recursive: true, force: true });
+  await rm(legacyLockPath, { recursive: true, force: true });
 }
 
 async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranchPlan; runner: ProcessRunner }): Promise<void> {

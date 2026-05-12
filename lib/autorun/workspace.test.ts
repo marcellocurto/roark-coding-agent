@@ -6,8 +6,10 @@ import {
   assertWorkspacePathSafe,
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
+  listWorkspaces,
   prepareCloneWorkspace,
   refreshCopyToWorktree,
+  removeWorkspace,
   resolveCloneRemote,
   runLifecycleHook,
   sanitizeWorkspaceSegment,
@@ -82,6 +84,22 @@ describe("managed clone workspaces", () => {
 
     expect(prepared.path).toBe(workspacePath);
     expect((await lstat(`${workspacePath}.lock`)).isDirectory()).toBe(true);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("legacy lock sidecars are not listed and are removed with workspaces", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-legacy-lock-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 76 });
+    await mkdir(workspacePath, { recursive: true });
+    await mkdir(`${workspacePath}.lock`, { recursive: true });
+
+    expect(await listWorkspaces({ workspace: { ...defaultWorkspaceConfig, root: workspaceRoot }, repo: "owner/repo" })).toEqual([workspacePath]);
+
+    await removeWorkspace({ workspacePath, force: true, hooks: defaultLifecycleHooks });
+
+    expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
+    expect(Bun.file(`${workspacePath}.lock`).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 
