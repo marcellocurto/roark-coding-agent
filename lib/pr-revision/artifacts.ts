@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "../workflow/thinking.ts";
@@ -15,7 +15,10 @@ export type PrRevisionArtifactName =
   | "verification";
 
 export interface PrRevisionContext {
+  /** @deprecated Use agentCwd for mutation/agent work and controlCwd for control-plane work. */
   cwd: string;
+  controlCwd: string;
+  agentCwd: string;
   outDir: string;
   repo?: string | undefined  ;
   prNumber: number;
@@ -23,6 +26,8 @@ export interface PrRevisionContext {
   prDir: string;
   revisionDir: string;
   revisionDirRelative: string;
+  agentRevisionDir: string;
+  agentRevisionDirRelative: string;
   model?: string | undefined  ;
   thinkingLevel?: RevisePrCliOptions["thinkingLevel"] | undefined  ;
   thinkingProfile?: ThinkingProfileName | undefined  ;
@@ -45,21 +50,29 @@ const artifactFilenames: Record<PrRevisionArtifactName, string> = {
   verification: "verification.md",
 };
 
-export async function createPrRevisionContext(options: RevisePrCliOptions): Promise<PrRevisionContext> {
-  const cwd = path.resolve(options.cwd);
-  const outDir = path.resolve(cwd, options.outDir);
+export async function createPrRevisionContext(options: RevisePrCliOptions & { controlCwd?: string | undefined; agentCwd?: string | undefined }): Promise<PrRevisionContext> {
+  const controlCwd = path.resolve(options.controlCwd ?? options.cwd);
+  const agentCwd = path.resolve(options.agentCwd ?? options.cwd);
+  const outDir = path.resolve(controlCwd, options.outDir);
   const prDir = path.join(outDir, "pr", String(options.prNumber));
-  const revision = await allocateNextRevision(prDir);
+  const agentOutDir = path.resolve(agentCwd, options.outDir);
+  const agentPrDir = path.join(agentOutDir, "pr", String(options.prNumber));
+  const revision = await allocateNextRevisionAcross([prDir, agentPrDir]);
   const revisionDir = path.join(prDir, `revision-${revision}`);
+  const agentRevisionDir = path.join(agentPrDir, `revision-${revision}`);
   return {
-    cwd,
+    cwd: agentCwd,
+    controlCwd,
+    agentCwd,
     outDir,
     repo: options.repo,
     prNumber: options.prNumber,
     revision,
     prDir,
     revisionDir,
-    revisionDirRelative: path.relative(cwd, revisionDir) || ".",
+    revisionDirRelative: path.relative(controlCwd, revisionDir) || ".",
+    agentRevisionDir,
+    agentRevisionDirRelative: path.relative(agentCwd, agentRevisionDir) || ".",
     model: options.model,
     thinkingLevel: options.thinkingLevel,
     thinkingProfile: options.thinkingProfile,
@@ -74,38 +87,69 @@ export async function createPrRevisionContext(options: RevisePrCliOptions): Prom
 }
 
 export async function allocateNextRevision(prDir: string): Promise<number> {
-  if (!existsSync(prDir)) return 1;
-  const entries = await readdir(prDir, { withFileTypes: true });
-  const revisions = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => (/^revision-(\d+)$/.exec(entry.name))?.[1])
-    .filter((value): value is string => value !== undefined)
-    .map((value) => Number(value))
-    .filter((value) => Number.isInteger(value) && value > 0);
+  return allocateNextRevisionAcross([prDir]);
+}
+
+export async function allocateNextRevisionAcross(prDirs: string[]): Promise<number> {
+  const revisions: number[] = [];
+  for (const prDir of prDirs) {
+    if (!existsSync(prDir)) continue;
+    const entries = await readdir(prDir, { withFileTypes: true });
+    revisions.push(...entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => (/^revision-(\d+)$/.exec(entry.name))?.[1])
+      .filter((value): value is string => value !== undefined)
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0));
+  }
   return revisions.length === 0 ? 1 : Math.max(...revisions) + 1;
 }
 
 export function prRevisionArtifactPath(context: PrRevisionContext, artifact: string): string {
-  const filename = artifact in artifactFilenames ? artifactFilenames[artifact as PrRevisionArtifactName] : artifact;
+  const filename = artifactFilename(artifact);
   return path.join(context.revisionDir, filename);
 }
 
+export function agentPrRevisionArtifactPath(context: PrRevisionContext, artifact: string): string {
+  const filename = artifactFilename(artifact);
+  return path.join(context.agentRevisionDir, filename);
+}
+
 export function prRevisionArtifactRelativePath(context: PrRevisionContext, artifact: string): string {
-  const filename = artifact in artifactFilenames ? artifactFilenames[artifact as PrRevisionArtifactName] : artifact;
+  const filename = artifactFilename(artifact);
   return path.join(context.revisionDirRelative, filename);
 }
 
+export function agentPrRevisionArtifactRelativePath(context: PrRevisionContext, artifact: string): string {
+  const filename = artifactFilename(artifact);
+  return path.join(context.agentRevisionDirRelative, filename);
+}
+
 export async function writePrRevisionArtifact(context: PrRevisionContext, artifact: string, content: string): Promise<void> {
+  const normalized = content.endsWith("\n") ? content : `${content}\n`;
   await mkdir(context.revisionDir, { recursive: true });
-  await writeFile(prRevisionArtifactPath(context, artifact), content.endsWith("\n") ? content : `${content}\n`, "utf8");
+  await writeFile(prRevisionArtifactPath(context, artifact), normalized, "utf8");
+  if (path.resolve(context.agentRevisionDir) !== path.resolve(context.revisionDir)) {
+    await mkdir(context.agentRevisionDir, { recursive: true });
+    await writeFile(agentPrRevisionArtifactPath(context, artifact), normalized, "utf8");
+  }
 }
 
 export async function readPrRevisionArtifact(context: PrRevisionContext, artifact: string): Promise<string> {
   return readFile(prRevisionArtifactPath(context, artifact), "utf8");
 }
 
+export async function removeAgentPrRevisionArtifacts(context: PrRevisionContext): Promise<void> {
+  if (path.resolve(context.agentRevisionDir) === path.resolve(context.revisionDir)) return;
+  await rm(context.agentRevisionDir, { recursive: true, force: true });
+}
+
 export async function writePrRevisionJsonArtifact(context: PrRevisionContext, artifact: string, value: unknown): Promise<void> {
   await writePrRevisionArtifact(context, artifact, JSON.stringify(value, null, 2));
+}
+
+function artifactFilename(artifact: string): string {
+  return artifact in artifactFilenames ? artifactFilenames[artifact as PrRevisionArtifactName] : artifact;
 }
 
 export function formatPrFeedbackMarkdown(feedback: PullRequestFeedback): string {

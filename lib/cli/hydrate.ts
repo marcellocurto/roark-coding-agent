@@ -170,6 +170,8 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       force: raw.force ?? false,
       yes: raw.yes ?? false,
       comment: raw.comment ?? true,
+      workspace: workspaceConfig,
+      hooks,
     } satisfies RevisePrCliOptions;
   }
 

@@ -3,7 +3,7 @@ import type { PrRevisionContext } from "./artifacts.ts";
 export function revisionPlanPrompt(context: PrRevisionContext): string {
   return `<pr_revision_planning>
 You are planning a manual revision for PR #${context.prNumber}, revision ${context.revision}.
-Read the PR feedback artifacts in ${context.revisionDirRelative}:
+Read the PR feedback artifacts in ${context.agentRevisionDirRelative}:
 - pr-feedback.md
 - pr-feedback.json
 
@@ -38,8 +38,8 @@ revise|needs-human|no-action-needed
 export function revisionImplementationPrompt(context: PrRevisionContext, pass: number): string {
   return `<pr_revision_implementation>
 You are implementing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` fix pass ${pass}` : ""}.
-Use ${context.revisionDirRelative}/revision-plan.md and the latest revision review artifact if present.
-For fix passes, inspect the latest revision-review*.md artifact if it requested fixes and ${context.revisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.
+Use ${context.agentRevisionDirRelative}/revision-plan.md and the latest revision review artifact if present.
+For fix passes, inspect the latest revision-review*.md artifact if it requested fixes and ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.
 Apply only planner-classified must-fix-current items and repair any verification failure captured for this fix pass. Do not implement non-blocking, invalid/stale, already-addressed, or needs-human items.
 Keep scope minimal and inspect the current diff before editing.
 
@@ -61,7 +61,7 @@ Return only this Markdown artifact:
 export function revisionReviewPrompt(context: PrRevisionContext, pass: number): string {
   return `<pr_revision_review>
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
-Review the current working tree diff and artifacts in ${context.revisionDirRelative}.
+Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
 Verify feedback handling, skipped-item rationale, validation evidence, regression risk, and scope control.
 
 Return only this Markdown artifact:
