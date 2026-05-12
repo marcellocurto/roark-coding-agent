@@ -21,7 +21,7 @@ import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import { publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
+import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
 export interface RunAutorunAttemptLifecycleInput {
@@ -92,7 +92,7 @@ export async function runAutorunAttemptLifecycle(
       workflowContext: input.workflowContext,
       attemptMetadata,
       attemptMetadataPath,
-      recoveryCommand: recoveryCommand(input, false),
+      recoveryCommand: publicRecoveryCommand(input, false),
     });
 
     while (completionOutcome.outcome === "verification-needs-fix") {
@@ -105,7 +105,7 @@ export async function runAutorunAttemptLifecycle(
         workflowContext: input.workflowContext,
         attemptMetadata,
         attemptMetadataPath,
-        recoveryCommand: recoveryCommand(input, false),
+        recoveryCommand: publicRecoveryCommand(input, false),
       });
     }
 
@@ -203,7 +203,7 @@ async function markWorkflowError(
     artifactPath: errorArtifact?.path,
     artifactContent: errorArtifact?.content,
     attemptMetadataPath,
-    recoveryCommand: command,
+    recoveryCommand: publicRecoveryCommand(input, shouldRecoverWithYes(error)),
   });
 
   await markFailed({
@@ -253,6 +253,15 @@ function recoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): 
   return formatContinueCommand({
     issueNumber: input.attemptMetadata.issueNumber,
     cwd: input.gateOptions.cwd,
+    repo: input.gateOptions.repo,
+    attempt: input.attemptMetadata.attempt,
+    yes,
+  });
+}
+
+function publicRecoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): string {
+  return formatPublicContinueCommand({
+    issueNumber: input.attemptMetadata.issueNumber,
     repo: input.gateOptions.repo,
     attempt: input.attemptMetadata.attempt,
     yes,

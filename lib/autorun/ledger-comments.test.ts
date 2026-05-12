@@ -100,7 +100,7 @@ describe("autorun ledger comment formatters", () => {
       phase: "review-a",
       title: "Review A",
       artifactPath: ".roark/runs/issue/24/attempts/2/review-a.md",
-      artifactContent: "# Review\n\n## Verdict\nfixes-required\n",
+      artifactContent: "# Review\n\n## Verdict\nfixes-required\npath:/Users/alice/repo\n",
     });
 
     expect(body).toStartWith("<!-- roark:issue=24 attempt=2 phase=review-a -->");
@@ -108,6 +108,8 @@ describe("autorun ledger comment formatters", () => {
     expect(body).toContain("Verdict: fixes-required");
     expect(body).toContain("Artifact: `.roark/runs/issue/24/attempts/2/review-a.md`");
     expect(body).toContain("## Verdict\nfixes-required");
+    expect(body).toContain("path:[local path redacted]");
+    expect(body).not.toContain("/Users/alice/repo");
   });
 
   test("formats PR created comments", () => {

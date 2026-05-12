@@ -24,31 +24,34 @@ describe("autorun failure", () => {
     );
   });
 
-  test("formatFailureComment includes branch, worktree, attempt path, artifact contents, and recovery command", () => {
+  test("formatFailureComment includes branch, attempt path, redacted artifact contents, and safe recovery command", () => {
     const comment = formatFailureComment({
       issueNumber: 10,
       issueUrl: "https://github.com/owner/repo/issues/10",
       phase: "readiness",
-      reason: 'readiness status is "not-ready"',
+      reason: 'readiness status is "not-ready" at path:/Users/alice/repo',
       branchName: "roark/issue-10",
       worktreePath: "/repo/.roark/worktrees/issue-10",
       artifactPath: ".roark/runs/issue/10/attempts/2/readiness.md",
-      artifactContent: "# PR Readiness\n\n## Status\nnot-ready\n",
+      artifactContent: "# PR Readiness\n\n## Status\nnot-ready\nlog: [/Users/alice/repo]\n",
       attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
       recoveryCommand: "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
     });
     expect(comment).toContain(
-      'Roark stopped on issue https://github.com/owner/repo/issues/10 at phase **readiness**: readiness status is "not-ready".',
+      'Roark stopped on issue https://github.com/owner/repo/issues/10 at phase **readiness**: readiness status is "not-ready" at path:[local path redacted].',
     );
     expect(comment).toContain("Issue: #10");
     expect(comment).toContain("Branch: `roark/issue-10`");
-    expect(comment).toContain("Worktree: `/repo/.roark/worktrees/issue-10`");
+    expect(comment).not.toContain("Worktree:");
+    expect(comment).not.toContain("Workspace:");
     expect(comment).toContain("Artifact: `.roark/runs/issue/10/attempts/2/readiness.md`");
     expect(comment).toContain("Attempt: `.roark/runs/issue/10/attempts/2/attempt.json`");
     expect(comment).toContain("## Artifact contents");
     expect(comment).toContain("## Status\nnot-ready");
+    expect(comment).toContain("log: [[local path redacted]]");
     expect(comment).toContain("## Recovery");
-    expect(comment).toContain("roark continue 10 --cwd /repo --repo owner/repo --attempt 2");
+    expect(comment).not.toContain("--cwd");
+    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
   });
 
   test("formatFailureComment renders only the issue and attempt path when artifact path is omitted", () => {

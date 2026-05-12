@@ -2,6 +2,7 @@ import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readAr
 import { parseVerdict } from "../workflow/verdicts.ts";
 import { buildRoarkMarker, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
+import { redactLocalPaths } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
 const reviewExcerptMaxChars = 24_000;
@@ -95,7 +96,7 @@ export function formatReviewLedgerComment(input: {
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: input.markerPhase ?? input.phase });
   const verdict = parseVerdict(input.artifactContent) ?? "unknown";
-  const excerpt = truncateReviewContent(input.artifactContent);
+  const excerpt = redactLocalPaths(truncateReviewContent(input.artifactContent));
   return [
     marker,
     `## Roark ${input.title} — attempt ${input.attempt}`,

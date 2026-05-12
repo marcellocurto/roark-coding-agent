@@ -1,5 +1,6 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
+import { redactLocalPaths } from "./public-output.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
@@ -44,13 +45,11 @@ export interface FailureCommentArgvOptions {
 
 export function formatFailureComment(input: FailureCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
-  const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${input.reason}.`;
+  const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${redactLocalPaths(input.reason)}.`;
   const lines: string[] = [];
 
   lines.push(`Issue: #${input.issueNumber}`);
   if (input.branchName) lines.push(`Branch: \`${input.branchName}\``);
-  if (input.workspacePath) lines.push(`Workspace: \`${input.workspacePath}\``);
-  else if (input.worktreePath) lines.push(`Worktree: \`${input.worktreePath}\``);
   if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
 
@@ -58,14 +57,14 @@ export function formatFailureComment(input: FailureCommentInput): string {
     if (lines.length > 0) lines.push("");
     lines.push("## Artifact contents");
     if (input.artifactPath) lines.push(`\`${input.artifactPath}\``);
-    lines.push(formatFencedBlock(truncateArtifactContent(input.artifactContent), "markdown"));
+    lines.push(formatFencedBlock(redactLocalPaths(truncateArtifactContent(input.artifactContent)), "markdown"));
   }
 
   if (input.recoveryCommand) {
     if (lines.length > 0) lines.push("");
     lines.push("## Recovery");
     lines.push("From the same checkout, run:");
-    lines.push(formatFencedBlock(input.recoveryCommand, "bash"));
+    lines.push(formatFencedBlock(formatPublicRecoveryCommand(input.recoveryCommand), "bash"));
   }
 
   if (lines.length === 0) return `${lead}\n`;
@@ -132,6 +131,10 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
     console.warn(`Failed to post failure comment: ${formatError(error)}`);
   }
   return undefined;
+}
+
+function formatPublicRecoveryCommand(value: string): string {
+  return redactLocalPaths(value.replace(/\s+--cwd\s+(?:'[^']*'|"[^"]*"|\S+)/g, ""));
 }
 
 function truncateArtifactContent(value: string): string {

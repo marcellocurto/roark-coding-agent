@@ -10,12 +10,20 @@ export interface ContinueCommandInput {
 }
 
 export function formatContinueCommand(input: ContinueCommandInput): string {
+  return formatContinueArgs(input).map(shellQuote).join(" ");
+}
+
+export function formatPublicContinueCommand(input: Omit<ContinueCommandInput, "cwd">): string {
+  return formatContinueArgs(input).map(shellQuote).join(" ");
+}
+
+function formatContinueArgs(input: ContinueCommandInput): string[] {
   const args = ["roark", "continue", String(input.issueNumber)];
   if (input.cwd) args.push("--cwd", input.cwd);
   if (input.repo) args.push("--repo", input.repo);
   if (input.attempt !== undefined) args.push("--attempt", String(input.attempt));
   if (input.yes === true) args.push("--yes");
-  return args.map(shellQuote).join(" ");
+  return args;
 }
 
 export function shouldRecoverWithYes(error: unknown): boolean {

@@ -20,6 +20,7 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
+import { redactLocalPaths } from "./public-output.ts";
 
 export const defaultAutorunSuccessLabel = "roark-pr-opened";
 export const defaultAutorunRemote = "origin";
@@ -114,7 +115,7 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   lines.push("");
   lines.push("## Verification");
   if (input.verification) {
-    lines.push(`- Command: \`${input.verification.command}\``);
+    lines.push(`- Command: \`${redactLocalPaths(input.verification.command)}\``);
     lines.push(`- Exit code: ${input.verification.exitCode}`);
     lines.push(`- Status: ${input.verification.ok ? "passed" : "failed"}`);
   } else {
@@ -128,8 +129,6 @@ export function formatPrBody(input: FormatPrBodyInput): string {
     lines.push(`- Branch: \`${meta.branch}\``);
     lines.push(`- Started: ${meta.startedAt}`);
     if (meta.endedAt) lines.push(`- Ended: ${meta.endedAt}`);
-    if (meta.workspace?.path) lines.push(`- Workspace: \`${meta.workspace.path}\``);
-    else lines.push(`- Worktree: \`${meta.worktreePath}\``);
     if (input.attemptMetadataPath) {
       lines.push(`- Metadata: \`${input.attemptMetadataPath}\``);
     }

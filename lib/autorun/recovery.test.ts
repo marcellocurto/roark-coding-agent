@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
-import { formatContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
+import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 
 describe("formatContinueCommand", () => {
   test("formats the command needed to continue a specific attempt", () => {
@@ -18,6 +18,12 @@ describe("formatContinueCommand", () => {
   test("appends --yes when dirty-tree recovery is expected", () => {
     expect(formatContinueCommand({ issueNumber: 11, cwd: "/repo", repo: "owner/repo", attempt: 1, yes: true })).toBe(
       "roark continue 11 --cwd /repo --repo owner/repo --attempt 1 --yes",
+    );
+  });
+
+  test("formats a public recovery command without cwd", () => {
+    expect(formatPublicContinueCommand({ issueNumber: 11, repo: "owner/repo", attempt: 1, yes: true })).toBe(
+      "roark continue 11 --repo owner/repo --attempt 1 --yes",
     );
   });
 });
