@@ -32,7 +32,7 @@ import {
   defaultWorkspaceConfig,
   preparePrRevisionWorkspace,
   runLifecycleHook,
-  type PreparedWorkspace,
+  type PreparedPrRevisionWorkspace,
 } from "../autorun/workspace.ts";
 import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
@@ -299,7 +299,7 @@ export async function runPrRevision(
     try {
       await hookRunner("afterRun", hooks, preparedWorkspace.path);
     } finally {
-      await preparedWorkspace.releaseLock();
+      await preparedWorkspace.releaseLock?.();
     }
   }
 }
@@ -309,7 +309,7 @@ async function prepareRevisionWorkspace(input: {
   repo: string;
   feedback: PullRequestFeedback;
   deps: RunPrRevisionDependencies;
-}): Promise<PreparedWorkspace> {
+}): Promise<PreparedPrRevisionWorkspace> {
   const { options, repo, feedback, deps } = input;
   if (deps.prepareWorkspace) {
     return deps.prepareWorkspace({
@@ -327,7 +327,6 @@ async function prepareRevisionWorkspace(input: {
     return {
       path: options.cwd,
       metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
-      releaseLock: async () => { await Promise.resolve(); },
     };
   }
 

@@ -5,8 +5,8 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
-import { runPrRevision } from "./workflow.ts";
 import { tick } from "../test-utils/async.ts";
+import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
 
 async function tempGitRepo(): Promise<string> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-workflow-"));
@@ -14,6 +14,24 @@ async function tempGitRepo(): Promise<string> {
   await Bun.spawn(["git", "config", "user.email", "roark@example.invalid"], { cwd }).exited;
   await Bun.spawn(["git", "config", "user.name", "Roark Test"], { cwd }).exited;
   return cwd;
+}
+
+async function isolatedWorkspace(setup?: (workspace: string) => Promise<void>): Promise<{
+  workspace: string;
+  prepareWorkspace: NonNullable<RunPrRevisionDependencies["prepareWorkspace"]>;
+}> {
+  const workspace = await tempGitRepo();
+  await setup?.(workspace);
+  return {
+    workspace,
+    prepareWorkspace: async () => {
+      await tick();
+      return {
+        path: workspace,
+        metadata: { path: workspace, strategy: "clone", cloneRemote: "origin", createdNow: false },
+      };
+    },
+  };
 }
 
 async function run(args: string[], cwd: string): Promise<void> {
@@ -76,8 +94,8 @@ function feedback(): PullRequestFeedback {
 }
 
 describe("runPrRevision", () => {
-  test("no-action-needed writes artifacts without code mutation, push, or comment", async () => {
-        await tick();
+  test("legacy checkout fallback uses the control checkout as the agent workspace", async () => {
+    await tick();
     const cwd = await tempGitRepo();
     let checkoutCalled = false;
     let commentCalled = false;
@@ -98,24 +116,19 @@ describe("runPrRevision", () => {
     expect(result.outcome).toBe("no-action-needed");
     expect(checkoutCalled).toBe(true);
     expect(commentCalled).toBe(false);
+    expect(result.context.agentCwd).toBe(result.context.controlCwd);
+    expect(result.context.revisionDir).toBe(result.context.agentRevisionDir);
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-1");
   });
 
-  test("non-published isolated revisions remove mirrored workspace artifacts", async () => {
+  test("no-action-needed isolated revisions remove mirrored workspace artifacts", async () => {
     await tick();
     const control = await tempGitRepo();
-    const workspace = await tempGitRepo();
+    const { workspace, prepareWorkspace } = await isolatedWorkspace();
 
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await tick(), feedback()),
-      prepareWorkspace: async () => {
-        await tick();
-        return {
-          path: workspace,
-          metadata: { path: workspace, strategy: "clone", cloneRemote: "origin", createdNow: false },
-          releaseLock: async () => { await Promise.resolve(); },
-        };
-      },
+      prepareWorkspace,
       agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
         await tick();
@@ -124,20 +137,22 @@ describe("runPrRevision", () => {
     });
 
     expect(result.outcome).toBe("no-action-needed");
+    expect(result.context.agentCwd).toBe(workspace);
     expect(await Bun.file(path.join(result.context.revisionDir, "metadata.json")).exists()).toBe(true);
     expect(await Bun.file(path.join(result.context.agentRevisionDir, "metadata.json")).exists()).toBe(false);
     expect((await runOutput(["git", "status", "--porcelain"], workspace)).trim()).toBe("");
   });
 
-  test("allocates revision after checking out the PR head branch", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+  test("allocates revisions across the control checkout and isolated workspace", async () => {
+    await tick();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
+      await mkdir(path.join(workspace, ".roark", "runs", "pr", "12", "revision-1"), { recursive: true });
+    });
 
-    const result = await runPrRevision(options(cwd), {
+    const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await mkdir(path.join(cwd, ".roark", "runs", "pr", "12", "revision-1"), { recursive: true });
-      },
+      prepareWorkspace,
       agentRunner: async () => (await tick(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
       postSummaryComment: async () => {
         await tick();
@@ -151,15 +166,15 @@ describe("runPrRevision", () => {
   });
 
   test("needs-human stops before writable implementation and posts one summary by default", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
     const writableCalls: boolean[] = [];
     let commentCalled = false;
 
-    const result = await runPrRevision(options(cwd), {
+    const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await tick();},
+      prepareWorkspace,
       agentRunner: async (request) => {
         await tick();
         writableCalls.push(request.writable);
@@ -177,14 +192,14 @@ describe("runPrRevision", () => {
   });
 
   test("uses centralized thinking profiles for revision agents", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
     const thinkingLevels: string[] = [];
 
-    const result = await runPrRevision(options(cwd, { thinkingProfile: "fast" }), {
+    const result = await runPrRevision(options(control, { thinkingProfile: "fast" }), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await tick();},
+      prepareWorkspace,
       agentRunner: async (request) => {
         await tick();
         thinkingLevels.push(request.thinkingLevel);
@@ -194,7 +209,8 @@ describe("runPrRevision", () => {
       },
       verificationRunner: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
-        await tick();},
+        await tick();
+      },
     });
 
     expect(result.outcome).toBe("verification-failed");
@@ -202,16 +218,16 @@ describe("runPrRevision", () => {
   });
 
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
     let calls = 0;
     let writableCalls = 0;
 
-    const result = await runPrRevision(options(cwd, { maxFixPasses: 3 }), {
+    const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await tick();},
+      prepareWorkspace,
       agentRunner: async (request) => {
         await tick();
         calls++;
@@ -236,27 +252,28 @@ describe("runPrRevision", () => {
   });
 
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
-    await run(["git", "remote", "add", "origin", remote], cwd);
+    await run(["git", "remote", "add", "origin", remote], control);
+    const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
+      await run(["git", "checkout", "-b", "feature/pr-12"], workspace);
+    });
     let calls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
     const writableArtifacts: string[] = [];
 
-    const result = await runPrRevision(options(cwd, { maxFixPasses: 3 }), {
+    const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await run(["git", "checkout", "-b", "feature/pr-12"], cwd);
-      },
+      prepareWorkspace,
       agentRunner: async (request) => {
         await tick();
         calls++;
         if (request.writable) {
           writableArtifacts.push(request.prompt);
-          await Bun.write(path.join(cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
+          await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
@@ -282,21 +299,21 @@ describe("runPrRevision", () => {
     const archivedFailure = path.join(result.context.revisionDir, "verification-before-fix-1.md");
     expect(existsSync(archivedFailure)).toBe(true);
     expect(await readFile(archivedFailure, "utf8")).toContain("type error");
-    await run(["git", "ls-remote", "--exit-code", "origin", "feature/pr-12"], cwd);
+    await run(["git", "ls-remote", "--exit-code", "origin", "feature/pr-12"], control);
   });
 
   test("review and verification repairs share the fix-pass budget", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
     let calls = 0;
     let writableCalls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
 
-    const result = await runPrRevision(options(cwd, { maxFixPasses: 1 }), {
+    const result = await runPrRevision(options(control, { maxFixPasses: 1 }), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await tick();},
+      prepareWorkspace,
       agentRunner: async (request) => {
         await tick();
         calls++;
@@ -397,23 +414,24 @@ describe("runPrRevision", () => {
   });
 
   test("successful verification commits, pushes, and comments once", async () => {
-        await tick();
-    const cwd = await tempGitRepo();
+    await tick();
+    const control = await tempGitRepo();
     const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
-    await run(["git", "remote", "add", "origin", remote], cwd);
+    await run(["git", "remote", "add", "origin", remote], control);
+    const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
+      await run(["git", "checkout", "-b", "feature/pr-12"], workspace);
+    });
     let calls = 0;
     let commentCalls = 0;
 
-    const result = await runPrRevision(options(cwd), {
+    const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await tick(), feedback()),
-      checkout: async () => {
-        await run(["git", "checkout", "-b", "feature/pr-12"], cwd);
-      },
+      prepareWorkspace,
       agentRunner: async (request) => {
         calls++;
         if (request.writable) {
-          await Bun.write(path.join(cwd, "fixed.txt"), "fixed\n");
+          await Bun.write(path.join(request.cwd, "fixed.txt"), "fixed\n");
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
@@ -428,8 +446,10 @@ describe("runPrRevision", () => {
 
     expect(result.outcome).toBe("published");
     expect(commentCalls).toBe(1);
-    const log = Bun.spawn(["git", "log", "--oneline", "-1"], { cwd, stdout: "pipe" });
+    expect(result.context.agentCwd).not.toBe(control);
+    expect(await Bun.file(path.join(control, "fixed.txt")).exists()).toBe(false);
+    const log = Bun.spawn(["git", "log", "--oneline", "-1"], { cwd: result.context.agentCwd, stdout: "pipe" });
     expect(await new Response(log.stdout).text()).toContain("roark: revise PR #12 (revision 1)");
-    await run(["git", "ls-remote", "--exit-code", "origin", "feature/pr-12"], cwd);
+    await run(["git", "ls-remote", "--exit-code", "origin", "feature/pr-12"], control);
   });
 });

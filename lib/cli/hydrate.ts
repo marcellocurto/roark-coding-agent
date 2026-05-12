@@ -91,7 +91,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
 
   if (raw.command === "workspace") {
     if (raw.action === "list") return { command: "workspace", action: "list", cwd: workspace, repo, workspace: workspaceConfig, hooks };
-    if (raw.action === "remove") return { command: "workspace", action: "remove", issue: raw.issue, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
+    if (raw.action === "remove") return { command: "workspace", action: "remove", target: raw.target, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
     return { command: "workspace", action: "prune", olderThan: raw.olderThan, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
   }
 
