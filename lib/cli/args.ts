@@ -5,7 +5,7 @@ import {
   defaultAutorunReadyLabel,
 } from "../autorun/selection.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig } from "../autorun/workspace.ts";
+import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig, WorkspaceRemoveTarget } from "../autorun/workspace.ts";
 import type { ThinkingProfileName } from "../workflow/thinking.ts";
 
 export type IssueWorkflowCommand =
@@ -239,7 +239,7 @@ export interface RawInitCliOptions {
 
 export type RawWorkspaceCliOptions =
   | { command: "workspace"; action: "list"; cwd?: string | undefined; repo?: string  | undefined}
-  | { command: "workspace"; action: "remove"; issue: number; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined }
+  | { command: "workspace"; action: "remove"; target: WorkspaceRemoveTarget; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined }
   | { command: "workspace"; action: "prune"; olderThan: string; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined };
 
 export type RawCliOptions =
@@ -287,7 +287,7 @@ Commands:
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   status [issue]         Print persisted run observability status; use --all for all known issues.
   workspace list         List managed clone workspaces.
-  workspace remove --issue <n> [--force]
+  workspace remove (--issue <n> | --pr <n>) [--force]
                         Remove one managed workspace; dirty workspaces require --force.
   workspace prune --older-than <duration> [--force]
                         Remove old clean workspaces, e.g. --older-than 30d.
@@ -388,6 +388,7 @@ function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
   let repo: string | undefined;
   let force: true | undefined;
   let issue: number | undefined;
+  let pr: number | undefined;
   let olderThan: string | undefined;
 
   for (let index = 0; index < rest.length; index++) {
@@ -396,23 +397,26 @@ function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
     else if (arg === "--repo") repo = requiredValue(rest, ++index, arg);
     else if (arg === "--force") force = true;
     else if (arg === "--issue") issue = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--pr") pr = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--older-than") olderThan = requiredValue(rest, ++index, arg);
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
   }
 
   if (action === "list") {
-    if (force === true || issue !== undefined || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
+    if (force === true || issue !== undefined || pr !== undefined || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
     return { command: "workspace", action, cwd, repo };
   }
   if (action === "remove") {
-    if (issue === undefined) throw new Error("workspace remove requires --issue <n>.");
+    if ((issue === undefined) === (pr === undefined)) throw new Error("workspace remove requires exactly one of --issue <n> or --pr <n>.");
     if (olderThan !== undefined) throw new Error("workspace remove cannot be combined with --older-than.");
-    return { command: "workspace", action, issue, cwd, repo, force };
+    if (issue !== undefined) return { command: "workspace", action, target: { kind: "issue", number: issue }, cwd, repo, force };
+    if (pr !== undefined) return { command: "workspace", action, target: { kind: "pr", number: pr }, cwd, repo, force };
+    throw new Error("workspace remove requires exactly one of --issue <n> or --pr <n>.");
   }
 
   if (olderThan === undefined) throw new Error("workspace prune requires --older-than <duration>.");
-  if (issue !== undefined) throw new Error("workspace prune cannot be combined with --issue.");
+  if (issue !== undefined || pr !== undefined) throw new Error("workspace prune cannot be combined with --issue or --pr.");
   return { command: "workspace", action, olderThan, cwd, repo, force };
 }
 

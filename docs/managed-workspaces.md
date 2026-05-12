@@ -11,7 +11,10 @@ By default, workspaces live under:
 
 ```text
 ~/.roark/workspaces/<owner>-<repo>/issue-<number>
+~/.roark/workspaces/<owner>-<repo>/pr-<number>
 ```
+
+Issue workflow runs use `issue-<number>` workspaces. `revise-pr` uses `pr-<number>` workspaces.
 
 Each issue gets a persistent workspace and a branch named:
 
@@ -76,10 +79,11 @@ Do not store secret values in `.roark/config.json`; store only path names such a
 ```bash
 roark workspace list
 roark workspace remove --issue 123
+roark workspace remove --pr 98
 roark workspace prune --older-than 30d
 ```
 
-Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
+`list` and `prune` include both issue and PR revision workspaces. Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
 
 ## Next steps
 

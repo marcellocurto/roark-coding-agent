@@ -13,6 +13,7 @@ import {
   removeWorkspace,
   resolveCloneRemote,
   runLifecycleHook,
+  runWorkspaceCommand,
   sanitizeWorkspaceSegment,
   workspacePathForIssue,
   workspacePathForPrRevision,
@@ -94,15 +95,39 @@ describe("managed clone workspaces", () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-legacy-lock-"));
     const workspaceRoot = path.join(root, "managed");
     const workspacePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 76 });
+    const prWorkspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 98 });
     await mkdir(workspacePath, { recursive: true });
+    await mkdir(prWorkspacePath, { recursive: true });
     await mkdir(`${workspacePath}.lock`, { recursive: true });
+    await mkdir(`${prWorkspacePath}.lock`, { recursive: true });
 
-    expect(await listWorkspaces({ workspace: { ...defaultWorkspaceConfig, root: workspaceRoot }, repo: "owner/repo" })).toEqual([workspacePath]);
+    expect(await listWorkspaces({ workspace: { ...defaultWorkspaceConfig, root: workspaceRoot }, repo: "owner/repo" })).toEqual([workspacePath, prWorkspacePath].toSorted());
 
     await removeWorkspace({ workspacePath, force: true, hooks: defaultLifecycleHooks });
 
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     expect(Bun.file(`${workspacePath}.lock`).exists()).resolves.toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("workspace remove resolves PR revision workspaces", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-workspace-remove-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 98 });
+    await mkdir(workspacePath, { recursive: true });
+
+    await runWorkspaceCommand({
+      command: "workspace",
+      action: "remove",
+      target: { kind: "pr", number: 98 },
+      cwd: root,
+      repo: "owner/repo",
+      force: true,
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+    });
+
+    expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 

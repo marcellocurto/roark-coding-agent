@@ -118,7 +118,7 @@ describe("hydrateCliOptions", () => {
     const workspaceHydrated = await hydrateCliOptions(workspaceRaw);
     expect(workspaceHydrated.command).toBe("workspace");
     if (workspaceHydrated.command !== "workspace" || workspaceHydrated.action !== "remove") throw new Error("expected workspace remove options");
-    expect(workspaceHydrated.issue).toBe(4);
+    expect(workspaceHydrated.target).toEqual({ kind: "issue", number: 4 });
     expect(workspaceHydrated.force).toBe(true);
     expect(workspaceHydrated.workspace.cloneRemote).toBe("upstream");
     expect(workspaceHydrated.hooks.beforeRemove).toBe("echo removing");
