@@ -12,6 +12,7 @@ import {
   buildSuccessLabelArgv,
   defaultAutorunRemote,
   defaultAutorunSuccessLabel,
+  formatAutorunPrBody,
   formatCommitMessage,
   formatPrBody,
   hasUncommittedChanges,
@@ -19,6 +20,7 @@ import {
 } from "./publish.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { VerificationResult } from "./verification.ts";
+import { createWorkflowContext, reviewARef, reviewBRef, writeArtifact } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 
 const okVerification: VerificationResult = {
@@ -508,6 +510,43 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Readiness status: ready-for-pr");
     expect(body).toContain("- Triage: https://github.com/owner/repo/issues/9#issuecomment-1");
     expect(body).toContain("- #20: https://github.com/owner/repo/issues/20");
+  });
+
+  test("links pass-specific review ledger comments in autorun PR bodies", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-body-ledger-"));
+    tempDirs.push(cwd);
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "9",
+      cwd,
+      outDir: ".roark/runs",
+      force: false,
+      yes: false,
+      maxFixPasses: 2,
+      attempt: 1,
+    });
+    await writeArtifact(context, reviewARef(0), "# Review A\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewBRef(0), "# Review B\n\n## Verdict\napprove\n");
+    const attemptMetadata = formatAttemptMetadata({
+      attempt: 1,
+      issueNumber: 9,
+      branch: "roark/issue-9",
+      baseBranch: "main",
+      worktreePath: cwd,
+      runArtifactPath: context.runDirRelative,
+      startedAt: "2026-05-05T07:17:40.000Z",
+      githubComments: {
+        issue: {
+          "review-a-0": { id: 101, url: "https://github.com/owner/repo/issues/9#issuecomment-101", marker: "a", updatedAt: "2026-05-05T07:18:40.000Z" },
+          "review-b-0": { id: 102, url: "https://github.com/owner/repo/issues/9#issuecomment-102", marker: "b", updatedAt: "2026-05-05T07:18:41.000Z" },
+        },
+      },
+    });
+
+    const body = formatAutorunPrBody({ issueNumber: 9, workflowContext: context, attemptMetadata });
+
+    expect(body).toContain("- Review A: https://github.com/owner/repo/issues/9#issuecomment-101");
+    expect(body).toContain("- Review B: https://github.com/owner/repo/issues/9#issuecomment-102");
   });
 
   test("renders supplied Review A/B verdict summary", () => {

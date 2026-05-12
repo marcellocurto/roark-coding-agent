@@ -241,6 +241,7 @@ export async function runPrRevision(
           endedAt: new Date().toISOString(),
         });
         await removeAgentPrRevisionArtifacts(context);
+        const revisionLog = await safeReadLog(context, latestRevisionLogArtifact(artifactFilenames));
         await postSummary({
           context,
           outcome: "verification-failed",
@@ -248,8 +249,8 @@ export async function runPrRevision(
           reviewVerdict,
           verification,
           feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-          addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
-          skipped: [failedReason, ...extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items")],
+          addressed: extractSectionBullets(revisionLog, "Addressed Must Fix Current Items"),
+          skipped: [failedReason, ...extractSectionBullets(revisionLog, "Skipped Items")],
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
         });
         return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
@@ -302,6 +303,7 @@ export async function runPrRevision(
     const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
     await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
     const commitSha = await commitAndPushRevision(context, feedback.pr.headRefName);
+    const revisionLog = await safeReadLog(context, latestRevisionLogArtifact(artifactFilenames));
     await postSummary({
       context,
       outcome: "published",
@@ -309,8 +311,8 @@ export async function runPrRevision(
       reviewVerdict,
       verification,
       feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-      addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
-      skipped: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items"),
+      addressed: extractSectionBullets(revisionLog, "Addressed Must Fix Current Items"),
+      skipped: extractSectionBullets(revisionLog, "Skipped Items"),
       changedFiles,
       commitSha,
       artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
@@ -553,6 +555,18 @@ function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): 
 
 function addArtifactFilename(filenames: string[], filename: string): void {
   if (!filenames.includes(filename)) filenames.push(filename);
+}
+
+function latestRevisionLogArtifact(filenames: string[]): string {
+  let latest: { pass: number; filename: string } | undefined;
+  for (const filename of filenames) {
+    const match = /^revision-log-fix-pass-(\d+)\.md$/.exec(filename);
+    if (!match?.[1]) continue;
+    const pass = Number(match[1]);
+    if (!Number.isInteger(pass)) continue;
+    if (!latest || pass > latest.pass) latest = { pass, filename };
+  }
+  return latest?.filename ?? "revision-log.md";
 }
 
 function escapeRegExp(value: string): string {

@@ -288,6 +288,7 @@ describe("runPrRevision", () => {
     let calls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
+    let addressedSummary: string[] | undefined;
     const writableArtifacts: string[] = [];
 
     const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
@@ -299,7 +300,7 @@ describe("runPrRevision", () => {
         if (request.writable) {
           writableArtifacts.push(request.prompt);
           await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
+          return `# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed pass ${writableArtifacts.length}.\n\n## Skipped Items\n- None.\n`;
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
@@ -311,9 +312,10 @@ describe("runPrRevision", () => {
           ? { ok: false, command, exitCode: 1, stdout: "", stderr: "type error" }
           : { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
       },
-      postSummaryComment: async () => {
+      postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalls++;
+        addressedSummary = summary.addressed;
       },
     });
 
@@ -321,6 +323,7 @@ describe("runPrRevision", () => {
     expect(verificationCalls).toBe(2);
     expect(writableArtifacts).toHaveLength(2);
     expect(commentCalls).toBe(1);
+    expect(addressedSummary).toEqual(["Fixed pass 2."]);
     const archivedFailure = path.join(result.context.revisionDir, "verification-before-fix-1.md");
     expect(existsSync(archivedFailure)).toBe(true);
     expect(await readFile(archivedFailure, "utf8")).toContain("type error");

@@ -77,12 +77,9 @@ export async function postPrRevisionSummaryComment(input: RevisionSummaryInput):
   });
 }
 
-async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: string[]): Promise<{ title: string; content: string }[]> {
-  const interesting = new Set(["pr-feedback.md", "revision-plan.md", "revision-log.md", "revision-review.md"]);
+export async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: string[]): Promise<{ title: string; content: string }[]> {
   const excerpts: { title: string; content: string }[] = [];
-  for (const artifactPath of artifactPaths) {
-    const filename = path.basename(artifactPath);
-    if (!interesting.has(filename)) continue;
+  for (const filename of selectRevisionExcerptFilenames(artifactPaths)) {
     try {
       excerpts.push({ title: filename, content: await readFile(path.join(context.revisionDir, filename), "utf8") });
     } catch {
@@ -90,6 +87,31 @@ async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: s
     }
   }
   return excerpts;
+}
+
+export function selectRevisionExcerptFilenames(artifactPaths: string[]): string[] {
+  const filenames = [...new Set(artifactPaths.map((artifactPath) => path.basename(artifactPath)))];
+  const selected: string[] = [];
+  for (const filename of ["pr-feedback.md", "revision-plan.md"]) {
+    if (filenames.includes(filename)) selected.push(filename);
+  }
+  const latestLog = latestPassArtifactFilename(filenames, "revision-log.md", /^revision-log-fix-pass-(\d+)\.md$/);
+  if (latestLog) selected.push(latestLog);
+  const latestReview = latestPassArtifactFilename(filenames, "revision-review.md", /^revision-review-pass-(\d+)\.md$/);
+  if (latestReview) selected.push(latestReview);
+  return selected;
+}
+
+function latestPassArtifactFilename(filenames: string[], baseFilename: string, passPattern: RegExp): string | undefined {
+  let latestPass: { pass: number; filename: string } | undefined;
+  for (const filename of filenames) {
+    const match = passPattern.exec(filename);
+    if (!match?.[1]) continue;
+    const pass = Number(match[1]);
+    if (!Number.isInteger(pass)) continue;
+    if (!latestPass || pass > latestPass.pass) latestPass = { pass, filename };
+  }
+  return latestPass?.filename ?? (filenames.includes(baseFilename) ? baseFilename : undefined);
 }
 
 function formatDetails(summary: string, content: string): string {

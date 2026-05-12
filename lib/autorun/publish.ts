@@ -155,7 +155,7 @@ export function formatAutorunPrBody(input: {
     triageVerdict: collectArtifactVerdict(input.workflowContext, "triage"),
     planReady: collectPlanReady(input.workflowContext),
     readinessStatus: collectArtifactVerdict(input.workflowContext, "readiness"),
-    ledgerComments: collectLedgerCommentSummaries(input.attemptMetadata),
+    ledgerComments: collectLedgerCommentSummaries(input.attemptMetadata, input.workflowContext),
     followUpIssues: input.followUpIssues,
   });
 }
@@ -384,18 +384,24 @@ function collectPlanReady(context: WorkflowContext): string | undefined {
   }
 }
 
-function collectLedgerCommentSummaries(attemptMetadata: AttemptMetadata | undefined): FormatPrBodyLedgerComment[] | undefined {
+function collectLedgerCommentSummaries(attemptMetadata: AttemptMetadata | undefined, context: WorkflowContext): FormatPrBodyLedgerComment[] | undefined {
   const issueComments = attemptMetadata?.githubComments?.issue;
   if (!issueComments) return undefined;
-  const phases: { phase: string; title: string }[] = [
-    { phase: "triage", title: "Triage" },
-    { phase: "implementation-plan", title: "Implementation plan" },
-    { phase: "readiness", title: "Readiness" },
-    { phase: "review-a", title: "Review A" },
-    { phase: "review-b", title: "Review B" },
+  const latestCycle = latestCompleteReviewCycle(context);
+  const reviewAPhases = latestCycle === undefined ? ["review-a"] : [`review-a-${latestCycle}`, "review-a"];
+  const reviewBPhases = latestCycle === undefined ? ["review-b"] : [`review-b-${latestCycle}`, "review-b"];
+  const phases: { phases: string[]; title: string }[] = [
+    { phases: ["triage"], title: "Triage" },
+    { phases: ["implementation-plan"], title: "Implementation plan" },
+    { phases: ["readiness"], title: "Readiness" },
+    { phases: reviewAPhases, title: "Review A" },
+    { phases: reviewBPhases, title: "Review B" },
   ];
   return phases
-    .map(({ phase, title }) => ({ phase, title, url: issueComments[phase]?.url }))
+    .map(({ phases, title }) => {
+      const phase = phases.find((candidate) => issueComments[candidate]?.url !== undefined) ?? phases[0] ?? title;
+      return { phase, title, url: issueComments[phase]?.url };
+    })
     .filter((summary) => summary.url !== undefined);
 }
 
