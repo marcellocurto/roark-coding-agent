@@ -183,7 +183,7 @@ describe("runAutoContinue", () => {
     expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
   });
 
-  test("serializes concurrent continues for the same attempt", async () => {
+  test("serializes concurrent continues for the same issue across attempts", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-"));
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-workspace-"));
     tempDirs.push(cwd, workspacePath);
@@ -241,13 +241,13 @@ describe("runAutoContinue", () => {
 
     await firstEntered;
 
-    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
+    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 3 }, {
       ...injected,
       runner: async () => {
         await tick();
         throw new Error("second continue should not run lifecycle");
       },
-    })).rejects.toThrow("roark continue issue #24 attempt 2 is already running");
+    })).rejects.toThrow("roark continue issue #24 attempt 3 is already running");
 
     releaseFirst();
     expect(first).rejects.toThrow("stop first continue");

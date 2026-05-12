@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -12,6 +12,8 @@ interface LocalLockOwner {
   acquiredAt: string;
 }
 
+const ownerlessLockGraceMs = 5_000;
+
 export async function withCheckoutLock<T>(
   input: { cwd: string; name: string; description: string },
   run: () => Promise<T>,
@@ -22,6 +24,17 @@ export async function withCheckoutLock<T>(
   } finally {
     await releaseCheckoutLock(lock);
   }
+}
+
+export async function withAutorunIssueLock<T>(
+  input: { cwd: string; issueNumber: number | string; description: string },
+  run: () => Promise<T>,
+): Promise<T> {
+  return withCheckoutLock({
+    cwd: input.cwd,
+    name: `autorun-issue-${input.issueNumber}`,
+    description: input.description,
+  }, run);
 }
 
 async function acquireCheckoutLock(input: { cwd: string; name: string; description: string }): Promise<{ dir: string; token: string }> {
@@ -68,9 +81,21 @@ async function removeStaleLock(lockDir: string): Promise<boolean> {
   try {
     owner = JSON.parse(await readFile(path.join(lockDir, "owner.json"), "utf8")) as LocalLockOwner;
   } catch {
-    return false;
+    return removeOwnerlessStaleLock(lockDir);
   }
   if (owner.pid === process.pid || isProcessAlive(owner.pid)) return false;
+  await rm(lockDir, { recursive: true, force: true });
+  return true;
+}
+
+async function removeOwnerlessStaleLock(lockDir: string): Promise<boolean> {
+  let ageMs: number;
+  try {
+    ageMs = Date.now() - (await stat(lockDir)).mtimeMs;
+  } catch {
+    return false;
+  }
+  if (ageMs < ownerlessLockGraceMs) return false;
   await rm(lockDir, { recursive: true, force: true });
   return true;
 }

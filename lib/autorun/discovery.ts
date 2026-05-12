@@ -28,7 +28,7 @@ import { ensureAutorunLabelContract } from "./labels.ts";
 import { type completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
-import { withCheckoutLock } from "./lock.ts";
+import { withAutorunIssueLock } from "./lock.ts";
 import { findMatchingSkipLabel, isEligibleIssue, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook } from "./workspace.ts";
@@ -244,19 +244,19 @@ async function runManagedIssueAttempts(
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
 ): Promise<void> {
-  await withCheckoutLock({ cwd: options.cwd, name: "auto", description: "roark auto" }, async () => {
-    const assignee = await resolveAssignee(options, injected);
-    console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
-    if (assignee) console.log(`Assignee: ${assignee}`);
-    else console.log("Assignee: none");
+  const assignee = await resolveAssignee(options, injected);
+  console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
+  if (assignee) console.log(`Assignee: ${assignee}`);
+  else console.log("Assignee: none");
 
-    const clock = injected.clock ?? defaultClock;
-    for (const issue of issues) {
+  const clock = injected.clock ?? defaultClock;
+  for (const issue of issues) {
+    await withAutorunIssueLock({ cwd: options.cwd, issueNumber: issue.number, description: `roark auto issue #${issue.number}` }, async () => {
       await runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
-    }
+    });
+  }
 
-    console.log("\nAuto workflow complete.");
-  });
+  console.log("\nAuto workflow complete.");
 }
 
 async function runManagedIssueAttempt(

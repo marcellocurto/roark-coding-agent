@@ -409,7 +409,7 @@ describe("runAutoDiscovery", () => {
     });
   });
 
-  test("non-dry auto runs are serialized per checkout", async () => {
+  test("non-dry auto runs are serialized per issue", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-auto-lock-"));
     tempDirs.push(cwd);
     let releaseFirst!: () => void;
@@ -442,7 +442,46 @@ describe("runAutoDiscovery", () => {
         await tick();
         throw new Error("second auto should not prepare a workspace");
       },
-    })).rejects.toThrow("roark auto is already running");
+    })).rejects.toThrow("roark auto issue #29 is already running");
+
+    releaseFirst();
+    expect(first).rejects.toThrow("stop first auto");
+  });
+
+  test("non-dry auto allows different issues to run concurrently in one checkout", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-auto-issue-lock-"));
+    tempDirs.push(cwd);
+    let releaseFirst!: () => void;
+    let enteredFirst!: () => void;
+    const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
+    const release = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+    const first = runAutoDiscovery({ ...baseOptions(cwd), issue: "29", noAssign: true }, {
+      ...noOpLabelContract,
+      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(29, [])),
+      assertCleanAutorunGit: async () => {
+        await tick();
+      },
+      prepareCloneWorkspace: async () => {
+        enteredFirst();
+        await release;
+        throw new Error("stop first auto");
+      },
+    });
+
+    await firstEntered;
+
+    expect(runAutoDiscovery({ ...baseOptions(cwd), issue: "30", noAssign: true }, {
+      ...noOpLabelContract,
+      fetchGitHubIssue: async () => (await tick(), fetchedGitHubIssue(30, [])),
+      assertCleanAutorunGit: async () => {
+        await tick();
+      },
+      prepareCloneWorkspace: async () => {
+        await tick();
+        throw new Error("second auto reached workspace");
+      },
+    })).rejects.toThrow("second auto reached workspace");
 
     releaseFirst();
     expect(first).rejects.toThrow("stop first auto");

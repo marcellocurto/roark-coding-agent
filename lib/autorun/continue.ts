@@ -19,7 +19,7 @@ import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
-import { withCheckoutLock } from "./lock.ts";
+import { withAutorunIssueLock } from "./lock.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
 
@@ -48,7 +48,7 @@ export async function runAutoContinue(
   console.log(`Attempt: ${attempt}`);
   console.log(`Recovery command: ${recoveryCommand}`);
 
-  await withCheckoutLock({ cwd, name: `continue-issue-${parsed.issueNumber}-attempt-${attempt}`, description: `roark continue issue #${parsed.issueNumber} attempt ${attempt}` }, async () => {
+  await withAutorunIssueLock({ cwd, issueNumber: parsed.issueNumber, description: `roark continue issue #${parsed.issueNumber} attempt ${attempt}` }, async () => {
     let attemptMetadata = await readAttemptMetadata(issueDir, attempt);
     assertAttemptMatchesIssue(attemptMetadata, parsed.issueNumber);
 
