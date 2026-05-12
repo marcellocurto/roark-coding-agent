@@ -107,7 +107,19 @@ export async function runPrRevision(
 
     if (planStatus === "no-action-needed") {
       await updateMetadata(context, feedback, { outcome: "no-action-needed", planStatus, endedAt: new Date().toISOString() });
-      console.log("No action needed; not mutating code, committing, pushing, or commenting.");
+      console.log(context.comment
+        ? "No action needed; not mutating code, committing, or pushing. Posting summary comment."
+        : "No action needed; not mutating code, committing, pushing, or commenting.");
+      if (context.comment) {
+        await postSummary({
+          context,
+          outcome: "no-action-needed",
+          planStatus,
+          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
+          skipped: ["Planner reported no revision was needed for the current feedback."],
+          artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "metadata.json"]),
+        });
+      }
       await removeAgentPrRevisionArtifacts(context);
       return { outcome: "no-action-needed", context, planStatus };
     }
@@ -119,6 +131,7 @@ export async function runPrRevision(
         context,
         outcome: "needs-human",
         planStatus,
+        feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
         skipped: extractSectionBullets(plan, "Human Needs"),
         artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "metadata.json"]),
       });
@@ -158,6 +171,7 @@ export async function runPrRevision(
             outcome: "review-blocked",
             planStatus,
             reviewVerdict,
+            feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
             skipped: extractSectionBullets(review, "Required Fixes"),
             artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
           });
@@ -196,6 +210,7 @@ export async function runPrRevision(
           outcome: "review-blocked",
           planStatus,
           reviewVerdict,
+          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
           skipped: extractSectionBullets(review, "Required Fixes"),
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
         });
@@ -231,6 +246,7 @@ export async function runPrRevision(
           planStatus,
           reviewVerdict,
           verification,
+          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
           addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
           skipped: [failedReason, ...extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items")],
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
@@ -275,22 +291,27 @@ export async function runPrRevision(
         planStatus,
         reviewVerdict,
         verification,
+        feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
         skipped: ["Planner requested a revision, but no non-.roark code changes were present after implementation."],
         artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
       });
       return { outcome: "no-code-changes", context, planStatus, reviewVerdict, verification };
     }
 
+    const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
     await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
-    await commitAndPushRevision(context, feedback.pr.headRefName);
+    const commitSha = await commitAndPushRevision(context, feedback.pr.headRefName);
     await postSummary({
       context,
       outcome: "published",
       planStatus,
       reviewVerdict,
       verification,
+      feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
       addressed: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Addressed Must Fix Current Items"),
       skipped: extractSectionBullets(await safeReadLog(context, "revision-log.md"), "Skipped Items"),
+      changedFiles,
+      commitSha,
       artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
     });
 
@@ -477,7 +498,7 @@ function isRoarkPath(filePath: string): boolean {
   return filePath === ".roark" || filePath.startsWith(".roark/");
 }
 
-async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<void> {
+async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<string | undefined> {
   await ensurePushRemote(context);
   await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
   await runProcessOrThrow(["git", "add", "-f", "--", context.agentRevisionDirRelative], { cwd: context.agentCwd, label: "git add revision artifacts" });
@@ -486,6 +507,18 @@ async function commitAndPushRevision(context: PrRevisionContext, branchName: str
     label: "git commit",
   });
   await runProcessOrThrow(["git", "push", context.remote, `HEAD:${branchName}`], { cwd: context.agentCwd, label: `git push ${context.remote}` });
+  try {
+    return (await runProcessOrThrow(["git", "rev-parse", "--short", "HEAD"], { cwd: context.agentCwd, label: "git rev-parse HEAD" })).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+async function changedFilesOutsideRoark(cwd: string): Promise<string[]> {
+  const paths = (await gitDirtyLines(cwd))
+    .flatMap(statusLinePaths)
+    .filter((filePath) => !isRoarkPath(filePath));
+  return [...new Set(paths)];
 }
 
 async function ensurePushRemote(context: PrRevisionContext): Promise<void> {

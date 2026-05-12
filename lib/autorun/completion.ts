@@ -1,10 +1,10 @@
-import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { runPublishGate, type AutorunGateOptions, type PublishGateOutcome } from "./publish-flow.ts";
-import { publishReviewLedgerComments } from "./ledger-comments.ts";
+import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
 
@@ -26,6 +26,7 @@ export interface CompleteAutorunWorkflowInput {
 export interface CompleteAutorunWorkflowInjected {
   publishGate?: typeof runPublishGate | undefined;
   markTriageStopped?: ((options: MarkIssueTriageStoppedOptions) => Promise<unknown>) | undefined;
+  publishPlanningLedgerComments?: typeof publishPlanningLedgerComments | undefined;
 }
 
 export async function completeAutorunWorkflow(
@@ -34,6 +35,7 @@ export async function completeAutorunWorkflow(
 ): Promise<AutorunCompletionOutcome> {
   const publishGate = injected.publishGate ?? runPublishGate;
   const markTriageStopped = injected.markTriageStopped ?? markIssueTriageStopped;
+  const publishPlanning = injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
 
   if (input.workflowResult.status === "triage-stopped") {
     const phase = "triage";
@@ -45,6 +47,7 @@ export async function completeAutorunWorkflow(
       issueUrl: input.issue.url,
       triageVerdict: input.workflowResult.triageVerdict,
       triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
+      triageArtifactContent: await readArtifactIfExists(input.workflowContext, "triage"),
       attemptMetadataPath: input.attemptMetadataPath,
       removeLabels: [input.options.inProgressLabel, input.options.failureLabel],
       marker,
@@ -56,6 +59,15 @@ export async function completeAutorunWorkflow(
       outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
     };
   }
+
+  await publishPlanning({
+    cwd: input.options.cwd,
+    repo: input.options.repo,
+    issue: input.issue,
+    workflowContext: input.workflowContext,
+    attemptMetadata: input.attemptMetadata,
+    attemptMetadataPath: input.attemptMetadataPath,
+  });
 
   await publishReviewLedgerComments({
     cwd: input.options.cwd,
@@ -74,6 +86,14 @@ export async function completeAutorunWorkflow(
     attemptMetadataPath: input.attemptMetadataPath,
     recoveryCommand: input.recoveryCommand,
   });
+}
+
+async function readArtifactIfExists(context: WorkflowContext, artifact: "triage"): Promise<string | undefined> {
+  try {
+    return await readArtifact(context, artifact);
+  } catch {
+    return undefined;
+  }
 }
 
 function isCommentRef(value: unknown): value is { id: number; url?: string | undefined; marker: string } {

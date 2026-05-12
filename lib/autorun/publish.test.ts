@@ -6,6 +6,7 @@ import { runProcessOrThrow } from "../cli/process.ts";
 import {
   buildCommitArgv,
   buildPrCreateArgv,
+  buildPrEditBodyArgv,
   buildPushArgv,
   buildStageAllArgv,
   buildSuccessLabelArgv,
@@ -122,6 +123,19 @@ describe("autorun publish argv builders", () => {
       "Fix bug",
       "--body",
       "Closes #9\n",
+    ]);
+  });
+
+  test("buildPrEditBodyArgv produces a gh pr edit command with --repo", () => {
+    expect(buildPrEditBodyArgv({ repo: "owner/repo", pr: "https://github.com/owner/repo/pull/9", body: "body" })).toEqual([
+      "gh",
+      "pr",
+      "edit",
+      "https://github.com/owner/repo/pull/9",
+      "--body",
+      "body",
+      "--repo",
+      "owner/repo",
     ]);
   });
 
@@ -359,6 +373,9 @@ describe("formatPrBody", () => {
     });
 
     expect(body).toContain("Closes #9");
+    expect(body).toContain("## Reviewer summary");
+    expect(body).toContain("- Triage verdict: unknown");
+    expect(body).toContain("- Plan ready for implementation: unknown");
     expect(body).toContain("## Verification");
     expect(body).toContain("- Command: `bun run typecheck`");
     expect(body).toContain("- Exit code: 0");
@@ -367,6 +384,8 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Review A: unknown");
     expect(body).toContain("- Review B: unknown");
     expect(body).toContain("- Full run ledger: issue comments on #9");
+    expect(body).toContain("## Follow-up issues");
+    expect(body).toContain("- None recorded in this PR body at creation time.");
     expect(body).toContain("## Workflow artifacts");
     expect(body).toContain("These artifacts are local control-plane state and are not committed to this PR branch.");
     expect(body).toContain("- `.roark/runs/issue/9/readiness.md`");
@@ -387,20 +406,21 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Status: failed");
   });
 
-  test("redacts local paths in verification commands", () => {
+  test("sanitizes verification commands", () => {
     const body = formatPrBody({
       issueNumber: 9,
       verification: {
         ...okVerification,
-        command: "/Users/alice/repo/scripts/verify.sh --flag C:\\Users\\alice\\repo\\check.bat",
+        command: "GITHUB_TOKEN=secret /Users/alice/repo/scripts/verify.sh --flag C:\\Users\\alice\\repo\\check.bat",
       },
       runDirRelative: ".roark/runs/issue/9",
       artifactPaths: [".roark/runs/issue/9/verification.md"],
     });
 
-    expect(body).toContain("- Command: `[local path redacted] --flag [local path redacted]`");
+    expect(body).toContain("- Command: `GITHUB_TOKEN=[redacted] [local path redacted] --flag [local path redacted]`");
     expect(body).not.toContain("/Users/alice");
     expect(body).not.toContain("C:\\Users\\alice");
+    expect(body).not.toContain("GITHUB_TOKEN=secret");
   });
 
   test("handles missing verification defensively", () => {
@@ -469,6 +489,25 @@ describe("formatPrBody", () => {
       artifactPaths: [".roark/runs/issue/9/readiness.md"],
     });
     expect(body).not.toContain("## Attempt");
+  });
+
+  test("renders supplied reviewer-facing summaries and ledger/follow-up links", () => {
+    const body = formatPrBody({
+      issueNumber: 9,
+      runDirRelative: ".roark/runs/issue/9",
+      artifactPaths: [],
+      triageVerdict: "proceed",
+      planReady: "yes",
+      readinessStatus: "ready-for-pr",
+      ledgerComments: [{ title: "Triage", phase: "triage", url: "https://github.com/owner/repo/issues/9#issuecomment-1" }],
+      followUpIssues: [{ title: "Follow up", number: 20, url: "https://github.com/owner/repo/issues/20" }],
+    });
+
+    expect(body).toContain("- Triage verdict: proceed");
+    expect(body).toContain("- Plan ready for implementation: yes");
+    expect(body).toContain("- Readiness status: ready-for-pr");
+    expect(body).toContain("- Triage: https://github.com/owner/repo/issues/9#issuecomment-1");
+    expect(body).toContain("- #20: https://github.com/owner/repo/issues/20");
   });
 
   test("renders supplied Review A/B verdict summary", () => {

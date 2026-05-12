@@ -1,5 +1,24 @@
 const redactedLocalPath = "[local path redacted]";
+const redactedSecret = "[redacted]";
 const fileUriPrefix = "file://";
+
+export function sanitizePublicMarkdown(value: string): string {
+  return redactSecrets(redactLocalPaths(value));
+}
+
+export function redactSecrets(value: string): string {
+  const secretValuePattern = `(?:"[^"\\r\\n]*(?:"|(?=\\r?\\n|$))|'[^'\\r\\n]*(?:'|(?=\\r?\\n|$))|[^\\s\`'"<>]+)`;
+  const secretNamePattern = `[A-Z0-9_]*(?:TOKEN|SECRET|API[_-]?KEY|PASSWORD)[A-Z0-9_]*`;
+  return value
+    .replace(new RegExp(`\\b(authorization\\s*:\\s*bearer\\s+)${secretValuePattern}`, "gi"), `$1${redactedSecret}`)
+    .replace(new RegExp(`\\b((${secretNamePattern})\\s*=\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`)
+    .replace(new RegExp(`\\b((${secretNamePattern})\\s*:\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`);
+}
+
+export function truncatePublicMarkdown(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n... (truncated ${value.length - maxChars} later characters) ...`;
+}
 
 export function redactLocalPaths(value: string): string {
   let result = "";

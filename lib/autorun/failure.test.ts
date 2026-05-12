@@ -24,6 +24,21 @@ describe("autorun failure", () => {
     );
   });
 
+  test("formatFailureComment omits verification artifact contents", () => {
+    const comment = formatFailureComment({
+      issueNumber: 8,
+      phase: "verification",
+      reason: "verification command exited 1",
+      artifactPath: ".roark/runs/issue/8/attempts/1/verification.md",
+      artifactContent: "# Verification\n\n## Stdout (tail)\n```\nSECRET_OUTPUT\n```\n\n## Stderr (tail)\n```\nTOKEN=leaked\n```\n",
+    });
+
+    expect(comment).toContain("Artifact: `.roark/runs/issue/8/attempts/1/verification.md`");
+    expect(comment).not.toContain("## Artifact contents");
+    expect(comment).not.toContain("SECRET_OUTPUT");
+    expect(comment).not.toContain("TOKEN=leaked");
+  });
+
   test("formatFailureComment includes branch, attempt path, redacted artifact contents, and safe recovery command", () => {
     const comment = formatFailureComment({
       issueNumber: 10,

@@ -19,7 +19,7 @@ import {
 import type { AutorunBranchPlan } from "./branch.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { publishReviewLedgerComments } from "./ledger-comments.ts";
+import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
@@ -46,6 +46,7 @@ export interface RunAutorunAttemptLifecycleInjected {
   runFullWorkflow?: ((context: WorkflowContext, runner?: AgentRunner) => Promise<WorkflowRunResult>) | undefined;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
   publishReviewLedgerComments?: typeof publishReviewLedgerComments | undefined;
+  publishPlanningLedgerComments?: typeof publishPlanningLedgerComments | undefined;
   markIssueFailed?: typeof markIssueFailed | undefined;
   finalizeAttemptObservability?: typeof finalizeAttemptObservability | undefined;
 }
@@ -174,12 +175,22 @@ async function markWorkflowError(
   const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
   const command = recoveryCommand(input, shouldRecoverWithYes(error));
   const prefix = input.logPrefix ?? "Auto";
+  const publishPlanning = injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
   const publishLedger = injected.publishReviewLedgerComments ?? publishReviewLedgerComments;
   const markFailed = injected.markIssueFailed ?? markIssueFailed;
 
   console.log(`\n${prefix} workflow error on #${issue.number}: ${formatError(error)}`);
   console.log(`Attempt: ${attemptMetadataPath}`);
   console.log(`Continue: ${command}`);
+
+  await publishPlanning({
+    cwd: input.gateOptions.cwd,
+    repo: input.gateOptions.repo,
+    issue,
+    workflowContext: input.workflowContext,
+    attemptMetadata,
+    attemptMetadataPath,
+  });
 
   await publishLedger({
     cwd: input.gateOptions.cwd,

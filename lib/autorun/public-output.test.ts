@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { redactLocalPaths } from "./public-output.ts";
+import { redactLocalPaths, redactSecrets, sanitizePublicMarkdown, truncatePublicMarkdown } from "./public-output.ts";
 
 describe("redactLocalPaths", () => {
   test("redacts obvious POSIX local paths", () => {
@@ -35,5 +35,31 @@ describe("redactLocalPaths", () => {
 
   test("preserves web URLs", () => {
     expect(redactLocalPaths("https://github.com/owner/repo/issues/1")).toBe("https://github.com/owner/repo/issues/1");
+  });
+});
+
+describe("public markdown sanitization", () => {
+  test("redacts obvious token assignments and authorization headers", () => {
+    expect(redactSecrets("GITHUB_TOKEN=abc API_KEY: xyz Authorization: Bearer secret")).toBe(
+      "GITHUB_TOKEN=[redacted] API_KEY: [redacted] Authorization: Bearer [redacted]",
+    );
+    expect(redactSecrets("GITHUB_TOKEN=\"abc\" API_KEY: 'xyz' Authorization: Bearer \"secret\"")).toBe(
+      "GITHUB_TOKEN=[redacted] API_KEY: [redacted] Authorization: Bearer [redacted]",
+    );
+  });
+
+  test("redacts unterminated quoted secrets", () => {
+    expect(redactSecrets("TOKEN=\"abc123\nnext line")).toBe("TOKEN=[redacted]\nnext line");
+    expect(redactSecrets("Authorization: Bearer 'abc123")).toBe("Authorization: Bearer [redacted]");
+  });
+
+  test("sanitizes paths and secrets together", () => {
+    const sanitized = sanitizePublicMarkdown("cwd=/Users/alice/repo\nTOKEN=secret");
+    expect(sanitized).toContain("[local path redacted]");
+    expect(sanitized).toContain("TOKEN=[redacted]");
+  });
+
+  test("truncates with an explicit note", () => {
+    expect(truncatePublicMarkdown("abcdef", 3)).toBe("abc\n\n... (truncated 3 later characters) ...");
   });
 });

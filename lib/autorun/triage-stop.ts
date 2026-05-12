@@ -2,6 +2,7 @@ import { runProcessOrThrow } from "../cli/process.ts";
 import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
+import { sanitizePublicMarkdown, truncatePublicMarkdown } from "./public-output.ts";
 
 export type TriageStoppedVerdict = string;
 
@@ -10,6 +11,7 @@ export interface FormatTriageStoppedCommentInput {
   issueUrl?: string | undefined  ;
   triageVerdict: TriageStoppedVerdict;
   triageArtifactPath?: string | undefined;
+  triageArtifactContent?: string | undefined;
   attemptMetadataPath?: string | undefined;
 }
 
@@ -46,6 +48,10 @@ export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInpu
     lines.push("");
     if (input.triageArtifactPath) lines.push(`Triage artifact: \`${input.triageArtifactPath}\``);
     if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  }
+
+  if (input.triageArtifactContent) {
+    lines.push("", "<details><summary>Triage artifact excerpt</summary>", "", formatFencedBlock(truncatePublicMarkdown(sanitizePublicMarkdown(input.triageArtifactContent), 8_000), "markdown"), "</details>");
   }
 
   return `${lines.join("\n")}\n`;
@@ -109,6 +115,25 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
     console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
   }
   return undefined;
+}
+
+function formatFencedBlock(value: string, language: string): string {
+  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const char of value) {
+    if (char === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
 }
 
 function uniqueLabels(labels: string[]): string[] {

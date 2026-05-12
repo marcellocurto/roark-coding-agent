@@ -50,6 +50,7 @@ describe("verification repair planning", () => {
     const context = await tempContext(1);
     await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
     const postPrCalls: string[] = [];
+    const prBodyUpdates: string[] = [];
 
     const outcome = await runPublishGate({
       options: {
@@ -75,11 +76,14 @@ describe("verification repair planning", () => {
       writeVerificationArtifact: async () => { await tick(); },
       publishAutorunResult: async () => (await tick(), "https://github.com/owner/repo/pull/10"),
       publishIssueLedgerComment: async () => { await tick(); return undefined; },
-      postPrIssueCreation: async ({ prUrl }) => { await tick(); postPrCalls.push(prUrl); },
+      postPrIssueCreation: async ({ prUrl }) => { await tick(); postPrCalls.push(prUrl); return undefined; },
+      updatePrBody: async ({ body }) => { await tick(); prBodyUpdates.push(body); },
     });
 
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
+    expect(prBodyUpdates).toHaveLength(1);
+    expect(prBodyUpdates[0]).toContain("## Reviewer summary");
   });
 
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
@@ -105,7 +109,7 @@ describe("verification repair planning", () => {
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
       handleNonPublish: async () => { await tick(); },
-      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+      postPrIssueCreation: async () => { await tick(); postPrCalled = true; return undefined; },
     });
 
     expect(outcome.outcome).toBe("failed-readiness");
@@ -140,7 +144,7 @@ describe("verification repair planning", () => {
       runVerification: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
       writeVerificationArtifact: async () => { await tick(); },
       handleNonPublish: async () => { await tick(); },
-      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+      postPrIssueCreation: async () => { await tick(); postPrCalled = true; return undefined; },
     });
 
     expect(outcome.outcome).toBe("failed-verification");

@@ -1,6 +1,6 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
-import { redactLocalPaths } from "./public-output.ts";
+import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
@@ -45,7 +45,7 @@ export interface FailureCommentArgvOptions {
 
 export function formatFailureComment(input: FailureCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
-  const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${redactLocalPaths(input.reason)}.`;
+  const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${sanitizePublicMarkdown(input.reason)}.`;
   const lines: string[] = [];
 
   lines.push(`Issue: #${input.issueNumber}`);
@@ -53,11 +53,11 @@ export function formatFailureComment(input: FailureCommentInput): string {
   if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
   if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
 
-  if (input.artifactContent !== undefined) {
+  if (input.artifactContent !== undefined && input.phase !== "verification") {
     if (lines.length > 0) lines.push("");
     lines.push("## Artifact contents");
     if (input.artifactPath) lines.push(`\`${input.artifactPath}\``);
-    lines.push(formatFencedBlock(redactLocalPaths(truncateArtifactContent(input.artifactContent)), "markdown"));
+    lines.push(formatFencedBlock(truncateArtifactContent(sanitizePublicMarkdown(input.artifactContent)), "markdown"));
   }
 
   if (input.recoveryCommand) {
