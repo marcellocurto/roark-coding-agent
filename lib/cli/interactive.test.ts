@@ -74,12 +74,12 @@ describe("promptForInteractiveArgv", () => {
 
   test("maps workspace remove to argv and asks whether to force", async () => {
     await tick();
-    const forcePrompt = scriptedPrompt(["7", "42", "yes"]);
+    const forcePrompt = scriptedPrompt(["7", "issue", "42", "yes"]);
     expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
-    expect(forcePrompt.prompts).toEqual(["Select an option: ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
+    expect(forcePrompt.prompts).toEqual(["Select an option: ", "Remove issue or PR workspace? [issue/pr] ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
 
-    const cleanPrompt = scriptedPrompt(["7", "42", "no"]);
-    expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42"]);
+    const cleanPrompt = scriptedPrompt(["7", "pr", "98", "no"]);
+    expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--pr", "98"]);
   });
 
   test("maps help to argv", async () => {

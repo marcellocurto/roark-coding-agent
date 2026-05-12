@@ -76,14 +76,25 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
     if (choice === "6") return ["status", await promptRequiredIssue(prompt)];
 
     if (choice === "7") {
-      const issue = await promptRequiredIssue(prompt);
+      const targetKind = await promptWorkspaceRemoveTargetKind(prompt);
+      const flag = targetKind === "pr" ? "--pr" : "--issue";
+      const number = targetKind === "pr" ? await promptRequiredPrNumber(prompt) : await promptRequiredIssue(prompt);
       const force = await confirm(prompt, "Force remove dirty workspace?");
-      return force ? ["workspace", "remove", "--issue", issue, "--force"] : ["workspace", "remove", "--issue", issue];
+      return force ? ["workspace", "remove", flag, number, "--force"] : ["workspace", "remove", flag, number];
     }
 
     if (choice === "8") return ["--help"];
 
     prompt.write?.("Invalid choice. Please choose 1-8.\n");
+  }
+}
+
+async function promptWorkspaceRemoveTargetKind(prompt: InteractivePrompt): Promise<"issue" | "pr"> {
+  for (;;) {
+    const target = (await prompt.question("Remove issue or PR workspace? [issue/pr] ")).trim().toLowerCase();
+    if (target === "issue" || target === "i") return "issue";
+    if (target === "pr" || target === "p") return "pr";
+    prompt.write?.("Please enter issue or pr.\n");
   }
 }
 

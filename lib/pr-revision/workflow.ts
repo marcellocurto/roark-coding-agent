@@ -32,7 +32,7 @@ import {
   defaultWorkspaceConfig,
   preparePrRevisionWorkspace,
   runLifecycleHook,
-  type PreparedWorkspace,
+  type PreparedPrRevisionWorkspace,
 } from "../autorun/workspace.ts";
 import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
@@ -309,7 +309,7 @@ async function prepareRevisionWorkspace(input: {
   repo: string;
   feedback: PullRequestFeedback;
   deps: RunPrRevisionDependencies;
-}): Promise<PreparedWorkspace> {
+}): Promise<PreparedPrRevisionWorkspace> {
   const { options, repo, feedback, deps } = input;
   if (deps.prepareWorkspace) {
     return deps.prepareWorkspace({

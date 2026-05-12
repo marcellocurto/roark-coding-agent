@@ -43,9 +43,17 @@ export interface PreparedWorkspace {
   releaseLock?: (() => Promise<void>) | undefined;
 }
 
+export interface PreparedPrRevisionWorkspace extends PreparedWorkspace {
+  releaseLock: () => Promise<void>;
+}
+
+export type WorkspaceRemoveTarget =
+  | { kind: "issue"; number: number }
+  | { kind: "pr"; number: number };
+
 export type WorkspaceCommandOptions =
   | { command: "workspace"; action: "list"; cwd: string; repo?: string | undefined; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
-  | { command: "workspace"; action: "remove"; issue: number; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
+  | { command: "workspace"; action: "remove"; target: WorkspaceRemoveTarget; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
   | { command: "workspace"; action: "prune"; olderThan: string; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig };
 
 export const workspaceStateFile = ".roark-workspace-state.json";
@@ -205,7 +213,7 @@ export async function preparePrRevisionWorkspace(input: {
   hooks: LifecycleHooksConfig;
   workspacePath?: string | undefined;
   runner?: ProcessRunner | undefined;
-}): Promise<PreparedWorkspace> {
+}): Promise<PreparedPrRevisionWorkspace> {
   const runner = input.runner ?? runProcess;
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForPrRevision({
@@ -406,7 +414,7 @@ export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo
   if (!existsSync(repoRoot)) return [];
   const entries = await readdir(repoRoot, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("issue-") && !entry.name.endsWith(".lock"))
+    .filter((entry) => entry.isDirectory() && (entry.name.startsWith("issue-") || entry.name.startsWith("pr-")) && !entry.name.endsWith(".lock"))
     .map((entry) => path.join(repoRoot, entry.name))
     .toSorted();
 }
@@ -420,7 +428,9 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
   }
 
   if (options.action === "remove") {
-    const workspacePath = workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: options.issue, controlCwd: options.cwd });
+    const workspacePath = options.target.kind === "issue"
+      ? workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: options.target.number, controlCwd: options.cwd })
+      : workspacePathForPrRevision({ root: options.workspace.root, repo: options.repo, prNumber: options.target.number, controlCwd: options.cwd });
     await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks });
     console.log(`Removed workspace: ${workspacePath}`);
     return;
@@ -437,6 +447,14 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
     removed++;
   }
   console.log(`Pruned ${removed} workspace(s).`);
+}
+
+async function acquireWorkspaceLock(workspacePath: string): Promise<() => Promise<void>> {
+  const lockPath = `${workspacePath}.lock`;
+  await mkdir(lockPath, { recursive: true });
+  return async () => {
+    await rm(lockPath, { recursive: true, force: true });
+  };
 }
 
 export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<void> {
