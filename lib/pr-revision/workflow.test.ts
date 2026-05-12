@@ -116,7 +116,7 @@ describe("runPrRevision", () => {
 
     expect(result.outcome).toBe("no-action-needed");
     expect(checkoutCalled).toBe(true);
-    expect(commentCalled).toBe(false);
+    expect(commentCalled).toBe(true);
     expect(result.context.agentCwd).toBe(result.context.controlCwd);
     expect(result.context.revisionDir).toBe(result.context.agentRevisionDir);
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-1");
@@ -127,13 +127,14 @@ describe("runPrRevision", () => {
     const control = await tempGitRepo();
     const { workspace, prepareWorkspace } = await isolatedWorkspace();
 
+    let commentCalls = 0;
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
       postSummaryComment: async () => {
         await noopAsync();
-        throw new Error("summary comment should not be posted for no-action-needed");
+        commentCalls++;
       },
     });
 
@@ -141,7 +142,28 @@ describe("runPrRevision", () => {
     expect(result.context.agentCwd).toBe(workspace);
     expect(await Bun.file(path.join(result.context.revisionDir, "metadata.json")).exists()).toBe(true);
     expect(await Bun.file(path.join(result.context.agentRevisionDir, "metadata.json")).exists()).toBe(false);
+    expect(commentCalls).toBe(1);
     expect((await runOutput(["git", "status", "--porcelain"], workspace)).trim()).toBe("");
+  });
+
+  test("no-action-needed respects --no-comment", async () => {
+    await noopAsync();
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
+    let commentCalled = false;
+
+    const result = await runPrRevision(options(control, { comment: false }), {
+      fetchFeedback: async () => (await noopAsync(), feedback()),
+      prepareWorkspace,
+      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      postSummaryComment: async () => {
+        await noopAsync();
+        commentCalled = true;
+      },
+    });
+
+    expect(result.outcome).toBe("no-action-needed");
+    expect(commentCalled).toBe(false);
   });
 
   test("allocates revisions across the control checkout and isolated workspace", async () => {
@@ -151,19 +173,21 @@ describe("runPrRevision", () => {
       await mkdir(path.join(workspace, ".roark", "runs", "pr", "12", "revision-1"), { recursive: true });
     });
 
+    let commentCalls = 0;
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
       postSummaryComment: async () => {
         await noopAsync();
-        throw new Error("summary comment should not be posted for no-action-needed");
+        commentCalls++;
       },
     });
 
     expect(result.outcome).toBe("no-action-needed");
     expect(result.context.revision).toBe(2);
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-2");
+    expect(commentCalls).toBe(1);
   });
 
   test("needs-human stops before writable implementation and posts one summary by default", async () => {
@@ -264,6 +288,7 @@ describe("runPrRevision", () => {
     let calls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
+    let addressedSummary: string[] | undefined;
     const writableArtifacts: string[] = [];
 
     const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
@@ -275,7 +300,7 @@ describe("runPrRevision", () => {
         if (request.writable) {
           writableArtifacts.push(request.prompt);
           await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
+          return `# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed pass ${writableArtifacts.length}.\n\n## Skipped Items\n- None.\n`;
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
@@ -287,9 +312,10 @@ describe("runPrRevision", () => {
           ? { ok: false, command, exitCode: 1, stdout: "", stderr: "type error" }
           : { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
       },
-      postSummaryComment: async () => {
+      postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalls++;
+        addressedSummary = summary.addressed;
       },
     });
 
@@ -297,6 +323,7 @@ describe("runPrRevision", () => {
     expect(verificationCalls).toBe(2);
     expect(writableArtifacts).toHaveLength(2);
     expect(commentCalls).toBe(1);
+    expect(addressedSummary).toEqual(["Fixed pass 2."]);
     const archivedFailure = path.join(result.context.revisionDir, "verification-before-fix-1.md");
     expect(existsSync(archivedFailure)).toBe(true);
     expect(await readFile(archivedFailure, "utf8")).toContain("type error");

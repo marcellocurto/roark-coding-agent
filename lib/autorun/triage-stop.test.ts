@@ -35,6 +35,18 @@ describe("triage stop handling", () => {
     expect(comment.toLowerCase()).not.toContain("error");
   });
 
+  test("includes a sanitized collapsed triage excerpt when content is provided", () => {
+    const comment = formatTriageStoppedComment({
+      issueNumber: 12,
+      triageVerdict: "blocked",
+      triageArtifactContent: "# Triage\n\n## Verdict\nblocked\nAPI_KEY=secret\n",
+    });
+
+    expect(comment).toContain("<details><summary>Triage artifact excerpt</summary>");
+    expect(comment).toContain("API_KEY=[redacted]");
+    expect(comment).not.toContain("API_KEY=secret");
+  });
+
   test("builds gh argv for labels and comments", () => {
     expect(buildTriageStopAddLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "blocked" })).toEqual([
       "gh",

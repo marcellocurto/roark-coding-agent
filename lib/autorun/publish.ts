@@ -19,8 +19,8 @@ import type { AttemptMetadata } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
-import { parseVerdict } from "../workflow/verdicts.ts";
-import { redactLocalPaths } from "./public-output.ts";
+import { parseReadyForImplementationValue, parseVerdict } from "../workflow/verdicts.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 
 export const defaultAutorunSuccessLabel = "roark-pr-opened";
 export const defaultAutorunRemote = "origin";
@@ -34,6 +34,11 @@ export interface PrCreateArgvOptions {
   title: string;
   body: string;
 }
+export interface PrEditBodyArgvOptions {
+  repo?: string | undefined;
+  pr: string;
+  body: string;
+}
 export interface SuccessLabelArgvOptions {
   repo?: string | undefined  ;
   issueNumber: number;
@@ -45,6 +50,18 @@ export interface ReviewVerdictSummary {
   reviewB?: string | undefined;
 }
 
+export interface FormatPrBodyLedgerComment {
+  title: string;
+  phase: string;
+  url?: string | undefined;
+}
+
+export interface FormatPrBodyFollowUpIssue {
+  title: string;
+  url?: string | undefined;
+  number?: number | undefined;
+}
+
 export interface FormatPrBodyInput {
   issueNumber: number;
   verification?: VerificationResult | undefined;
@@ -53,6 +70,11 @@ export interface FormatPrBodyInput {
   attemptMetadata?: AttemptMetadata | undefined;
   attemptMetadataPath?: string | undefined;
   reviewVerdicts?: ReviewVerdictSummary | undefined;
+  triageVerdict?: string | undefined;
+  planReady?: string | undefined;
+  readinessStatus?: string | undefined;
+  ledgerComments?: FormatPrBodyLedgerComment[] | undefined;
+  followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
 }
 
 export type AutorunPublishOptions = Pick<
@@ -100,6 +122,11 @@ export function buildPrCreateArgv(options: PrCreateArgvOptions): string[] {
   ];
 }
 
+export function buildPrEditBodyArgv(options: PrEditBodyArgvOptions): string[] {
+  const repoArgs = options.repo ? ["--repo", options.repo] : [];
+  return ["gh", "pr", "edit", options.pr, "--body", options.body, ...repoArgs];
+}
+
 export function buildSuccessLabelArgv(options: SuccessLabelArgvOptions): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
@@ -109,13 +136,44 @@ export function formatCommitMessage(input: { issueNumber: number }): string {
   return `roark: implement issue #${input.issueNumber}`;
 }
 
+export function formatAutorunPrBody(input: {
+  issueNumber: number;
+  workflowContext: WorkflowContext;
+  verification?: VerificationResult | undefined;
+  attemptMetadata?: AttemptMetadata | undefined;
+  attemptMetadataPath?: string | undefined;
+  followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
+}): string {
+  return formatPrBody({
+    issueNumber: input.issueNumber,
+    verification: input.verification,
+    runDirRelative: input.workflowContext.runDirRelative,
+    artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
+    attemptMetadata: input.attemptMetadata,
+    attemptMetadataPath: input.attemptMetadataPath,
+    reviewVerdicts: collectReviewVerdicts(input.workflowContext),
+    triageVerdict: collectArtifactVerdict(input.workflowContext, "triage"),
+    planReady: collectPlanReady(input.workflowContext),
+    readinessStatus: collectArtifactVerdict(input.workflowContext, "readiness"),
+    ledgerComments: collectLedgerCommentSummaries(input.attemptMetadata, input.workflowContext),
+    followUpIssues: input.followUpIssues,
+  });
+}
+
 export function formatPrBody(input: FormatPrBodyInput): string {
   const lines: string[] = [];
   lines.push(`Closes #${input.issueNumber}`);
   lines.push("");
+  lines.push("## Reviewer summary");
+  lines.push("- Changes: Roark implemented the source issue on this branch.");
+  lines.push(`- Triage verdict: ${input.triageVerdict ?? "unknown"}`);
+  lines.push(`- Plan ready for implementation: ${input.planReady ?? "unknown"}`);
+  lines.push(`- Readiness status: ${input.readinessStatus ?? "unknown"}`);
+  lines.push("- Review focus: confirm the implementation matches the issue scope and review any verification or readiness notes below.");
+  lines.push("");
   lines.push("## Verification");
   if (input.verification) {
-    lines.push(`- Command: \`${redactLocalPaths(input.verification.command)}\``);
+    lines.push(`- Command: \`${sanitizePublicMarkdown(input.verification.command)}\``);
     lines.push(`- Exit code: ${input.verification.exitCode}`);
     lines.push(`- Status: ${input.verification.ok ? "passed" : "failed"}`);
   } else {
@@ -138,6 +196,21 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   lines.push(`- Review A: ${input.reviewVerdicts?.reviewA ?? "unknown"}`);
   lines.push(`- Review B: ${input.reviewVerdicts?.reviewB ?? "unknown"}`);
   lines.push(`- Full run ledger: issue comments on #${input.issueNumber}`);
+  if (input.ledgerComments && input.ledgerComments.length > 0) {
+    for (const comment of input.ledgerComments) {
+      lines.push(comment.url ? `- ${comment.title}: ${comment.url}` : `- ${comment.title}: phase \`${comment.phase}\``);
+    }
+  }
+  lines.push("");
+  lines.push("## Follow-up issues");
+  if (input.followUpIssues && input.followUpIssues.length > 0) {
+    for (const issue of input.followUpIssues) {
+      const label = issue.number !== undefined ? `#${issue.number}` : issue.title;
+      lines.push(issue.url ? `- ${label}: ${issue.url}` : `- ${label}`);
+    }
+  } else {
+    lines.push("- None recorded in this PR body at creation time.");
+  }
   lines.push("");
   lines.push("## Workflow artifacts");
   lines.push("These artifacts are local control-plane state and are not committed to this PR branch.");
@@ -224,14 +297,12 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     { cwd: agentCwd, label: `git push ${options.remote}` },
   );
 
-  const body = formatPrBody({
+  const body = formatAutorunPrBody({
     issueNumber: issue.number,
+    workflowContext,
     verification,
-    runDirRelative: workflowContext.runDirRelative,
-    artifactPaths: collectPrBodyArtifactPaths(workflowContext),
     attemptMetadata,
     attemptMetadataPath,
-    reviewVerdicts: collectReviewVerdicts(workflowContext),
   });
 
   console.log("- Creating pull request");
@@ -275,6 +346,18 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   return prUrl || undefined;
 }
 
+export async function updatePrBody(input: {
+  cwd: string;
+  repo?: string | undefined;
+  pr: string;
+  body: string;
+}): Promise<void> {
+  await runProcessOrThrow(
+    buildPrEditBodyArgv({ repo: input.repo, pr: input.pr, body: input.body }),
+    { cwd: input.cwd, label: "gh pr edit --body" },
+  );
+}
+
 export function collectReviewVerdicts(context: WorkflowContext): ReviewVerdictSummary {
   const latestCycle = latestCompleteReviewCycle(context);
   return latestCycle === undefined
@@ -286,6 +369,40 @@ export function collectReviewVerdicts(context: WorkflowContext): ReviewVerdictSu
       reviewA: readVerdictIfExists(context, reviewARef(latestCycle)),
       reviewB: readVerdictIfExists(context, reviewBRef(latestCycle)),
     };
+}
+
+function collectArtifactVerdict(context: WorkflowContext, artifact: ArtifactRef): string | undefined {
+  return readVerdictIfExists(context, artifact);
+}
+
+function collectPlanReady(context: WorkflowContext): string | undefined {
+  if (!artifactExists(context, "implementationPlan")) return undefined;
+  try {
+    return parseReadyForImplementationValue(readFileSync(artifactPath(context, "implementationPlan"), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function collectLedgerCommentSummaries(attemptMetadata: AttemptMetadata | undefined, context: WorkflowContext): FormatPrBodyLedgerComment[] | undefined {
+  const issueComments = attemptMetadata?.githubComments?.issue;
+  if (!issueComments) return undefined;
+  const latestCycle = latestCompleteReviewCycle(context);
+  const reviewAPhases = latestCycle === undefined ? ["review-a"] : [`review-a-${latestCycle}`, "review-a"];
+  const reviewBPhases = latestCycle === undefined ? ["review-b"] : [`review-b-${latestCycle}`, "review-b"];
+  const phases: { phases: string[]; title: string }[] = [
+    { phases: ["triage"], title: "Triage" },
+    { phases: ["implementation-plan"], title: "Implementation plan" },
+    { phases: ["readiness"], title: "Readiness" },
+    { phases: reviewAPhases, title: "Review A" },
+    { phases: reviewBPhases, title: "Review B" },
+  ];
+  return phases
+    .map(({ phases, title }) => {
+      const phase = phases.find((candidate) => issueComments[candidate]?.url !== undefined) ?? phases[0] ?? title;
+      return { phase, title, url: issueComments[phase]?.url };
+    })
+    .filter((summary) => summary.url !== undefined);
 }
 
 function readVerdictIfExists(context: WorkflowContext, artifact: ArtifactRef): string | undefined {
