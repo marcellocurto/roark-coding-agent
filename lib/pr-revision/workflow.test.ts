@@ -29,6 +29,7 @@ async function isolatedWorkspace(setup?: (workspace: string) => Promise<void>): 
       return {
         path: workspace,
         metadata: { path: workspace, strategy: "clone", cloneRemote: "origin", createdNow: false },
+        releaseLock: () => Promise.resolve(),
       };
     },
   };

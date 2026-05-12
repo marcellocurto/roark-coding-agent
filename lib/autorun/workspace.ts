@@ -449,14 +449,6 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
   console.log(`Pruned ${removed} workspace(s).`);
 }
 
-async function acquireWorkspaceLock(workspacePath: string): Promise<() => Promise<void>> {
-  const lockPath = `${workspacePath}.lock`;
-  await mkdir(lockPath, { recursive: true });
-  return async () => {
-    await rm(lockPath, { recursive: true, force: true });
-  };
-}
-
 export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<void> {
   const legacyLockPath = `${input.workspacePath}.lock`;
   if (!existsSync(input.workspacePath)) {
