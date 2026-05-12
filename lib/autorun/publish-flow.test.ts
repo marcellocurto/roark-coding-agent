@@ -2,9 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { planVerificationRepair, runPublishGate } from "./publish-flow.ts";
+import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
 import { tick } from "../test-utils/async.ts";
 
@@ -44,6 +44,127 @@ describe("verification repair planning", () => {
     const context = await tempContext(1);
 
     expect(await planVerificationRepair(context, failedVerification(127, "sh: missing: command not found"))).toBeUndefined();
+  });
+
+  test("successful PR publication triggers post-PR reviewer issue creation", async () => {
+    const context = await tempContext(1);
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    const postPrCalls: string[] = [];
+
+    const outcome = await runPublishGate({
+      options: {
+        cwd: context.controlCwd,
+        repo: "owner/repo",
+        verifyCommand: "bun run typecheck",
+        failureLabel: "failed",
+        successLabel: "done",
+        inProgressLabel: "in-progress",
+        remote: "origin",
+        baseBranch: "main",
+      },
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, {
+      updateIssueBranchFromBase: async () => { await tick(); },
+      refreshCopyToWorktree: async () => { await tick(); },
+      runLifecycleHook: async () => { await tick(); },
+      runVerification: async ({ command }) => (await tick(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+      writeVerificationArtifact: async () => { await tick(); },
+      publishAutorunResult: async () => (await tick(), "https://github.com/owner/repo/pull/10"),
+      publishIssueLedgerComment: async () => { await tick(); return undefined; },
+      postPrIssueCreation: async ({ prUrl }) => { await tick(); postPrCalls.push(prUrl); },
+    });
+
+    expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
+    expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
+  });
+
+  test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
+    const context = await tempContext(1);
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nnot-ready\n");
+    let postPrCalled = false;
+
+    const outcome = await runPublishGate({
+      options: {
+        cwd: context.controlCwd,
+        repo: "owner/repo",
+        verifyCommand: "bun run typecheck",
+        failureLabel: "failed",
+        successLabel: "done",
+        inProgressLabel: "in-progress",
+        remote: "origin",
+        baseBranch: "main",
+      },
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, {
+      handleNonPublish: async () => { await tick(); },
+      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+    });
+
+    expect(outcome.outcome).toBe("failed-readiness");
+    expect(postPrCalled).toBe(false);
+  });
+
+  test("failed verification does not trigger post-PR reviewer issue creation", async () => {
+    const context = await tempContext(0);
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    let postPrCalled = false;
+
+    const outcome = await runPublishGate({
+      options: {
+        cwd: context.controlCwd,
+        repo: "owner/repo",
+        verifyCommand: "bun run typecheck",
+        failureLabel: "failed",
+        successLabel: "done",
+        inProgressLabel: "in-progress",
+        remote: "origin",
+        baseBranch: "main",
+      },
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, {
+      updateIssueBranchFromBase: async () => { await tick(); },
+      refreshCopyToWorktree: async () => { await tick(); },
+      runLifecycleHook: async () => { await tick(); },
+      runVerification: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
+      writeVerificationArtifact: async () => { await tick(); },
+      handleNonPublish: async () => { await tick(); },
+      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+    });
+
+    expect(outcome.outcome).toBe("failed-verification");
+    expect(postPrCalled).toBe(false);
+  });
+
+  test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
+    const context = await tempContext(1);
+    await writeArtifact(context, "issue", `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`);
+    await writeArtifact(context, reviewARef(0), reviewWithLedger(finding("N1", "follow-up")));
+    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
+    await writeArtifact(context, "issueCreationResults", JSON.stringify({
+      created: [{ planItemId: "follow-up-1", kind: "follow-up", title: "Document numbered review curation", url: "https://github.com/owner/repo/issues/100" }],
+    }));
+
+    await createReviewerIssuesAfterPr({ workflowContext: context, prUrl: "https://github.com/owner/repo/pull/10" });
+
+    const plan = JSON.parse(await readArtifact(context, "issueCurationPlan")) as { run: { prUrl?: string; artifactPaths: string[] }; issuesToCreate: { planItemId: string; sourceFindingIds: string[]; runContext: { prUrl?: string } }[] };
+    expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
+    expect(plan.issuesToCreate).toHaveLength(1);
+    expect(plan.issuesToCreate[0]?.planItemId).toBe("follow-up-1");
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:N1"]);
+    expect(plan.issuesToCreate[0]?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/10");
+    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.md");
   });
 
   test("terminal command-unavailable failures include setup guidance", async () => {
@@ -108,6 +229,21 @@ describe("verification repair planning", () => {
   });
 });
 
+function attemptMetadata(context: WorkflowContext) {
+  return {
+    attempt: 1,
+    issueNumber: 1,
+    branch: "roark/issue-1",
+    baseBranch: "main",
+    worktreePath: context.agentCwd,
+    runArtifactPath: context.runDirRelative,
+    startedAt: new Date("2026-05-08T00:00:00.000Z").toISOString(),
+    endedAt: null,
+    outcome: "in-progress" as const,
+    outcomeDetail: null,
+  };
+}
+
 async function tempContext(maxFixPasses: number): Promise<WorkflowContext> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-flow-"));
   tempDirs.push(cwd);
@@ -137,4 +273,21 @@ function failedVerification(exitCode: number, stderr = "lint failed"): Verificat
     stdout: "",
     stderr,
   };
+}
+
+function reviewWithLedger(entries: string): string {
+  return `# Review A Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\n${entries}\n\n## Validation Reviewed\nTests.\n`;
+}
+
+function finding(id: string, classification: string): string {
+  return `- Identifier: ${id}
+- Classification: ${classification}
+- Title: Document numbered review curation
+- Severity: low
+- Confidence: high
+- Evidence: lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact.
+- Current-issue impact: Reviewer findings from normal autorun attempts are promoted after PR publication.
+- Recommended handling: Use numbered review artifacts when curating reviewer-generated issues.
+- Suggested issue title (optional): Document numbered review curation
+`;
 }

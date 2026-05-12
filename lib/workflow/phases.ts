@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from "node:fs";
+import path from "node:path";
 import { fetchGitHubIssue } from "../github/issue.ts";
 import { createFileRunObserver } from "../observability/observer.ts";
 import { runPiAgent } from "../pi/agent.ts";
@@ -300,6 +302,20 @@ async function shouldRegenerateArtifact(context: WorkflowContext, artifact: Arti
   return !validateAgentArtifact(artifact, existing).ok;
 }
 
+function assertAttemptSelectedWhenAttemptsExist(context: WorkflowContext, command: "curate-issues" | "create-issues"): void {
+  if (context.attempt !== undefined) return;
+  const attemptsDir = path.join(context.outDir, "issue", context.issueNumber, "attempts");
+  if (!existsSync(attemptsDir)) return;
+  const attempts = readdirSync(attemptsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .map((entry) => Number(entry.name))
+    .sort((left, right) => left - right);
+  if (attempts.length === 0) return;
+  const latest = attempts[attempts.length - 1];
+  if (latest === undefined) return;
+  throw new Error(`Issue #${context.issueNumber} has attempt artifacts under ${path.relative(context.controlCwd, attemptsDir)}. Run '${command} ${context.issueInput} --attempt ${latest}' (or choose another attempt) so reviewer findings are curated from the intended attempt.`);
+}
+
 export async function runSinglePhase(
   context: WorkflowContext,
   phase: string,
@@ -320,8 +336,14 @@ export async function runSinglePhase(
     else if (phase === "reset-baseline") await resetBaselinePhase(context, context.fixPass ?? 1);
     else if (phase === "final-review") await finalReviewPhase(context, context.fixPass ?? inferNextFinalReviewPass(context), runner);
     else if (phase === "readiness") await readinessPhase(context);
-    else if (phase === "curate-issues") await issueCurationPhase(context);
-    else if (phase === "create-issues") await createIssuesPhase(context, runner);
+    else if (phase === "curate-issues") {
+      assertAttemptSelectedWhenAttemptsExist(context, "curate-issues");
+      await issueCurationPhase(context);
+    }
+    else if (phase === "create-issues") {
+      assertAttemptSelectedWhenAttemptsExist(context, "create-issues");
+      await createIssuesPhase(context, runner);
+    }
     else throw new Error(`Unsupported phase '${phase}'.`);
     await context.observer.runCompleted({ status: "completed" });
   } catch (error) {

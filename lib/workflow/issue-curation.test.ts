@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, writeArtifact, type WorkflowContext } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 import { tick } from "../test-utils/async.ts";
@@ -41,7 +41,7 @@ describe("buildIssueCurationPlan", () => {
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
     expect(plan).toMatchObject({
-      version: 1,
+      version: 2,
       sourceIssue: {
         number: 42,
         title: "Source issue title",
@@ -52,8 +52,7 @@ describe("buildIssueCurationPlan", () => {
         attempt: 2,
         generatedAt: "2026-05-06T12:00:00.000Z",
       },
-      blockingIssuesToCreate: [],
-      followUpIssuesToCreate: [],
+      issuesToCreate: [],
       rejectedCandidates: [],
       duplicatesMerged: [],
     });
@@ -73,15 +72,34 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.blockingIssuesToCreate).toEqual([]);
-    expect(plan.followUpIssuesToCreate).toHaveLength(1);
-    const item = plan.followUpIssuesToCreate[0];
+    expect(plan.issuesToCreate).toHaveLength(1);
+    const item = plan.issuesToCreate[0];
     expect(item?.planItemId).toBe("follow-up-1");
+    expect(item?.classification).toBe("follow-up");
     expect(item?.proposedTitle).toBe("Document retry edge case for users");
-    expect(item?.proposedLabels).toContain("needs-triage");
+    expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "follow-up"]);
     expect(item?.sourceFindingIds).toEqual(["review-a:F1"]);
     expect(item?.proposedBody).toContain("## Non-goals");
     expect(item?.proposedBody).toContain("Source issue: #42 Source issue title");
+  });
+
+  test("numbered autorun review artifacts are used when present", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, reviewARef(0), reviewWithLedger(finding("N1", "follow-up", {
+      title: "Document autorun review artifact handling",
+      evidence: "lib/workflow/issue-curation.ts:116 reads the review artifact selected for curation.",
+      impact: "Reviewer findings from normal autorun attempts are promoted into follow-up issues.",
+      handling: "Use numbered review artifacts when curating autorun findings.",
+    })));
+    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
+
+    const plan = await buildIssueCurationPlan(context, fixedClock);
+
+    expect(plan.issuesToCreate).toHaveLength(1);
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:N1"]);
+    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/review-a-0.md");
+    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/review-b-0.md");
+    expect(plan.warnings).not.toContain("review-a.md is missing; treating Review Agent A findings as empty.");
   });
 
   test("one actionable external-blocker produces a blocking issue item", async () => {
@@ -96,26 +114,25 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.blockingIssuesToCreate).toHaveLength(1);
-    expect(plan.followUpIssuesToCreate).toEqual([]);
-    const item = plan.blockingIssuesToCreate[0];
-    expect(item?.planItemId).toBe("blocking-1");
-    expect(item?.proposedLabels).toEqual(["needs-triage", "external-blocker"]);
-    expect(item?.whyBlockingOrNonBlocking).toContain("Blocking");
+    expect(plan.issuesToCreate).toHaveLength(1);
+    const item = plan.issuesToCreate[0];
+    expect(item?.planItemId).toBe("external-blocker-1");
+    expect(item?.classification).toBe("external-blocker");
+    expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "external-blocker"]);
+    expect(item?.whyBlockingOrNonBlocking).toContain("External blocker");
   });
 
-  test("suggestion and must-fix-current findings are rejected by default", async () => {
+  test("suggestion findings become issues while must-fix-current findings are rejected", async () => {
     const context = await tempContext();
     await writeArtifact(context, "reviewA", reviewWithLedger(`${finding("S1", "suggestion")}\n${finding("M1", "must-fix-current")}`));
     await writeArtifact(context, "reviewB", reviewWithLedger("None"));
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.followUpIssuesToCreate).toEqual([]);
-    expect(plan.blockingIssuesToCreate).toEqual([]);
-    expect(plan.rejectedCandidates.map((candidate) => candidate.sourceFindingIds[0])).toEqual(["review-a:S1", "review-a:M1"]);
-    expect(plan.rejectedCandidates[0]?.reason).toContain("suggestions are not issue candidates");
-    expect(plan.rejectedCandidates[1]?.reason).toContain("current issue/fix pass");
+    expect(plan.issuesToCreate.map((item) => item.planItemId)).toEqual(["suggestion-1"]);
+    expect(plan.issuesToCreate[0]?.proposedLabels).toEqual(["needs-triage", "needs-human", "suggestion"]);
+    expect(plan.rejectedCandidates.map((candidate) => candidate.sourceFindingIds[0])).toEqual(["review-a:M1"]);
+    expect(plan.rejectedCandidates[0]?.reason).toContain("current issue/fix pass");
   });
 
   test("missing evidence causes rejection", async () => {
@@ -125,7 +142,7 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.followUpIssuesToCreate).toEqual([]);
+    expect(plan.issuesToCreate).toEqual([]);
     expect(plan.rejectedCandidates).toHaveLength(1);
     expect(plan.rejectedCandidates[0]?.reason).toBe("missing concrete evidence");
   });
@@ -142,7 +159,7 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.followUpIssuesToCreate).toEqual([]);
+    expect(plan.issuesToCreate).toEqual([]);
     expect(plan.rejectedCandidates[0]?.reason).toBe("vague or speculative candidate");
   });
 
@@ -163,8 +180,8 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.followUpIssuesToCreate).toHaveLength(1);
-    const item = plan.followUpIssuesToCreate[0];
+    expect(plan.issuesToCreate).toHaveLength(1);
+    const item = plan.issuesToCreate[0];
     expect(item?.sourceFindingIds).toEqual(["review-a:F1", "review-b:G1"]);
     expect(item?.reviewerSources).toEqual(["review-a", "review-b"]);
     expect(item?.evidence).toEqual([
@@ -198,8 +215,8 @@ describe("buildIssueCurationPlan", () => {
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
-    expect(plan.followUpIssuesToCreate).toHaveLength(2);
-    expect(plan.followUpIssuesToCreate.map((item) => item.sourceFindingIds)).toEqual([
+    expect(plan.issuesToCreate).toHaveLength(2);
+    expect(plan.issuesToCreate.map((item) => item.sourceFindingIds)).toEqual([
       ["review-b:G1"],
       ["review-a:F1"],
     ]);
@@ -218,12 +235,26 @@ describe("buildIssueCurationPlan", () => {
     await writeArtifact(context, "reviewB", reviewWithLedger("None"));
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
-    const item = plan.followUpIssuesToCreate[0];
+    const item = plan.issuesToCreate[0];
 
     expect(plan.sourceIssue.title).toBe("Metadata issue title");
     expect(plan.run.generatedAt).toBe("2026-05-06T12:00:00.000Z");
     expect(item?.sourceIssueContext).toEqual(plan.sourceIssue);
     expect(item?.runContext.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/implementation-log.md");
+  });
+
+  test("PR context is preserved in plan and generated issue bodies", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, "reviewA", reviewWithLedger(finding("F1", "suggestion")));
+    await writeArtifact(context, "reviewB", reviewWithLedger("None"));
+
+    const plan = await buildIssueCurationPlan(context, fixedClock, { prUrl: "https://github.com/owner/repo/pull/99" });
+    const item = plan.issuesToCreate[0];
+
+    expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/99");
+    expect(item?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/99");
+    expect(item?.proposedBody).toContain("Pull request: https://github.com/owner/repo/pull/99");
+    expect(item?.proposedBody).toContain("Classification: suggestion");
   });
 
   test("available artifact paths include catalog static refs and numbered refs", async () => {
@@ -250,6 +281,29 @@ describe("buildIssueCurationPlan", () => {
 });
 
 describe("issue curation phase", () => {
+  test("manual curate-issues without --attempt gives guidance when attempt artifacts exist", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "roark-curation-root-"));
+    tempDirs.push(dir);
+    const context = createWorkflowContext({
+      command: "curate-issues",
+      issue: "42",
+      cwd: dir,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+    });
+    await mkdir(path.join(dir, ".roark/runs/issue/42/attempts/3"), { recursive: true });
+
+    try {
+      await runSinglePhase(context, "curate-issues");
+      throw new Error("expected curate-issues to require --attempt");
+    } catch (error) {
+      expect(error instanceof Error ? error.message : String(error)).toContain("--attempt 3");
+    }
+  });
+
   test("runSinglePhase writes issue-curation-plan.json without using an agent", async () => {
     const context = await tempContext();
     await writeArtifact(context, "reviewA", reviewWithLedger(finding("F1", "follow-up")));
@@ -262,8 +316,8 @@ describe("issue curation phase", () => {
 
     expect(artifactExists(context, "issueCurationPlan")).toBe(true);
     const raw = await readArtifact(context, "issueCurationPlan");
-    const plan = JSON.parse(raw) as { followUpIssuesToCreate: unknown[] };
-    expect(plan.followUpIssuesToCreate).toHaveLength(1);
+    const plan = JSON.parse(raw) as { issuesToCreate: unknown[] };
+    expect(plan.issuesToCreate).toHaveLength(1);
   });
 });
 
