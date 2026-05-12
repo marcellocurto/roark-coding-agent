@@ -15,7 +15,8 @@ const menu = `1. Auto discover
 3. Continue
 4. Do full workflow
 5. Status
-6. Help
+6. Workspace remove
+7. Help
 `;
 
 export async function resolveInteractiveArgv(options: {
@@ -71,9 +72,16 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
     if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
     if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
     if (choice === "5") return ["status", await promptRequiredIssue(prompt)];
-    if (choice === "6") return ["--help"];
 
-    prompt.write?.("Invalid choice. Please choose 1-6.\n");
+    if (choice === "6") {
+      const issue = await promptRequiredIssue(prompt);
+      const force = await confirm(prompt, "Force remove dirty workspace?");
+      return force ? ["workspace", "remove", "--issue", issue, "--force"] : ["workspace", "remove", "--issue", issue];
+    }
+
+    if (choice === "7") return ["--help"];
+
+    prompt.write?.("Invalid choice. Please choose 1-7.\n");
   }
 }
 

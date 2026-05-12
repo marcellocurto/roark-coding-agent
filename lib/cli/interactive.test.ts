@@ -63,19 +63,29 @@ describe("promptForInteractiveArgv", () => {
     }
   });
 
+  test("maps workspace remove to argv and asks whether to force", async () => {
+    await tick();
+    const forcePrompt = scriptedPrompt(["6", "42", "yes"]);
+    expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
+    expect(forcePrompt.prompts).toEqual(["Select an option: ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
+
+    const cleanPrompt = scriptedPrompt(["6", "42", "no"]);
+    expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42"]);
+  });
+
   test("maps help to argv", async () => {
     await tick();
-    const { prompt } = scriptedPrompt(["6"]);
+    const { prompt } = scriptedPrompt(["7"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
   });
 
   test("retries invalid menu choices", async () => {
     await tick();
-    const { prompt, output } = scriptedPrompt(["bad", "6"]);
+    const { prompt, output } = scriptedPrompt(["bad", "7"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
-    expect(output.join("")).toContain("Invalid choice. Please choose 1-6.");
+    expect(output.join("")).toContain("Invalid choice. Please choose 1-7.");
   });
 });
 
