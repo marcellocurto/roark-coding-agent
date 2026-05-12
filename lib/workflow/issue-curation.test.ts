@@ -5,7 +5,7 @@ import path from "node:path";
 import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 const fixedClock = { now: () => new Date("2026-05-06T12:00:00.000Z") };
@@ -310,7 +310,7 @@ describe("issue curation phase", () => {
     await writeArtifact(context, "reviewB", reviewWithLedger("None"));
 
     await runSinglePhase(context, "curate-issues", async () => {
-      await tick();
+      await noopAsync();
       throw new Error("curation should not invoke an agent");
     });
 

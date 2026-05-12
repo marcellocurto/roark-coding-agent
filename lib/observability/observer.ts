@@ -1,4 +1,5 @@
 import { createEventWriter, type EventWriter } from "./events.ts";
+import { noopAsync } from "../utils/async.ts";
 import type { ArtifactRef, WorkflowContext } from "../workflow/artifacts.ts";
 import { artifactRelativePath, formatArtifactRef } from "../workflow/artifacts.ts";
 import {
@@ -63,20 +64,19 @@ export interface AutoRetryObservation {
 }
 
 export function createNoopRunObserver(): RunObserver {
-  const noop = () => Promise.resolve();
   return {
-    runStarted: noop,
-    runCompleted: noop,
-    runFailed: noop,
-    phaseStarted: noop,
-    phaseCompleted: noop,
-    phaseFailed: noop,
-    agentSessionStarted: noop,
-    agentSessionStats: noop,
-    toolStarted: noop,
-    toolCompleted: noop,
-    autoRetryStarted: noop,
-    autoRetryCompleted: noop,
+    runStarted: noopAsync,
+    runCompleted: noopAsync,
+    runFailed: noopAsync,
+    phaseStarted: noopAsync,
+    phaseCompleted: noopAsync,
+    phaseFailed: noopAsync,
+    agentSessionStarted: noopAsync,
+    agentSessionStats: noopAsync,
+    toolStarted: noopAsync,
+    toolCompleted: noopAsync,
+    autoRetryStarted: noopAsync,
+    autoRetryCompleted: noopAsync,
   };
 }
 

@@ -12,7 +12,7 @@ import {
   formatReviewLedgerComment,
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -22,7 +22,7 @@ afterEach(async () => {
 
 describe("autorun ledger comment publishing", () => {
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
-        await tick();
+        await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -60,7 +60,7 @@ describe("autorun ledger comment publishing", () => {
       attemptMetadata,
     }, {
       publishIssueLedgerComment: async (input) => {
-        await tick();
+        await noopAsync();
         calls.push({ phase: input.phase, body: input.body });
         recordAttemptIssueComment(input.attemptMetadata, input.phase, {
           id: input.phase === "review-a" ? 101 : 102,

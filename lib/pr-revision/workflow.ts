@@ -15,6 +15,7 @@ import {
 import { fetchPullRequestFeedback, type PullRequestFeedback } from "../github/pr.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
+import { noopAsync } from "../utils/async.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { assertCleanGitTree, gitDirtyLines } from "../workflow/git.ts";
 import {
@@ -327,7 +328,7 @@ async function prepareRevisionWorkspace(input: {
     return {
       path: options.cwd,
       metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
-      releaseLock: () => Promise.resolve(),
+      releaseLock: noopAsync,
     };
   }
 

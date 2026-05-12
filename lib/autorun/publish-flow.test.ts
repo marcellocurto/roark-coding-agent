@@ -6,7 +6,7 @@ import { finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeA
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -68,14 +68,14 @@ describe("verification repair planning", () => {
       attemptMetadata: attemptMetadata(context),
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      updateIssueBranchFromBase: async () => { await tick(); },
-      refreshCopyToWorktree: async () => { await tick(); },
-      runLifecycleHook: async () => { await tick(); },
-      runVerification: async ({ command }) => (await tick(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
-      writeVerificationArtifact: async () => { await tick(); },
-      publishAutorunResult: async () => (await tick(), "https://github.com/owner/repo/pull/10"),
-      publishIssueLedgerComment: async () => { await tick(); return undefined; },
-      postPrIssueCreation: async ({ prUrl }) => { await tick(); postPrCalls.push(prUrl); },
+      updateIssueBranchFromBase: async () => { await noopAsync(); },
+      refreshCopyToWorktree: async () => { await noopAsync(); },
+      runLifecycleHook: async () => { await noopAsync(); },
+      runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+      writeVerificationArtifact: async () => { await noopAsync(); },
+      publishAutorunResult: async () => (await noopAsync(), "https://github.com/owner/repo/pull/10"),
+      publishIssueLedgerComment: async () => { await noopAsync(); return undefined; },
+      postPrIssueCreation: async ({ prUrl }) => { await noopAsync(); postPrCalls.push(prUrl); },
     });
 
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
@@ -104,8 +104,8 @@ describe("verification repair planning", () => {
       attemptMetadata: attemptMetadata(context),
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      handleNonPublish: async () => { await tick(); },
-      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+      handleNonPublish: async () => { await noopAsync(); },
+      postPrIssueCreation: async () => { await noopAsync(); postPrCalled = true; },
     });
 
     expect(outcome.outcome).toBe("failed-readiness");
@@ -134,13 +134,13 @@ describe("verification repair planning", () => {
       attemptMetadata: attemptMetadata(context),
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
-      updateIssueBranchFromBase: async () => { await tick(); },
-      refreshCopyToWorktree: async () => { await tick(); },
-      runLifecycleHook: async () => { await tick(); },
-      runVerification: async ({ command }) => (await tick(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
-      writeVerificationArtifact: async () => { await tick(); },
-      handleNonPublish: async () => { await tick(); },
-      postPrIssueCreation: async () => { await tick(); postPrCalled = true; },
+      updateIssueBranchFromBase: async () => { await noopAsync(); },
+      refreshCopyToWorktree: async () => { await noopAsync(); },
+      runLifecycleHook: async () => { await noopAsync(); },
+      runVerification: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
+      writeVerificationArtifact: async () => { await noopAsync(); },
+      handleNonPublish: async () => { await noopAsync(); },
+      postPrIssueCreation: async () => { await noopAsync(); postPrCalled = true; },
     });
 
     expect(outcome.outcome).toBe("failed-verification");
@@ -168,7 +168,7 @@ describe("verification repair planning", () => {
   });
 
   test("terminal command-unavailable failures include setup guidance", async () => {
-  await tick();
+  await noopAsync();
     const context = await tempContext(1);
     await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
     let failureComment = "";
@@ -203,12 +203,12 @@ describe("verification repair planning", () => {
       attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
     }, {
       updateIssueBranchFromBase: async () => {
-        await tick();},
+        await noopAsync();},
       refreshCopyToWorktree: async () => {
-        await tick();},
+        await noopAsync();},
       runLifecycleHook: async () => {
-        await tick();},
-      runVerification: async ({ command }) => (await tick(), ({
+        await noopAsync();},
+      runVerification: async ({ command }) => (await noopAsync(), ({
         ok: false,
         command,
         exitCode: 127,
@@ -216,7 +216,7 @@ describe("verification repair planning", () => {
         stderr: "/bin/bash: tsc: command not found",
       })),
       handleNonPublish: async ({ decision }) => {
-        await tick();
+        await noopAsync();
         failureComment = decision.reason;
       },
     });

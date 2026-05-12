@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AgentRunner } from "./agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
 import { issueArtifactHasRelationshipSnapshot, runFullWorkflow } from "./phases.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -50,7 +50,7 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     const prompts: string[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       prompts.push(request.prompt);
       return "# Triage\n\n## Verdict\nblocked\n\n## Reasoning\nWaiting.\n\n## Evidence\n#7 is open.\n\n## Blocking Questions\nNone.\n\n## Recommended Next Step\nWait.\n";
     };
@@ -70,7 +70,7 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     const phases: string[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       if (request.prompt.includes('name="triage"')) {
         phases.push("triage");
         return proceedTriage();
@@ -98,7 +98,7 @@ describe("runFullWorkflow", () => {
     await seedBaselineAndImplementation(context);
 
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
@@ -117,7 +117,7 @@ describe("runFullWorkflow", () => {
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
@@ -145,7 +145,7 @@ describe("runFullWorkflow", () => {
     const phases: string[] = [];
 
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       if (request.prompt.includes('name="triage"')) return proceedTriage();
       if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
       if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();

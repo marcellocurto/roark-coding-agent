@@ -6,7 +6,7 @@ import { artifactExists, baselineResetLogRef, createWorkflowContext, implementat
 import type { AgentRunner } from "./agent-runner.ts";
 import { AgentTaskRunError, codeRefinementTask, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
 
@@ -39,7 +39,7 @@ describe("runAgentTask skill loading", () => {
     const context = await createContext({ agentCwd });
     const requests: string[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       requests.push(request.cwd);
       return "# Triage\n\n## Verdict\nproceed\n";
     };
@@ -52,7 +52,7 @@ describe("runAgentTask skill loading", () => {
     const context = await createContext();
     const requests: unknown[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       requests.push(request.skillPaths);
       return "# Triage\n\n## Verdict\nproceed\n";
     };
@@ -68,7 +68,7 @@ describe("runAgentTask thinking profiles", () => {
     await writeReadyThroughPlan(context);
     const requests: string[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       requests.push(`${request.writable ? "write" : "read"}:${request.thinkingLevel}`);
       if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
       if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
@@ -96,7 +96,7 @@ describe("runAgentTask thinking profiles", () => {
     const prompts: string[] = [];
 
     await runAgentTask(context, async (request) => {
-      await tick();
+      await noopAsync();
       prompts.push(request.prompt);
       return "# Refinement Log Pass 1\n\n## Summary\nRefined restart.\n";
     }, codeRefinementTask(1, "restart"));
@@ -113,7 +113,7 @@ describe("runAgentTask thinking profiles", () => {
     await writeReadyThroughPlan(deep);
     const deepRequests: string[] = [];
     await runAgentTask(deep, async (request) => {
-      await tick();
+      await noopAsync();
       deepRequests.push(request.thinkingLevel);
       return "# Implementation Log\n";
     }, implementationTask);
@@ -122,7 +122,7 @@ describe("runAgentTask thinking profiles", () => {
     const explicit = await createContext({ thinkingLevel: "medium" });
     const explicitRequests: string[] = [];
     await runAgentTask(explicit, async (request) => {
-      await tick();
+      await noopAsync();
       explicitRequests.push(request.thinkingLevel);
       return "# Triage\n\n## Verdict\nproceed\n";
     }, triageTask);
@@ -135,7 +135,7 @@ describe("runAgentTask error diagnostics", () => {
     const context = await createContext();
     let calls = 0;
     const runner: AgentRunner = async () => {
-      await tick();
+      await noopAsync();
       calls++;
       throw new Error("openai-codex/gpt-5.5 failed: provider unavailable");
     };
@@ -157,7 +157,7 @@ describe("runAgentTask error diagnostics", () => {
     const context = await createContext();
     let calls = 0;
     const runner: AgentRunner = async () => {
-      await tick();
+      await noopAsync();
       calls++;
       return "";
     };
@@ -188,13 +188,13 @@ async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof creat
 
 describe("runAgentTask transient agent retry", () => {
   test("retries transient connection errors before writing the phase artifact", async () => {
-        await tick();
+        await noopAsync();
     const context = await createContext();
     const validTriage = "# Triage\n\n## Verdict\nproceed\n";
     let calls = 0;
     const sleeps: number[] = [];
     const runner: AgentRunner = async () => {
-      await tick();
+      await noopAsync();
       calls++;
       if (calls === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
       return validTriage;
@@ -203,7 +203,7 @@ describe("runAgentTask transient agent retry", () => {
     const result = await runAgentTask(context, runner, triageTask, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async (ms) => {
-        await tick();
+        await noopAsync();
         sleeps.push(ms);
       },
     });
@@ -224,7 +224,7 @@ describe("runAgentTask transient agent retry", () => {
     );
     const prompts: string[] = [];
     const runner: AgentRunner = async (request) => {
-      await tick();
+      await noopAsync();
       prompts.push(request.prompt);
       if (prompts.length === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
       return "# Implementation Log\n";
@@ -233,7 +233,7 @@ describe("runAgentTask transient agent retry", () => {
     expect(runAgentTask(context, runner, implementationTask, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async () => {
-        await tick();},
+        await noopAsync();},
     })).resolves.toBe("# Implementation Log\n");
 
     expect(prompts).toHaveLength(2);
@@ -248,7 +248,7 @@ describe("runAgentTask transient agent retry", () => {
     const validTriage = "# Triage\n\n## Verdict\nproceed\n";
     let calls = 0;
     const runner: AgentRunner = async () => {
-      await tick();
+      await noopAsync();
       calls++;
       expect(artifactExists(context, "triage")).toBe(false);
       if (calls < 4) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
@@ -258,7 +258,7 @@ describe("runAgentTask transient agent retry", () => {
     expect(runAgentTask(context, runner, triageTask, {
       delaysMs: [0, 1, 2],
       sleep: async () => {
-        await tick();},
+        await noopAsync();},
     })).resolves.toBe(validTriage);
 
     expect(calls).toBe(4);
@@ -266,12 +266,12 @@ describe("runAgentTask transient agent retry", () => {
   });
 
   test("exhausts immediate, one minute, and three minute retries before failing", async () => {
-        await tick();
+        await noopAsync();
     const context = await createContext();
     let calls = 0;
     const sleeps: number[] = [];
     const runner: AgentRunner = async () => {
-      await tick();
+      await noopAsync();
       calls++;
       throw new Error("openai-codex/gpt-5.5 failed: fetch failed");
     };
@@ -279,7 +279,7 @@ describe("runAgentTask transient agent retry", () => {
     expect(runAgentTask(context, runner, triageTask, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async (ms) => {
-        await tick();
+        await noopAsync();
         sleeps.push(ms);
       },
     })).rejects.toThrow(AgentTaskRunError);

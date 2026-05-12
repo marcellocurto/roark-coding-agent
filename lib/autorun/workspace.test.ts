@@ -21,7 +21,7 @@ import {
   type ProcessRunner,
 } from "./workspace.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
-import { tick } from "../test-utils/async.ts";
+import { noopAsync } from "../utils/async.ts";
 
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({ stdout: "", stderr, exitCode: 1 });
@@ -40,10 +40,10 @@ describe("managed clone workspaces", () => {
   });
 
   test("resolves remote names and preflights the resulting URL", async () => {
-    await tick();
+    await noopAsync();
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       calls.push(args);
       if (args.join(" ") === "git remote get-url upstream") return ok("git@github.com:owner/repo.git\n");
       if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
@@ -173,7 +173,7 @@ describe("managed clone workspaces", () => {
     await mkdir(path.join(workspacePath, ".git"), { recursive: true });
     const calls: string[][] = [];
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
@@ -275,7 +275,7 @@ describe("managed clone workspaces", () => {
   test("PR revision workspace preparation releases its lock on failure", async () => {
     const fixture = await createPrRevisionWorkspaceFixture("roark-pr-workspace-failed-lock-");
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       if (args[0] === "git" && args[1] === "remote") return ok(`${fixture.root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote") return fail("remote unavailable");
       return fail("unexpected command");
@@ -369,7 +369,7 @@ describe("managed clone workspaces", () => {
     await mkdir(worktree, { recursive: true });
     await writeFile(path.join(control, "visible"), "copy me\n", "utf8");
     const runner: ProcessRunner = async (args) => {
-      await tick();
+      await noopAsync();
       if (args[1] === "check-ignore") return ok();
       if (args[1] === "status") return ok("?? visible\n");
       return ok();
@@ -433,7 +433,7 @@ async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
   const workspaceRoot = path.join(root, "managed");
   const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 12 });
   const runner: ProcessRunner = async (args) => {
-    await tick();
+    await noopAsync();
     if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
     if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
     if (args[0] === "git" && args[1] === "clone") {
