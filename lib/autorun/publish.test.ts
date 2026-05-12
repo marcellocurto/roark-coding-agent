@@ -383,6 +383,22 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Status: failed");
   });
 
+  test("redacts local paths in verification commands", () => {
+    const body = formatPrBody({
+      issueNumber: 9,
+      verification: {
+        ...okVerification,
+        command: "/Users/alice/repo/scripts/verify.sh --flag C:\\Users\\alice\\repo\\check.bat",
+      },
+      runDirRelative: ".roark/runs/issue/9",
+      artifactPaths: [".roark/runs/issue/9/verification.md"],
+    });
+
+    expect(body).toContain("- Command: `[local path redacted] --flag [local path redacted]`");
+    expect(body).not.toContain("/Users/alice");
+    expect(body).not.toContain("C:\\Users\\alice");
+  });
+
   test("handles missing verification defensively", () => {
     const body = formatPrBody({
       issueNumber: 9,
@@ -406,7 +422,7 @@ describe("formatPrBody", () => {
     expect(body).toContain("- `.roark/runs/issue/9/`");
   });
 
-  test("renders the Attempt section with branch, timestamps, worktree, and metadata path", () => {
+  test("renders the Attempt section with branch, timestamps, and metadata path", () => {
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 10,
@@ -433,7 +449,9 @@ describe("formatPrBody", () => {
     expect(body).toContain("- Branch: `roark/issue-10`");
     expect(body).toContain("- Started: 2026-05-05T07:17:40.000Z");
     expect(body).toContain("- Ended: 2026-05-05T07:42:11.000Z");
-    expect(body).toContain("- Worktree: `/repo`");
+    expect(body).not.toContain("- Worktree:");
+    expect(body).not.toContain("- Workspace:");
+    expect(body).not.toContain("/repo");
     expect(body).toContain("- Metadata: `.roark/runs/issue/10/attempts/2/attempt.json`");
     // Attempt block precedes the artifacts list.
     expect(body.indexOf("## Attempt")).toBeLessThan(body.indexOf("## Workflow artifacts"));
