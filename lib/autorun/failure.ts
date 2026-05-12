@@ -134,7 +134,68 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
 }
 
 function formatPublicRecoveryCommand(value: string): string {
-  return redactLocalPaths(value.replace(/\s+--cwd\s+(?:'[^']*'|"[^"]*"|\S+)/g, ""));
+  return redactLocalPaths(
+    parseShellWords(value)
+      .filter(shouldKeepPublicRecoveryToken)
+      .map((token) => token.raw)
+      .join(" "),
+  );
+}
+
+interface ShellWord {
+  raw: string;
+  value: string;
+}
+
+function shouldKeepPublicRecoveryToken(token: ShellWord, index: number, tokens: ShellWord[]): boolean {
+  return token.value !== "--cwd" && tokens[index - 1]?.value !== "--cwd" && !token.value.startsWith("--cwd=");
+}
+
+function parseShellWords(value: string): ShellWord[] {
+  const tokens: ShellWord[] = [];
+  let index = 0;
+
+  while (index < value.length) {
+    while (index < value.length && /\s/.test(value[index] ?? "")) index += 1;
+    if (index >= value.length) break;
+
+    const start = index;
+    let parsed = "";
+    while (index < value.length && !/\s/.test(value[index] ?? "")) {
+      const char = value[index] ?? "";
+      if (char === "'") {
+        index += 1;
+        while (index < value.length && value[index] !== "'") {
+          parsed += value[index] ?? "";
+          index += 1;
+        }
+        if (value[index] === "'") index += 1;
+        continue;
+      }
+      if (char === '"') {
+        index += 1;
+        while (index < value.length && value[index] !== '"') {
+          if (value[index] === "\\" && index + 1 < value.length) index += 1;
+          parsed += value[index] ?? "";
+          index += 1;
+        }
+        if (value[index] === '"') index += 1;
+        continue;
+      }
+      if (char === "\\" && index + 1 < value.length) {
+        index += 1;
+        parsed += value[index] ?? "";
+        index += 1;
+        continue;
+      }
+      parsed += char;
+      index += 1;
+    }
+
+    tokens.push({ raw: value.slice(start, index), value: parsed });
+  }
+
+  return tokens;
 }
 
 function truncateArtifactContent(value: string): string {

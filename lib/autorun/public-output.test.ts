@@ -20,6 +20,19 @@ describe("redactLocalPaths", () => {
     );
   });
 
+  test("redacts POSIX file URIs", () => {
+    expect(redactLocalPaths("at file:///Users/alice/repo/src/index.ts:10:2 then https://github.com/owner/repo")).toBe(
+      "at [local path redacted] then https://github.com/owner/repo",
+    );
+  });
+
+  test("redacts full paths containing spaces", () => {
+    expect(redactLocalPaths("at /Users/John Doe/repo/src/index.ts and C:\\Users\\John Doe\\repo\\file.ts")).toBe(
+      "at [local path redacted] and [local path redacted]",
+    );
+    expect(redactLocalPaths("cwd /Users/alice/My Repo failed")).toBe("cwd [local path redacted] failed");
+  });
+
   test("preserves web URLs", () => {
     expect(redactLocalPaths("https://github.com/owner/repo/issues/1")).toBe("https://github.com/owner/repo/issues/1");
   });

@@ -54,6 +54,20 @@ describe("autorun failure", () => {
     expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
   });
 
+  test("formatFailureComment removes shell-quoted cwd values from recovery commands", () => {
+    const comment = formatFailureComment({
+      issueNumber: 10,
+      phase: "readiness",
+      reason: 'readiness status is "not-ready"',
+      recoveryCommand: "roark continue 10 --cwd '/Users/alice/it'\\''s/repo' --repo owner/repo --attempt 2",
+    });
+
+    expect(comment).not.toContain("--cwd");
+    expect(comment).not.toContain("alice");
+    expect(comment).not.toContain("repo' --repo");
+    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
+  });
+
   test("formatFailureComment renders only the issue and attempt path when artifact path is omitted", () => {
     const comment = formatFailureComment({
       issueNumber: 10,
