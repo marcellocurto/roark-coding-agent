@@ -53,7 +53,7 @@ describe("promptForInteractiveArgv", () => {
     const cases: [string, string[]][] = [
       ["3", ["continue", "42"]],
       ["4", ["do", "42"]],
-      ["5", ["status", "42"]],
+      ["6", ["status", "42"]],
     ];
 
     for (const [choice, argv] of cases) {
@@ -63,29 +63,38 @@ describe("promptForInteractiveArgv", () => {
     }
   });
 
+  test("maps revise PR to argv and retries empty PR input", async () => {
+    await tick();
+    const { prompt, output, prompts } = scriptedPrompt(["5", "", "123"]);
+
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["revise-pr", "123"]);
+    expect(prompts).toEqual(["Select an option: ", "PR number: ", "PR number: "]);
+    expect(output.join("")).toContain("PR number is required.");
+  });
+
   test("maps workspace remove to argv and asks whether to force", async () => {
     await tick();
-    const forcePrompt = scriptedPrompt(["6", "42", "yes"]);
+    const forcePrompt = scriptedPrompt(["7", "42", "yes"]);
     expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
     expect(forcePrompt.prompts).toEqual(["Select an option: ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
 
-    const cleanPrompt = scriptedPrompt(["6", "42", "no"]);
+    const cleanPrompt = scriptedPrompt(["7", "42", "no"]);
     expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42"]);
   });
 
   test("maps help to argv", async () => {
     await tick();
-    const { prompt } = scriptedPrompt(["7"]);
+    const { prompt } = scriptedPrompt(["8"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
   });
 
   test("retries invalid menu choices", async () => {
     await tick();
-    const { prompt, output } = scriptedPrompt(["bad", "7"]);
+    const { prompt, output } = scriptedPrompt(["bad", "8"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
-    expect(output.join("")).toContain("Invalid choice. Please choose 1-7.");
+    expect(output.join("")).toContain("Invalid choice. Please choose 1-8.");
   });
 });
 

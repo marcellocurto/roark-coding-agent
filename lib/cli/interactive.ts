@@ -14,9 +14,10 @@ const menu = `1. Auto discover
 2. Auto specific issue
 3. Continue
 4. Do full workflow
-5. Status
-6. Workspace remove
-7. Help
+5. Revise PR
+6. Status
+7. Workspace remove
+8. Help
 `;
 
 export async function resolveInteractiveArgv(options: {
@@ -71,17 +72,18 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
 
     if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
     if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
-    if (choice === "5") return ["status", await promptRequiredIssue(prompt)];
+    if (choice === "5") return ["revise-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "6") return ["status", await promptRequiredIssue(prompt)];
 
-    if (choice === "6") {
+    if (choice === "7") {
       const issue = await promptRequiredIssue(prompt);
       const force = await confirm(prompt, "Force remove dirty workspace?");
       return force ? ["workspace", "remove", "--issue", issue, "--force"] : ["workspace", "remove", "--issue", issue];
     }
 
-    if (choice === "7") return ["--help"];
+    if (choice === "8") return ["--help"];
 
-    prompt.write?.("Invalid choice. Please choose 1-7.\n");
+    prompt.write?.("Invalid choice. Please choose 1-8.\n");
   }
 }
 
@@ -90,6 +92,14 @@ async function promptRequiredIssue(prompt: InteractivePrompt): Promise<string> {
     const issue = (await prompt.question("Issue: ")).trim();
     if (issue) return issue;
     prompt.write?.("Issue is required.\n");
+  }
+}
+
+async function promptRequiredPrNumber(prompt: InteractivePrompt): Promise<string> {
+  for (;;) {
+    const prNumber = (await prompt.question("PR number: ")).trim();
+    if (prNumber) return prNumber;
+    prompt.write?.("PR number is required.\n");
   }
 }
 
