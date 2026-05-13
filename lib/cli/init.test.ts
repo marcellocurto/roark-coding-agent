@@ -11,7 +11,7 @@ import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import { hydrateCliOptions } from "./hydrate.ts";
 import { roarkGitignoreContent, runInit } from "./init.ts";
-import { runProcessOrThrow } from "./process.ts";
+import { runProcess, runProcessOrThrow } from "./process.ts";
 
 const tempDirs: string[] = [];
 
@@ -68,6 +68,23 @@ describe("runInit", () => {
       hooks: { timeoutMs: defaultLifecycleHooks.timeoutMs },
       sandbox: { provider: "host" },
     });
+  });
+
+  test("canonicalizes inferred origin repos through GitHub before writing config", async () => {
+    const repo = await tempGitRepo();
+    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/old-name.git"], { cwd: repo });
+
+    await runInit({ command: "init", cwd: repo, force: false }, {
+      runner: async (args, options) => {
+        if (args.join(" ") === "gh repo view owner/old-name --json nameWithOwner --jq .nameWithOwner") {
+          return { exitCode: 0, stdout: "owner/new-name\n", stderr: "" };
+        }
+        return runProcess(args, options);
+      },
+    });
+
+    const config = await readConfig(repo);
+    expect(config["repo"]).toBe("owner/new-name");
   });
 
   test("generates config with inferred SSH origin and test fallback", async () => {

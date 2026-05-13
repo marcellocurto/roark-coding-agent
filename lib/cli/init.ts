@@ -41,10 +41,12 @@ logs/
 
 export async function runInit(options: InitCliOptions, deps: InitDependencies = {}): Promise<InitResult> {
   const runner = deps.runner ?? runProcess;
-  const repo = options.repo ?? (await inferRepoFromOrigin(options.cwd, runner));
-  if (!repo) {
+  const rawRepo = options.repo ?? (await inferRepoFromOrigin(options.cwd, runner));
+  if (!rawRepo) {
     throw new Error("Could not determine GitHub repository. Pass --repo owner/repo or set origin to a GitHub repository URL.");
   }
+  assertOwnerRepo(rawRepo);
+  const repo = options.repo ? rawRepo : await canonicalizeGitHubRepo(rawRepo, runner);
   assertOwnerRepo(repo);
 
   const verify = await inferVerifyCommand(options.cwd, runner);
@@ -78,6 +80,14 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
     repo,
     guidance,
   };
+}
+
+async function canonicalizeGitHubRepo(repo: string, runner: ProcessRunner): Promise<string> {
+  const result = await runner(["gh", "repo", "view", repo, "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
+  if (result.exitCode !== 0) return repo;
+
+  const canonical = result.stdout.trim();
+  return /^[^/\s]+\/[^/\s]+$/.test(canonical) ? canonical : repo;
 }
 
 function buildInitConfig(input: { repo: string; verify?: string | undefined; setupHook?: string | undefined }): InitRoarkConfig {
