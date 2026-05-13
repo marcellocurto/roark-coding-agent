@@ -4,7 +4,7 @@ import { createIssuesFromCurationPlan, type IssueCreationResults } from "../issu
 import { issueCurationPhase } from "../workflow/issue-curation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { formatAutorunPrBody, publishAutorunResult, updatePrBody, type AutorunPublishOptions, type FormatPrBodyFollowUpIssue } from "./publish.ts";
+import { publishAutorunResult, updatePrBodyWithAgent, type AutorunPublishOptions, type FormatPrBodyFollowUpIssue } from "./publish.ts";
 import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
 import {
   classifyVerificationFailure,
@@ -39,7 +39,7 @@ export interface RunPublishGateInjected {
   publishAutorunResult?: typeof publishAutorunResult | undefined;
   postPrIssueCreation?: ((input: { workflowContext: WorkflowContext; prUrl: string }) => Promise<IssueCreationResults | undefined>) | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
-  updatePrBody?: typeof updatePrBody | undefined;
+  updatePrBody?: typeof updatePrBodyWithAgent | undefined;
 }
 
 export async function runPublishGate(input: {
@@ -60,7 +60,7 @@ export async function runPublishGate(input: {
   const publishResult = injected.publishAutorunResult ?? publishAutorunResult;
   const postPrIssueCreation = injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
   const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-  const editPrBody = injected.updatePrBody ?? updatePrBody;
+  const editPrBody = injected.updatePrBody ?? updatePrBodyWithAgent;
 
   const readinessMarkdown = await readReadinessArtifact(workflowContext);
   const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
@@ -128,14 +128,14 @@ export async function runPublishGate(input: {
           cwd: options.cwd,
           repo: options.repo,
           pr: prUrl,
-          body: formatAutorunPrBody({
-            issueNumber: issue.number,
-            workflowContext,
-            verification,
-            attemptMetadata,
-            attemptMetadataPath,
-            followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
-          }),
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+          ...(issue.url ? { issueUrl: issue.url } : {}),
+          workflowContext,
+          verification,
+          attemptMetadata,
+          attemptMetadataPath,
+          followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
         });
       } catch (error) {
         console.warn(`Failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);

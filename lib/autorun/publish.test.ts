@@ -202,7 +202,7 @@ describe("publish git staging", () => {
 });
 
 describe("publishAutorunResult", () => {
-  test("uses agent cwd for git and control cwd for PR creation and issue labels", async () => {
+  test("uses agent cwd for git and control cwd for PR authoring agent and issue labels", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
     tempDirs.push(root);
     const controlCwd = path.join(root, "control");
@@ -235,6 +235,7 @@ describe("publishAutorunResult", () => {
     process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
     process.env["ROARK_GH_LOG"] = ghLog;
     try {
+      const agentRequests: { cwd: string; prompt: string; skillPaths?: string[] | undefined }[] = [];
       const prUrl = await publishAutorunResult({
         options: {
           cwd: controlCwd,
@@ -261,9 +262,18 @@ describe("publishAutorunResult", () => {
           maxFixPasses: 1,
           thinkingConfig: getWorkflowThinkingConfig(),
         },
+        agentRunner: (request) => {
+          agentRequests.push({ cwd: request.cwd, prompt: request.prompt, skillPaths: request.skillPaths });
+          return Promise.resolve(JSON.stringify({ url: "https://github.com/owner/repo/pull/1", title: "Fix bug" }));
+        },
       });
 
       expect(prUrl).toBe("https://github.com/owner/repo/pull/1");
+      expect(agentRequests).toHaveLength(1);
+      expect(agentRequests[0]?.cwd).toBe(controlCwd);
+      expect(agentRequests[0]?.skillPaths).toBeUndefined();
+      expect(agentRequests[0]?.prompt).toContain("Write the final PR title and body yourself");
+      expect(agentRequests[0]?.prompt).toContain("<branch>roark/issue-9</branch>");
     } finally {
       process.env["PATH"] = oldPath;
       if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
@@ -271,7 +281,7 @@ describe("publishAutorunResult", () => {
     }
 
     const ghCalls = await readFile(ghLog, "utf8");
-    expect(ghCalls).toContain(`${controlCwd}\tpr create`);
+    expect(ghCalls).not.toContain(`${controlCwd}\tpr create`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);
@@ -343,6 +353,7 @@ describe("publishAutorunResult", () => {
           maxFixPasses: 1,
           thinkingConfig: getWorkflowThinkingConfig(),
         },
+        agentRunner: () => Promise.resolve(JSON.stringify({ url: "https://github.com/owner/repo/pull/1", title: "Fix bug" })),
       });
     } finally {
       process.env["PATH"] = oldPath;

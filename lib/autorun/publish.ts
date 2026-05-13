@@ -1,6 +1,9 @@
 import type { AutoCliOptions } from "../cli/args.ts";
 import { readFileSync } from "node:fs";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { runPiAgent } from "../pi/agent.ts";
+import { prBodyUpdatePrompt, prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
+import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
@@ -119,6 +122,7 @@ export interface PublishAutorunResultInput {
   verification?: VerificationResult | undefined;
   attemptMetadata?: AttemptMetadata | undefined;
   attemptMetadataPath?: string | undefined;
+  agentRunner?: AgentRunner | undefined;
 }
 
 export function buildStageAllArgv(): string[] {
@@ -803,7 +807,7 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
 }
 
 export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
-  const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath } = input;
+  const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath, agentRunner = runPiAgent } = input;
   const agentCwd = workflowContext.agentCwd;
   const controlCwd = workflowContext.controlCwd;
 
@@ -829,26 +833,18 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
 
   await writePrNarrativeArtifact(workflowContext);
 
-  const body = formatAutorunPrBody({
-    issueNumber: issue.number,
+  console.log("- Authoring and creating pull request");
+  const publishedPr = await publishPullRequestWithAgent({
+    options,
+    issue,
+    branchPlan,
     workflowContext,
     verification,
     attemptMetadata,
     attemptMetadataPath,
+    agentRunner,
   });
-
-  console.log("- Creating pull request");
-  const prStdout = await runProcessOrThrow(
-    buildPrCreateArgv({
-      repo: options.repo,
-      baseBranch: options.baseBranch,
-      branchName: branchPlan.branchName,
-      title: issue.title,
-      body,
-    }),
-    { cwd: controlCwd, label: "gh pr create" },
-  );
-  const prUrl = prStdout.trim();
+  const prUrl = publishedPr.url;
   if (prUrl) console.log(`- PR: ${prUrl}`);
 
   try {
@@ -875,7 +871,127 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     }
   }
 
-  return prUrl || undefined;
+  return prUrl === "" ? undefined : prUrl;
+}
+
+interface PublishedPullRequest {
+  url: string;
+  title?: string | undefined;
+  number?: number | undefined;
+  stdout?: string | undefined;
+}
+
+async function publishPullRequestWithAgent(input: PublishAutorunResultInput & { agentRunner: AgentRunner }): Promise<PublishedPullRequest> {
+  const output = await input.agentRunner({
+    cwd: input.workflowContext.controlCwd,
+    model: input.workflowContext.model,
+    thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
+    systemPrompt: prPublishingSystemPrompt(),
+    prompt: prCreatePrompt({
+      context: input.workflowContext,
+      repo: input.options.repo,
+      sourceIssue: input.issue,
+      branchName: input.branchPlan.branchName,
+      baseBranch: input.options.baseBranch,
+      verification: input.verification,
+      attemptMetadata: input.attemptMetadata,
+      attemptMetadataPath: input.attemptMetadataPath,
+      artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
+    }),
+    writable: false,
+    observer: input.workflowContext.observer,
+    phase: "pr-publishing",
+  });
+  const parsed = parsePrPublishingAgentResponse(output);
+  if (!parsed.url) throw new Error("PR publishing agent response did not include a non-empty url.");
+  return parsed;
+}
+
+export async function updatePrBodyWithAgent(input: {
+  cwd: string;
+  repo?: string | undefined;
+  pr: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl?: string | undefined;
+  workflowContext: WorkflowContext;
+  verification?: VerificationResult | undefined;
+  attemptMetadata?: AttemptMetadata | undefined;
+  attemptMetadataPath?: string | undefined;
+  followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
+  agentRunner?: AgentRunner | undefined;
+}): Promise<void> {
+  const agentRunner = input.agentRunner ?? runPiAgent;
+  const output = await agentRunner({
+    cwd: input.cwd,
+    model: input.workflowContext.model,
+    thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
+    systemPrompt: prPublishingSystemPrompt(),
+    prompt: prBodyUpdatePrompt({
+      context: input.workflowContext,
+      repo: input.repo,
+      sourceIssue: { number: input.issueNumber, title: input.issueTitle, ...(input.issueUrl ? { url: input.issueUrl } : {}) },
+      branchName: input.attemptMetadata?.branch ?? `issue-${input.issueNumber}`,
+      baseBranch: input.attemptMetadata?.baseBranch ?? "unknown",
+      prUrl: input.pr,
+      verification: input.verification,
+      attemptMetadata: input.attemptMetadata,
+      attemptMetadataPath: input.attemptMetadataPath,
+      followUpIssues: input.followUpIssues,
+      artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
+    }),
+    writable: false,
+    observer: input.workflowContext.observer,
+    phase: "pr-body-update",
+  });
+  const result = parsePrBodyUpdateAgentResponse(output);
+  if (!result.updated) throw new Error(result.message ?? "PR body update agent did not report a successful update.");
+}
+
+function parsePrPublishingAgentResponse(output: string): PublishedPullRequest {
+  const parsed = parseAgentJson(output);
+  const url = asNonEmptyString(parsed["url"]);
+  const number = asInteger(parsed["number"]);
+  return {
+    ...(url ? { url } : { url: "" }),
+    ...(asNonEmptyString(parsed["title"]) ? { title: asNonEmptyString(parsed["title"]) } : {}),
+    ...(number !== undefined ? { number } : {}),
+    ...(asNonEmptyString(parsed["stdout"]) ? { stdout: asNonEmptyString(parsed["stdout"]) } : {}),
+  };
+}
+
+function parsePrBodyUpdateAgentResponse(output: string): { updated: boolean; message?: string | undefined } {
+  const parsed = parseAgentJson(output);
+  return {
+    updated: parsed["updated"] === true,
+    ...(asNonEmptyString(parsed["message"]) ? { message: asNonEmptyString(parsed["message"]) } : {}),
+  };
+}
+
+function parseAgentJson(output: string): Record<string, unknown> {
+  const trimmed = output.trim();
+  const jsonText = trimmed.startsWith("```") ? extractFencedJson(trimmed) : trimmed;
+  const parsed = JSON.parse(jsonText) as unknown;
+  if (!isRecord(parsed)) throw new Error("Agent response was not a JSON object.");
+  return parsed;
+}
+
+function extractFencedJson(output: string): string {
+  const match = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(output);
+  if (!match?.[1]) throw new Error("Agent response was fenced but did not contain JSON.");
+  return match[1];
+}
+
+function asNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function asInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export async function updatePrBody(input: {

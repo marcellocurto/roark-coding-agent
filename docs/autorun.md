@@ -2,7 +2,7 @@
 title: Autorun
 summary: End-to-end behavior of `roark auto`, including issue selection, claiming, gates, and PR publishing.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-05-13T00:00:00Z
 ---
 
 ```bash
@@ -20,8 +20,10 @@ roark auto --repo owner/repo --limit 1
 7. Apply the readiness gate.
 8. Run the verification gate.
 9. If verification fails and `maxFixPasses` has budget, repair through fix pass + final review + readiness, then rerun verification.
-10. On success, commit code changes, push the branch, and open a PR.
-11. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
+10. On success, commit code changes and push the branch.
+11. A PR publishing agent writes a reviewer-friendly PR title/body from the source issue, workflow artifacts, and verification result, then opens the PR.
+12. Reviewer-generated follow-up issues are created after the PR exists, and a PR body update agent adds their links while preserving the human-authored PR explanation.
+13. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
 
 ## Recommended posture
 
