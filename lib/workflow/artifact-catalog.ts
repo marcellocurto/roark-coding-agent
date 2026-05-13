@@ -5,6 +5,7 @@ export type StaticArtifactName =
   | "implementationPlan"
   | "preImplementationBaseline"
   | "implementationLog"
+  | "prNarrative"
   | "reviewA"
   | "reviewB"
   | "readiness"
@@ -60,6 +61,7 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "implementationPlan", filename: "implementation-plan.md", displayName: "Implementation Plan" },
   { name: "preImplementationBaseline", filename: "pre-implementation-baseline.json", displayName: "Pre-implementation Baseline" },
   { name: "implementationLog", filename: "implementation-log.md", displayName: "Implementation Log" },
+  { name: "prNarrative", filename: "pr-narrative.md", displayName: "PR Narrative" },
   { name: "reviewA", filename: "review-a.md", displayName: "Review A" },
   { name: "reviewB", filename: "review-b.md", displayName: "Review B" },
   { name: "readiness", filename: "readiness.md", displayName: "Readiness" },

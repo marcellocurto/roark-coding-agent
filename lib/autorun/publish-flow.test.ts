@@ -82,7 +82,7 @@ describe("verification repair planning", () => {
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
     expect(prBodyUpdates).toHaveLength(1);
-    expect(prBodyUpdates[0]).toContain("## Reviewer summary");
+    expect(prBodyUpdates[0]).toContain("## Before / After");
   });
 
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {

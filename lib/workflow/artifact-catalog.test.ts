@@ -22,6 +22,7 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   implementationPlan: "implementation-plan.md",
   preImplementationBaseline: "pre-implementation-baseline.json",
   implementationLog: "implementation-log.md",
+  prNarrative: "pr-narrative.md",
   reviewA: "review-a.md",
   reviewB: "review-b.md",
   readiness: "readiness.md",
