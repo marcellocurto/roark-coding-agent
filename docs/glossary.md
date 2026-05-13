@@ -57,6 +57,3 @@ A GitHub label that prevents `roark auto` from selecting an issue.
 
 The gate that runs the configured shell command and requires exit code `0`.
 
-## Workflow Skill
-
-A Roark-resolved skill used for a controlled workflow path, such as `github-issue-create`, without falling back to ambient global Pi skills.

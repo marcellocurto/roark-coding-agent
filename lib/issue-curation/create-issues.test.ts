@@ -69,10 +69,6 @@ describe("createIssuesFromCurationPlan", () => {
         await noopAsync();
         throw new Error("dry-run should not invoke an agent");
       },
-      skillResolver: async () => {
-        await noopAsync();
-        throw new Error("dry-run should not resolve skills");
-      },
     });
 
     expect(calls).toBe(0);
@@ -173,7 +169,6 @@ describe("createIssuesFromCurationPlan", () => {
       approvalReason: "autorun PR was opened",
       clock,
       labelEnsurer: async (options) => { await noopAsync(); ensured.push(options); },
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
         await noopAsync();
         expect(request.prompt).toContain("autorun PR was opened");
@@ -194,7 +189,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.created.map((entry) => entry.planItemId)).toEqual(["external-blocker-1", "follow-up-1"]);
   });
 
-  test("approved run uses the resolved issue-create skill through the agent runner", async () => {
+  test("approved run uses the issue-authoring publishing agent without loading a skill", async () => {
         await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
@@ -204,13 +199,12 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
         await noopAsync();
         requests.push(request);
         return JSON.stringify({
           created: [
-            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+            { planItemId: "external-blocker-1", title: "Clear blocker title", url: "https://github.com/owner/repo/issues/300", number: 300 },
             { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
           ],
           failed: [],
@@ -220,11 +214,13 @@ describe("createIssuesFromCurationPlan", () => {
     });
 
     expect(requests).toHaveLength(1);
-    expect(requests[0]?.skillPaths).toEqual([path.join(context.agentCwd, "skills", "github-issue-create")]);
+    expect(requests[0]?.skillPaths).toBeUndefined();
     expect(requests[0]?.writable).toBe(false);
-    expect(requests[0]?.prompt).toContain("Read and follow the available `github-issue-create` skill");
+    expect(requests[0]?.prompt).toContain("write the final GitHub issue title and body yourself");
+    expect(requests[0]?.prompt).toContain("Do not copy the plan's proposedBody as the final body");
     expect(requests[0]?.prompt).toContain("external-blocker-1");
     expect(result.created.map((entry) => entry.number)).toEqual([300, 301]);
+    expect(result.created[0]?.title).toBe("Clear blocker title");
     expect(result.relationshipOutcomes).toEqual([{ planItemId: "external-blocker-1", status: "not-requested", message: "No native relationship was requested for this plan item." }]);
   });
 
@@ -241,7 +237,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async (request) => {
         await noopAsync();
         requests.push(request);
@@ -275,8 +270,7 @@ describe("createIssuesFromCurationPlan", () => {
         context,
         clock,
         labelEnsurer: false,
-        skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
-        agentRunner: async (request) => {
+          agentRunner: async (request) => {
         await noopAsync();
           thinkingLevels.push(request.thinkingLevel);
           return JSON.stringify({
@@ -303,7 +297,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [],
@@ -325,7 +318,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
         failed: [
@@ -350,7 +342,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [
           { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
@@ -375,7 +366,6 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async (cwd) => (await noopAsync(), path.join(cwd, "skills", "github-issue-create")),
       agentRunner: async () => (await noopAsync(), JSON.stringify({
         created: [
           { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
@@ -390,28 +380,28 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.failed[0]?.message).toContain("without a non-empty message");
   });
 
-  test("missing resolved skill fails before invoking the publishing agent", async () => {
+  test("publishing agent failures are recorded for every creatable issue", async () => {
   await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     let agentCalls = 0;
 
-    expect(createIssuesFromCurationPlan({
+    const result = await createIssuesFromCurationPlan({
       context,
       clock,
       labelEnsurer: false,
-      skillResolver: async () => {
-        await noopAsync();
-        throw new Error("Repo override skill 'github-issue-create' is missing or incomplete at /repo/.roark/skills/github-issue-create: missing SKILL.md.");
-      },
       agentRunner: async () => {
         await noopAsync();
         agentCalls += 1;
-        return "{}";
+        throw new Error("publishing agent failed");
       },
-    })).rejects.toThrow("Repo override skill 'github-issue-create' is missing or incomplete");
-    expect(agentCalls).toBe(0);
-    expect(artifactExists(context, "issueCreationResults")).toBe(false);
+    });
+
+    expect(agentCalls).toBe(1);
+    expect(result.created).toEqual([]);
+    expect(result.failed).toHaveLength(2);
+    expect(result.failed[0]?.message).toBe("publishing agent failed");
+    expect(artifactExists(context, "issueCreationResults")).toBe(true);
   });
 
   test("records partial failures from an injected process runner while preserving successes", async () => {

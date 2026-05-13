@@ -45,7 +45,6 @@
       "title": "Development",
       "items": [
         { "title": "Architecture", "path": "architecture.md" },
-        { "title": "Workflow Skills", "path": "workflow-skills.md" },
         { "title": "Versioning", "path": "versioning.md" },
         { "title": "Docs Maintenance", "path": "docs-maintenance.md" }
       ]

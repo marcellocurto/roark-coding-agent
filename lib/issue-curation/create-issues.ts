@@ -1,7 +1,6 @@
 import type { ProcessResult } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
-import { resolveGithubIssueCreateSkillPath } from "../skills/skill-resolver.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import {
   artifactAgentPath,
@@ -99,11 +98,10 @@ export interface CreateIssuesOptions {
   context: WorkflowContext;
   /**
    * Test-only/direct publisher override retained for low-level gh argv coverage.
-   * Product create-issues runs use agentRunner with the resolved Roark skill.
+   * Product create-issues runs use agentRunner so the LLM authors and publishes final issues.
    */
   runner?: ProcessRunner | undefined  ;
   agentRunner?: AgentRunner | undefined;
-  skillResolver?: ((cwd: string) => Promise<string>) | undefined;
   clock?: { now(): Date } | undefined;
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
@@ -149,7 +147,7 @@ export async function createIssuesPhase(context: WorkflowContext, agentRunner: A
 }
 
 export async function createIssuesFromCurationPlan(options: CreateIssuesOptions): Promise<IssueCreationResults> {
-  const { context, runner, agentRunner = runPiAgent, skillResolver = resolveGithubIssueCreateSkillPath, clock = issueCreationDefaultClock } = options;
+  const { context, runner, agentRunner = runPiAgent, clock = issueCreationDefaultClock } = options;
   const approved = options.approved ?? context.yes;
   const approvalReason = options.approvalReason ?? (context.yes ? "The user passed --yes" : "An internal caller explicitly approved publishing");
   const plan = await readIssueCurationPlan(context);
@@ -233,14 +231,13 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
 
   const publishResult = runner
     ? await publishIssuesDirectlyWithProcessRunner(context, creatable, runner)
-    : await publishIssuesWithResolvedSkill({
+    : await publishIssuesWithAgent({
       context,
       sourcePlanPath,
       promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
       promptResultPath: artifactAgentPath(context, "issueCreationResults"),
       creatable,
       agentRunner,
-      skillResolver,
       approvalReason,
     });
 
@@ -318,21 +315,19 @@ async function publishIssuesDirectlyWithProcessRunner(
   return { createdCurrentRun, failed, relationshipOutcomes: [] };
 }
 
-async function publishIssuesWithResolvedSkill(input: {
+async function publishIssuesWithAgent(input: {
   context: WorkflowContext;
   sourcePlanPath: string;
   promptSourcePlanPath: string;
   promptResultPath: string;
   creatable: ValidPlanItem[];
   agentRunner: AgentRunner;
-  skillResolver: (cwd: string) => Promise<string>;
   approvalReason: string;
 }): Promise<PublishResult> {
-  const { context, sourcePlanPath, promptSourcePlanPath, promptResultPath, creatable, agentRunner, skillResolver, approvalReason } = input;
+  const { context, sourcePlanPath, promptSourcePlanPath, promptResultPath, creatable, agentRunner, approvalReason } = input;
   if (creatable.length === 0) return { createdCurrentRun: [], failed: [], relationshipOutcomes: [] };
 
-  const skillPath = await skillResolver(context.agentCwd);
-  console.log(`\n=== Create issues from ${sourcePlanPath} with skill ${skillPath} ===`);
+  console.log(`\n=== Author and create issues from ${sourcePlanPath} ===`);
 
   try {
     const output = await agentRunner({
@@ -348,14 +343,13 @@ async function publishIssuesWithResolvedSkill(input: {
         allowedItems: creatable.map((item) => ({
           planItemId: item.planItemId,
           kind: item.kind,
-          title: item.title,
+          suggestedTitle: item.title,
           labels: labelsForPlanItem(item),
         })),
       }),
       writable: false,
       observer: context.observer,
       phase: "issue-publishing",
-      skillPaths: [skillPath],
     });
     return toPublishResult(parseIssuePublishingAgentResponse(output), creatable);
   } catch (error) {
@@ -400,7 +394,7 @@ function toPublishResult(agentResult: ReturnType<typeof parseIssuePublishingAgen
     return {
       planItemId,
       kind: item.kind,
-      title: item.title,
+      title: asNonEmptyString(entry["title"]) ?? item.title,
       ...(asNonEmptyString(entry["url"]) ? { url: asNonEmptyString(entry["url"]) } : {}),
       ...(number !== undefined ? { number } : {}),
       ...(asNonEmptyString(entry["stdout"]) ? { stdout: asNonEmptyString(entry["stdout"]) } : {}),
@@ -591,13 +585,14 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
 
   const planItemId = asNonEmptyString(raw["planItemId"]);
   const title = asNonEmptyString(raw["proposedTitle"]);
-  const body = typeof raw["proposedBody"] === "string" && raw["proposedBody"].trim() !== "" ? raw["proposedBody"] : undefined;
+  const body = typeof raw["proposedBody"] === "string" && raw["proposedBody"].trim() !== ""
+    ? raw["proposedBody"]
+    : fallbackDirectPublishBody(planItemId ?? fallbackId, title);
   const missing = [
     ...(planItemId ? [] : ["planItemId"]),
     ...(title ? [] : ["proposedTitle"]),
-    ...(body ? [] : ["proposedBody"]),
   ];
-  if (missing.length > 0 || !planItemId || !title || !body) {
+  if (missing.length > 0 || !planItemId || !title) {
     return { skipped: malformedSkip(planItemId ?? fallbackId, kind, title, `Missing required field(s): ${missing.join(", ")}.`) };
   }
 
@@ -610,6 +605,10 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
       labels: Array.isArray(raw["proposedLabels"]) ? raw["proposedLabels"].filter((label): label is string => typeof label === "string") : [],
     },
   };
+}
+
+function fallbackDirectPublishBody(planItemId: string, title: string | undefined): string {
+  return `Reviewer-generated issue${title ? `: ${title}` : ""}.\n\nPlan item: ${planItemId}\n\nNo legacy proposedBody was recorded. Approved agent publishing writes the final issue body from the curation plan; this fallback is only for direct process-runner publishing.`;
 }
 
 function malformedSkip(planItemId: string, kind: IssueCreationSkippedKind, title: string | undefined, message: string): IssueCreationSkippedEntry {

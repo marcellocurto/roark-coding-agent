@@ -286,21 +286,52 @@ function buildIssuePlanItems(input: {
 }
 
 function classificationExplanation(classification: IssuePlanClassification): string {
-  if (classification === "external-blocker") return "External blocker: reviewers classified this as prerequisite or external work needed to explain why the current issue could not proceed normally.";
-  if (classification === "suggestion") return "Suggestion: reviewers classified this as optional improvement work that should be triaged by a human before implementation.";
-  return "Non-blocking follow-up: reviewers classified this as future work separate from the current issue.";
+  if (classification === "external-blocker") return "A reviewer found prerequisite or external work that may explain why the source issue could not proceed normally.";
+  if (classification === "suggestion") return "A reviewer flagged this as optional improvement work that should be triaged by a human before implementation.";
+  return "A reviewer found follow-up work that is separate from the completed source issue.";
 }
 
 function buildProposedIssueBody(input: { item: IssuePlanItem }): string {
   const issue = input.item.sourceIssueContext;
   const issueLink = issue.url ? ` (${issue.url})` : "";
   const attempt = input.item.runContext.attempt === undefined ? "not specified" : String(input.item.runContext.attempt);
-  const prLine = input.item.runContext.prUrl ? `- Pull request: ${input.item.runContext.prUrl}\n` : "";
+  const prLine = input.item.runContext.prUrl ? `- Related PR: ${input.item.runContext.prUrl}\n` : "";
+  const triage = triageRecommendation(input.item.classification);
   const nonGoals = input.item.classification === "follow-up" || input.item.classification === "suggestion"
-    ? "\n## Non-goals\n- Do not rework the already-completed source issue beyond this generated issue's scope.\n- Do not broaden this into an unrelated repository audit.\n"
+    ? "\n## Non-goals\n\n- Do not rework the already-completed source issue beyond this issue's scope.\n- Do not broaden this into an unrelated repository audit.\n"
     : "";
 
-  return `## Source\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n- Source finding IDs: ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n\n## Why Roark created this candidate\n${input.item.whyBlockingOrNonBlocking}\n\n## Evidence\n${input.item.evidence.map((evidence) => `- ${evidence}`).join("\n")}\n\n## Impact\n${input.item.impact}\n\n## Recommended handling\n${input.item.recommendedHandling.map((handling) => `- ${handling}`).join("\n")}\n\n## Run artifacts\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n${nonGoals}`;
+  return `## Summary\n\n${summarySentence(input.item.proposedTitle)}\n\n## Why this issue exists\n\n${input.item.whyBlockingOrNonBlocking}\n\n## What the reviewer observed\n\n${input.item.evidence.map((evidence) => `- ${evidence}`).join("\n")}\n\n## Impact\n\n${input.item.impact}\n\n## Suggested fix\n\n${input.item.recommendedHandling.map((handling) => `- ${handling}`).join("\n")}\n\n## Acceptance criteria\n\n- The behavior described in “What the reviewer observed” is addressed for the cited code paths.\n- The suggested fix above is completed, or the issue is closed with a clear explanation of why no change is needed.\n- Relevant validation is updated or documented so this gap is less likely to recur.\n- Existing relevant checks continue to pass.\n\n## Triage recommendation\n\nPriority: ${triage.priority}  \nType: ${triage.type}  \nRecommended action: ${triage.recommendedAction}\n\n## Context\n\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Reviewer finding(s): ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n\n<details>\n<summary>Run artifacts</summary>\n\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n\n</details>\n${nonGoals}`;
+}
+
+function summarySentence(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) return "Address the reviewer finding described below.";
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function triageRecommendation(classification: IssuePlanClassification): { priority: string; type: string; recommendedAction: string } {
+  if (classification === "external-blocker") {
+    return {
+      priority: "High if it is still blocking the source issue; otherwise triage manually",
+      type: "External blocker / prerequisite work",
+      recommendedAction: "Resolve or explicitly dismiss this prerequisite before relying on the completed source issue work.",
+    };
+  }
+
+  if (classification === "suggestion") {
+    return {
+      priority: "Low",
+      type: "Optional improvement",
+      recommendedAction: "Implement if the added protection or clarity is worth the cost; otherwise close as not planned.",
+    };
+  }
+
+  return {
+    priority: "Medium",
+    type: "Non-blocking follow-up",
+    recommendedAction: "Implement as a focused follow-up when it fits the roadmap; keep it separate from the completed source issue.",
+  };
 }
 
 async function readOptionalArtifact(

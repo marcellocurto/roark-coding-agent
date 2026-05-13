@@ -117,7 +117,6 @@ Common topics:
 - [Scheduling](docs/scheduling.md) — cron, launchd, and GitHub Actions examples.
 - [Security and secrets](docs/security-and-secrets.md) — secret handling and untrusted input boundaries.
 - [Labels](docs/labels.md) — GitHub label roles and defaults.
-- [Workflow skills](docs/workflow-skills.md) — bundled and repo-local skill behavior.
 - [Architecture](docs/architecture.md) — contributor-level internals.
 - [Versioning](docs/versioning.md) — SemVer policy, changelog expectations, and release checklist.
 - [Glossary](docs/glossary.md) — term definitions.

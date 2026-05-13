@@ -79,8 +79,17 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.proposedTitle).toBe("Document retry edge case for users");
     expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "follow-up"]);
     expect(item?.sourceFindingIds).toEqual(["review-a:F1"]);
+    expect(item?.proposedBody.startsWith("## Summary\n\nDocument retry edge case for users.")).toBe(true);
+    expect(item?.proposedBody).toContain("## Why this issue exists");
+    expect(item?.proposedBody).toContain("## What the reviewer observed");
+    expect(item?.proposedBody).toContain("## Suggested fix");
+    expect(item?.proposedBody).toContain("## Acceptance criteria");
+    expect(item?.proposedBody).toContain("## Triage recommendation");
+    expect(item?.proposedBody).toContain("<summary>Run artifacts</summary>");
     expect(item?.proposedBody).toContain("## Non-goals");
     expect(item?.proposedBody).toContain("Source issue: #42 Source issue title");
+    expect(item?.proposedBody).not.toContain("## Source");
+    expect(item?.proposedBody).not.toContain("Why Roark created this candidate");
   });
 
   test("numbered autorun review artifacts are used when present", async () => {
@@ -119,7 +128,7 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.planItemId).toBe("external-blocker-1");
     expect(item?.classification).toBe("external-blocker");
     expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "external-blocker"]);
-    expect(item?.whyBlockingOrNonBlocking).toContain("External blocker");
+    expect(item?.whyBlockingOrNonBlocking).toContain("prerequisite or external work");
   });
 
   test("suggestion findings become issues while must-fix-current findings are rejected", async () => {
@@ -253,7 +262,7 @@ describe("buildIssueCurationPlan", () => {
 
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/99");
     expect(item?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/99");
-    expect(item?.proposedBody).toContain("Pull request: https://github.com/owner/repo/pull/99");
+    expect(item?.proposedBody).toContain("Related PR: https://github.com/owner/repo/pull/99");
     expect(item?.proposedBody).toContain("Classification: suggestion");
   });
 

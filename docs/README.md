@@ -49,7 +49,6 @@ For the full first-run path, read [Quickstart](quickstart.md).
 ## Development
 
 - [Architecture](architecture.md) - contributor-level module and workflow overview.
-- [Workflow skills](workflow-skills.md) - bundled and repo-local skill resolution.
 - [Versioning](versioning.md) - SemVer policy, changelog expectations, and release checklist.
 - [Docs maintenance](docs-maintenance.md) - checks to keep docs aligned with CLI behavior.
 
@@ -65,7 +64,7 @@ Read [Operations runbook](operations-runbook.md), [Autorun](autorun.md), [Recove
 
 ### Contributor
 
-Read [Architecture](architecture.md), [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), [Workflow skills](workflow-skills.md), [Versioning](versioning.md), and [Docs maintenance](docs-maintenance.md).
+Read [Architecture](architecture.md), [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), [Versioning](versioning.md), and [Docs maintenance](docs-maintenance.md).
 
 ## Navigation Metadata
 

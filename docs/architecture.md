@@ -155,6 +155,5 @@ bun run typecheck
 
 ## Next Steps
 
-- Use [Workflow skills](workflow-skills.md) for skill resolution details.
 - Use [Artifacts](artifacts.md) for durable state contracts.
 - Use [CLI reference](cli-reference.md) when command behavior changes.

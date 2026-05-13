@@ -16,36 +16,36 @@ describe("Pi agent settings", () => {
   });
 
   test("explicit skill paths do not re-enable ambient skill discovery", () => {
-    expect(buildRoarkResourceLoaderSecurityOptions(["/repo/skills/github-issue-create"])).toEqual({
+    expect(buildRoarkResourceLoaderSecurityOptions(["/repo/skills/example-skill"])).toEqual({
       noExtensions: true,
       noPromptTemplates: true,
       noSkills: true,
-      additionalSkillPaths: ["/repo/skills/github-issue-create"],
+      additionalSkillPaths: ["/repo/skills/example-skill"],
     });
   });
 
   test("surfaces resource loading errors before an agent session starts", () => {
-    expect(() => { assertNoResourceLoadErrors([{ type: "error", message: "missing skill", path: "/repo/skills/github-issue-create" }], "skill"); })
-      .toThrow("Pi skill loading failed: error: missing skill (/repo/skills/github-issue-create)");
+    expect(() => { assertNoResourceLoadErrors([{ type: "error", message: "missing skill", path: "/repo/skills/example-skill" }], "skill"); })
+      .toThrow("Pi skill loading failed: error: missing skill (/repo/skills/example-skill)");
   });
 
   test("fails before an agent session starts when a requested skill path did not load", () => {
-    expect(() => { assertRequestedSkillsLoaded([], ["/repo/skills/github-issue-create"], [{
+    expect(() => { assertRequestedSkillsLoaded([], ["/repo/skills/example-skill"], [{
       type: "warning",
       message: "Flow sequence in block collection must be sufficiently indented",
-      path: "/repo/skills/github-issue-create/SKILL.md",
-    }]); }).toThrow("requested skill path(s) did not load: /repo/skills/github-issue-create");
+      path: "/repo/skills/example-skill/SKILL.md",
+    }]); }).toThrow("requested skill path(s) did not load: /repo/skills/example-skill");
   });
 
   test("accepts requested skill paths that loaded at least one skill", () => {
     expect(() => { assertRequestedSkillsLoaded([{
-      name: "github-issue-create",
-      description: "Create GitHub issues.",
-      filePath: "/repo/skills/github-issue-create/SKILL.md",
-      baseDir: "/repo/skills/github-issue-create",
+      name: "example-skill",
+      description: "Example skill.",
+      filePath: "/repo/skills/example-skill/SKILL.md",
+      baseDir: "/repo/skills/example-skill",
       sourceInfo: {} as never,
       disableModelInvocation: false,
-    }], ["/repo/skills/github-issue-create"]); }).not.toThrow();
+    }], ["/repo/skills/example-skill"]); }).not.toThrow();
   });
 });
 
