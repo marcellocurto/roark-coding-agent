@@ -453,7 +453,7 @@ yes
     expect(body).toContain("- Query behavior could change for empty filter values.");
   });
 
-  test("reports failed verification status and exit code", () => {
+  test("reports failed verification status and exit code without checking verification as acceptance criteria", () => {
     const body = formatPrBody({
       issueNumber: 9,
       verification: failedVerification,
@@ -463,6 +463,7 @@ yes
 
     expect(body).toContain("- `bun run typecheck` — failed");
     expect(body).toContain("  - Exit code: 2");
+    expect(body).not.toContain("- [x] Verification completed as recorded below.");
   });
 
   test("sanitizes verification commands", () => {

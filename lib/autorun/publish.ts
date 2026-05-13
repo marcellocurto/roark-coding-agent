@@ -215,7 +215,6 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   lines.push("");
   appendChecklistSection(lines, "## Acceptance criteria", narrative?.acceptanceCriteria, [
     `Implementation satisfies the source issue #${input.issueNumber}.`,
-    "Verification completed as recorded below.",
   ]);
   lines.push("");
   appendOrderedSection(lines, "## Suggested review path", narrative?.reviewPath, [
