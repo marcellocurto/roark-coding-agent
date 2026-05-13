@@ -390,7 +390,7 @@ describe("formatPrBody", () => {
     expect(body).toContain("## Risk");
     expect(body).toContain("## Follow-up issues");
     expect(body).toContain("- None recorded in this PR body at creation time.");
-    expect(body).toContain("### Workflow artifacts");
+    expect(body).toContain("### Key workflow artifacts");
     expect(body).toContain("These artifacts are local control-plane state and are not committed to this PR branch.");
     expect(body).toContain("- `.roark/runs/issue/9/readiness.md`");
     expect(body).toContain("- `.roark/runs/issue/9/verification.md`");
@@ -449,7 +449,7 @@ yes
     expect(body).toContain("- Root cause: The tender list loader ignored the status query parameter, so users saw unfiltered results.");
     expect(body).toContain("- Fix: Added status filter handling to the tender query.");
     expect(body).toContain("- [x] Thread the status filter into the tender query builder.");
-    expect(body).toContain("Behavior:\n- `lib/tenders/query.ts`");
+    expect(body).toContain("Primary output:\n- `lib/tenders/query.ts`");
     expect(body).toContain("- Query behavior could change for empty filter values.");
   });
 
@@ -537,7 +537,7 @@ yes
     expect(body).not.toContain("/repo");
     expect(body).toContain("- Metadata: `.roark/runs/issue/10/attempts/2/attempt.json`");
     // Attempt block precedes the artifacts list.
-    expect(body.indexOf("### Attempt")).toBeLessThan(body.indexOf("### Workflow artifacts"));
+    expect(body.indexOf("### Attempt")).toBeLessThan(body.indexOf("### Key workflow artifacts"));
     expect(body).toContain("- `.roark/runs/issue/10/attempts/2/readiness.md`");
   });
 
