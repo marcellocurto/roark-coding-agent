@@ -43,12 +43,14 @@ function localPathEnd(value: string, index: number): number | undefined {
   if (!isPathBoundary(value[index - 1])) return undefined;
 
   if (value.slice(index, index + fileUriPrefix.length).toLowerCase() === fileUriPrefix) {
-    const end = scanPathEnd(value, index + fileUriPrefix.length);
-    return end > index + fileUriPrefix.length ? end : undefined;
+    const pathStart = index + fileUriPrefix.length;
+    const end = scanPathEnd(value, pathStart);
+    const path = value.slice(pathStart, end);
+    return end > pathStart && isLikelyLocalPathPrefix(path) ? end : undefined;
   }
 
   if (isWindowsPathStart(value, index)) return scanPathEnd(value, index);
-  if (value[index] === "/" && value[index + 1] !== "/") return scanPathEnd(value, index);
+  if (value[index] === "/" && value[index + 1] !== "/" && isLikelyLocalPathPrefix(value.slice(index))) return scanPathEnd(value, index);
 
   return undefined;
 }

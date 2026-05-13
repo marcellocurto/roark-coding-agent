@@ -73,6 +73,7 @@ export interface FormatPrBodyNarrativeFilesChanged {
 
 export interface FormatPrBodyNarrative {
   issueTitle?: string | undefined;
+  workClassification?: string | undefined;
   summary?: string | undefined;
   before?: string[] | undefined;
   after?: string[] | undefined;
@@ -198,17 +199,22 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   lines.push("");
   appendBeforeAfterSection(lines, narrative, input.issueNumber);
   lines.push("");
-  appendBulletSection(lines, "## Root cause / Fix", [
-    ...prefixedItems("Root cause", narrative?.rootCause),
-    ...prefixedItems("Fix", narrative?.fix),
-  ], [
-    "Root cause: not recorded in the PR narrative artifact.",
-    "Fix: review the implementation log artifact to confirm the change.",
-  ]);
+  if (usesRootCauseTemplate(narrative)) {
+    appendBulletSection(lines, "## Root cause / Fix", [
+      ...prefixedItems("Root cause", narrative?.rootCause),
+      ...prefixedItems("Fix", narrative?.fix),
+    ], [
+      "Root cause: not recorded in the PR narrative artifact.",
+      "Fix: review the implementation log artifact to confirm the change.",
+    ]);
+  } else {
+    appendBulletSection(lines, "## Implementation", nonEmptyItems(narrative?.fix), [
+      "Review the implementation log artifact to confirm the change.",
+    ]);
+  }
   lines.push("");
   appendChecklistSection(lines, "## Acceptance criteria", narrative?.acceptanceCriteria, [
     `Implementation satisfies the source issue #${input.issueNumber}.`,
-    "Verification completed as recorded below.",
   ]);
   lines.push("");
   appendOrderedSection(lines, "## Suggested review path", narrative?.reviewPath, [
@@ -231,21 +237,21 @@ export function formatPrBody(input: FormatPrBodyInput): string {
   }
   for (const note of nonEmptyItems(narrative?.verificationNotes)) lines.push(`- ${note}`);
   lines.push("");
-  const manualVerification = nonEmptyItems(narrative?.manualVerification);
+  const manualVerification = withoutNoneItems(narrative?.manualVerification);
   if (manualVerification.length > 0) {
     appendOrderedSection(lines, "## Manual verification", manualVerification, []);
     lines.push("");
   }
   lines.push("## Risk");
-  const risks = nonEmptyItems(narrative?.risks);
+  const risks = withoutNoneItems(narrative?.risks);
   if (risks.length > 0) for (const risk of risks) lines.push(`- ${risk}`);
   else lines.push("- No specific risks were recorded in the PR narrative artifact.");
-  const edgeCases = nonEmptyItems(narrative?.edgeCases);
+  const edgeCases = withoutNoneItems(narrative?.edgeCases).filter((edgeCase) => !risks.includes(edgeCase));
   if (edgeCases.length > 0) {
     lines.push("- Edge cases to review:");
     for (const edgeCase of edgeCases) lines.push(`  - ${edgeCase}`);
   }
-  const reviewerQuestions = nonEmptyItems(narrative?.reviewerQuestions);
+  const reviewerQuestions = withoutNoneItems(narrative?.reviewerQuestions);
   if (reviewerQuestions.length > 0) {
     lines.push("");
     appendBulletSection(lines, "## Reviewer questions", reviewerQuestions, []);
@@ -290,12 +296,13 @@ export function formatPrBody(input: FormatPrBodyInput): string {
     }
   }
   lines.push("");
-  lines.push("### Workflow artifacts");
+  lines.push("### Key workflow artifacts");
   lines.push("These artifacts are local control-plane state and are not committed to this PR branch.");
-  if (input.artifactPaths.length === 0) {
+  const keyArtifactPaths = keyPrBodyArtifactPaths(input.artifactPaths);
+  if (keyArtifactPaths.length === 0) {
     lines.push(`- \`${input.runDirRelative}/\``);
   } else {
-    for (const artifactPath of input.artifactPaths) {
+    for (const artifactPath of keyArtifactPaths) {
       lines.push(`- \`${artifactPath}\``);
     }
   }
@@ -341,8 +348,8 @@ function appendFilesChangedSection(lines: string[], filesChanged: FormatPrBodyNa
     lines.push("- See the workflow artifacts for the changed file list.");
     return;
   }
-  appendFileCategory(lines, "Behavior", filesChanged.behavior);
-  appendFileCategory(lines, "Tests", filesChanged.tests);
+  appendFileCategory(lines, "Primary output", filesChanged.behavior);
+  appendFileCategory(lines, "Validation", filesChanged.tests);
   appendFileCategory(lines, "Plumbing", filesChanged.plumbing);
   appendFileCategory(lines, "Docs", filesChanged.docs);
   appendFileCategory(lines, "Other", filesChanged.other);
@@ -366,6 +373,23 @@ function prefixedItems(prefix: string, items: string[] | undefined): string[] {
 
 function nonEmptyItems(items: string[] | undefined): string[] {
   return (items ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
+}
+
+function withoutNoneItems(items: string[] | undefined): string[] {
+  return nonEmptyItems(items).filter((item) => !isNoneItem(item));
+}
+
+function isNoneItem(item: string): boolean {
+  return /^(?:none|not applicable|n\/a|not run|unknown)[.!]?$/i.test(item.trim());
+}
+
+function keyPrBodyArtifactPaths(paths: string[]): string[] {
+  const keyNames = new Set(["implementation-plan.md", "implementation-log.md", "pr-narrative.md", "readiness.md", "verification.md"]);
+  return paths.filter((artifactPath) => keyNames.has(artifactPath.split("/").pop() ?? ""));
+}
+
+function usesRootCauseTemplate(narrative: FormatPrBodyNarrative | undefined): boolean {
+  return !["docs-config", "test-only"].includes(narrative?.workClassification ?? "");
 }
 
 function stripCheckboxMarker(item: string): string {
@@ -427,39 +451,39 @@ function buildPrNarrativeFromWorkflowArtifacts(context: WorkflowContext): Format
   const implementationMarkdown = readArtifactTextIfExists(context, "implementationLog");
 
   const issueTitle = issueMarkdown ? extractIssueTitle(issueMarkdown) : undefined;
+  const workClassification = firstItem(summarizeMarkdownSection(planMarkdown, "Work Classification", 1));
   const goal = summarizeMarkdownSection(planMarkdown, "Goal", 2);
   const currentFindings = summarizeMarkdownSection(planMarkdown, "Current Code Findings", 4);
-  const proposedChanges = summarizeMarkdownSection(planMarkdown, "Proposed Changes", 5);
+  const proposedChanges = summarizeMarkdownSection(planMarkdown, "Proposed Changes", 8);
   const nonGoals = summarizeMarkdownSection(planMarkdown, "Non-Goals", 4);
   const risks = summarizeMarkdownSection(planMarkdown, "Risks", 4);
   const implementationSummary = summarizeMarkdownSection(implementationMarkdown, "Summary", 4);
   const changedFiles = summarizeMarkdownSection(implementationMarkdown, "Changed Files", 20).map(extractFileReference);
 
   const summary = buildSummary({ issueTitle, currentFindings, implementationSummary, proposedChanges, goal });
+  const beforeFindings = selectReviewerBeforeItems(currentFindings);
   const before = compactItems([
-    ...currentFindings,
-    ...(currentFindings.length === 0 && issueTitle ? [`The source issue reported: ${issueTitle}.`] : []),
+    ...beforeFindings,
+    ...(beforeFindings.length === 0 && issueTitle ? [`The source issue reported: ${issueTitle}.`] : []),
   ]);
   const after = compactItems([
     ...implementationSummary,
     ...(implementationSummary.length === 0 ? proposedChanges : []),
   ]);
-  const rootCause = compactItems(currentFindings);
+  const rootCause = compactItems(beforeFindings.length > 0 ? beforeFindings : currentFindings.slice(0, 1));
   const fix = compactItems([...implementationSummary, ...(implementationSummary.length === 0 ? proposedChanges : [])]);
-  const acceptanceCriteria = compactItems([...goal, ...proposedChanges]).slice(0, 6);
+  const acceptanceCriteria = buildAcceptanceCriteria(goal, proposedChanges, implementationSummary);
   const reviewPath = compactItems([
     changedFiles.length > 0 ? `Start with ${changedFiles.slice(0, 4).map((file) => `\`${file}\``).join(", ")} to verify the core change.` : undefined,
     goal[0] ? `Confirm the behavior satisfies the issue goal: ${goal[0]}` : undefined,
     nonGoals.length > 0 ? `Confirm scope stayed inside the important non-changes: ${nonGoals.join("; ")}.` : undefined,
     "Check the verification result and any edge cases listed below.",
   ]);
-  const verificationNotes = [
-    "Confirms the configured repository check command completed successfully when the status below is passed.",
-    "Does not replace reviewer judgment on product behavior, edge cases, or production data assumptions.",
-  ];
+  const verificationNotes = buildVerificationNotes(changedFiles);
 
   return {
     issueTitle,
+    workClassification,
     summary,
     before,
     after,
@@ -471,8 +495,8 @@ function buildPrNarrativeFromWorkflowArtifacts(context: WorkflowContext): Format
     importantNonChanges: nonGoals,
     verificationNotes,
     manualVerification: [],
-    risks: risks.length > 0 ? risks : ["No specific risks were recorded in the implementation plan."],
-    edgeCases: compactItems([...risks, ...nonGoals]).slice(0, 4),
+    risks: risks.length > 0 ? risks : [],
+    edgeCases: [],
     reviewerQuestions: [],
   };
 }
@@ -480,6 +504,7 @@ function buildPrNarrativeFromWorkflowArtifacts(context: WorkflowContext): Format
 function parsePrNarrativeArtifact(markdown: string): FormatPrBodyNarrative {
   return {
     issueTitle: firstItem(summarizeMarkdownSection(markdown, "Issue Title", 1)),
+    workClassification: firstItem(summarizeMarkdownSection(markdown, "Work Classification", 1)),
     summary: firstItem(summarizeMarkdownSection(markdown, "Summary", 1)),
     before: summarizeMarkdownSection(markdown, "Before", 6),
     after: summarizeMarkdownSection(markdown, "After", 6),
@@ -488,8 +513,14 @@ function parsePrNarrativeArtifact(markdown: string): FormatPrBodyNarrative {
     acceptanceCriteria: summarizeMarkdownSection(markdown, "Acceptance Criteria", 10).map(stripCheckboxMarker),
     reviewPath: summarizeMarkdownSection(markdown, "Suggested Review Path", 10),
     filesChanged: {
-      behavior: summarizeMarkdownSection(markdown, "Files Changed: Behavior", 20).map(extractFileReference),
-      tests: summarizeMarkdownSection(markdown, "Files Changed: Tests", 20).map(extractFileReference),
+      behavior: [
+        ...summarizeMarkdownSection(markdown, "Files Changed: Primary Output", 20),
+        ...summarizeMarkdownSection(markdown, "Files Changed: Behavior", 20),
+      ].map(extractFileReference),
+      tests: [
+        ...summarizeMarkdownSection(markdown, "Files Changed: Validation", 20),
+        ...summarizeMarkdownSection(markdown, "Files Changed: Tests", 20),
+      ].map(extractFileReference),
       plumbing: summarizeMarkdownSection(markdown, "Files Changed: Plumbing", 20).map(extractFileReference),
       docs: summarizeMarkdownSection(markdown, "Files Changed: Docs", 20).map(extractFileReference),
       other: summarizeMarkdownSection(markdown, "Files Changed: Other", 20).map(extractFileReference),
@@ -511,6 +542,9 @@ function formatPrNarrativeArtifact(narrative: FormatPrBodyNarrative): string {
     "## Issue Title",
     narrative.issueTitle ?? "Not recorded.",
     "",
+    "## Work Classification",
+    narrative.workClassification ?? "unknown",
+    "",
     "## Summary",
     narrative.summary ?? "Not recorded.",
     "",
@@ -526,9 +560,9 @@ function formatPrNarrativeArtifact(narrative: FormatPrBodyNarrative): string {
     "",
     ...markdownNumberedSection("Suggested Review Path", narrative.reviewPath),
     "",
-    ...markdownBulletSection("Files Changed: Behavior", filesChanged.behavior),
+    ...markdownBulletSection("Files Changed: Primary Output", filesChanged.behavior),
     "",
-    ...markdownBulletSection("Files Changed: Tests", filesChanged.tests),
+    ...markdownBulletSection("Files Changed: Validation", filesChanged.tests),
     "",
     ...markdownBulletSection("Files Changed: Plumbing", filesChanged.plumbing),
     "",
@@ -558,17 +592,69 @@ function buildSummary(input: {
   proposedChanges: string[];
   goal: string[];
 }): string | undefined {
-  const subject = input.issueTitle ? `The source issue was ${input.issueTitle}` : "The source issue described behavior that needed correction";
-  const cause = input.currentFindings[0] ? ` ${input.currentFindings[0]}` : "";
-  const fix = input.implementationSummary[0] ?? input.proposedChanges[0] ?? input.goal[0];
-  if (!fix) return ensureSentence(subject);
-  return normalizePrItem(`${ensureSentence(subject)}${cause ? ` The likely cause/context was: ${ensureSentence(cause)}` : ""} The fix is: ${ensureSentence(fix)}`);
+  const primaryChange = input.implementationSummary[0] ?? input.proposedChanges[0] ?? input.goal[0];
+  const before = selectReviewerBeforeItems(input.currentFindings)[0];
+  if (!primaryChange) return input.issueTitle ? normalizePrItem(`This PR addresses ${ensureSentence(input.issueTitle)}`) : undefined;
+  const sentences = [`This PR ${pastTenseForSummary(primaryChange)}`];
+  if (before) sentences.push(`Previously, ${lowercaseFirst(ensureSentence(before))}`);
+  return normalizePrItem(sentences.join(" "));
+}
+
+function selectReviewerBeforeItems(items: string[]): string[] {
+  const meaningful = items.filter((item) => /\b(no|not|missing|without|lacked|lacks|absent|did not|does not|was not|were not)\b/i.test(item));
+  return (meaningful.length > 0 ? meaningful : items).filter((item) => !isImplementationTrivia(item)).slice(0, 3);
+}
+
+function isImplementationTrivia(item: string): boolean {
+  return /\b(public\/ exists|Next serves|middleware matcher|proxy\.ts|lib\/public-site-paths|matcher excludes)\b/i.test(item);
+}
+
+function buildAcceptanceCriteria(goal: string[], proposedChanges: string[], implementationSummary: string[]): string[] {
+  const raw = compactItems([...goal, ...proposedChanges, ...implementationSummary]);
+  const criteria: string[] = [];
+  for (let index = 0; index < raw.length; index += 1) {
+    const item = raw[index] ?? "";
+    if (/including:\s*$/i.test(item)) {
+      const details: string[] = [];
+      for (let detailIndex = index + 1; detailIndex < raw.length && details.length < 5; detailIndex += 1) {
+        const detail = raw[detailIndex] ?? "";
+        if (isFragmentDetail(detail)) {
+          details.push(detail.replace(/[.!]$/, ""));
+          index = detailIndex;
+          continue;
+        }
+        break;
+      }
+      criteria.push(details.length > 0 ? `${item.replace(/:\s*$/, "")}: ${details.join(", ")}.` : item.replace(/:\s*$/, "."));
+      continue;
+    }
+    if (isFragmentDetail(item) && criteria.length > 0) continue;
+    criteria.push(item);
+  }
+  return compactItems(criteria).slice(0, 5);
+}
+
+function isFragmentDetail(item: string): boolean {
+  return item.length <= 80 && !/[.!?]$/.test(item) && !/^\w+\s+(?:the|a|an|to|for|with|from|in|on)\b/i.test(item);
+}
+
+function buildVerificationNotes(changedFiles: string[]): string[] {
+  const validationFiles = changedFiles.filter((file) => /(^scripts\/|check|test|spec)/i.test(file));
+  if (validationFiles.length === 0) return [];
+  return [`Validation updates cover ${validationFiles.map((file) => `\`${file}\``).join(", ")}.`];
+}
+
+function pastTenseForSummary(value: string): string {
+  const sentence = ensureSentence(value);
+  if (/^(added|updated|changed|removed|fixed|published|created)\b/i.test(sentence)) return lowercaseFirst(sentence);
+  return `implements ${lowercaseFirst(sentence)}`;
 }
 
 function categorizeChangedFiles(files: string[]): FormatPrBodyNarrativeFilesChanged {
   const categorized = emptyFilesChanged();
   for (const file of files) {
-    if (/(__tests__|\.test\.|\.spec\.)/i.test(file)) categorized.tests.push(file);
+    if (/(__tests__|\.test\.|\.spec\.|^scripts\/|check)/i.test(file)) categorized.tests.push(file);
+    else if (/^public\//i.test(file)) categorized.behavior.push(file);
     else if (/\.(md|mdx|txt)$/i.test(file)) categorized.docs.push(file);
     else if (/^(app|pages|routes|src\/app|lib\/cli|lib\/autorun|lib\/workflow)\//.test(file)) categorized.plumbing.push(file);
     else if (/^(components|lib|src|server|api)\//.test(file)) categorized.behavior.push(file);
@@ -607,6 +693,11 @@ function extractFileReference(value: string): string {
     .replace(/^`(.+)`$/, "$1")
     .split(/\s+[—–-]\s+|:\s+/)[0]
     ?.trim() ?? value.trim();
+}
+
+function lowercaseFirst(value: string): string {
+  if (value.length === 0) return value;
+  return `${value.charAt(0).toLocaleLowerCase()}${value.slice(1)}`;
 }
 
 function ensureSentence(value: string): string {
@@ -682,7 +773,7 @@ function normalizePrItem(item: string | undefined): string | undefined {
     .replace(/`{3,}/g, "`")
     .replace(/\s+/g, " ")
     .trim();
-  if (!normalized || /^(?:none|not applicable|n\/a|not run|unknown)$/i.test(normalized)) return undefined;
+  if (!normalized || isNoneItem(normalized)) return undefined;
   return normalized.length > 360 ? `${normalized.slice(0, 357).trimEnd()}...` : normalized;
 }
 

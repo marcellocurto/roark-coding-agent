@@ -33,8 +33,9 @@ describe("redactLocalPaths", () => {
     expect(redactLocalPaths("cwd /Users/alice/My Repo failed")).toBe("cwd [local path redacted] failed");
   });
 
-  test("preserves web URLs", () => {
+  test("preserves web URLs, site paths, and repo-relative paths", () => {
     expect(redactLocalPaths("https://github.com/owner/repo/issues/1")).toBe("https://github.com/owner/repo/issues/1");
+    expect(redactLocalPaths("serve /llms.txt and /pricing from public/llms.txt")).toBe("serve /llms.txt and /pricing from public/llms.txt");
   });
 });
 
