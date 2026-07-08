@@ -27,6 +27,8 @@ describe("PR publishing prompts", () => {
 
     expect(prompt).toContain("Write the final PR title and body yourself");
     expect(prompt).toContain("Do not copy a deterministic PR body template or artifact dump");
+    expect(prompt).toContain("Before the regular PR body sections, add a top-level `## Simple summary` section");
+    expect(prompt).toContain("busy maintainer");
     expect(prompt).toContain("Closes #12");
     expect(prompt).toContain("<branch>roark/issue-12</branch>");
     expect(prompt).toContain("Return only JSON");
@@ -58,6 +60,7 @@ describe("PR publishing prompts", () => {
 
     expect(prompt).toContain("Fetch the current PR title/body with gh before editing");
     expect(prompt).toContain("Preserve the existing human-authored PR explanation");
+    expect(prompt).toContain("add or update a top-level `## Simple summary` section");
     expect(prompt).toContain("#80 https://github.com/owner/repo/issues/80");
     expect(prompt).toContain("Do not replace the PR body with a deterministic template or artifact dump");
   });

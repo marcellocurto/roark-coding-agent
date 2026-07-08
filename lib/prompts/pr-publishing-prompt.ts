@@ -41,6 +41,7 @@ ${formatArtifactPaths(input.artifactPaths)}
     <instruction>Preflight gh, authentication, and target repository before creating the PR.</instruction>
     <instruction>Read the source issue and workflow artifacts needed to understand what changed. Start with ${artifactRelativePath(input.context, "issue")}, ${artifactRelativePath(input.context, "implementationPlan")}, ${artifactRelativePath(input.context, "implementationLog")}, ${artifactRelativePath(input.context, "readiness")}, and ${artifactRelativePath(input.context, "verification")} when present.</instruction>
     <instruction>Write the final PR title and body yourself. Do not copy a deterministic PR body template or artifact dump as the final body.</instruction>
+    <instruction>Before the regular PR body sections, add a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what Roark did, what happened, what changed, the result, and what the human should do next if anything.</instruction>
     <instruction>Write for a human code reviewer. Lead with what changed, why it changed, how to review it, verification, and risks/non-goals. Put automation details and artifact links at the bottom in a collapsed details block.</instruction>
     <instruction>Do not invent facts, scope, tests, files, risks, or follow-up work. If the artifacts are thin, say so plainly and keep the body concise.</instruction>
     <instruction>The PR body must include a closing reference for the source issue: Closes #${input.sourceIssue.number}.</instruction>
@@ -69,6 +70,7 @@ ${formatArtifactPaths(input.artifactPaths)}
   <instructions>
     <instruction>Fetch the current PR title/body with gh before editing.</instruction>
     <instruction>Preserve the existing human-authored PR explanation unless it is clearly stale according to the workflow artifacts.</instruction>
+    <instruction>Before the regular PR body sections, add or update a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what Roark did, what happened, what changed, the result, and what the human should do next if anything.</instruction>
     <instruction>Update the Follow-up issues section with the follow-up issues listed above. If there are none, state that none were created at PR creation time.</instruction>
     <instruction>Update or add collapsed automation details for current run metadata, verification, ledger comments, and key workflow artifacts.</instruction>
     <instruction>Do not replace the PR body with a deterministic template or artifact dump.</instruction>

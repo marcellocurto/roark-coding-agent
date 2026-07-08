@@ -25,6 +25,8 @@ describe("issuePublishingPrompt", () => {
     expect(prompt).toContain("Do not create issues for rejected candidates");
     expect(prompt).toContain("write the final GitHub issue title and body yourself");
     expect(prompt).toContain("Do not copy the plan's proposedBody as the final body");
+    expect(prompt).toContain("Before the regular issue body sections, add a top-level `## Simple summary` section");
+    expect(prompt).toContain("busy maintainer");
     expect(prompt).toContain("Summary, Why this issue exists, Impact, Suggested fix, Acceptance criteria, Risks / non-goals, Context");
     expect(prompt).toContain("search likely duplicates");
     expect(prompt).toContain("follow-up-1");

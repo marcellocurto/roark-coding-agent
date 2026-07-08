@@ -33,6 +33,7 @@ ${allowedItemsJson}
   <issue_authoring_instructions>
     <instruction>Read \`${sourcePlanPath}\` and create issues only for the allowed planItemId values above.</instruction>
     <instruction>For each allowed item, write the final GitHub issue title and body yourself from the structured context in the curation plan: source issue, related PR, reviewer finding IDs, classification, evidence, impact, recommended handling, non-goals, and run artifacts.</instruction>
+    <instruction>Before the regular issue body sections, add a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what the issue is, why it matters, what should change, and what the human should do next if anything.</instruction>
     <instruction>Do not copy the plan's proposedBody as the final body. Treat proposedBody, if present, only as legacy fallback context. The created GitHub issue should read like a maintainer-authored issue, not a stitched artifact dump.</instruction>
     <instruction>Do not invent facts, severity, requirements, labels, relationships, acceptance criteria, or implementation details. If the evidence is limited, say so plainly and keep the scope narrow.</instruction>
     <instruction>Use a concise, action-oriented title. The allowed item suggestedTitle is a starting point; improve it if a clearer title is obvious from the plan context.</instruction>
