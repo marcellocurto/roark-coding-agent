@@ -2,16 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ProcessResult } from "../cli/process.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
 import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
 
-import {
-  buildIssueCreateArgv,
-  createIssuesFromCurationPlan,
-  type ProcessRunner,
-} from "./create-issues.ts";
+import { createIssuesFromCurationPlan } from "./create-issues.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
@@ -19,33 +14,6 @@ const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
 
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
-});
-
-describe("buildIssueCreateArgv", () => {
-  test("builds gh issue create argv with needs-triage, labels, and repo", () => {
-    expect(buildIssueCreateArgv({
-      repo: "owner/repo",
-      title: "Follow-up",
-      body: "Body",
-      labels: ["follow-up", "needs-triage", " follow-up ", ""],
-    })).toEqual([
-      "gh",
-      "issue",
-      "create",
-      "--title",
-      "Follow-up",
-      "--body",
-      "Body",
-      "--label",
-      "needs-triage",
-      "--label",
-      "needs-human",
-      "--label",
-      "follow-up",
-      "--repo",
-      "owner/repo",
-    ]);
-  });
 });
 
 describe("createIssuesFromCurationPlan", () => {
@@ -56,22 +24,15 @@ describe("createIssuesFromCurationPlan", () => {
     plan.issuesToCreate.push({ planItemId: "bad", proposedTitle: "Bad" } as never);
     await writeJsonArtifact(context, "issueCurationPlan", plan);
 
-    let calls = 0;
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
-      runner: async () => {
-        await noopAsync();
-        calls += 1;
-        return okProcess("unexpected");
-      },
       agentRunner: async () => {
         await noopAsync();
         throw new Error("dry-run should not invoke an agent");
       },
     });
 
-    expect(calls).toBe(0);
     expect(artifactExists(context, "issueCreationResults")).toBe(false);
     expect(result.dryRun).toBe(true);
     expect(result.wouldCreate.map((item) => item.planItemId)).toEqual(["external-blocker-1", "follow-up-1"]);
@@ -128,34 +89,6 @@ describe("createIssuesFromCurationPlan", () => {
     }]);
     expect(result.counts.acceptedPlanItems).toBe(1);
     expect(result.counts.skippedMalformed).toBe(1);
-  });
-
-  test("approved run creates blocking and follow-up items sequentially with an injected process runner", async () => {
-    const context = await tempContext({ yes: true });
-    const plan = basePlan();
-    await writeJsonArtifact(context, "issueCurationPlan", plan);
-    const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
-      calls.push(args);
-      return okProcess(`https://github.com/owner/repo/issues/${100 + calls.length}\n`);
-    };
-
-    const result = await createIssuesFromCurationPlan({ context, runner, clock });
-
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual(buildIssueCreateArgv({
-      repo: "owner/repo",
-      title: "Blocking tracker",
-      body: plan.issuesToCreate[0]?.proposedBody ?? "",
-      labels: ["external-blocker"],
-    }));
-    expect(calls[1]).toContain("follow-up");
-    expect(calls[0]?.[calls[0].indexOf("--body") + 1]).toContain("Source issue: #12 Source title");
-    expect(calls[0]?.[calls[0].indexOf("--body") + 1]).toContain("Reviewer source(s): review-a");
-    expect(result.created.map((entry) => entry.number)).toEqual([101, 102]);
-    expect(result.failed).toEqual([]);
-    expect((JSON.parse(await readArtifact(context, "issueCreationResults")) as { created: unknown[] }).created).toHaveLength(2);
   });
 
   test("internal approval can publish with label preflight while context.yes is false", async () => {
@@ -404,17 +337,23 @@ describe("createIssuesFromCurationPlan", () => {
     expect(artifactExists(context, "issueCreationResults")).toBe(true);
   });
 
-  test("records partial failures from an injected process runner while preserving successes", async () => {
-        await noopAsync();
+  test("records partial agent-publishing failures while preserving successes", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-    const runner: ProcessRunner = async (_args) => {
-      await noopAsync();
-      if (_args.includes("Follow-up tracker")) return { stdout: "", stderr: "rate limited", exitCode: 1 };
-      return okProcess("https://github.com/owner/repo/issues/200\n");
-    };
 
-    const result = await createIssuesFromCurationPlan({ context, runner, clock });
+    const result = await createIssuesFromCurationPlan({
+      context,
+      clock,
+      labelEnsurer: false,
+      agentRunner: async () => {
+        await noopAsync();
+        return JSON.stringify({
+          created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/200", number: 200 }],
+          failed: [{ planItemId: "follow-up-1", message: "rate limited" }],
+          relationshipOutcomes: [],
+        });
+      },
+    });
 
     expect(result.created.map((entry) => entry.planItemId)).toEqual(["external-blocker-1"]);
     expect(result.failed).toEqual([{ planItemId: "follow-up-1", kind: "follow-up", title: "Follow-up tracker", message: "rate limited" }]);
@@ -424,7 +363,6 @@ describe("createIssuesFromCurationPlan", () => {
   });
 
   test("rerun skips already-created plan item IDs unless forced", async () => {
-        await noopAsync();
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     await writeJsonArtifact(context, "issueCreationResults", {
@@ -432,31 +370,46 @@ describe("createIssuesFromCurationPlan", () => {
       created: [{ planItemId: "external-blocker-1", kind: "external-blocker", title: "Blocking tracker", url: "https://github.com/owner/repo/issues/10" }],
     });
 
-    const calls: string[][] = [];
-    await createIssuesFromCurationPlan({
+    let agentCalls = 0;
+    const rerun = await createIssuesFromCurationPlan({
       context,
       clock,
-      runner: async (args) => {
+      labelEnsurer: false,
+      agentRunner: async () => {
         await noopAsync();
-        calls.push(args);
-        return okProcess("https://github.com/owner/repo/issues/11\n");
+        agentCalls += 1;
+        return JSON.stringify({
+          created: [{ planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/11", number: 11 }],
+          failed: [],
+          relationshipOutcomes: [],
+        });
       },
     });
-    expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("Follow-up tracker");
+    expect(agentCalls).toBe(1);
+    expect(rerun.created.filter((entry) => entry.source === "current-run").map((entry) => entry.planItemId)).toEqual(["follow-up-1"]);
+    expect(rerun.skipped.map((entry) => entry.planItemId)).toContain("external-blocker-1");
 
     const forcedContext = await tempContext({ yes: true, force: true, reuseDir: context.controlCwd });
-    const forcedCalls: string[][] = [];
-    await createIssuesFromCurationPlan({
+    let forcedAgentCalls = 0;
+    const forced = await createIssuesFromCurationPlan({
       context: forcedContext,
       clock,
-      runner: async (args) => {
+      labelEnsurer: false,
+      agentRunner: async () => {
         await noopAsync();
-        forcedCalls.push(args);
-        return okProcess("https://github.com/owner/repo/issues/12\n");
+        forcedAgentCalls += 1;
+        return JSON.stringify({
+          created: [
+            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/12", number: 12 },
+            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/13", number: 13 },
+          ],
+          failed: [],
+          relationshipOutcomes: [],
+        });
       },
     });
-    expect(forcedCalls).toHaveLength(2);
+    expect(forcedAgentCalls).toBe(1);
+    expect(forced.counts.createdCurrentRun).toBe(2);
   });
 });
 
@@ -530,8 +483,4 @@ function planItem(id: string, title: string, labels: string[], classification: "
     },
     proposedLabels: labels,
   };
-}
-
-function okProcess(stdout: string): ProcessResult {
-  return { stdout, stderr: "", exitCode: 0 };
 }

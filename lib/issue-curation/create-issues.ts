@@ -1,4 +1,3 @@
-import type { ProcessResult } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
@@ -12,15 +11,6 @@ import {
 } from "../workflow/artifacts.ts";
 import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
 import { ensureReviewerIssueLabels, reviewerIssueClassificationLabels, reviewerIssueHumanLabels } from "./labels.ts";
-
-export interface IssueCreateArgvOptions {
-  repo?: string | undefined  ;
-  title: string;
-  body: string;
-  labels?: string[] | undefined;
-}
-
-export type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
 
 export interface IssueCreationCreatedEntry {
   planItemId: string;
@@ -96,11 +86,6 @@ export interface IssueCreationResults {
 
 export interface CreateIssuesOptions {
   context: WorkflowContext;
-  /**
-   * Test-only/direct publisher override retained for low-level gh argv coverage.
-   * Product create-issues runs use agentRunner so the LLM authors and publishes final issues.
-   */
-  runner?: ProcessRunner | undefined  ;
   agentRunner?: AgentRunner | undefined;
   clock?: { now(): Date } | undefined;
   approved?: boolean | undefined;
@@ -115,28 +100,10 @@ interface ValidPlanItem {
   kind: IssuePlanKind;
   planItemId: string;
   title: string;
-  body: string;
   labels: string[];
 }
 
 const issueCreationDefaultClock = { now: () => new Date() };
-
-export function buildIssueCreateArgv(options: IssueCreateArgvOptions): string[] {
-  const labels = normalizeLabels([...reviewerIssueHumanLabels, ...(options.labels ?? [])]);
-  const labelArgs = labels.flatMap((label) => ["--label", label]);
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return [
-    "gh",
-    "issue",
-    "create",
-    "--title",
-    options.title,
-    "--body",
-    options.body,
-    ...labelArgs,
-    ...repoArgs,
-  ];
-}
 
 export async function createIssuesPhase(context: WorkflowContext, agentRunner: AgentRunner = runPiAgent): Promise<IssueCreationResults> {
   const result = await createIssuesFromCurationPlan({ context, agentRunner });
@@ -147,7 +114,7 @@ export async function createIssuesPhase(context: WorkflowContext, agentRunner: A
 }
 
 export async function createIssuesFromCurationPlan(options: CreateIssuesOptions): Promise<IssueCreationResults> {
-  const { context, runner, agentRunner = runPiAgent, clock = issueCreationDefaultClock } = options;
+  const { context, agentRunner = runPiAgent, clock = issueCreationDefaultClock } = options;
   const approved = options.approved ?? context.yes;
   const approvalReason = options.approvalReason ?? (context.yes ? "The user passed --yes" : "An internal caller explicitly approved publishing");
   const plan = await readIssueCurationPlan(context);
@@ -199,7 +166,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     return result;
   }
 
-  if (creatable.length > 0 && !runner) {
+  if (creatable.length > 0) {
     const labelEnsurer = options.labelEnsurer ?? ensureReviewerIssueLabels;
     if (labelEnsurer !== false) {
       try {
@@ -229,9 +196,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     }
   }
 
-  const publishResult = runner
-    ? await publishIssuesDirectlyWithProcessRunner(context, creatable, runner)
-    : await publishIssuesWithAgent({
+  const publishResult = await publishIssuesWithAgent({
       context,
       sourcePlanPath,
       promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
@@ -239,7 +204,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
       creatable,
       agentRunner,
       approvalReason,
-    });
+  });
 
   const result = buildResult({
     context,
@@ -266,53 +231,6 @@ interface PublishResult {
   createdCurrentRun: IssueCreationCreatedEntry[];
   failed: IssueCreationFailedEntry[];
   relationshipOutcomes: IssueCreationRelationshipOutcomeEntry[];
-}
-
-async function publishIssuesDirectlyWithProcessRunner(
-  context: WorkflowContext,
-  creatable: ValidPlanItem[],
-  runner: ProcessRunner,
-): Promise<PublishResult> {
-  const createdCurrentRun: IssueCreationCreatedEntry[] = [];
-  const failed: IssueCreationFailedEntry[] = [];
-
-  console.log(`\n=== Create issues from ${artifactRelativePath(context, "issueCurationPlan")} ===`);
-  for (const item of creatable) {
-    const argv = buildIssueCreateArgv({ repo: context.repo, title: item.title, body: item.body, labels: labelsForPlanItem(item) });
-    console.log(`- Creating ${item.planItemId}: ${item.title}`);
-    try {
-      const processResult = await runner(argv, { cwd: context.agentCwd });
-      if (processResult.exitCode !== 0) {
-        failed.push({
-          planItemId: item.planItemId,
-          kind: item.kind,
-          title: item.title,
-          message: processResult.stderr.trim() || processResult.stdout.trim() || `gh issue create exited with code ${processResult.exitCode}`,
-        });
-        continue;
-      }
-
-      const parsed = parseCreatedIssue(processResult.stdout);
-      createdCurrentRun.push({
-        planItemId: item.planItemId,
-        kind: item.kind,
-        title: item.title,
-        ...(parsed.url ? { url: parsed.url } : {}),
-        ...(parsed.number !== undefined ? { number: parsed.number } : {}),
-        ...(processResult.stdout.trim() ? { stdout: processResult.stdout.trim() } : {}),
-        source: "current-run",
-      });
-    } catch (error) {
-      failed.push({
-        planItemId: item.planItemId,
-        kind: item.kind,
-        title: item.title,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return { createdCurrentRun, failed, relationshipOutcomes: [] };
 }
 
 async function publishIssuesWithAgent(input: {
@@ -585,9 +503,6 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
 
   const planItemId = asNonEmptyString(raw["planItemId"]);
   const title = asNonEmptyString(raw["proposedTitle"]);
-  const body = typeof raw["proposedBody"] === "string" && raw["proposedBody"].trim() !== ""
-    ? raw["proposedBody"]
-    : fallbackDirectPublishBody(planItemId ?? fallbackId, title);
   const missing = [
     ...(planItemId ? [] : ["planItemId"]),
     ...(title ? [] : ["proposedTitle"]),
@@ -601,14 +516,9 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
       kind,
       planItemId,
       title,
-      body,
       labels: Array.isArray(raw["proposedLabels"]) ? raw["proposedLabels"].filter((label): label is string => typeof label === "string") : [],
     },
   };
-}
-
-function fallbackDirectPublishBody(planItemId: string, title: string | undefined): string {
-  return `Reviewer-generated issue${title ? `: ${title}` : ""}.\n\nPlan item: ${planItemId}\n\nNo legacy proposedBody was recorded. Approved agent publishing writes the final issue body from the curation plan; this fallback is only for direct process-runner publishing.`;
 }
 
 function malformedSkip(planItemId: string, kind: IssueCreationSkippedKind, title: string | undefined, message: string): IssueCreationSkippedEntry {
@@ -690,16 +600,6 @@ function normalizeLabels(labels: string[]): string[] {
     normalized.push(trimmed);
   }
   return normalized;
-}
-
-function parseCreatedIssue(stdout: string): { url?: string | undefined; number?: number } {
-  const url = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => /^https?:\/\//.test(line));
-  if (!url) return {};
-  const numberMatch = /\/issues\/(\d+)(?:[/?#]|$)/.exec(url);
-  return { url, ...(numberMatch?.[1] ? { number: Number(numberMatch[1]) } : {}) };
 }
 
 function printDryRunSummary(context: WorkflowContext, result: IssueCreationResults): void {

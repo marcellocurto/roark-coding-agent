@@ -31,6 +31,7 @@ import {
   planWorkflowProgression,
   type WorkflowProgressionAction,
 } from "./progression.ts";
+import type { SinglePhaseCommand, StandaloneWorkflowPhase, WorkflowRunPhase } from "./phase-vocabulary.ts";
 import {
   codeRefinementTask,
   type CodeRefinementSource,
@@ -227,7 +228,7 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
     }
 
     if (next.type === "run") {
-      await runProgressionPhase(context, runner, next);
+      await runWorkflowPhase(context, runner, next.phase, next.pass);
       completedActions.push(next);
       continue;
     }
@@ -248,23 +249,31 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
   }
 }
 
-async function runProgressionPhase(
+async function runWorkflowPhase(
   context: WorkflowContext,
   runner: AgentRunner,
-  action: Extract<WorkflowProgressionAction, { type: "run" }>,
+  phase: WorkflowRunPhase,
+  pass?: number,
 ): Promise<void> {
-  if (action.phase === "fetch") await fetchIssuePhase(context);
-  else if (action.phase === "triage") await triagePhase(context, runner);
-  else if (action.phase === "plan-draft") await planDraftPhase(context, runner);
-  else if (action.phase === "plan") await planPhase(context, runner);
-  else if (action.phase === "capture-baseline") await captureBaselinePhase(context);
-  else if (action.phase === "implement") await implementationPhase(context, runner, action.pass ?? 0);
-  else if (action.phase === "refine-code") await codeRefinementPhase(context, action.pass, runner);
-  else if (action.phase === "review-a") await runAgentTask(context, runner, reviewATaskForPass(action.pass ?? 0));
-  else if (action.phase === "review-b") await runAgentTask(context, runner, reviewBTaskForPass(action.pass ?? 0));
-  else if (action.phase === "fix") await fixPhase(context, action.pass, runner);
-  else if (action.phase === "reset-baseline") await resetBaselinePhase(context, action.pass ?? 1);
-  else await finalReviewPhase(context, action.pass, runner);
+  switch (phase) {
+    case "fetch": await fetchIssuePhase(context); return;
+    case "triage": await triagePhase(context, runner); return;
+    case "plan-draft": await planDraftPhase(context, runner); return;
+    case "plan": await planPhase(context, runner); return;
+    case "capture-baseline": await captureBaselinePhase(context); return;
+    case "implement": await implementationPhase(context, runner, pass ?? 0); return;
+    case "refine-code": await codeRefinementPhase(context, pass, runner); return;
+    case "review-a": await runAgentTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
+    case "review-b": await runAgentTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
+    case "fix": await fixPhase(context, pass, runner); return;
+    case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
+    case "final-review": await finalReviewPhase(context, pass, runner); return;
+    default: return assertNever(phase);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unsupported workflow phase '${String(value)}'.`);
 }
 
 function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
@@ -318,23 +327,13 @@ function assertAttemptSelectedWhenAttemptsExist(context: WorkflowContext, comman
 
 export async function runSinglePhase(
   context: WorkflowContext,
-  phase: string,
+  phase: SinglePhaseCommand,
   runner: AgentRunner = runPiAgent,
 ): Promise<void> {
   context.observer ??= createFileRunObserver(context);
   await context.observer.runStarted({ command: phase });
   try {
-    if (phase === "fetch") await fetchIssuePhase(context);
-    else if (phase === "triage") await triagePhase(context, runner);
-    else if (phase === "plan-draft") await planDraftPhase(context, runner);
-    else if (phase === "plan") await planPhase(context, runner);
-    else if (phase === "capture-baseline") await captureBaselinePhase(context);
-    else if (phase === "implement") await implementationPhase(context, runner);
-    else if (phase === "refine-code") await codeRefinementPhase(context, context.fixPass ?? inferNextRefinementPass(context), runner);
-    else if (phase === "review") await reviewPhase(context, context.fixPass ?? inferNextReviewPass(context), runner);
-    else if (phase === "fix") await fixPhase(context, context.fixPass ?? inferNextFixPass(context), runner);
-    else if (phase === "reset-baseline") await resetBaselinePhase(context, context.fixPass ?? 1);
-    else if (phase === "final-review") await finalReviewPhase(context, context.fixPass ?? inferNextFinalReviewPass(context), runner);
+    if (phase === "review") await reviewPhase(context, context.fixPass ?? inferNextReviewPass(context), runner);
     else if (phase === "readiness") await readinessPhase(context);
     else if (phase === "curate-issues") {
       assertAttemptSelectedWhenAttemptsExist(context, "curate-issues");
@@ -344,10 +343,18 @@ export async function runSinglePhase(
       assertAttemptSelectedWhenAttemptsExist(context, "create-issues");
       await createIssuesPhase(context, runner);
     }
-    else throw new Error(`Unsupported phase '${phase}'.`);
+    else await runWorkflowPhase(context, runner, phase, standalonePhasePass(context, phase));
     await context.observer.runCompleted({ status: "completed" });
   } catch (error) {
     await context.observer.runFailed(error);
     throw error;
   }
+}
+
+function standalonePhasePass(context: WorkflowContext, phase: StandaloneWorkflowPhase): number | undefined {
+  if (phase === "refine-code") return context.fixPass ?? inferNextRefinementPass(context);
+  if (phase === "fix") return context.fixPass ?? inferNextFixPass(context);
+  if (phase === "reset-baseline") return context.fixPass ?? 1;
+  if (phase === "final-review") return context.fixPass ?? inferNextFinalReviewPass(context);
+  return undefined;
 }

@@ -7,23 +7,9 @@ import {
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
 import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig, WorkspaceRemoveTarget } from "../autorun/workspace.ts";
 import type { ThinkingProfileName } from "../workflow/thinking.ts";
+import { singlePhaseCommands, type SinglePhaseCommand } from "../workflow/phase-vocabulary.ts";
 
-export type IssueWorkflowCommand =
-  | "do"
-  | "fetch"
-  | "triage"
-  | "plan-draft"
-  | "plan"
-  | "capture-baseline"
-  | "implement"
-  | "refine-code"
-  | "review"
-  | "fix"
-  | "reset-baseline"
-  | "final-review"
-  | "readiness"
-  | "curate-issues"
-  | "create-issues";
+export type IssueWorkflowCommand = "do" | SinglePhaseCommand;
 
 export type ContinueCommand = "continue";
 export type StatusCommand = "status";
@@ -253,20 +239,7 @@ export type RawCliOptions =
 
 const issueCommands = new Set<IssueWorkflowCommand>([
   "do",
-  "fetch",
-  "triage",
-  "plan-draft",
-  "plan",
-  "capture-baseline",
-  "implement",
-  "refine-code",
-  "review",
-  "fix",
-  "reset-baseline",
-  "final-review",
-  "readiness",
-  "curate-issues",
-  "create-issues",
+  ...singlePhaseCommands,
 ]);
 
 const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status", "init", "workspace"]);

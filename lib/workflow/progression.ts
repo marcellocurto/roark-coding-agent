@@ -11,6 +11,7 @@ import {
   type WorkflowContext,
 } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
+import type { WorkflowRunPhase } from "./phase-vocabulary.ts";
 import {
   hasBlockedReview,
   needsFix,
@@ -19,20 +20,6 @@ import {
   shouldImplementPlan,
   shouldProceedAfterTriage,
 } from "./verdicts.ts";
-
-export type WorkflowRunPhase =
-  | "fetch"
-  | "triage"
-  | "plan-draft"
-  | "plan"
-  | "capture-baseline"
-  | "implement"
-  | "refine-code"
-  | "review-a"
-  | "review-b"
-  | "fix"
-  | "reset-baseline"
-  | "final-review";
 
 export type WorkflowProgressionAction =
   | { type: "run"; phase: WorkflowRunPhase; pass?: number | undefined; reason: string }
