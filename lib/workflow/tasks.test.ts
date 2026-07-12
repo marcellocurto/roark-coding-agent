@@ -14,7 +14,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function createContext(options: { agentCwd?: string | undefined; thinkingProfile?: "fast" | "deep" | undefined; thinkingLevel?: "medium"  | undefined} = {}) {
+async function createContext(options: { agentCwd?: string | undefined; model?: string | undefined; thinkingProfile?: "fast" | "deep" | undefined; thinkingLevel?: "medium"  | undefined} = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-tasks-"));
   tempDirs.push(dir);
   const context = createWorkflowContext({
@@ -22,6 +22,7 @@ async function createContext(options: { agentCwd?: string | undefined; thinkingP
     issue: "12",
     cwd: dir,
     outDir: ".roark/runs",
+    model: options.model,
     thinkingLevel: options.thinkingLevel,
     thinkingProfile: options.thinkingProfile,
     force: false,
@@ -59,6 +60,20 @@ describe("runAgentTask skill loading", () => {
 
     expect(runAgentTask(context, runner, triageTask)).resolves.toContain("## Verdict\nproceed");
     expect(requests).toEqual([undefined]);
+  });
+
+  test("sends the routed model unless the CLI supplied a global override", async () => {
+    const requests: string[] = [];
+    const runner: AgentRunner = async (request) => {
+      await noopAsync();
+      requests.push(request.model ?? "missing");
+      return "# Triage\n\n## Verdict\nproceed\n";
+    };
+
+    await runAgentTask(await createContext(), runner, triageTask);
+    await runAgentTask(await createContext({ model: "anthropic/claude-opus-4-7" }), runner, triageTask);
+
+    expect(requests).toEqual(["openai-codex/gpt-5.6-sol", "anthropic/claude-opus-4-7"]);
   });
 });
 
