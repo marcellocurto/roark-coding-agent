@@ -69,8 +69,15 @@ describe("observability summary writing", () => {
     const observer = createFileRunObserver(runContext);
 
     await observer.runStarted({ command: "do" });
-    await observer.phaseStarted({ phase: "triage", label: "Triage", artifact: "triage", model: "provider/model", thinkingLevel: "medium" });
-    await observer.agentSessionStarted({ phase: "triage", sessionId: "session-1", model: "provider/model", thinkingLevel: "medium" });
+    await observer.phaseStarted({ phase: "triage", label: "Triage", artifact: "triage", model: "provider/model", thinkingLevel: "max" });
+    await observer.agentSessionStarted({
+      phase: "triage",
+      sessionId: "session-1",
+      model: "provider/model",
+      thinkingLevel: "xhigh",
+      requestedThinkingLevel: "max",
+      effectiveThinkingLevel: "xhigh",
+    });
     await observer.agentSessionStats({
       phase: "triage",
       stats: {
@@ -80,13 +87,13 @@ describe("observability summary writing", () => {
         cost: 0.0123,
       },
     });
-    await observer.phaseCompleted({ phase: "triage", label: "Triage", artifact: "triage" });
+    await observer.phaseCompleted({ phase: "triage", label: "Triage", artifact: "triage", thinkingLevel: "max" });
     await observer.runCompleted({ status: "completed" });
 
     const summary = JSON.parse(await readFile(path.join(runContext.runDir, "summary.json"), "utf8")) as {
       status: string;
       attempt: number;
-      phases: { triage: { status: string; artifactPath: string; sessionId: string } };
+      phases: { triage: { status: string; artifactPath: string; sessionId: string; thinkingLevel: string; requestedThinkingLevel: string; effectiveThinkingLevel: string } };
       totals: Record<string, unknown>;
     };
     expect(summary.status).toBe("completed");
@@ -94,6 +101,11 @@ describe("observability summary writing", () => {
     expect(summary.phases.triage.status).toBe("completed");
     expect(summary.phases.triage.artifactPath).toBe(".roark/runs/issue/42/attempts/2/triage.md");
     expect(summary.phases.triage.sessionId).toBe("session-1");
+    expect(summary.phases.triage).toMatchObject({
+      thinkingLevel: "xhigh",
+      requestedThinkingLevel: "max",
+      effectiveThinkingLevel: "xhigh",
+    });
     expect(summary.totals).toMatchObject({ inputTokens: 10, outputTokens: 20, totalTokens: 33, toolCalls: 3, cost: 0.0123 });
   });
 

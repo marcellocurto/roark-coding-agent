@@ -300,6 +300,12 @@ describe("parseArgs", () => {
     expect(parsed.yes).toBe(true);
   });
 
+  test("parses max thinking", () => {
+    const parsed = parseArgs(["do", "123", "--thinking", "max"]);
+    if ("help" in parsed || parsed.command !== "do") throw new Error("expected issue options");
+    expect(parsed.thinkingLevel).toBe("max");
+  });
+
   test("parses workflow thinking profile flags", () => {
     const doFast = parseArgs(["do", "123", "--fast"]);
     const doDeep = parseArgs(["do", "123", "--deep"]);

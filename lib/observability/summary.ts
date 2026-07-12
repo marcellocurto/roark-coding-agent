@@ -25,6 +25,8 @@ export interface PhaseSummary {
   artifactPath?: string | undefined;
   model?: string | undefined  ;
   thinkingLevel?: string | undefined  ;
+  requestedThinkingLevel?: string | undefined;
+  effectiveThinkingLevel?: string | undefined;
   sessionId?: string | undefined;
   reused?: boolean | undefined;
   errorMessage?: string | undefined;

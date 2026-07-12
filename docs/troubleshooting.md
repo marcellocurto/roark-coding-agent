@@ -195,7 +195,7 @@ See [Scheduling](scheduling.md) and [Operations runbook](operations-runbook.md).
 
 - `Model not found` or request-shape errors: run `bun install --frozen-lockfile` to restore the supported Pi version.
 - Authentication errors: run Pi interactively and use `/login` for `openai-codex`, then retry as the same OS user.
-- Unsupported thinking levels: choose a level supported by the selected model; Roark does not silently downgrade it.
+- Unsupported thinking levels: Roark reports the requested and effective levels when Pi clamps the selection; unsupported `max` falls back to the highest supported level.
 - To roll back, rerun or continue with `--model openai-codex/gpt-5.5`.
 
 ## Useful First Files

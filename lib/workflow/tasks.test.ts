@@ -100,7 +100,7 @@ describe("runAgentTask thinking profiles", () => {
     await runAgentTask(context, runner, fixTask(1));
     await runAgentTask(context, runner, finalReviewTask(1));
 
-    expect(requests).toEqual(["write:low", "write:low", "read:medium", "read:medium", "write:low", "read:low"]);
+    expect(requests).toEqual(["write:low", "write:low", "read:medium", "read:medium", "write:low", "read:medium"]);
   });
 
   test("restart refinement pass uses restart artifacts instead of requiring a fix log", async () => {
