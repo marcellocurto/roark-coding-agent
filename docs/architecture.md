@@ -70,7 +70,7 @@ lib/workflow/
 
 Static artifacts include issue, triage, implementation plan, implementation log, reviews, readiness, verification, metadata, issue curation plan, and issue creation results.
 
-Numbered artifacts include fix logs, refinements, Review A/B cycles, and optional standalone final reviews.
+Numbered artifacts include fix logs, refinements, and Review A/B cycles.
 
 ## Pi Integration
 

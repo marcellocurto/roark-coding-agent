@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { artifactExists, baselineResetLogRef, createWorkflowContext, implementationRestartLogRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, codeRefinementTask, finalReviewTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
+import { AgentTaskRunError, codeRefinementTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import { noopAsync } from "../utils/async.ts";
 
@@ -76,24 +76,6 @@ describe("runAgentTask skill loading", () => {
 });
 
 describe("runAgentTask thinking profiles", () => {
-  test("final review prerequisites match its numbered prompt inputs", async () => {
-    const context = await createContext();
-    const task = finalReviewTask(2);
-
-    expect(task.prerequisites).toEqual([
-      "issue",
-      "implementationPlan",
-      "implementationLog",
-      refinementLogRef(2),
-      reviewARef(2),
-      reviewBRef(2),
-    ]);
-    const prompt = task.prompt(context);
-    expect(prompt).toContain("refinement-log-2.md");
-    expect(prompt).toContain("review-a-2.md");
-    expect(prompt).toContain("review-b-2.md");
-  });
-
   test("routes task authority and thinking by assigned stage", async () => {
     const context = await createContext();
     context.thinkingConfig.implement = "minimal";
@@ -101,7 +83,6 @@ describe("runAgentTask thinking profiles", () => {
     context.thinkingConfig.fix = "low";
     context.thinkingConfig.reviewA = "medium";
     context.thinkingConfig.reviewB = "high";
-    context.thinkingConfig.finalReview = "xhigh";
     await writeReadyThroughPlan(context);
     const requests: string[] = [];
     const runner: AgentRunner = async (request) => {
@@ -110,7 +91,6 @@ describe("runAgentTask thinking profiles", () => {
       if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
       if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
       if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
-      if (request.prompt.includes("Final Review")) return "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n";
       if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
       return "# Implementation Log\n";
     };
@@ -120,9 +100,8 @@ describe("runAgentTask thinking profiles", () => {
     await runAgentTask(context, runner, reviewATask);
     await runAgentTask(context, runner, reviewBTask);
     await runAgentTask(context, runner, fixTask(1));
-    await runAgentTask(context, runner, finalReviewTask(0));
 
-    expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low", "read:xhigh"]);
+    expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low"]);
   });
 
   test("restart refinement pass uses restart artifacts instead of requiring a fix log", async () => {

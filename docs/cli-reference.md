@@ -61,10 +61,9 @@ owner/repo#123
 | `roark implement <issue>` | Run only the implementation agent. |
 | `roark review <issue>` | Run both review agents. |
 | `roark fix <issue>` | Run only the fix agent. |
-| `roark final-review <issue>` | Independently audit the latest completed numbered Review A/B cycle. This does not alter workflow readiness. |
 | `roark readiness <issue>` | Write deterministic PR readiness markdown. |
 
-Phase commands are most useful for debugging. `final-review` is an optional standalone second opinion and is never scheduled by `do`, `auto`, or `continue`.
+Phase commands are most useful for debugging. For normal work, prefer `do`, `auto`, or `continue`.
 
 ## Common Options
 
@@ -77,7 +76,6 @@ Phase commands are most useful for debugging. `final-review` is an optional stan
 | `--thinking <level>` | Agent-backed phases | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Unsupported levels are clamped by Pi to a supported level and reported. |
 | `--max-fix-passes <n>` | `auto`, `do`, `continue` | Maximum automatic fix/review cycles. Defaults to `3`. |
 | `--fix-pass <n>` | `fix` | Fix pass number. |
-| `--review-pass <n>` | `final-review` | Numbered Review A/B cycle to audit; accepts cycle `0`. Defaults to the latest completed cycle. |
 | `--attempt <n>` | issue, `continue`, `status` | Use a specific autorun attempt directory. |
 | `--all` | `status` | Summarize all known issue runs. |
 | `--force` | phase, implementation, fix, PR revision | Re-run phases or continue past supported dirty-tree preflights. |

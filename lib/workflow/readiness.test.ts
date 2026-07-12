@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createWorkflowContext, finalReviewRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
+import { createWorkflowContext, writeArtifact } from "./artifacts.ts";
 import { buildReadinessMarkdown } from "./readiness.ts";
 
 const tempDirs: string[] = [];
@@ -12,59 +12,6 @@ afterEach(async () => {
 });
 
 describe("buildReadinessMarkdown", () => {
-  test("readiness stays based on numbered reviews when a standalone final review requests fixes", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "roark-readiness-"));
-    tempDirs.push(dir);
-    const context = createWorkflowContext({
-      command: "do",
-      issue: "22",
-      cwd: dir,
-      outDir: ".roark/runs",
-      force: false,
-      yes: true,
-      maxFixPasses: 1,
-      attempt: 1,
-    });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
-    await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nfixes-required\n");
-
-    const markdown = await buildReadinessMarkdown(context);
-
-    expect(markdown).toContain("## Status\nready-for-pr");
-    expect(markdown).toContain("- Latest review cycle: 0");
-    expect(markdown).not.toContain("final review");
-  });
-
-  test("standalone final review cannot override numbered reviews that require fixes", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "roark-readiness-"));
-    tempDirs.push(dir);
-    const context = createWorkflowContext({
-      command: "do",
-      issue: "22",
-      cwd: dir,
-      outDir: ".roark/runs",
-      force: false,
-      yes: true,
-      maxFixPasses: 1,
-      attempt: 1,
-    });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
-    await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\nfixes-required\n");
-    await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n");
-
-    const markdown = await buildReadinessMarkdown(context);
-
-    expect(markdown).toContain("## Status\nnot-ready");
-    expect(markdown).toContain("- Latest review cycle: 0");
-    expect(markdown).toContain("- Review A verdict: fixes-required");
-    expect(markdown).not.toContain("final review");
-  });
-
   test("separates blocking, non-blocking, and warning finding summaries", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "roark-readiness-"));
     tempDirs.push(dir);

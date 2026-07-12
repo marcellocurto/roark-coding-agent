@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { artifactExists, createWorkflowContext, finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 import { noopAsync } from "../utils/async.ts";
@@ -275,7 +275,6 @@ describe("buildIssueCurationPlan", () => {
     await writeArtifact(context, reviewARef(0), reviewWithLedger("None"));
     await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n");
-    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n");
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
@@ -288,7 +287,6 @@ describe("buildIssueCurationPlan", () => {
       ".roark/runs/issue/42/attempts/2/review-a-0.md",
       ".roark/runs/issue/42/attempts/2/review-b-0.md",
       ".roark/runs/issue/42/attempts/2/fix-log-1.md",
-      ".roark/runs/issue/42/attempts/2/final-review-0.md",
     ]);
   });
 });

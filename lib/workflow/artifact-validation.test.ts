@@ -49,16 +49,6 @@ describe("validateAgentArtifact", () => {
     if (!result.ok) expect(result.reason).toContain("Ready For Implementation");
   });
 
-  test("validates numbered final review verdicts", () => {
-    expect(validateAgentArtifact({ name: "finalReview", pass: 1 }, "# Final Review Cycle 1\n\n## Verdict\nready-for-pr\n")).toEqual({ ok: true });
-    const result = validateAgentArtifact({ name: "finalReview", pass: 1 }, "# Final Review Cycle 1\n\n## Verdict\napprove\n");
-    expect(result.ok).toBe(false);
-    expect(validateAgentArtifact({ name: "finalReview", pass: 1 }, "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n")).toEqual({
-      ok: false,
-      reason: "missing # Final Review Cycle 1 heading",
-    });
-  });
-
   test("allows restart-required for numbered review cycles", () => {
     expect(validateAgentArtifact({ name: "reviewA", pass: 0 }, "# Review A Pass 0\n\n## Verdict\nrestart-required\n")).toEqual({ ok: true });
   });

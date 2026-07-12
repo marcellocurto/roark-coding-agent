@@ -64,7 +64,7 @@ describe("PR revision summary comments", () => {
     await writeFile(path.join(revisionDir, "revision-log.md"), "initial log", "utf8");
     await writeFile(path.join(revisionDir, "revision-review.md"), "initial review", "utf8");
     await writeFile(path.join(revisionDir, "revision-log-fix-pass-1.md"), "final log", "utf8");
-    await writeFile(path.join(revisionDir, "revision-review-pass-1.md"), "final review", "utf8");
+    await writeFile(path.join(revisionDir, "revision-review-pass-1.md"), "revision review", "utf8");
 
     const excerpts = await readRevisionExcerpts(context({ revisionDir }), [
       ".roark/runs/pr/12/revision-1/revision-log.md",
@@ -75,7 +75,7 @@ describe("PR revision summary comments", () => {
 
     expect(excerpts).toEqual([
       { title: "revision-log-fix-pass-1.md", content: "final log" },
-      { title: "revision-review-pass-1.md", content: "final review" },
+      { title: "revision-review-pass-1.md", content: "revision review" },
     ]);
   });
 

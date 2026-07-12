@@ -16,7 +16,6 @@ export const workflowModelRoutes: Record<WorkflowThinkingStage, string> = {
   reviewA: models.gpt56Sol,
   reviewB: models.gpt56Sol,
   fix: models.gpt56Sol,
-  finalReview: models.gpt56Sol,
   issuePublishing: models.gpt56Sol,
   revisionPlan: models.gpt56Sol,
   revisionImplementation: models.gpt56Sol,

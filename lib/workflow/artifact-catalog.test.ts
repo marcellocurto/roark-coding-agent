@@ -3,7 +3,6 @@ import {
   artifactContract,
   artifactFilename,
   artifactIdentity,
-  finalReviewRef,
   fixLogRef,
   formatArtifactRef,
   implementationRestartLogRef,
@@ -42,9 +41,7 @@ describe("artifact catalog", () => {
 
   test("constructs numbered artifact refs and filenames", () => {
     expect(fixLogRef(2)).toEqual({ name: "fixLog", pass: 2 });
-    expect(finalReviewRef(3)).toEqual({ name: "finalReview", pass: 3 });
     expect(artifactFilename(fixLogRef(2))).toBe("fix-log-2.md");
-    expect(artifactFilename(finalReviewRef(3))).toBe("final-review-3.md");
     expect(verificationBeforeFixRef(1)).toEqual({ name: "verificationBeforeFix", pass: 1 });
     expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
     expect(implementationRestartLogRef(1)).toEqual({ name: "implementationRestartLog", pass: 1 });
@@ -62,13 +59,6 @@ describe("artifact catalog", () => {
       kind: "static",
       filename: "implementation-plan.md",
       displayName: "Implementation Plan",
-    });
-    expect(artifactIdentity(finalReviewRef(1))).toEqual({
-      name: "finalReview",
-      kind: "numbered",
-      filename: "final-review-1.md",
-      displayName: "Final Review Cycle 1",
-      pass: 1,
     });
   });
 
@@ -94,11 +84,6 @@ describe("artifact catalog", () => {
       requiredHeading: "Review A Pass 4",
       allowedVerdicts: ["approve", "fixes-required", "restart-required", "blocked"],
     });
-    expect(artifactContract(finalReviewRef(1))?.allowedVerdicts).toEqual([
-      "ready-for-pr",
-      "fixes-required",
-      "blocked",
-    ]);
     expect(artifactContract(verificationBeforeFixRef(1))).toEqual({});
   });
 

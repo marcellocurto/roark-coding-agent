@@ -275,19 +275,8 @@ describe("parseArgs", () => {
     expect(parsed.attempt).toBe(2);
   });
 
-  test("parses a standalone final review cycle including cycle zero", () => {
-    const parsed = parseArgs(["final-review", "123", "--review-pass", "0"]);
-    if ("help" in parsed || parsed.command !== "final-review") throw new Error("expected final-review options");
-
-    expect(parsed.reviewPass).toBe(0);
-    expect(() => parseArgs(["final-review", "123", "--fix-pass", "1"])).toThrow("--fix-pass is only valid with fix");
-    expect(() => parseArgs(["review", "123", "--review-pass", "0"])).toThrow("--review-pass is only valid with final-review");
-    expect(() => parseArgs(["final-review", "123", "--review-pass", "-1"])).toThrow("--review-pass must be a non-negative integer");
-  });
-
-  test("help describes final review as an independent numbered-cycle audit", () => {
-    expect(usage).toContain("Independently audit the latest completed Review A/B cycle");
-    expect(usage).not.toContain("legacy final review");
+  test("rejects the removed final-review command", () => {
+    expect(() => parseArgs(["final-review", "123"])).toThrow("Unknown command 'final-review'");
   });
 
   test("parses curate-issues as a standalone issue workflow command", () => {

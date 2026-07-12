@@ -10,7 +10,6 @@ import {
   baselineResetLogRef,
   fixLogRef,
   implementationRestartLogRef,
-  inferFinalReviewCycle,
   inferNextFixPass,
   inferNextRefinementPass,
   readArtifact,
@@ -35,7 +34,6 @@ import type { SinglePhaseCommand, StandaloneWorkflowPhase, WorkflowRunPhase } fr
 import {
   codeRefinementTask,
   type CodeRefinementSource,
-  finalReviewTask,
   fixTask,
   implementationTaskForPass,
   planDraftTask,
@@ -171,14 +169,6 @@ export async function resetBaselinePhase(context: WorkflowContext, pass: number)
   return content;
 }
 
-export async function finalReviewPhase(
-  context: WorkflowContext,
-  reviewCycle = inferFinalReviewCycle(context),
-  runner: AgentRunner = runPiAgent,
-): Promise<string> {
-  return runAgentTask(context, runner, finalReviewTask(reviewCycle));
-}
-
 export async function readinessPhase(context: WorkflowContext): Promise<string> {
   await context.observer?.phaseStarted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
   try {
@@ -267,7 +257,6 @@ async function runWorkflowPhase(
     case "review-b": await runAgentTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
     case "fix": await fixPhase(context, pass, runner); return;
     case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
-    case "final-review": await finalReviewPhase(context, pass, runner); return;
     default: return assertNever(phase);
   }
 }
@@ -355,6 +344,5 @@ function standalonePhasePass(context: WorkflowContext, phase: StandaloneWorkflow
   if (phase === "refine-code") return context.fixPass ?? inferNextRefinementPass(context);
   if (phase === "fix") return context.fixPass ?? inferNextFixPass(context);
   if (phase === "reset-baseline") return context.fixPass ?? 1;
-  if (phase === "final-review") return context.reviewPass ?? inferFinalReviewCycle(context);
   return undefined;
 }

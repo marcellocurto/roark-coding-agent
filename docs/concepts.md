@@ -64,9 +64,9 @@ Attempts are stored under:
 
 ## Phase
 
-A phase is one workflow step, such as `fetch`, `triage`, `plan`, `implement`, `review`, `fix`, or `readiness`. `final-review` is an optional standalone audit command rather than an automatic workflow phase.
+A phase is one workflow step, such as `fetch`, `triage`, `plan`, `implement`, `review`, `fix`, or `readiness`.
 
-Standalone phase commands are useful for debugging. `final-review` is also useful when a human explicitly wants an independent second opinion on a completed numbered Review A/B cycle. Most users should otherwise prefer `roark do`, `roark auto`, or `roark continue`.
+Standalone phase commands are useful for debugging, but most users should prefer `roark do`, `roark auto`, or `roark continue`.
 
 ## Readiness Gate
 

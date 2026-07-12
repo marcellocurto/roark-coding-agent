@@ -7,8 +7,6 @@ import {
   artifactRelativePath,
   type ArtifactRef,
   baselineResetLogRef,
-  finalReviewInputRefs,
-  finalReviewRef,
   fixLogRef,
   implementationRestartLogRef,
   readArtifact,
@@ -22,7 +20,6 @@ import {
 import { ArtifactValidationError, validateAgentArtifact } from "./artifact-validation.ts";
 import {
   codeRefinementPrompt,
-  finalReviewPrompt,
   fixPrompt,
   implementationPrompt,
   planDraftPrompt,
@@ -169,18 +166,6 @@ export function fixTask(pass: number): AgentTask {
     thinkingStage: "fix",
     prerequisites: ["issue", "implementationPlan", "implementationLog", reviewARef(pass - 1), reviewBRef(pass - 1)],
     prompt: (context) => fixPrompt(context, pass),
-  };
-}
-
-export function finalReviewTask(reviewCycle: number): AgentTask {
-  const inputs = finalReviewInputRefs(reviewCycle);
-  return {
-    artifact: finalReviewRef(reviewCycle),
-    label: `Standalone final review cycle ${reviewCycle}`,
-    fileEditingToolsEnabled: false,
-    thinkingStage: "finalReview",
-    prerequisites: [inputs.issue, inputs.implementationPlan, inputs.implementationLog, inputs.refinementLog, inputs.reviewA, inputs.reviewB],
-    prompt: (context) => finalReviewPrompt(context, reviewCycle),
   };
 }
 

@@ -64,7 +64,12 @@ export function revisionReviewPrompt(context: PrRevisionContext, pass: number): 
   return `<pr_revision_review>
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
-Verify feedback handling, skipped-item rationale, validation evidence, regression risk, and scope control.
+Primary responsibility: verify that every planner-classified must-fix-current feedback item was correctly addressed and every skipped item has a sound rationale.
+Then inspect the touched files and relevant callers and tests for regressions introduced by this revision. Check correctness, original PR requirement coverage, maintainability, validation evidence, and scope control.
+Do not reopen unrelated pre-existing concerns in untouched code. Do not require changes for non-blocking feedback, optional suggestions, or follow-up work unless the revision made them current blockers.
+Use fixes-required only for concrete unresolved must-fix feedback or regressions introduced by this revision. Use blocked only when an external dependency, missing access, or human decision prevents a safe verdict.
+Support every required fix with concrete repository evidence such as a file, symbol, behavior, test, or command result. Stop once the verdict and any required fixes are adequately supported; do not perform an unbounded repository audit.
+${pass > 0 ? `If ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md exists, verify that this fix pass addressed the recorded failure or clearly identify why it remains externally blocked.` : ""}
 Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.
 
 Return only this Markdown artifact:
@@ -79,9 +84,11 @@ approve|fixes-required|blocked
 
 ## Validation Review
 
-## Regression And Scope Review
+## Requirement And Correctness Review
+
+## Maintainability, Regression, And Scope Review
 
 ## Required Fixes
-- If verdict is fixes-required, list concrete fixes. Otherwise None.
+- If verdict is fixes-required, list concrete fixes with evidence. Otherwise None.
 </pr_revision_review>`;
 }

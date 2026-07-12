@@ -10,9 +10,7 @@ import {
   artifactExists,
   artifactPath,
   artifactRelativePath,
-  finalReviewRef,
   latestCompleteReviewCycle,
-  latestFinalReviewPass,
   refinementLogRef,
   reviewARef,
   reviewBRef,
@@ -147,11 +145,6 @@ export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
   const paths = candidates
     .filter((artifact) => artifactExists(context, artifact))
     .map((artifact) => artifactRelativePath(context, artifact));
-
-  const latestFinalReview = latestFinalReviewPass(context);
-  if (latestFinalReview !== undefined) {
-    paths.push(artifactRelativePath(context, finalReviewRef(latestFinalReview)));
-  }
 
   return paths;
 }

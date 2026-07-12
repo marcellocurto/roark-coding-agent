@@ -8,7 +8,6 @@ export const standaloneWorkflowPhases = [
   "refine-code",
   "fix",
   "reset-baseline",
-  "final-review",
 ] as const;
 
 export type StandaloneWorkflowPhase = (typeof standaloneWorkflowPhases)[number];

@@ -3,8 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentRunner } from "./agent-runner.ts";
-import { artifactExists, createWorkflowContext, finalReviewRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
-import { issueArtifactHasRelationshipSnapshot, runFullWorkflow, runSinglePhase } from "./phases.ts";
+import { artifactExists, createWorkflowContext, readArtifact, writeArtifact } from "./artifacts.ts";
+import { issueArtifactHasRelationshipSnapshot, runFullWorkflow } from "./phases.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
@@ -165,42 +165,6 @@ describe("runFullWorkflow", () => {
     expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "review-blocked" });
     expect(phases).toEqual(["review-a", "review-b"]);
     expect(await readArtifact(context, "readiness")).toContain("## External Blockers\n- review-a:B1");
-  });
-});
-
-describe("standalone final review", () => {
-  test("audits the latest completed review cycle, reuses its artifact, and honors force", async () => {
-    const context = await tempContext();
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nImplemented.\n");
-    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-    await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined again.\n");
-    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
-    let calls = 0;
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
-      calls++;
-      const cycle = context.reviewPass ?? 1;
-      expect(request.prompt).toContain(`numbered Review A/B cycle ${cycle}`);
-      return `# Final Review Cycle ${cycle}\n\n## Verdict\nready-for-pr\n`;
-    };
-
-    await runSinglePhase(context, "final-review", runner);
-    await runSinglePhase(context, "final-review", runner);
-    expect(calls).toBe(1);
-    expect(await readArtifact(context, finalReviewRef(1))).toContain("ready-for-pr");
-
-    context.force = true;
-    await runSinglePhase(context, "final-review", runner);
-    expect(calls).toBe(2);
-
-    context.reviewPass = 0;
-    await runSinglePhase(context, "final-review", runner);
-    expect(calls).toBe(3);
-    expect(await readArtifact(context, finalReviewRef(0))).toContain("ready-for-pr");
   });
 });
 

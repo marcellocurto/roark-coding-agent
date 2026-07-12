@@ -7,7 +7,6 @@ import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThink
 import { parseIssueRef } from "../github/issue.ts";
 import {
   artifactFilename,
-  finalReviewRef,
   fixLogRef,
   formatArtifactRef,
   refinementLogRef,
@@ -19,8 +18,6 @@ export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./ar
 export {
   artifactFilename,
   baselineResetLogRef,
-  finalReviewInputRefs,
-  finalReviewRef,
   fixLogRef,
   formatArtifactRef,
   implementationRestartLogRef,
@@ -48,7 +45,6 @@ export interface WorkflowContext {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number | undefined;
-  reviewPass?: number | undefined;
   observer?: RunObserver | undefined;
 }
 
@@ -84,7 +80,6 @@ export function createWorkflowContext(
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,
     fixPass: options.fixPass,
-    reviewPass: options.reviewPass,
   };
 }
 
@@ -155,22 +150,6 @@ export function inferNextFixPass(context: WorkflowContext): number {
       throw new Error(`Fix pass ${pass} already exists. Run review before starting another fix pass.`);
     }
   }
-}
-
-export function inferFinalReviewCycle(context: WorkflowContext): number {
-  const reviewCycle = latestCompleteReviewCycle(context);
-  if (reviewCycle !== undefined) return reviewCycle;
-  throw new Error("No completed numbered review cycle is available. Run 'review' before 'final-review'.");
-}
-
-export function latestFinalReviewPass(context: WorkflowContext): number | undefined {
-  let latest: number | undefined;
-  const latestReviewCycle = latestCompleteReviewCycle(context);
-  if (latestReviewCycle === undefined) return undefined;
-  for (let pass = 0; pass <= latestReviewCycle; pass++) {
-    if (artifactExists(context, finalReviewRef(pass))) latest = pass;
-  }
-  return latest;
 }
 
 export function latestCompleteReviewCycle(context: WorkflowContext): number | undefined {

@@ -29,7 +29,6 @@ Artifacts are useful for:
                 ├── review-a.md
                 ├── review-b.md
                 ├── fix-log-1.md
-                ├── final-review-0.md       # only when explicitly requested
                 ├── readiness.md
                 ├── verification.md
                 ├── verification-before-fix-1.md
@@ -50,7 +49,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | Why did publishing stop? | `readiness.md`, then `verification.md` |
 | What command failed? | `verification.md` |
 | What did the agent change? | `implementation-log.md`, then Git diff in the managed workspace |
-| What did reviewers find? | `review-a.md`, `review-b.md`, `final-review-<n>.md` |
+| What did reviewers find? | `review-a.md`, `review-b.md`, and numbered `review-a-<n>.md`, `review-b-<n>.md` cycles |
 | Can this be continued? | `attempt.json`, `attempts.json`, managed workspace state |
 | What follow-up issues were planned? | `issue-curation-plan.json` |
 | What follow-up issues were created? | `issue-creation-results.json` |
@@ -65,7 +64,6 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `implementation-log.md` | Implementation result. |
 | `review-a.md`, `review-b.md` | Independent reviews. |
 | `fix-log-<n>.md` | Fix pass output. |
-| `final-review-<n>.md` | Optional standalone audit of numbered Review A/B cycle `n`; it is not a readiness input. |
 | `readiness.md` | Final readiness gate artifact. |
 | `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
 | `verification-before-fix-<n>.md` | Archived failed verification output that triggered fix pass `n`. |
