@@ -20,12 +20,22 @@ export const ambiguityPolicy = `<ambiguity_policy>
     <instruction>Never weaken acceptance criteria to remove ambiguity. Automated phases report unresolved decisions in their artifact rather than waiting for conversational clarification.</instruction>
   </ambiguity_policy>`;
 
+export const testQualityPolicy = `<test_quality_policy>
+    <instruction>Only add or require tests with clear bug-finding value. Not every change needs a new test.</instruction>
+    <instruction>For each proposed test, identify the realistic regression or failure it would catch. If none exists, do not add the test.</instruction>
+    <instruction>Do not add tests merely to increase coverage or restate implementation details, configuration values, prompt wording, static content, private structure, fixtures, or framework behavior.</instruction>
+    <instruction>Prefer observable behavior, meaningful contracts, failure paths, persistence, routing, security properties, and externally visible outcomes.</instruction>
+    <instruction>Do not duplicate stronger existing coverage. When existing coverage is sufficient, say so instead of adding another test.</instruction>
+    <instruction>Tests of generated prompts or static artifacts are justified only when they protect a meaningful consumer-visible contract, security property, or parsing/escaping behavior; avoid assertions over arbitrary wording.</instruction>
+  </test_quality_policy>`;
+
 export const sharedSystemPrompt = `<system_prompt>
   <role>You are one agent in a multi-agent coding workflow.</role>
   <principles>
     <principle>Prefer direct, boring, maintainable changes.</principle>
     <principle>Ground every conclusion in the issue and the repository.</principle>
   </principles>
+  ${testQualityPolicy}
   ${ambiguityPolicy}
   <untrusted_issue_content_policy>${untrustedIssueContentPolicy}</untrusted_issue_content_policy>
   <artifact_style>Keep artifacts concise but decision-useful. Prefer bullets. Empty sections should say None, Not applicable, or Not run rather than adding filler.</artifact_style>
@@ -51,6 +61,7 @@ const changedCodeValidationInstruction = "After changes, run the most relevant a
 const workClassificationValues = "frontend, backend, full-stack, docs-config, test-only, unknown";
 const workClassificationLine = `One of: ${workClassificationValues}`;
 const reviewVerdictLine = "One of: approve, fixes-required, restart-required, blocked";
+const testsAndValidationGuidance = "For every proposed new test, name the realistic regression it would catch. If no realistic regression remains, state that existing coverage is sufficient or that no new test is warranted.";
 
 interface WorkflowArtifactInput {
   kind: string;
@@ -196,7 +207,7 @@ export function planDraftPrompt(context: WorkflowContext): string {
       "Proposed Changes",
       "Files Likely To Change",
       "Detailed Steps",
-      "Tests And Validation",
+      { heading: "Tests And Validation", body: testsAndValidationGuidance },
       "Risks",
       "Rollback Plan",
       { heading: "Ready For Implementation", body: "yes/no" },
@@ -234,7 +245,7 @@ export function planPrompt(context: WorkflowContext): string {
       "Proposed Changes",
       "Files Likely To Change",
       "Detailed Steps",
-      "Tests And Validation",
+      { heading: "Tests And Validation", body: testsAndValidationGuidance },
       "Risks",
       "Rollback Plan",
       { heading: "Ready For Implementation", body: "yes/no" },
@@ -292,7 +303,7 @@ const reviewAConfig: ReviewPromptConfig = {
     "Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.",
     "Missing or incorrect error handling, race conditions, and ordering issues.",
     "Regressions or broken contracts in unrelated callers touched by the diff.",
-    "Missing or insufficient tests for the changed behavior.",
+    "Missing behavior-oriented regression coverage only where a realistic defect could escape existing tests. Do not require tests by default.",
     "Gaps or unsubstantiated claims in the implementation/refinement logs' validation evidence.",
   ],
   requiredFixesPolicy: "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current issue.",
@@ -309,7 +320,7 @@ const reviewBConfig: ReviewPromptConfig = {
     "Simplicity: unnecessary complexity, indirection, or premature abstraction.",
     "Codebase fit: alignment with existing patterns, idioms, and module boundaries already used here.",
     "Scope control: changes that go beyond what the issue requires.",
-    "Test quality: brittle, redundant, low-signal, or poorly scoped tests; coverage adequacy for the change.",
+    "Test quality: reject tests that cannot name a realistic bug, duplicate stronger coverage, or merely freeze configuration, prompt wording, fixtures, static content, or private structure; assess coverage only for meaningful changed behavior.",
     "Naming and API clarity: ambiguous, misleading, or inconsistent names and public surfaces.",
     "Style, formatting, and structure only when they materially harm readability or consistency.",
   ],

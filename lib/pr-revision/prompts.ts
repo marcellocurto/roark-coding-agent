@@ -66,6 +66,7 @@ You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
 Primary responsibility: verify that every planner-classified must-fix-current feedback item was correctly addressed and every skipped item has a sound rationale.
 Then inspect the touched files and relevant callers and tests for regressions introduced by this revision. Check correctness, original PR requirement coverage, maintainability, validation evidence, and scope control.
+Evaluate tests by realistic bug-finding value. Do not require tests by default, and reject tests that merely duplicate stronger coverage or restate configuration, prompt wording, fixtures, static content, or private structure.
 Do not reopen unrelated pre-existing concerns in untouched code. Do not require changes for non-blocking feedback, optional suggestions, or follow-up work unless the revision made them current blockers.
 Use fixes-required only for concrete unresolved must-fix feedback or regressions introduced by this revision. Use blocked only when an external dependency, missing access, or human decision prevents a safe verdict.
 Support every required fix with concrete repository evidence such as a file, symbol, behavior, test, or command result. Stop once the verdict and any required fixes are adequately supported; do not perform an unbounded repository audit.

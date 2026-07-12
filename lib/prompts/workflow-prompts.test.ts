@@ -64,6 +64,7 @@ describe("workflow prompt safety policy", () => {
   test("shared system prompt wraps instructions in XML tags", () => {
     expect(sharedSystemPrompt).toContain("<system_prompt>");
     expect(sharedSystemPrompt).toContain("<principles>");
+    expect(sharedSystemPrompt).toContain("<test_quality_policy>");
     expect(sharedSystemPrompt).toContain("<untrusted_issue_content_policy>");
     expect(sharedSystemPrompt).toContain("<output_contract>");
     expect(sharedSystemPrompt).toContain("</system_prompt>");
