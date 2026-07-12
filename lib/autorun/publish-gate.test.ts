@@ -78,10 +78,13 @@ describe("decidePublish", () => {
     });
   });
 
-  test("treats missing verification when ready as publishable (caller responsibility to run it)", () => {
-    // Documents the contract: callers must supply verification when readiness is ready.
-    // The gate itself does not require verification to be present in that branch.
+  test("blocks publish when readiness is ready but verification is missing", () => {
     const decision = decidePublish({ readinessStatus: "ready-for-pr" });
-    expect(decision).toEqual({ publish: true });
+    expect(decision).toEqual({
+      publish: false,
+      phase: "verification",
+      reason: "verification result is missing",
+      artifactPath: "verification.md",
+    });
   });
 });

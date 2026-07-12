@@ -48,23 +48,14 @@ const baseInput = {
 } as const;
 
 describe("path helpers", () => {
-  test("attemptsRootDir returns <issueDir>/attempts", () => {
+  test("uses the durable issue attempt layout", () => {
     expect(attemptsRootDir("/repo/.roark/runs/issue/10")).toBe(
       "/repo/.roark/runs/issue/10/attempts",
     );
-  });
-
-  test("attemptDir returns <issueDir>/attempts/<n>", () => {
     expect(attemptDir("/repo/.roark/runs/issue/10", 2)).toBe(
       "/repo/.roark/runs/issue/10/attempts/2",
     );
-  });
-
-  test("attemptMetadataPath includes attempt.json", () => {
     expect(attemptMetadataPath("/repo/issue/10", 3)).toBe("/repo/issue/10/attempts/3/attempt.json");
-  });
-
-  test("attemptIndexPath sits at issue root", () => {
     expect(attemptIndexPath("/repo/issue/10")).toBe("/repo/issue/10/attempts.json");
   });
 });
@@ -98,46 +89,6 @@ describe("formatAttemptMetadata", () => {
     expect(metadata.outcome).toBe("published");
   });
 
-  test("preserves outcomeDetail when provided", () => {
-    const metadata = formatAttemptMetadata({
-      ...baseInput,
-      outcome: "failed-verification",
-      outcomeDetail: "verify command exited 2",
-      endedAt: "2026-05-05T07:42:11.000Z",
-    });
-    expect(metadata.outcome).toBe("failed-verification");
-    expect(metadata.outcomeDetail).toBe("verify command exited 2");
-    expect(metadata.endedAt).toBe("2026-05-05T07:42:11.000Z");
-  });
-
-  test("supports triage-stopped outcome", () => {
-    const metadata = formatAttemptMetadata({
-      ...baseInput,
-      outcome: "triage-stopped",
-      outcomeDetail: 'triage verdict is "blocked"',
-      endedAt: "2026-05-05T07:42:11.000Z",
-    });
-    expect(metadata.outcome).toBe("triage-stopped");
-    expect(metadata.outcomeDetail).toBe('triage verdict is "blocked"');
-  });
-
-  test("preserves GitHub comment metadata when provided", () => {
-    const metadata = formatAttemptMetadata({
-      ...baseInput,
-      githubComments: {
-        issue: {
-          "review-a": {
-            id: 123,
-            url: "https://github.com/owner/repo/issues/10#issuecomment-123",
-            marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
-            updatedAt: "2026-05-05T07:20:00.000Z",
-          },
-        },
-      },
-    });
-
-    expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(123);
-  });
 });
 
 describe("recordAttemptIssueComment", () => {

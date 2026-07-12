@@ -33,7 +33,16 @@ export function decidePublish(input: PublishGateInput): PublishGateDecision {
     };
   }
 
-  if (input.verification && !input.verification.ok) {
+  if (!input.verification) {
+    return {
+      publish: false,
+      phase: "verification",
+      reason: "verification result is missing",
+      artifactPath: "verification.md",
+    };
+  }
+
+  if (!input.verification.ok) {
     return {
       publish: false,
       phase: "verification",

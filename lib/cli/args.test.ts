@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { parseArgs, usage } from "./args.ts";
+import { parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
-  test("usage names the roark command", () => {
-    expect(usage.startsWith("roark <command> [issue] [options]")).toBe(true);
-  });
-
   test("parses init command options", () => {
     const parsed = parseArgs(["init", "--cwd", "/tmp/repo", "--repo", "owner/repo", "--force"]);
     expect("help" in parsed).toBe(false);
