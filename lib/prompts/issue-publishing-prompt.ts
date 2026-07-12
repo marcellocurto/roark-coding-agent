@@ -38,7 +38,10 @@ ${allowedItemsJson}
     <instruction>Do not invent facts, severity, requirements, labels, relationships, acceptance criteria, or implementation details. If the evidence is limited, say so plainly and keep the scope narrow.</instruction>
     <instruction>Use a concise, action-oriented title. The allowed item suggestedTitle is a starting point; improve it if a clearer title is obvious from the plan context.</instruction>
     <instruction>Use this body structure unless the finding clearly needs a small adjustment: Summary, Why this issue exists, Impact, Suggested fix, Acceptance criteria, Risks / non-goals, Context. Put source issue, related PR, reviewer finding IDs, classification, and run artifacts in Context near the bottom.</instruction>
-    <instruction>Acceptance criteria must be specific to the finding. Avoid generic criteria like “address the behavior” unless the plan lacks enough detail to be more specific.</instruction>
+    <instruction>Prefer one small vertical slice with a complete, independently verifiable outcome. Do not split one outcome into separate implementation-layer tasks.</instruction>
+    <instruction>State blockers explicitly. Do not invent blockers or relationships that the curation plan does not support.</instruction>
+    <instruction>For a genuinely wide migration that cannot safely land as one vertical slice, describe expand, migrate, and contract stages in that order.</instruction>
+    <instruction>Write outcome-focused acceptance criteria. Avoid prescribed file paths, code snippets, or generic criteria like “address the behavior” unless the plan requires them.</instruction>
     <instruction>Keep run artifacts collapsed in a details block when included. They are provenance, not the main issue.</instruction>
   </issue_authoring_instructions>
   <publishing_instructions>

@@ -57,6 +57,13 @@ const doNotEditWorkflowArtifactsInstruction = "Do not edit .roark workflow artif
 const inspectionOnlyConstraint = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
 const reviewVerdictSemantics = "Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, <value>restart-required</value> when the implementation direction is fundamentally wrong and incremental fixes would be more expensive/risky than resetting to the pre-implementation baseline, and <value>blocked</value> when the workflow cannot safely proceed.";
 const changedCodeValidationInstruction = "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
+const bugFeedbackLoopPolicy = `  <bug_feedback_loop_policy>
+    <instruction>Apply this policy only when the requested work is a bug, regression, failing test, error, broken behavior, flaky behavior, or performance regression.</instruction>
+    <instruction>Before changing production code, establish one exact command that exercises the user's specific symptom. Planning phases name the command; change phases run it and record the red result. If no runnable reproduction is possible, record why and the best available evidence instead of inventing certainty.</instruction>
+    <instruction>Minimize the reproduction before fixing it. For flaky bugs, measure and raise the reproduction rate. For performance regressions, capture a baseline measurement or profile before optimizing.</instruction>
+    <instruction>Use falsifiable hypotheses and test one variable at a time. Tag temporary instrumentation with a unique searchable prefix and remove it before completion.</instruction>
+    <instruction>Add a regression test only at a seam that exercises the real bug pattern. After the fix, rerun both the minimized regression check and the original reproduction command and record the green results.</instruction>
+  </bug_feedback_loop_policy>`;
 
 const workClassificationValues = "frontend, backend, full-stack, docs-config, test-only, unknown";
 const workClassificationLine = `One of: ${workClassificationValues}`;
@@ -191,6 +198,7 @@ export function planDraftPrompt(context: WorkflowContext): string {
       { kind: "triage", artifact: "triage" },
     ]),
     blocks: [
+      bugFeedbackLoopPolicy,
       renderInstructions([
         "Use the minimum repository inspection needed to write a correct implementation plan. Start from the issue and triage artifacts plus short targeted searches. Read specific files only when they are likely to affect the plan. Stop once you can cite enough repository evidence for the phase outcome.",
         "Write a concise, implementation-ready plan. In Detailed Steps, use ordered steps and avoid speculative alternatives unless they affect correctness.",
@@ -226,6 +234,7 @@ export function planPrompt(context: WorkflowContext): string {
       { kind: "implementation_plan_draft", artifact: "implementationPlanDraft" },
     ]),
     blocks: [
+      bugFeedbackLoopPolicy,
       renderInstructions([
         "Taste-check the draft plan for simplicity, directness, missing repository constraints, and accidental scope broadening.",
         "Preserve the issue's real requirements; do not weaken acceptance criteria to make implementation easier.",
@@ -267,6 +276,7 @@ export function implementationPrompt(context: WorkflowContext, restartPass = 0):
       ...restartReviewInputLines(context, restartPass),
     ],
     blocks: [
+      bugFeedbackLoopPolicy,
       renderInstructions([
         "Satisfy the issue's real requirement using the refined plan as guidance. If the plan conflicts with the repository or the smallest correct solution, choose the correct minimal approach and document the deviation.",
         "If this is a restart pass, use prior review feedback to choose a materially better implementation direction after the baseline reset.",
@@ -436,6 +446,7 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
       ...failedVerificationInputLines(context, pass),
     ],
     blocks: [
+      bugFeedbackLoopPolicy,
       renderInstructions([
         "Apply only unresolved review findings classified as <value>must-fix-current</value>, plus any failed verification artifact listed in inputs.",
         "If this pass is driven by failed verification, fix only the local deterministic verification failure; do not broaden scope or revisit unrelated reviewer suggestions.",
