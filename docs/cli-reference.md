@@ -74,7 +74,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--cwd <path>` | Most commands | Repository working directory. Defaults to current directory. |
 | `--out <path>` | Workflow commands | Runs directory. Defaults to `.roark/runs`. |
 | `--model <provider/id>` | Agent-backed phases | Optional Pi model override, for example `anthropic/claude-sonnet-4-5`. |
-| `--thinking <level>` | Agent-backed phases | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
+| `--thinking <level>` | Agent-backed phases | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Unsupported levels are clamped by Pi to a supported level and reported. |
 | `--max-fix-passes <n>` | `auto`, `do`, `continue` | Maximum automatic fix/review cycles. Defaults to `3`. |
 | `--fix-pass <n>` | `fix`, `final-review` | Pass number for standalone fix/final-review. |
 | `--attempt <n>` | issue, `continue`, `status` | Use a specific autorun attempt directory. |

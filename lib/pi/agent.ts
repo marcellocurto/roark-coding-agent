@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { defaultRoarkModel } from "../workflow/model-routing.ts";
+import { resolveThinkingLevel } from "./thinking-level.ts";
 import { formatCompletedToolLine, formatToolRunSummary, type CompletedToolRunForLog } from "./tool-log.ts";
 
 export const roarkPiSettings = {
@@ -38,10 +39,13 @@ export function buildRoarkResourceLoaderSecurityOptions(skillPaths: readonly str
 export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   const modelSpec = requestedModelSpec(options.model);
   console.log(`model: ${modelSpec}`);
-  console.log(`thinking: ${options.thinkingLevel}`);
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const model = resolveModel(modelRegistry, modelSpec);
+  const thinking = resolveThinkingLevel(model, options.thinkingLevel);
+  console.log(thinking.clamped
+    ? `thinking: ${thinking.requested} -> ${thinking.effective} (${thinking.requested} unsupported by ${modelSpec})`
+    : `thinking: ${thinking.effective}`);
   const settingsManager = SettingsManager.inMemory(roarkPiSettings);
 
   const loader = new DefaultResourceLoader({
@@ -66,7 +70,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     authStorage,
     modelRegistry,
     model,
-    thinkingLevel: options.thinkingLevel,
+    thinkingLevel: thinking.effective,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(options.cwd),
     settingsManager,
@@ -86,7 +90,9 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     phase,
     sessionId: session.sessionId,
     model: modelSpec,
-    thinkingLevel: options.thinkingLevel,
+    thinkingLevel: thinking.effective,
+    requestedThinkingLevel: thinking.requested,
+    effectiveThinkingLevel: thinking.effective,
   }));
 
   let streamedText = "";

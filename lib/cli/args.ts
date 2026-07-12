@@ -18,7 +18,7 @@ export type WorkspaceCommand = "workspace";
 
 export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand;
 
-export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh"] as const;
+export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
 
 export interface IssueCliOptions {
@@ -289,7 +289,7 @@ Options:
   --cwd <path>           Repository working directory. Defaults to current directory.
   --out <path>           Runs directory. Defaults to .roark/runs.
   --model <provider/id>  Optional Pi model override, e.g. anthropic/claude-sonnet-4-5.
-  --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh).
+  --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh|max).
   --fast                 Use the fast workflow thinking profile (cannot combine with --thinking or --deep).
   --deep                 Use the deep workflow thinking profile (cannot combine with --thinking or --fast).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.

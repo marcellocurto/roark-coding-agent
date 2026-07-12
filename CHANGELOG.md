@@ -11,6 +11,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 - Added version tracking policy, release scripts, Git tag guidance, and `roark --version`.
 - Added observable per-phase GPT-5.6 family routing with explicit global model override precedence.
 - Added GPT-5.6 authentication, troubleshooting, and rollback guidance.
+- Added explicit `max` thinking with reported fallback for models that do not support it.
 
 ### Changed
 

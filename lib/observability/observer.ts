@@ -40,6 +40,8 @@ export interface AgentSessionObservation {
   sessionId: string;
   model?: string | undefined  ;
   thinkingLevel?: string | undefined  ;
+  requestedThinkingLevel?: string | undefined;
+  effectiveThinkingLevel?: string | undefined;
 }
 
 export interface AgentSessionStatsObservation {
@@ -155,6 +157,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
           thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
+          requestedThinkingLevel: input.thinkingLevel ?? existing?.requestedThinkingLevel,
           totals: existing?.totals ?? emptyTotals(),
         };
       });
@@ -185,7 +188,8 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
+          thinkingLevel: existing?.effectiveThinkingLevel ?? input.thinkingLevel ?? existing?.thinkingLevel,
+          requestedThinkingLevel: existing?.requestedThinkingLevel ?? input.thinkingLevel,
           reused: input.reused,
           totals: existing?.totals ?? emptyTotals(),
         };
@@ -218,7 +222,8 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
+          thinkingLevel: existing?.effectiveThinkingLevel ?? input.thinkingLevel ?? existing?.thinkingLevel,
+          requestedThinkingLevel: existing?.requestedThinkingLevel ?? input.thinkingLevel,
           errorMessage,
           totals: existing?.totals ?? emptyTotals(),
         };
@@ -226,6 +231,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
       });
     },
     async agentSessionStarted(input) {
+      const effectiveThinkingLevel = input.effectiveThinkingLevel ?? input.thinkingLevel;
       await writer.write({
         type: "agent_session_started",
         issueNumber: context.issueNumber,
@@ -233,7 +239,9 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         phase: input.phase,
         sessionId: input.sessionId,
         model: input.model,
-        thinkingLevel: input.thinkingLevel,
+        thinkingLevel: effectiveThinkingLevel,
+        requestedThinkingLevel: input.requestedThinkingLevel,
+        effectiveThinkingLevel,
       });
       await updateRunSummary(context, (summary) => {
         const existing = summary.phases[input.phase];
@@ -243,7 +251,9 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           ...existing,
           sessionId: input.sessionId,
           model: input.model ?? existing?.model,
-          thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
+          thinkingLevel: effectiveThinkingLevel ?? existing?.thinkingLevel,
+          requestedThinkingLevel: input.requestedThinkingLevel ?? existing?.requestedThinkingLevel,
+          effectiveThinkingLevel: effectiveThinkingLevel ?? existing?.effectiveThinkingLevel,
         };
       });
     },
