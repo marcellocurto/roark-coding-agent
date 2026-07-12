@@ -1,6 +1,6 @@
 {
   "name": "roark-coding-agent",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "module": "roark.ts",
   "type": "module",
   "bin": {
@@ -37,6 +37,6 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.72.1"
+    "@earendil-works/pi-coding-agent": "0.80.6"
   }
 }

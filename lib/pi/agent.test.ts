@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, defaultRoarkModel, extractAgentErrorMessage, requestedModelSpec, roarkPiSettings } from "./agent.ts";
+import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { defaultRoarkModel } from "../workflow/model-routing.ts";
+import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForMutationAuthority } from "./agent.ts";
 
 describe("Pi agent settings", () => {
   test("forces SSE transport for automated Roark sessions", () => {
@@ -13,6 +15,12 @@ describe("Pi agent settings", () => {
       noSkills: true,
       additionalSkillPaths: [],
     });
+  });
+
+  test("read-only phases retain shell inspection without edit or write tools", () => {
+    expect(toolsForMutationAuthority(false)).toEqual(["read", "bash", "grep", "find", "ls"]);
+    expect(toolsForMutationAuthority(false)).not.toContain("edit");
+    expect(toolsForMutationAuthority(false)).not.toContain("write");
   });
 
   test("explicit skill paths do not re-enable ambient skill discovery", () => {
@@ -50,9 +58,16 @@ describe("Pi agent settings", () => {
 });
 
 describe("Pi agent model selection", () => {
-  test("hard defaults to GPT 5.5 when no model override is provided", () => {
-    expect(defaultRoarkModel).toBe("openai-codex/gpt-5.5");
-    expect(requestedModelSpec()).toBe("openai-codex/gpt-5.5");
+  test("defaults to the built-in GPT-5.6 Sol catalog entry", () => {
+    expect(defaultRoarkModel).toBe("openai-codex/gpt-5.6-sol");
+    expect(requestedModelSpec()).toBe("openai-codex/gpt-5.6-sol");
+    const registry = ModelRegistry.create(AuthStorage.create());
+    expect(resolveModel(registry, requestedModelSpec()).id).toBe("gpt-5.6-sol");
+  });
+
+  test("fails clearly for an unavailable model", () => {
+    const registry = ModelRegistry.create(AuthStorage.create());
+    expect(() => resolveModel(registry, "openai-codex/not-a-real-model")).toThrow("Model not found");
   });
 
   test("still honors an explicit model override", () => {

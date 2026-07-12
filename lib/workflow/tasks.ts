@@ -1,4 +1,5 @@
 import type { WorkflowThinkingStage } from "./thinking.ts";
+import { effectiveModelForStage } from "./model-routing.ts";
 import { phaseNameForArtifact } from "../observability/observer.ts";
 import type { AgentRunRequest, AgentRunner } from "./agent-runner.ts";
 import {
@@ -191,13 +192,14 @@ export async function runAgentTask(
 
   const phase = phaseNameForArtifact(task.artifact);
   const thinkingLevel = thinkingLevelForTask(context, task);
+  const model = effectiveModelForStage(context.model, task.thinkingStage);
 
   if (!context.force && artifactExists(context, task.artifact)) {
     const existing = await readArtifact(context, task.artifact);
     const validation = validateAgentArtifact(task.artifact, existing);
     if (validation.ok) {
       console.log(`✓ ${task.label}: using existing ${artifactRelativePath(context, task.artifact)}`);
-      await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel, reused: true });
+      await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, reused: true });
       return existing;
     }
     console.log(
@@ -206,18 +208,18 @@ export async function runAgentTask(
   }
 
   console.log(`\n=== ${task.label} ===`);
-  await context.observer?.phaseStarted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel });
+  await context.observer?.phaseStarted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
   try {
     const content = await runTaskWithOutputContract(context, runner, task, retryOptions);
     await writeArtifact(context, task.artifact, content);
-    await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel });
+    await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
     console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
     return content;
   } catch (error) {
     const failurePhase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
     const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase: failurePhase, error });
     await writeArtifact(context, task.artifact, diagnostic);
-    await context.observer?.phaseFailed({ phase, label: task.label, artifact: task.artifact, model: context.model, thinkingLevel, error });
+    await context.observer?.phaseFailed({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, error });
     console.log(`\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`);
     throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
   }
@@ -231,7 +233,7 @@ async function runTaskWithOutputContract(
 ): Promise<string> {
   const request = {
     cwd: context.agentCwd,
-    model: context.model,
+    model: effectiveModelForStage(context.model, task.thinkingStage),
     thinkingLevel: thinkingLevelForTask(context, task),
     systemPrompt: sharedSystemPrompt,
     writable: task.writable,
@@ -335,7 +337,7 @@ function formatAgentTaskErrorArtifact(input: {
     `\`${artifactRelativePath(context, task.artifact)}\``,
     "",
     "## Model",
-    `\`${context.model ?? "roark default"}\``,
+    `\`${effectiveModelForStage(context.model, task.thinkingStage)}\``,
     "",
     "## Thinking Level",
     `\`${thinkingLevelForTask(context, task)}\``,

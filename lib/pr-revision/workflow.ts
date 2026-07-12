@@ -3,6 +3,7 @@ import path from "node:path";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
+import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
 import {
   classifyVerificationFailure,
@@ -373,7 +374,7 @@ async function runRevisionAgent(
   console.log(`\n=== ${input.label} ===`);
   const content = await runner({
     cwd: context.agentCwd,
-    model: context.model,
+    model: effectiveModelForStage(context.model, input.thinkingStage),
     thinkingLevel: context.thinkingConfig[input.thinkingStage],
     systemPrompt: sharedSystemPrompt,
     prompt: input.prompt,

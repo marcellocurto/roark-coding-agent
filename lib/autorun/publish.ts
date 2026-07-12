@@ -4,6 +4,7 @@ import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { prBodyUpdatePrompt, prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
@@ -563,7 +564,7 @@ interface PublishedPullRequest {
 async function publishPullRequestWithAgent(input: PublishAutorunResultInput & { agentRunner: AgentRunner }): Promise<PublishedPullRequest> {
   const output = await input.agentRunner({
     cwd: input.workflowContext.controlCwd,
-    model: input.workflowContext.model,
+    model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
     thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
     systemPrompt: prPublishingSystemPrompt(),
     prompt: prCreatePrompt({
@@ -603,7 +604,7 @@ export async function updatePrBodyWithAgent(input: {
   const agentRunner = input.agentRunner ?? runPiAgent;
   const output = await agentRunner({
     cwd: input.cwd,
-    model: input.workflowContext.model,
+    model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
     thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
     systemPrompt: prPublishingSystemPrompt(),
     prompt: prBodyUpdatePrompt({

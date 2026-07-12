@@ -1,6 +1,7 @@
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
   artifactAgentPath,
   artifactExists,
@@ -250,7 +251,7 @@ async function publishIssuesWithAgent(input: {
   try {
     const output = await agentRunner({
       cwd: context.agentCwd,
-      model: context.model,
+      model: effectiveModelForStage(context.model, "issuePublishing"),
       thinkingLevel: context.thinkingConfig.issuePublishing,
       systemPrompt: issuePublishingSystemPrompt(),
       prompt: issuePublishingPrompt({
