@@ -148,7 +148,7 @@ describe("createIssuesFromCurationPlan", () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.skillPaths).toBeUndefined();
-    expect(requests[0]?.writable).toBe(false);
+    expect(requests[0]?.fileEditingToolsEnabled).toBe(false);
     expect(requests[0]?.prompt).toContain("write the final GitHub issue title and body yourself");
     expect(requests[0]?.prompt).toContain("Do not copy the plan's proposedBody as the final body");
     expect(requests[0]?.prompt).toContain("external-blocker-1");

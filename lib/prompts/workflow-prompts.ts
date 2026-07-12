@@ -38,7 +38,7 @@ const findingsLedgerContract = `  <findings_ledger_contract>
 
 const doNotBroadenScopeInstruction = "Do not broaden scope.";
 const doNotEditWorkflowArtifactsInstruction = "Do not edit .roark workflow artifacts.";
-const doNotMakeChangesConstraint = "Do not make changes.";
+const inspectionOnlyConstraint = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
 const reviewVerdictSemantics = "Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, <value>restart-required</value> when the implementation direction is fundamentally wrong and incremental fixes would be more expensive/risky than resetting to the pre-implementation baseline, and <value>blocked</value> when the workflow cannot safely proceed.";
 const changedCodeValidationInstruction = "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
 
@@ -147,6 +147,7 @@ export function triagePrompt(context: WorkflowContext): string {
         "If a body-declared blocker cannot be verified, use needs-human-decision rather than blindly returning blocked.",
         "If returning blocked, include exact blocker evidence in ## Evidence: issue number, title if available, state, stateReason/closedAt, source, and verification command or snapshot field used.",
       ]),
+      renderConstraints([inspectionOnlyConstraint]),
     ],
     outputContract: `# Triage
 
@@ -179,6 +180,7 @@ export function planDraftPrompt(context: WorkflowContext): string {
         "Where details are missing or uncertain, reason through them yourself and propose the smartest solution.",
         `Classify the work as exactly one of: ${workClassificationValues}.`,
       ]),
+      renderConstraints([inspectionOnlyConstraint]),
     ],
     outputContract: markdownSections("Implementation Plan Draft", [
       "Issue",
@@ -215,6 +217,7 @@ export function planPrompt(context: WorkflowContext): string {
         "If intentional complexity remains, cite the issue, plan, or codebase reason it is necessary.",
         "Return the final refined plan as the complete implementation-plan.md artifact.",
       ]),
+      renderConstraints([inspectionOnlyConstraint]),
     ],
     outputContract: markdownSections("Implementation Plan", [
       "Issue",
@@ -335,7 +338,7 @@ function renderReviewPrompt(context: WorkflowContext, pass: number, config: Revi
         reviewVerdictSemantics,
       ].join("\n")),
       findingsLedgerContract,
-      renderConstraints([...config.extraConstraints, doNotMakeChangesConstraint]),
+      renderConstraints([...config.extraConstraints, inspectionOnlyConstraint]),
     ],
     outputContract: reviewOutputContract(config.reviewerLabel, pass),
   });
@@ -461,7 +464,7 @@ export function finalReviewPrompt(context: WorkflowContext, pass: number): strin
         "Decide if the work is ready for a PR based on unresolved current-issue blockers.",
         "Do not require fixes for non-blocking <value>follow-up</value> or <value>suggestion</value> findings; do not ask the fix agent to address them in the current issue.",
         "Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings and <value>blocked</value> only when the workflow cannot safely proceed.",
-        doNotMakeChangesConstraint,
+        inspectionOnlyConstraint,
       ]),
     ],
     outputContract: `# Final Review Pass ${pass}

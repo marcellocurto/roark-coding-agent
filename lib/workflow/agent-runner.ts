@@ -7,7 +7,7 @@ export interface AgentRunRequest {
   thinkingLevel: ThinkingLevel;
   systemPrompt: string;
   prompt: string;
-  writable: boolean;
+  fileEditingToolsEnabled: boolean;
   skillPaths?: string[] | undefined;
   observer?: RunObserver | undefined;
   phase?: string | undefined;

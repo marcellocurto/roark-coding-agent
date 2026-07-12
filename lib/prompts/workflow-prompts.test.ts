@@ -121,6 +121,23 @@ describe("workflow prompt safety policy", () => {
     expect(prompt).toContain("Stale ## Blocked by body text must not override resolved GitHub state");
   });
 
+  test("inspection phases retain shell use while avoiding intentional repository changes", () => {
+    const instruction = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
+    for (const prompt of [
+      triagePrompt(context),
+      planDraftPrompt(context),
+      planPrompt(context),
+      reviewAPrompt(context),
+      reviewBPrompt(context),
+      finalReviewPrompt(context, 1),
+    ]) {
+      expect(prompt).toContain(instruction);
+    }
+    for (const prompt of [implementationPrompt(context), codeRefinementPrompt(context, 0), fixPrompt(context, 1)]) {
+      expect(prompt).not.toContain(instruction);
+    }
+  });
+
   test("phase input artifact paths are reachable from split agent cwd", () => {
     const prompt = implementationPrompt(splitContext);
     expect(prompt).toContain('<artifact kind="issue">../../runs/issue/123/issue.md</artifact>');

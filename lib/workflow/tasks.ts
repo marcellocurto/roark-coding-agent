@@ -36,7 +36,7 @@ import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
 export interface AgentTask {
   artifact: ArtifactRef;
   label: string;
-  writable: boolean;
+  fileEditingToolsEnabled: boolean;
   thinkingStage: WorkflowThinkingStage;
   prerequisites: ArtifactRef[];
   prompt: (context: WorkflowContext) => string;
@@ -78,7 +78,7 @@ export class AgentTaskRunError extends Error {
 export const triageTask: AgentTask = {
   artifact: "triage",
   label: "Triage",
-  writable: false,
+  fileEditingToolsEnabled: false,
   thinkingStage: "triage",
   prerequisites: ["issue"],
   prompt: triagePrompt,
@@ -87,7 +87,7 @@ export const triageTask: AgentTask = {
 export const planDraftTask: AgentTask = {
   artifact: "implementationPlanDraft",
   label: "Implementation plan draft",
-  writable: false,
+  fileEditingToolsEnabled: false,
   thinkingStage: "plan",
   prerequisites: ["issue", "triage"],
   prompt: planDraftPrompt,
@@ -96,7 +96,7 @@ export const planDraftTask: AgentTask = {
 export const planTask: AgentTask = {
   artifact: "implementationPlan",
   label: "Implementation plan refinement",
-  writable: false,
+  fileEditingToolsEnabled: false,
   thinkingStage: "plan",
   prerequisites: ["issue", "triage", "implementationPlanDraft"],
   prompt: planPrompt,
@@ -108,7 +108,7 @@ export function implementationTaskForPass(restartPass = 0): AgentTask {
   return {
     artifact: "implementationLog",
     label: restartPass > 0 ? `Implementation restart pass ${restartPass}` : "Implementation",
-    writable: true,
+    fileEditingToolsEnabled: true,
     thinkingStage: "implement",
     prerequisites: restartPass > 0
       ? ["issue", "triage", "implementationPlan", reviewARef(restartPass - 1), reviewBRef(restartPass - 1)]
@@ -121,7 +121,7 @@ export function codeRefinementTask(pass: number, source: CodeRefinementSource = 
   return {
     artifact: refinementLogRef(pass),
     label: `Code refinement pass ${pass}`,
-    writable: true,
+    fileEditingToolsEnabled: true,
     thinkingStage: "fix",
     prerequisites: codeRefinementPrerequisites(pass, source),
     prompt: (context) => codeRefinementPrompt(context, pass, source),
@@ -142,7 +142,7 @@ export function reviewATaskForPass(pass = 0): AgentTask {
   return {
     artifact: reviewARef(pass),
     label: `Review A pass ${pass}`,
-    writable: false,
+    fileEditingToolsEnabled: false,
     thinkingStage: "reviewA",
     prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
     prompt: (context) => reviewAPrompt(context, pass),
@@ -153,7 +153,7 @@ export function reviewBTaskForPass(pass = 0): AgentTask {
   return {
     artifact: reviewBRef(pass),
     label: `Review B pass ${pass}`,
-    writable: false,
+    fileEditingToolsEnabled: false,
     thinkingStage: "reviewB",
     prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
     prompt: (context) => reviewBPrompt(context, pass),
@@ -164,7 +164,7 @@ export function fixTask(pass: number): AgentTask {
   return {
     artifact: fixLogRef(pass),
     label: `Fix pass ${pass}`,
-    writable: true,
+    fileEditingToolsEnabled: true,
     thinkingStage: "fix",
     prerequisites: ["issue", "implementationPlan", "implementationLog", reviewARef(pass - 1), reviewBRef(pass - 1)],
     prompt: (context) => fixPrompt(context, pass),
@@ -175,7 +175,7 @@ export function finalReviewTask(pass: number): AgentTask {
   return {
     artifact: finalReviewRef(pass),
     label: `Final review pass ${pass}`,
-    writable: false,
+    fileEditingToolsEnabled: false,
     thinkingStage: "finalReview",
     prerequisites: ["issue", "implementationPlan", reviewARef(Math.max(0, pass - 1)), reviewBRef(Math.max(0, pass - 1)), fixLogRef(pass)],
     prompt: (context) => finalReviewPrompt(context, pass),
@@ -236,7 +236,7 @@ async function runTaskWithOutputContract(
     model: effectiveModelForStage(context.model, task.thinkingStage),
     thinkingLevel: thinkingLevelForTask(context, task),
     systemPrompt: sharedSystemPrompt,
-    writable: task.writable,
+    fileEditingToolsEnabled: task.fileEditingToolsEnabled,
     observer: context.observer,
     phase: phaseNameForArtifact(task.artifact),
   };
@@ -285,7 +285,7 @@ async function runAgentRequestWithTransientRetries(
 }
 
 function withTransientConnectionRetryPrompt(request: AgentRunRequest, task: AgentTask): AgentRunRequest {
-  if (!task.writable) return request;
+  if (!task.fileEditingToolsEnabled) return request;
   return {
     ...request,
     prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, finish the phase, run validation, and return the complete required Markdown artifact.\n</transient_connection_retry>`,

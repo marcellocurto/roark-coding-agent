@@ -7,6 +7,8 @@ Read the PR feedback artifacts in ${context.agentRevisionDirRelative}:
 - pr-feedback.md
 - pr-feedback.json
 
+Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.
+
 Classify every relevant unresolved/current feedback item as exactly one of:
 - must-fix-current
 - already-addressed
@@ -63,6 +65,7 @@ export function revisionReviewPrompt(context: PrRevisionContext, pass: number): 
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
 Verify feedback handling, skipped-item rationale, validation evidence, regression risk, and scope control.
+Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.
 
 Return only this Markdown artifact:
 # Revision Review

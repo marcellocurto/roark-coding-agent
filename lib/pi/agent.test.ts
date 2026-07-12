@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { defaultRoarkModel } from "../workflow/model-routing.ts";
-import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForMutationAuthority } from "./agent.ts";
+import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForFileEditingMode } from "./agent.ts";
 
 describe("Pi agent settings", () => {
   test("forces SSE transport for automated Roark sessions", () => {
@@ -17,10 +17,10 @@ describe("Pi agent settings", () => {
     });
   });
 
-  test("read-only phases retain shell inspection without edit or write tools", () => {
-    expect(toolsForMutationAuthority(false)).toEqual(["read", "bash", "grep", "find", "ls"]);
-    expect(toolsForMutationAuthority(false)).not.toContain("edit");
-    expect(toolsForMutationAuthority(false)).not.toContain("write");
+  test("shell inspection mode retains bash without dedicated file-editing tools", () => {
+    expect(toolsForFileEditingMode(false)).toEqual(["read", "bash", "grep", "find", "ls"]);
+    expect(toolsForFileEditingMode(false)).not.toContain("edit");
+    expect(toolsForFileEditingMode(false)).not.toContain("write");
   });
 
   test("explicit skill paths do not re-enable ambient skill discovery", () => {

@@ -100,7 +100,7 @@ export async function runPrRevision(
     const plan = await runRevisionAgent(context, runner, {
       label: "Revision plan",
       artifact: "revision-plan.md",
-      writable: false,
+      fileEditingToolsEnabled: false,
       thinkingStage: "revisionPlan",
       prompt: revisionPlanPrompt(context),
     });
@@ -145,7 +145,7 @@ export async function runPrRevision(
     await runRevisionAgent(context, runner, {
       label: "Revision implementation",
       artifact: "revision-log.md",
-      writable: true,
+      fileEditingToolsEnabled: true,
       thinkingStage: "revisionImplementation",
       prompt: revisionImplementationPrompt(context, 0),
     });
@@ -154,7 +154,7 @@ export async function runPrRevision(
     let review = await runRevisionAgent(context, runner, {
       label: "Revision review",
       artifact: "revision-review.md",
-      writable: false,
+      fileEditingToolsEnabled: false,
       thinkingStage: "revisionReview",
       prompt: revisionReviewPrompt(context, 0),
     });
@@ -185,7 +185,7 @@ export async function runPrRevision(
         await runRevisionAgent(context, runner, {
           label: `Revision fix pass ${pass}`,
           artifact: logArtifact,
-          writable: true,
+          fileEditingToolsEnabled: true,
           thinkingStage: "revisionFix",
           prompt: revisionImplementationPrompt(context, pass),
         });
@@ -195,7 +195,7 @@ export async function runPrRevision(
         review = await runRevisionAgent(context, runner, {
           label: `Revision review pass ${pass}`,
           artifact: reviewArtifact,
-          writable: false,
+          fileEditingToolsEnabled: false,
           thinkingStage: "revisionReview",
           prompt: revisionReviewPrompt(context, pass),
         });
@@ -267,7 +267,7 @@ export async function runPrRevision(
       await runRevisionAgent(context, runner, {
         label: `Revision fix pass ${pass}`,
         artifact: logArtifact,
-        writable: true,
+        fileEditingToolsEnabled: true,
         thinkingStage: "revisionFix",
         prompt: revisionImplementationPrompt(context, pass),
       });
@@ -277,7 +277,7 @@ export async function runPrRevision(
       review = await runRevisionAgent(context, runner, {
         label: `Revision review pass ${pass}`,
         artifact: reviewArtifact,
-        writable: false,
+        fileEditingToolsEnabled: false,
         thinkingStage: "revisionReview",
         prompt: revisionReviewPrompt(context, pass),
       });
@@ -369,7 +369,7 @@ async function prepareRevisionWorkspace(input: {
 async function runRevisionAgent(
   context: PrRevisionContext,
   runner: AgentRunner,
-  input: { label: string; artifact: string; writable: boolean; thinkingStage: WorkflowThinkingStage; prompt: string },
+  input: { label: string; artifact: string; fileEditingToolsEnabled: boolean; thinkingStage: WorkflowThinkingStage; prompt: string },
 ): Promise<string> {
   console.log(`\n=== ${input.label} ===`);
   const content = await runner({
@@ -378,7 +378,7 @@ async function runRevisionAgent(
     thinkingLevel: context.thinkingConfig[input.thinkingStage],
     systemPrompt: sharedSystemPrompt,
     prompt: input.prompt,
-    writable: input.writable,
+    fileEditingToolsEnabled: input.fileEditingToolsEnabled,
   });
   await writePrRevisionArtifact(context, input.artifact, content);
   console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);

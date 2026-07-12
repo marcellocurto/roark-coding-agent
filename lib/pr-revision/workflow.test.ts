@@ -190,11 +190,11 @@ describe("runPrRevision", () => {
     expect(commentCalls).toBe(1);
   });
 
-  test("needs-human stops before writable implementation and posts one summary by default", async () => {
+  test("needs-human stops before enabling file-editing tools and posts one summary by default", async () => {
     await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
-    const writableCalls: boolean[] = [];
+    const fileEditingToolCalls: boolean[] = [];
     let commentCalled = false;
 
     const result = await runPrRevision(options(control), {
@@ -202,7 +202,7 @@ describe("runPrRevision", () => {
       prepareWorkspace,
       agentRunner: async (request) => {
         await noopAsync();
-        writableCalls.push(request.writable);
+        fileEditingToolCalls.push(request.fileEditingToolsEnabled);
         return "# Revision Plan\n\n## Status\nneeds-human\n\n## Human Needs\n- Please decide.\n";
       },
       postSummaryComment: async () => {
@@ -212,7 +212,7 @@ describe("runPrRevision", () => {
     });
 
     expect(result.outcome).toBe("needs-human");
-    expect(writableCalls).toEqual([false]);
+    expect(fileEditingToolCalls).toEqual([false]);
     expect(commentCalled).toBe(true);
   });
 
@@ -228,7 +228,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         thinkingLevels.push(request.thinkingLevel);
-        if (request.writable) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
+        if (request.fileEditingToolsEnabled) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
         return "# Revision Review\n\n## Verdict\napprove\n";
       },
@@ -256,7 +256,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         calls++;
-        if (request.writable) {
+        if (request.fileEditingToolsEnabled) {
           writableCalls++;
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         }
@@ -297,7 +297,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         calls++;
-        if (request.writable) {
+        if (request.fileEditingToolsEnabled) {
           writableArtifacts.push(request.prompt);
           await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
           return `# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed pass ${writableArtifacts.length}.\n\n## Skipped Items\n- None.\n`;
@@ -345,7 +345,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         calls++;
-        if (request.writable) {
+        if (request.fileEditingToolsEnabled) {
           writableCalls++;
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         }
@@ -413,7 +413,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         calls++;
         agentCwds.push(request.cwd);
-        if (request.writable) {
+        if (request.fileEditingToolsEnabled) {
           await writeFile(path.join(request.cwd, "fixed.txt"), "fixed in workspace\n", "utf8");
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }
@@ -459,7 +459,7 @@ describe("runPrRevision", () => {
       prepareWorkspace,
       agentRunner: async (request) => {
         calls++;
-        if (request.writable) {
+        if (request.fileEditingToolsEnabled) {
           await Bun.write(path.join(request.cwd, "fixed.txt"), "fixed\n");
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }

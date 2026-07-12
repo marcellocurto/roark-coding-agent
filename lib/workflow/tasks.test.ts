@@ -89,7 +89,7 @@ describe("runAgentTask thinking profiles", () => {
     const requests: string[] = [];
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      requests.push(`${request.writable ? "write" : "read"}:${request.thinkingLevel}`);
+      requests.push(`${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`);
       if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
       if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
       if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
@@ -234,7 +234,7 @@ describe("runAgentTask transient agent retry", () => {
     expect(await readArtifact(context, "triage")).toBe(validTriage);
   });
 
-  test("adds partial-edit guidance to writable retry prompts", async () => {
+  test("adds partial-edit guidance when file-editing tools are enabled", async () => {
     const context = await createContext();
     await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
     await writeArtifact(

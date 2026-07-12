@@ -578,7 +578,7 @@ async function publishPullRequestWithAgent(input: PublishAutorunResultInput & { 
       attemptMetadataPath: input.attemptMetadataPath,
       artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
     }),
-    writable: false,
+    fileEditingToolsEnabled: false,
     observer: input.workflowContext.observer,
     phase: "pr-publishing",
   });
@@ -620,7 +620,7 @@ export async function updatePrBodyWithAgent(input: {
       followUpIssues: input.followUpIssues,
       artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
     }),
-    writable: false,
+    fileEditingToolsEnabled: false,
     observer: input.workflowContext.observer,
     phase: "pr-body-update",
   });

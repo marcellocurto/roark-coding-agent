@@ -266,7 +266,7 @@ async function publishIssuesWithAgent(input: {
           labels: labelsForPlanItem(item),
         })),
       }),
-      writable: false,
+      fileEditingToolsEnabled: false,
       observer: context.observer,
       phase: "issue-publishing",
     });

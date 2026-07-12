@@ -20,11 +20,11 @@ export const roarkPiSettings = {
   retry: { enabled: true, maxRetries: 2 },
 };
 
-const readOnlyTools = ["read", "bash", "grep", "find", "ls"];
-const writableTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+const shellInspectionTools = ["read", "bash", "grep", "find", "ls"];
+const fileEditingTools = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
-export function toolsForMutationAuthority(writable: boolean): readonly string[] {
-  return writable ? writableTools : readOnlyTools;
+export function toolsForFileEditingMode(fileEditingToolsEnabled: boolean): readonly string[] {
+  return fileEditingToolsEnabled ? fileEditingTools : shellInspectionTools;
 }
 
 export function buildRoarkResourceLoaderSecurityOptions(skillPaths: readonly string[] = []) {
@@ -74,7 +74,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(options.cwd),
     settingsManager,
-    tools: [...toolsForMutationAuthority(options.writable)],
+    tools: [...toolsForFileEditingMode(options.fileEditingToolsEnabled)],
   });
 
   if (modelFallbackMessage) console.log(`! ${modelFallbackMessage}`);
