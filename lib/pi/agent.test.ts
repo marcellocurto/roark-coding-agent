@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, DefaultResourceLoader, getAgentDir, ModelRegistry, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForFileEditingMode } from "./agent.ts";
+import { agentSkillPaths, bundledSkillNames } from "./bundled-skills.ts";
 
 describe("Pi agent settings", () => {
   test("forces SSE transport for automated Roark sessions", () => {
     expect(roarkPiSettings.transport).toBe("sse");
   });
 
-  test("defaults to no skills, extensions, or prompt templates", () => {
+  test("disables ambient skills, extensions, and prompt templates", () => {
     expect(buildRoarkResourceLoaderSecurityOptions()).toEqual({
       noExtensions: true,
       noPromptTemplates: true,
@@ -53,6 +54,23 @@ describe("Pi agent settings", () => {
       sourceInfo: {} as never,
       disableModelInvocation: false,
     }], ["/repo/skills/example-skill"]); }).not.toThrow();
+  });
+
+  test("loads every bundled skill without enabling ambient discovery", async () => {
+    const skillPaths = agentSkillPaths();
+    const settingsManager = SettingsManager.inMemory(roarkPiSettings);
+    const loader = new DefaultResourceLoader({
+      cwd: import.meta.dir,
+      agentDir: getAgentDir(),
+      settingsManager,
+      ...buildRoarkResourceLoaderSecurityOptions(skillPaths),
+    });
+
+    await loader.reload();
+    const loaded = loader.getSkills();
+    assertNoResourceLoadErrors(loaded.diagnostics, "skill");
+    assertRequestedSkillsLoaded(loaded.skills, skillPaths, loaded.diagnostics);
+    expect(loaded.skills.map((skill) => skill.name).sort()).toEqual([...bundledSkillNames].sort());
   });
 });
 

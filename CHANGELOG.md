@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Added
 
+- Bundled curated React, Next.js, UI, and Convex skills with every normal agent session, loaded from the installed Roark package without ambient machine-local discovery.
 - Added version tracking policy, release scripts, Git tag guidance, and `roark --version`.
 - Added observable per-phase GPT-5.6 family routing with explicit global model override precedence.
 - Added GPT-5.6 authentication, troubleshooting, and rollback guidance.

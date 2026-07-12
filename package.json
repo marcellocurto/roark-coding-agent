@@ -9,6 +9,7 @@
   "files": [
     "roark.ts",
     "lib",
+    "skills",
     "docs",
     "README.md",
     "CHANGELOG.md",

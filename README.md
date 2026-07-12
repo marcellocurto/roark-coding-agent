@@ -1,18 +1,18 @@
 # roark-coding-agent
 
-Roark is a small CLI workflow runner around the Pi coding-agent SDK. It turns GitHub issues into isolated agent runs, review artifacts, verification gates, and pull requests.
+Roark turns GitHub issues into reviewed, verified pull requests using coding-agent workflows.
 
-## What Roark does
+It is a CLI runner around the Pi coding-agent SDK. Roark plans and implements changes, runs independent reviews and repair passes, records durable artifacts, and publishes only after readiness and repository verification pass.
 
-- Runs an issue workflow: fetch, triage, plan, implement, review, fix, and readiness.
-- Supports label-gated one-shot automation with `roark auto`.
-- Uses managed clone workspaces so agent work is isolated from the control checkout.
-- Publishes PRs only after readiness and verification pass.
-- Recovers failed attempts with `roark continue`.
-- Revises existing PRs from PR-scoped feedback with `roark revise-pr`.
-- Writes durable run artifacts under `.roark/runs`.
+## Key guarantees
 
-Roark does **not** merge PRs, close issues, or run as a daemon. Humans remain responsible for final review and merge decisions.
+- Automated publishing work runs in managed clone workspaces, isolated from the control checkout.
+- Independent reviewers check correctness and maintainability before publishing.
+- Review findings and verification failures can trigger bounded repair passes.
+- Durable artifacts under `.roark/runs` explain decisions and support recovery.
+- Roark never merges pull requests or closes issues; humans retain final control.
+
+Roark is one-shot automation, not a daemon. Use a scheduler when you want repeated autoruns.
 
 ## Install
 
@@ -21,7 +21,7 @@ Prerequisites:
 - Bun
 - Git
 - GitHub CLI authenticated with `gh auth status`
-- push and pull request permissions for the target repository
+- GitHub permissions to read and comment on issues, manage workflow labels, push branches, and open pull requests
 
 ```bash
 git clone https://github.com/marcellocurto/roark-coding-agent.git
@@ -34,96 +34,66 @@ roark --version
 
 For servers, pin a tag or commit before installing globally.
 
-## Quick start
+## First run
 
-For the complete first-run path, see [Quickstart](docs/quickstart.md).
-
-Initialize Roark config in a target repository:
+From the target repository checkout, initialize Roark and run one explicit issue locally:
 
 ```bash
+cd /path/to/target-repo
 roark init
-```
-
-Run one issue manually:
-
-```bash
-roark do https://github.com/owner/repo/issues/123
-# or, from a checkout
 roark do 123 --repo owner/repo
 ```
 
-Preview autorun selection:
+`roark do` edits the current target checkout, writes run artifacts locally, and does not claim the issue, push a branch, or open a pull request. It provides a controlled way to understand the workflow before enabling automation.
 
-```bash
-roark auto --repo owner/repo --limit 1 --dry-run
-```
+For the complete setup, dry-run, autorun, inspection, and recovery path, read the [Quickstart](docs/quickstart.md).
 
-Run one label-gated autorun attempt:
+## Choose a workflow
 
-```bash
-roark auto --repo owner/repo --limit 1
-```
+| Goal | Command | Where code changes | Publishing behavior |
+| --- | --- | --- | --- |
+| Initialize repository configuration | `roark init` | Current checkout | None |
+| Run one issue locally | `roark do 123 --repo owner/repo` | Current checkout | None |
+| Preview eligible issues | `roark auto --repo owner/repo --dry-run` | No code changes | None |
+| Claim, implement, and publish an issue | `roark auto --repo owner/repo --limit 1` | Managed clone | Opens a PR after gates pass |
+| Resume a stopped autorun attempt | `roark continue 123 --repo owner/repo` | Managed clone | Publishes after gates pass |
+| Address feedback on an existing PR | `roark revise-pr 456 --repo owner/repo` | Managed clone | Commits and pushes verified revisions |
 
-Recover a failed attempt:
+## How it works
 
-```bash
-roark continue 123 --repo owner/repo --attempt 1
-```
+For each issue, Roark:
 
-Revise an existing PR from review feedback:
+1. Fetches the issue and verifies whether it is actionable.
+2. Creates and refines an implementation plan grounded in the repository.
+3. Applies the change and runs relevant validation.
+4. Runs independent correctness and maintainability reviews.
+5. Applies bounded repair passes when reviews or verification find problems.
+6. Records phase outputs and decisions under `.roark/runs`.
+7. In autorun mode, opens a pull request only after readiness and verification pass.
 
-```bash
-roark revise-pr 123 --repo owner/repo
-```
+## Safety boundaries
 
-## Choose your path
+- GitHub issue text, PR feedback, repository files, and tool output are treated as untrusted input.
+- Lifecycle hooks and verification commands execute shell commands locally; review repository configuration before running Roark.
+- Autorun uses isolated managed workspaces and does not merge pull requests or close issues.
+- Use the least-privileged GitHub account that can perform the required workflow.
 
-- First successful run: [Quickstart](docs/quickstart.md)
-- Command selection: [Usage](docs/usage.md)
-- Mental model: [Concepts](docs/concepts.md)
-- Scheduled operation: [Operations runbook](docs/operations-runbook.md)
-- Failed run recovery: [Troubleshooting](docs/troubleshooting.md)
+Read [Security and secrets](docs/security-and-secrets.md) before running Roark on public repositories, shared hosts, or unattended schedules.
+
+## Essential documentation
+
+- [Quickstart](docs/quickstart.md) — install, initialize, run one issue, inspect results, and recover.
+- [Concepts](docs/concepts.md) — control checkouts, managed workspaces, attempts, gates, and artifacts.
+- [Usage](docs/usage.md) — choose between local runs, autorun, recovery, PR revision, and issue curation.
+- [Configuration](docs/configuration.md) — `.roark/config.json`, verification, hooks, labels, and workspaces.
+- [Operations runbook](docs/operations-runbook.md) — scheduled and shared-host operation.
+- [Troubleshooting](docs/troubleshooting.md) — diagnose stopped or failed runs.
+- [Documentation index](docs/README.md) — complete user, operator, reference, and contributor documentation.
 
 ## Local development
 
 ```bash
 bun run roark.ts --help
 bun run roark.ts do 123 --repo owner/repo
-bun test
-bun run typecheck
+bun run check
 ```
-
-## Documentation
-
-Start with the [docs index](docs/README.md).
-
-Common topics:
-
-- [Quickstart](docs/quickstart.md) - first-run path.
-- [Concepts](docs/concepts.md) - workflow mental model.
-- [Usage](docs/usage.md) - common commands and when to use them.
-- [Configuration](docs/configuration.md) — `.roark/config.json`, defaults, and precedence.
-- [Managed workspaces](docs/managed-workspaces.md) — clone workspaces and `workspace.copyToWorktree` for ignored local files such as `.secrets/env`.
-- [Autorun](docs/autorun.md) — label-gated automation and PR publishing.
-- [Recovery](docs/recovery.md) — failed attempts and `roark continue`.
-- [PR revisions](docs/pr-revisions.md) — responding to feedback on an existing PR.
-- [Issue curation](docs/issue-curation.md) — creating follow-up issues from reviewer findings.
-- [Verification](docs/verification.md) — readiness and verification gates.
-- [Troubleshooting](docs/troubleshooting.md) — common failure symptoms and recovery.
-- [Operations runbook](docs/operations-runbook.md) — scheduled or shared-host operation.
-- [Lifecycle hooks](docs/lifecycle-hooks.md) — setup commands such as dependency installation.
-- [Artifacts](docs/artifacts.md) — `.roark/runs` layout and phase outputs.
-- [CLI reference](docs/cli-reference.md) — commands and options.
-- [Scheduling](docs/scheduling.md) — cron, launchd, and GitHub Actions examples.
-- [Security and secrets](docs/security-and-secrets.md) — secret handling and untrusted input boundaries.
-- [Labels](docs/labels.md) — GitHub label roles and defaults.
-- [Architecture](docs/architecture.md) — contributor-level internals.
-- [Versioning](docs/versioning.md) — SemVer policy, changelog expectations, and release checklist.
-- [Glossary](docs/glossary.md) — term definitions.
-
-## Inspiration
-
-- [symphony](https://github.com/openai/symphony)
-- [OpenAI Symphony announcement](https://openai.com/index/open-source-codex-orchestration-symphony/)
-- [OpenAI harness engineering](https://openai.com/index/harness-engineering/)
-- [sandcastle](https://github.com/mattpocock/sandcastle)

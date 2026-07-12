@@ -12,6 +12,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { defaultRoarkModel } from "../workflow/model-routing.ts";
+import { agentSkillPaths, assertBundledSkillsPresent } from "./bundled-skills.ts";
 import { resolveThinkingLevel } from "./thinking-level.ts";
 import { formatCompletedToolLine, formatToolRunSummary, type CompletedToolRunForLog } from "./tool-log.ts";
 
@@ -37,6 +38,8 @@ export function buildRoarkResourceLoaderSecurityOptions(skillPaths: readonly str
 }
 
 export async function runPiAgent(options: AgentRunRequest): Promise<string> {
+  assertBundledSkillsPresent();
+  const skillPaths = agentSkillPaths(options.skillPaths);
   const modelSpec = requestedModelSpec(options.model);
   console.log(`model: ${modelSpec}`);
   const authStorage = AuthStorage.create();
@@ -52,7 +55,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     cwd: options.cwd,
     agentDir: getAgentDir(),
     settingsManager,
-    ...buildRoarkResourceLoaderSecurityOptions(options.skillPaths),
+    ...buildRoarkResourceLoaderSecurityOptions(skillPaths),
     appendSystemPromptOverride: (base) => [
       ...base,
       options.systemPrompt,
@@ -63,7 +66,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   await loader.reload();
   const loadedSkills = loader.getSkills();
   assertNoResourceLoadErrors(loadedSkills.diagnostics, "skill");
-  assertRequestedSkillsLoaded(loadedSkills.skills, options.skillPaths ?? [], loadedSkills.diagnostics);
+  assertRequestedSkillsLoaded(loadedSkills.skills, skillPaths, loadedSkills.diagnostics);
 
   const { session, modelFallbackMessage } = await createAgentSession({
     cwd: options.cwd,
