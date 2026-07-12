@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
-import { defaultRoarkModel } from "../workflow/model-routing.ts";
 import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForFileEditingMode } from "./agent.ts";
 
 describe("Pi agent settings", () => {
@@ -59,7 +58,6 @@ describe("Pi agent settings", () => {
 
 describe("Pi agent model selection", () => {
   test("defaults to the built-in GPT-5.6 Sol catalog entry", () => {
-    expect(defaultRoarkModel).toBe("openai-codex/gpt-5.6-sol");
     expect(requestedModelSpec()).toBe("openai-codex/gpt-5.6-sol");
     const registry = ModelRegistry.create(AuthStorage.create());
     expect(resolveModel(registry, requestedModelSpec()).id).toBe("gpt-5.6-sol");

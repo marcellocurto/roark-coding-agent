@@ -216,13 +216,13 @@ describe("runPrRevision", () => {
     expect(commentCalled).toBe(true);
   });
 
-  test("uses centralized thinking profiles for revision agents", async () => {
+  test("honors an explicit thinking override across revision agents", async () => {
     await noopAsync();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const thinkingLevels: string[] = [];
 
-    const result = await runPrRevision(options(control, { thinkingProfile: "fast" }), {
+    const result = await runPrRevision(options(control, { thinkingLevel: "medium" }), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
@@ -239,7 +239,7 @@ describe("runPrRevision", () => {
     });
 
     expect(result.outcome).toBe("verification-failed");
-    expect(thinkingLevels).toEqual(["low", "low", "low"]);
+    expect(thinkingLevels).toEqual(["medium", "medium", "medium"]);
   });
 
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {

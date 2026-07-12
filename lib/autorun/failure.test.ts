@@ -3,15 +3,10 @@ import {
   buildFailureCommentArgv,
   buildFailureLabelArgv,
   buildRemoveLabelArgv,
-  defaultAutorunFailureLabel,
   formatFailureComment,
 } from "./failure.ts";
 
 describe("autorun failure", () => {
-  test("default failure label is roark-failed", () => {
-    expect(defaultAutorunFailureLabel).toBe("roark-failed");
-  });
-
   test("formatFailureComment includes phase, reason, issue number, and artifact path", () => {
     const comment = formatFailureComment({
       issueNumber: 8,

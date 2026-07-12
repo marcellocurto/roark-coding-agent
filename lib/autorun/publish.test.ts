@@ -8,8 +8,6 @@ import {
   buildPushArgv,
   buildStageAllArgv,
   buildSuccessLabelArgv,
-  defaultAutorunRemote,
-  defaultAutorunSuccessLabel,
   formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
@@ -20,16 +18,6 @@ const tempDirs: string[] = [];
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
-
-describe("autorun publish defaults", () => {
-  test("default success label is roark-pr-opened", () => {
-    expect(defaultAutorunSuccessLabel).toBe("roark-pr-opened");
-  });
-
-  test("default remote is origin", () => {
-    expect(defaultAutorunRemote).toBe("origin");
-  });
 });
 
 describe("autorun publish argv builders", () => {

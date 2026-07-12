@@ -192,33 +192,32 @@ describe("createIssuesFromCurationPlan", () => {
     expect(requests[0]?.prompt).toContain(`Roark will write \`${expectedResultPath}\``);
   });
 
-  test("approved publishing agent uses centralized thinking profiles", async () => {
-        await noopAsync();
-    for (const [profile, expected] of [["fast", "low"], ["deep", "high"]] as const) {
-      const context = await tempContext({ yes: true, thinkingProfile: profile });
-      await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-      const thinkingLevels: string[] = [];
+  test("approved publishing agent uses the issue-publishing thinking stage", async () => {
+    await noopAsync();
+    const context = await tempContext({ yes: true });
+    context.thinkingConfig.issuePublishing = "minimal";
+    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    const thinkingLevels: string[] = [];
 
-      await createIssuesFromCurationPlan({
-        context,
-        clock,
-        labelEnsurer: false,
-          agentRunner: async (request) => {
+    await createIssuesFromCurationPlan({
+      context,
+      clock,
+      labelEnsurer: false,
+      agentRunner: async (request) => {
         await noopAsync();
-          thinkingLevels.push(request.thinkingLevel);
-          return JSON.stringify({
-            created: [
-              { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-              { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-            ],
-            failed: [],
-            relationshipOutcomes: [],
-          });
-        },
-      });
+        thinkingLevels.push(request.thinkingLevel);
+        return JSON.stringify({
+          created: [
+            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
+          ],
+          failed: [],
+          relationshipOutcomes: [],
+        });
+      },
+    });
 
-      expect(thinkingLevels).toEqual([expected]);
-    }
+    expect(thinkingLevels).toEqual(["minimal"]);
   });
 
   test("approved agent response must cover every creatable plan item exactly once", async () => {
@@ -413,7 +412,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 });
 
-async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined; thinkingProfile?: "fast" | "deep"  | undefined}) {
+async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined}) {
   const dir = options.reuseDir ?? await mkdtemp(path.join(tmpdir(), "roark-create-issues-"));
   if (!options.reuseDir) tempDirs.push(dir);
   return createWorkflowContext({
@@ -422,7 +421,6 @@ async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: 
     cwd: dir,
     outDir: ".roark/runs",
     repo: "owner/repo",
-    thinkingProfile: options.thinkingProfile,
     force: options.force ?? false,
     yes: options.yes,
     maxFixPasses: 1,

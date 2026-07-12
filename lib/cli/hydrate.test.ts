@@ -2,9 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
-import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import { defaultAutorunInProgressLabel, defaultAutorunReadyLabel } from "../autorun/selection.ts";
 import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 import { hydrateCliOptions, inferVerifyCommand, parseGithubRepoFromOrigin } from "./hydrate.ts";
 import { runProcessOrThrow } from "./process.ts";
@@ -220,6 +217,8 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.command).toBe("revise-pr");
     if (hydrated.command !== "revise-pr") throw new Error("expected revise-pr options");
     expect(hydrated.maxFixPasses).toBe(defaultMaxFixPasses);
+    expect(hydrated.verifyCommand).toBe("bun run typecheck");
+    expect(hydrated.remote).toBe("origin");
     expect(hydrated.workspace?.root).toBe("~/revision-workspaces");
     expect(hydrated.workspace?.cloneRemote).toBe("upstream");
     expect(hydrated.hooks?.beforeRun).toBe("echo before");
@@ -274,10 +273,12 @@ describe("hydrateCliOptions", () => {
     if (hydrated.command !== "auto") throw new Error("expected auto options");
     expect(hydrated.repo).toBe("owner/inferred");
     expect(hydrated.verifyCommand).toBe("bun run typecheck");
-    expect(hydrated.readyLabel).toBe(defaultAutorunReadyLabel);
-    expect(hydrated.inProgressLabel).toBe(defaultAutorunInProgressLabel);
-    expect(hydrated.failureLabel).toBe(defaultAutorunFailureLabel);
-    expect(hydrated.baseBranch).toBe(defaultAutorunBaseBranch);
+    expect(hydrated.readyLabel).toBe("afk");
+    expect(hydrated.inProgressLabel).toBe("roark-in-progress");
+    expect(hydrated.failureLabel).toBe("roark-failed");
+    expect(hydrated.successLabel).toBe("roark-pr-opened");
+    expect(hydrated.baseBranch).toBe("main");
+    expect(hydrated.remote).toBe("origin");
   });
 
   test("ignores root-level roark.config.json and loads only .roark/config.json", async () => {

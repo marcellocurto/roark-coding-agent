@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   classifyVerificationFailure,
-  defaultAutorunVerifyCommand,
   formatVerificationArtifact,
   parseVerificationArtifact,
   runVerification,
@@ -11,10 +10,6 @@ import {
 } from "./verification.ts";
 
 describe("autorun verification", () => {
-  test("default verify command targets typecheck", () => {
-    expect(defaultAutorunVerifyCommand).toBe("bun run typecheck");
-  });
-
   test("runVerification reports ok when the runner exits 0", async () => {
     const runner: VerificationRunner = ({ command, cwd })=> Promise.resolve(({
       ok: true,

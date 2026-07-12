@@ -14,7 +14,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
-async function createContext(options: { agentCwd?: string | undefined; model?: string | undefined; thinkingProfile?: "fast" | "deep" | undefined; thinkingLevel?: "medium"  | undefined} = {}) {
+async function createContext(options: { agentCwd?: string | undefined; model?: string | undefined} = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-tasks-"));
   tempDirs.push(dir);
   const context = createWorkflowContext({
@@ -23,8 +23,6 @@ async function createContext(options: { agentCwd?: string | undefined; model?: s
     cwd: dir,
     outDir: ".roark/runs",
     model: options.model,
-    thinkingLevel: options.thinkingLevel,
-    thinkingProfile: options.thinkingProfile,
     force: false,
     yes: false,
     maxFixPasses: 1,
@@ -128,7 +126,7 @@ describe("runAgentTask thinking profiles", () => {
   });
 
   test("restart refinement pass uses restart artifacts instead of requiring a fix log", async () => {
-    const context = await createContext({ thinkingProfile: "fast" });
+    const context = await createContext();
     await writeReadyThroughReviews(context);
     await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
     await writeArtifact(context, implementationRestartLogRef(1), "# Implementation Restart Log Pass 1\n\n## Summary\nRestarted.\n");
@@ -147,26 +145,6 @@ describe("runAgentTask thinking profiles", () => {
     expect(prompts[0]).not.toContain('<artifact kind="fix_log">');
   });
 
-  test("deep profile and explicit thinking override use the resolved context config", async () => {
-    const deep = await createContext({ thinkingProfile: "deep" });
-    await writeReadyThroughPlan(deep);
-    const deepRequests: string[] = [];
-    await runAgentTask(deep, async (request) => {
-      await noopAsync();
-      deepRequests.push(request.thinkingLevel);
-      return "# Implementation Log\n";
-    }, implementationTask);
-    expect(deepRequests).toEqual(["high"]);
-
-    const explicit = await createContext({ thinkingLevel: "medium" });
-    const explicitRequests: string[] = [];
-    await runAgentTask(explicit, async (request) => {
-      await noopAsync();
-      explicitRequests.push(request.thinkingLevel);
-      return "# Triage\n\n## Verdict\nproceed\n";
-    }, triageTask);
-    expect(explicitRequests).toEqual(["medium"]);
-  });
 });
 
 describe("runAgentTask error diagnostics", () => {
