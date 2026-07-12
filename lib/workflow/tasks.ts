@@ -142,7 +142,7 @@ export function reviewATaskForPass(pass = 0): AgentTask {
     label: `Review A pass ${pass}`,
     fileEditingToolsEnabled: false,
     thinkingStage: "reviewA",
-    prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
+    prerequisites: ["issue", "triage", "implementationPlan", "preImplementationBaseline", "implementationLog", refinementLogRef(pass)],
     prompt: (context) => reviewAPrompt(context, pass),
   };
 }
@@ -153,7 +153,7 @@ export function reviewBTaskForPass(pass = 0): AgentTask {
     label: `Review B pass ${pass}`,
     fileEditingToolsEnabled: false,
     thinkingStage: "reviewB",
-    prerequisites: ["issue", "triage", "implementationPlan", "implementationLog", refinementLogRef(pass)],
+    prerequisites: ["issue", "triage", "implementationPlan", "preImplementationBaseline", "implementationLog", refinementLogRef(pass)],
     prompt: (context) => reviewBPrompt(context, pass),
   };
 }

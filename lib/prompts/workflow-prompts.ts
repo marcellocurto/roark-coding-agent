@@ -298,6 +298,7 @@ interface ReviewPromptConfig {
   successCriteria: string;
   focusName: string;
   focusItems: readonly string[];
+  sourcePolicy: readonly string[];
   requiredFixesPolicy: string;
   extraConstraints: readonly string[];
 }
@@ -305,16 +306,22 @@ interface ReviewPromptConfig {
 const reviewAConfig: ReviewPromptConfig = {
   phase: "review_a",
   reviewerLabel: "A",
-  role: "Review Agent A",
-  successCriteria: "Defect review succeeds when required fixes cite concrete defects with file-level evidence, validation gaps are identified, and non-defect concerns are not promoted to blockers.",
-  focusName: "Defect",
+  role: "Review Agent A — Spec and Correctness",
+  successCriteria: "Spec and correctness review succeeds when the change is checked against the source issue, missing or extra behavior is identified, concrete defects cite file-level evidence, and non-defect concerns are not promoted to blockers.",
+  focusName: "Spec and Correctness",
   focusItems: [
-    "Misimplementation or partial implementation of the issue's acceptance criteria.",
+    "Missing, partial, or incorrect implementation of the issue's requirements or acceptance criteria. Quote the relevant issue requirement for each finding.",
+    "Behavior added by the diff that the issue did not request, including accidental scope expansion.",
     "Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.",
     "Missing or incorrect error handling, race conditions, and ordering issues.",
     "Regressions or broken contracts in unrelated callers touched by the diff.",
     "Missing behavior-oriented regression coverage only where a realistic defect could escape existing tests. Do not require tests by default.",
     "Gaps or unsubstantiated claims in the implementation/refinement logs' validation evidence.",
+  ],
+  sourcePolicy: [
+    "The source issue is authoritative for requested behavior and acceptance criteria.",
+    "The triage, implementation plan, and implementation/refinement logs are supporting evidence, not permission to change or broaden the issue requirements.",
+    "For every spec finding, quote or precisely cite the source issue requirement and explain how the diff is missing, partial, incorrect, or extra.",
   ],
   requiredFixesPolicy: "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current issue.",
   extraConstraints: [],
@@ -323,18 +330,23 @@ const reviewAConfig: ReviewPromptConfig = {
 const reviewBConfig: ReviewPromptConfig = {
   phase: "review_b",
   reviewerLabel: "B",
-  role: "Review Agent B",
-  successCriteria: "Maintainability review succeeds when required fixes cite concrete code-health harms with file-level evidence and subjective preferences remain suggested improvements.",
-  focusName: "Maintainability",
+  role: "Review Agent B — Standards and Maintainability",
+  successCriteria: "Standards and maintainability review succeeds when documented repository-standard violations cite their source, concrete code-health harms cite file-level evidence, and subjective preferences remain clearly labelled suggestions.",
+  focusName: "Standards and Maintainability",
   focusItems: [
+    "Documented standards: inspect applicable AGENTS.md files, CONTRIBUTING.md, and other repository guidance governing the touched files. Cite the standards file and rule for every violation.",
     "Simplicity: unnecessary complexity, indirection, or premature abstraction.",
     "Codebase fit: alignment with existing patterns, idioms, and module boundaries already used here.",
-    "Scope control: changes that go beyond what the issue requires.",
     "Test quality: reject tests that cannot name a realistic bug, duplicate stronger coverage, or merely freeze configuration, prompt wording, fixtures, static content, or private structure; assess coverage only for meaningful changed behavior.",
     "Naming and API clarity: ambiguous, misleading, or inconsistent names and public surfaces.",
     "Style, formatting, and structure only when they materially harm readability or consistency.",
   ],
-  requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, ambiguous public name, scope bloat) and a concrete remediation that blocks approval for the current issue.",
+  sourcePolicy: [
+    "A documented repository standard is a hard rule and overrides general maintainability preferences.",
+    "Cite the governing standards file and exact rule for documented-standard violations. Label uncodified maintainability concerns as judgement calls, not hard violations.",
+    "Skip formatting, style, and mechanical concerns already enforced by configured linting, formatting, typechecking, or other tooling.",
+  ],
+  requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm (for example: duplicated logic, broken pattern fit, brittle test, or ambiguous public name) and a concrete remediation that blocks approval for the current issue.",
   extraConstraints: ["Do not read Review Agent A's output."],
 };
 
@@ -349,15 +361,23 @@ function renderReviewPrompt(context: WorkflowContext, pass: number, config: Revi
         { kind: "issue", artifact: "issue" },
         { kind: "triage", artifact: "triage" },
         { kind: "implementation_plan", artifact: "implementationPlan" },
+        { kind: "pre_implementation_baseline", artifact: "preImplementationBaseline" },
         { kind: "implementation_log", artifact: "implementationLog" },
         { kind: "refinement_log", artifact: refinementLogRef(pass) },
       ]),
       ...failedVerificationInputLines(context, pass),
-      "    <current_git_diff />",
     ],
     blocks: [
+      renderXmlBlock("review_diff_scope", [
+        `Read the baseline commit from ${artifactAgentPath(context, "preImplementationBaseline")}.`,
+        "Review exactly the tracked changes from that commit through the current working tree with: git diff &lt;baseline-head&gt; -- . ':(exclude).roark'",
+        "Use the same baseline for the stat with: git diff --stat &lt;baseline-head&gt; -- . ':(exclude).roark'",
+        "Also run git status --short and inspect untracked files outside .roark, because git diff does not include them.",
+        "Do not review pre-existing changes before the stored baseline.",
+      ].join("\n")),
       renderXmlBlock("inspection_budget", `Start with the current refined diff/stat for cycle ${pass}. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the review verdict and any findings with concrete evidence.`),
       renderReviewFocus(config, pass),
+      renderInstructionsBlock("review_source_policy", config.sourcePolicy),
       renderXmlBlock("required_fixes_policy", [
         config.requiredFixesPolicy,
         "Non-blocking concerns belong in the Findings Ledger as <value>follow-up</value> or <value>suggestion</value>, not Required Fixes.",

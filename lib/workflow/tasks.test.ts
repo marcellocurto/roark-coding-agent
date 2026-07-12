@@ -172,6 +172,7 @@ async function writeReadyThroughPlan(context: Awaited<ReturnType<typeof createCo
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
   await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
   await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+  await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc123", capturedAt: "now", excludes: [".roark"] }));
 }
 
 async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof createContext>>) {
