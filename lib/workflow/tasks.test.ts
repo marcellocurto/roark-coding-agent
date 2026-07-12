@@ -78,6 +78,24 @@ describe("runAgentTask skill loading", () => {
 });
 
 describe("runAgentTask thinking profiles", () => {
+  test("final review prerequisites match its numbered prompt inputs", async () => {
+    const context = await createContext();
+    const task = finalReviewTask(2);
+
+    expect(task.prerequisites).toEqual([
+      "issue",
+      "implementationPlan",
+      "implementationLog",
+      refinementLogRef(2),
+      reviewARef(2),
+      reviewBRef(2),
+    ]);
+    const prompt = task.prompt(context);
+    expect(prompt).toContain("refinement-log-2.md");
+    expect(prompt).toContain("review-a-2.md");
+    expect(prompt).toContain("review-b-2.md");
+  });
+
   test("routes task authority and thinking by assigned stage", async () => {
     const context = await createContext();
     context.thinkingConfig.implement = "minimal";
@@ -94,7 +112,7 @@ describe("runAgentTask thinking profiles", () => {
       if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
       if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
       if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
-      if (request.prompt.includes("Final Review")) return "# Final Review\n\n## Verdict\nready-for-pr\n";
+      if (request.prompt.includes("Final Review")) return "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n";
       if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
       return "# Implementation Log\n";
     };
@@ -104,7 +122,7 @@ describe("runAgentTask thinking profiles", () => {
     await runAgentTask(context, runner, reviewATask);
     await runAgentTask(context, runner, reviewBTask);
     await runAgentTask(context, runner, fixTask(1));
-    await runAgentTask(context, runner, finalReviewTask(1));
+    await runAgentTask(context, runner, finalReviewTask(0));
 
     expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low", "read:xhigh"]);
   });

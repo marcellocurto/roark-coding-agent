@@ -1,8 +1,6 @@
 import {
   artifactExists,
-  finalReviewRef,
   latestCompleteReviewCycle,
-  latestFinalReviewPass,
   readArtifact,
   reviewARef,
   reviewBRef,
@@ -19,10 +17,7 @@ export async function buildReadinessMarkdown(context: WorkflowContext): Promise<
   const reviewBArtifact = latestReviewCycle === undefined ? "reviewB" : reviewBRef(latestReviewCycle);
   const reviewA = artifactExists(context, reviewAArtifact) ? await readArtifact(context, reviewAArtifact) : "";
   const reviewB = artifactExists(context, reviewBArtifact) ? await readArtifact(context, reviewBArtifact) : "";
-  const useLegacyFinalReview = latestReviewCycle === undefined;
-  const finalReviewPass = useLegacyFinalReview ? latestFinalReviewPass(context) : undefined;
-  const finalReview = finalReviewPass !== undefined ? await readArtifact(context, finalReviewRef(finalReviewPass)) : "";
-  const decision = decideReadiness({ triage, plan, reviewA, reviewB, finalReview, allowLegacyFinalReview: useLegacyFinalReview });
+  const decision = decideReadiness({ triage, plan, reviewA, reviewB });
 
   return `# PR Readiness
 
@@ -38,14 +33,12 @@ ${context.runDirRelative}
 ## Decision Inputs
 - Triage verdict: ${decision.triageVerdict}
 - Plan ready for implementation: ${decision.planReady ? "yes" : "no"}
-- Latest review cycle: ${latestReviewCycle ?? "legacy/static"}
+- Latest review cycle: ${latestReviewCycle ?? "unnumbered"}
 - Review A verdict: ${decision.reviewAVerdict}
 - Review B verdict: ${decision.reviewBVerdict}
 - Fixes were needed in latest cycle: ${decision.fixesWereNeeded ? "yes" : "no"}
 - Restart required in latest cycle: ${decision.restartRequired ? "yes" : "no"}
 - Review blocked workflow: ${decision.blockedByReview ? "yes" : "no"}
-- Legacy final review pass used: ${finalReviewPass ?? "none"}
-- Legacy final review verdict used: ${decision.finalVerdict}
 - Maximum fix passes: ${context.maxFixPasses}
 
 ## Current-Issue Blocking Findings

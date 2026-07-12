@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { finalReviewRef, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
@@ -26,7 +26,6 @@ describe("verification repair planning", () => {
   test("uses the next pass after reviewer-driven fixes", async () => {
     const context = await tempContext(2);
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nDone.\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
 
     expect(await planVerificationRepair(context, failedVerification(1))).toEqual({ pass: 2 });
     expect(await readArtifact(context, { name: "verificationBeforeFix", pass: 2 })).toContain("## Exit Code\n1");
@@ -35,7 +34,6 @@ describe("verification repair planning", () => {
   test("does not schedule repair when fix budget is exhausted", async () => {
     const context = await tempContext(1);
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nDone.\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
 
     expect(await planVerificationRepair(context, failedVerification(1))).toBeUndefined();
   });

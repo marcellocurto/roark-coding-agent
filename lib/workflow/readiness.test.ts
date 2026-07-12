@@ -12,7 +12,7 @@ afterEach(async () => {
 });
 
 describe("buildReadinessMarkdown", () => {
-  test("ignores stale final review artifacts when numbered review cycle approves", async () => {
+  test("readiness stays based on numbered reviews when a standalone final review requests fixes", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "roark-readiness-"));
     tempDirs.push(dir);
     const context = createWorkflowContext({
@@ -29,16 +29,16 @@ describe("buildReadinessMarkdown", () => {
     await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
     await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
     await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nfixes-required\n");
+    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nfixes-required\n");
 
     const markdown = await buildReadinessMarkdown(context);
 
     expect(markdown).toContain("## Status\nready-for-pr");
     expect(markdown).toContain("- Latest review cycle: 0");
-    expect(markdown).toContain("- Legacy final review pass used: none");
+    expect(markdown).not.toContain("final review");
   });
 
-  test("does not let a stale final review override latest numbered fixes-required reviews", async () => {
+  test("standalone final review cannot override numbered reviews that require fixes", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "roark-readiness-"));
     tempDirs.push(dir);
     const context = createWorkflowContext({
@@ -55,14 +55,14 @@ describe("buildReadinessMarkdown", () => {
     await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
     await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\nfixes-required\n");
     await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n");
 
     const markdown = await buildReadinessMarkdown(context);
 
     expect(markdown).toContain("## Status\nnot-ready");
     expect(markdown).toContain("- Latest review cycle: 0");
     expect(markdown).toContain("- Review A verdict: fixes-required");
-    expect(markdown).toContain("- Legacy final review pass used: none");
+    expect(markdown).not.toContain("final review");
   });
 
   test("separates blocking, non-blocking, and warning finding summaries", async () => {

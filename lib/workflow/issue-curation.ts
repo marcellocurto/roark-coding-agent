@@ -431,10 +431,14 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
     if (artifactExists(context, reviewB)) artifacts.push(toPosix(artifactRelativePath(context, reviewB)));
   }
 
-  for (let pass = 1; pass <= Math.max(context.maxFixPasses, 1) || artifactExists(context, fixLogRef(pass)) || artifactExists(context, finalReviewRef(pass)); pass++) {
+  for (let pass = 1; pass <= Math.max(context.maxFixPasses, 1) || artifactExists(context, fixLogRef(pass)); pass++) {
     const fixLog = fixLogRef(pass);
-    const finalReview = finalReviewRef(pass);
     if (artifactExists(context, fixLog)) artifacts.push(toPosix(artifactRelativePath(context, fixLog)));
+  }
+
+  const latestReviewCycle = latestCompleteReviewCycle(context) ?? -1;
+  for (let pass = 0; pass <= latestReviewCycle; pass++) {
+    const finalReview = finalReviewRef(pass);
     if (artifactExists(context, finalReview)) artifacts.push(toPosix(artifactRelativePath(context, finalReview)));
   }
 

@@ -102,7 +102,7 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(terminal.outcome).toBe("published");
   });
 
-  test("continues verification repair when final review requests another fix pass", async () => {
+  test("continues verification repair when the numbered review requests another fix pass", async () => {
         await noopAsync();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
@@ -116,7 +116,7 @@ describe("runAutorunAttemptLifecycle", () => {
         await noopAsync();
         phases.push(request.phase ?? "unknown");
         if (request.phase === "fixLog-1") {
-          return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nFinal review requested another fix.\n";
+          return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNumbered review requested another fix.\n";
         }
         if (request.phase === "refinementLog-1") {
           return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n";

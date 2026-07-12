@@ -67,7 +67,7 @@ describe("artifact catalog", () => {
       name: "finalReview",
       kind: "numbered",
       filename: "final-review-1.md",
-      displayName: "Final Review Pass 1",
+      displayName: "Final Review Cycle 1",
       pass: 1,
     });
   });

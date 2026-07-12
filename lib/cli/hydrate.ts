@@ -200,6 +200,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
     yes: raw.yes ?? false,
     maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,
     fixPass: raw.fixPass,
+    reviewPass: raw.reviewPass,
     attempt: raw.attempt,
   };
 }

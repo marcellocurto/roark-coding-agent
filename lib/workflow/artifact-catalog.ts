@@ -120,7 +120,10 @@ const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> = {
 
 const numberedContracts: Record<NumberedArtifactName, (pass: number) => ArtifactContract> = {
   fixLog: (pass) => ({ requiredHeading: `Fix Log Pass ${pass}` }),
-  finalReview: () => ({ allowedVerdicts: ["ready-for-pr", "fixes-required", "blocked"] }),
+  finalReview: (pass) => ({
+    requiredHeading: `Final Review Cycle ${pass}`,
+    allowedVerdicts: ["ready-for-pr", "fixes-required", "blocked"],
+  }),
   verificationBeforeFix: () => ({}),
   implementationRestartLog: (pass) => ({ requiredHeading: `Implementation Restart Log Pass ${pass}` }),
   refinementLog: (pass) => ({ requiredHeading: `Refinement Log Pass ${pass}` }),
@@ -135,6 +138,28 @@ export function fixLogRef(pass: number): ArtifactRef {
 
 export function finalReviewRef(pass: number): ArtifactRef {
   return { name: "finalReview", pass };
+}
+
+export interface FinalReviewInputRefs {
+  readonly reviewCycle: number;
+  readonly issue: ArtifactRef;
+  readonly implementationPlan: ArtifactRef;
+  readonly implementationLog: ArtifactRef;
+  readonly refinementLog: ArtifactRef;
+  readonly reviewA: ArtifactRef;
+  readonly reviewB: ArtifactRef;
+}
+
+export function finalReviewInputRefs(reviewCycle: number): FinalReviewInputRefs {
+  return {
+    reviewCycle,
+    issue: "issue",
+    implementationPlan: "implementationPlan",
+    implementationLog: "implementationLog",
+    refinementLog: refinementLogRef(reviewCycle),
+    reviewA: reviewARef(reviewCycle),
+    reviewB: reviewBRef(reviewCycle),
+  };
 }
 
 export function verificationBeforeFixRef(pass: number): ArtifactRef {
@@ -187,7 +212,9 @@ export function artifactIdentity(artifact: ArtifactRef): ArtifactIdentity {
     name: definition.name,
     kind: "numbered",
     filename: artifactFilename(artifact),
-    displayName: `${definition.displayName} Pass ${artifact.pass}`,
+    displayName: definition.name === "finalReview"
+      ? `${definition.displayName} Cycle ${artifact.pass}`
+      : `${definition.displayName} Pass ${artifact.pass}`,
     pass: artifact.pass,
   };
 }

@@ -296,7 +296,6 @@ function forceActionForArtifact(artifact: ArtifactRef): WorkflowProgressionActio
   if (artifact.name === "reviewA") return run("review-a", "forced rerun requested", artifact.pass);
   if (artifact.name === "reviewB") return run("review-b", "forced rerun requested", artifact.pass);
   if (artifact.name === "baselineResetLog") return run("reset-baseline", "forced rerun requested", artifact.pass);
-  if (artifact.name === "finalReview") return run("final-review", "forced rerun requested", artifact.pass);
   return undefined;
 }
 

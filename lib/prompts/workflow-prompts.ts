@@ -3,6 +3,7 @@ import {
   artifactAgentPath,
   artifactExists,
   baselineResetLogRef,
+  finalReviewInputRefs,
   fixLogRef,
   implementationRestartLogRef,
   refinementLogRef,
@@ -440,39 +441,42 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
   });
 }
 
-export function finalReviewPrompt(context: WorkflowContext, pass: number): string {
+export function finalReviewPrompt(context: WorkflowContext, reviewCycle: number): string {
+  const inputs = finalReviewInputRefs(reviewCycle);
   return renderWorkflowPhase({
     name: "final_review",
-    pass,
-    role: `You are final review agent pass ${pass}.`,
-    successCriteria: "Final review succeeds when unresolved required fixes, validation gaps, and PR readiness are clearly decided with concrete evidence.",
+    pass: reviewCycle,
+    role: `You are the standalone final review agent for numbered Review A/B cycle ${reviewCycle}.`,
+    successCriteria: "The independent audit succeeds when it gives a well-supported recommendation about the current post-review worktree and clearly identifies any unresolved current-issue blockers or validation gaps.",
     inputs: [
       ...renderInputArtifacts(context, [
-        { kind: "issue", artifact: "issue" },
-        { kind: "implementation_plan", artifact: "implementationPlan" },
-        { kind: "review_a", artifact: "reviewA" },
-        { kind: "review_b", artifact: "reviewB" },
-        { kind: "fix_log", artifact: fixLogRef(pass) },
+        { kind: "issue", artifact: inputs.issue },
+        { kind: "implementation_plan", artifact: inputs.implementationPlan },
+        { kind: "implementation_log", artifact: inputs.implementationLog },
+        { kind: "refinement_log", artifact: inputs.refinementLog },
+        { kind: "review_a", artifact: inputs.reviewA },
+        { kind: "review_b", artifact: inputs.reviewB },
       ]),
-      ...failedVerificationInputLines(context, pass),
+      ...failedVerificationInputLines(context, reviewCycle),
     ],
     blocks: [
-      renderXmlBlock("inspection_budget", "Start with the current diff/stat after fixes. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the final verdict and any remaining issues with concrete evidence."),
+      renderXmlBlock("command_semantics", "This is an explicitly requested standalone audit. It is not part of automatic workflow progression, does not replace numbered Review A/B, and does not calculate or override deterministic workflow readiness."),
+      renderXmlBlock("inspection_budget", "Start with the current diff/stat for the reviewed implementation. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the recommendation and any remaining issues with concrete evidence."),
       renderXmlBlock("reviewer_roles", [
         '<role name="review_a">Defect-focused review: correctness, requirement coverage, bugs, edge cases, regressions.</role>',
         '<role name="review_b">Maintainability-focused review: simplicity, codebase fit, scope control, test quality, naming and API clarity.</role>',
         "<note>Weigh each input according to its role; do not treat them as interchangeable.</note>",
       ].join("\n")),
       renderInstructions([
-        "Review the current diff after fixes against the inputs.",
+        `Independently review the current diff against the issue, plan, refinement, and both reviews from cycle ${reviewCycle}.`,
         "If a failed verification artifact is listed in inputs, verify that the fix addressed that failure or clearly classify it as an external blocker.",
-        "Decide if the work is ready for a PR based on unresolved current-issue blockers.",
+        "Recommend whether the work is ready for a PR based on unresolved current-issue blockers. This recommendation is advisory; deterministic readiness remains based on numbered Review A/B.",
         "Do not require fixes for non-blocking <value>follow-up</value> or <value>suggestion</value> findings; do not ask the fix agent to address them in the current issue.",
         "Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings and <value>blocked</value> only when the workflow cannot safely proceed.",
         inspectionOnlyConstraint,
       ]),
     ],
-    outputContract: `# Final Review Pass ${pass}
+    outputContract: `# Final Review Cycle ${reviewCycle}
 
 ## Verdict
 One of: ready-for-pr, fixes-required, blocked

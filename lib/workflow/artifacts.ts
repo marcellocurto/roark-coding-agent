@@ -19,6 +19,7 @@ export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./ar
 export {
   artifactFilename,
   baselineResetLogRef,
+  finalReviewInputRefs,
   finalReviewRef,
   fixLogRef,
   formatArtifactRef,
@@ -47,6 +48,7 @@ export interface WorkflowContext {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number | undefined;
+  reviewPass?: number | undefined;
   observer?: RunObserver | undefined;
 }
 
@@ -82,6 +84,7 @@ export function createWorkflowContext(
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,
     fixPass: options.fixPass,
+    reviewPass: options.reviewPass,
   };
 }
 
@@ -154,18 +157,18 @@ export function inferNextFixPass(context: WorkflowContext): number {
   }
 }
 
-export function inferNextFinalReviewPass(context: WorkflowContext): number {
-  for (let pass = 1; ; pass++) {
-    if (!artifactExists(context, fixLogRef(pass))) break;
-    if (!artifactExists(context, finalReviewRef(pass))) return pass;
-  }
-  throw new Error("No fix pass is ready for final review. Run 'fix' first or pass --fix-pass.");
+export function inferFinalReviewCycle(context: WorkflowContext): number {
+  const reviewCycle = latestCompleteReviewCycle(context);
+  if (reviewCycle !== undefined) return reviewCycle;
+  throw new Error("No completed numbered review cycle is available. Run 'review' before 'final-review'.");
 }
 
 export function latestFinalReviewPass(context: WorkflowContext): number | undefined {
   let latest: number | undefined;
-  for (let pass = 1; artifactExists(context, finalReviewRef(pass)); pass++) {
-    latest = pass;
+  const latestReviewCycle = latestCompleteReviewCycle(context);
+  if (latestReviewCycle === undefined) return undefined;
+  for (let pass = 0; pass <= latestReviewCycle; pass++) {
+    if (artifactExists(context, finalReviewRef(pass))) latest = pass;
   }
   return latest;
 }

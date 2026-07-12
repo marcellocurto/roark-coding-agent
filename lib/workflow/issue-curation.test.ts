@@ -272,8 +272,10 @@ describe("buildIssueCurationPlan", () => {
     await writeArtifact(context, "triage", "# Triage\n");
     await writeArtifact(context, "reviewA", reviewWithLedger("None"));
     await writeArtifact(context, "reviewB", reviewWithLedger("None"));
+    await writeArtifact(context, reviewARef(0), reviewWithLedger("None"));
+    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n");
-    await writeArtifact(context, finalReviewRef(1), "# Final Review Pass 1\n\n## Verdict\nready-for-pr\n");
+    await writeArtifact(context, finalReviewRef(0), "# Final Review Cycle 0\n\n## Verdict\nready-for-pr\n");
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
@@ -283,8 +285,10 @@ describe("buildIssueCurationPlan", () => {
       ".roark/runs/issue/42/attempts/2/triage.md",
       ".roark/runs/issue/42/attempts/2/review-a.md",
       ".roark/runs/issue/42/attempts/2/review-b.md",
+      ".roark/runs/issue/42/attempts/2/review-a-0.md",
+      ".roark/runs/issue/42/attempts/2/review-b-0.md",
       ".roark/runs/issue/42/attempts/2/fix-log-1.md",
-      ".roark/runs/issue/42/attempts/2/final-review-1.md",
+      ".roark/runs/issue/42/attempts/2/final-review-0.md",
     ]);
   });
 });

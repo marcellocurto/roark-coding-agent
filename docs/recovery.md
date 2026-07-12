@@ -21,7 +21,7 @@ If `--attempt` is omitted, Roark uses the latest attempt recorded in:
 
 `continue` reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites readiness, reruns verification, and publishes only if readiness and verification both pass.
 
-If an attempt stopped as `failed-verification` while fix budget remains, `continue` plans the next fix pass, final review, readiness, and publish gate instead of just rerunning the failed command.
+If an attempt stopped as `failed-verification` while fix budget remains, `continue` plans the next fix pass, refinement, numbered Review A/B cycle, readiness, and publish gate instead of just rerunning the failed command.
 
 ## Dirty workspaces
 

@@ -19,7 +19,7 @@ roark auto --repo owner/repo --limit 1
 6. Run triage, planning, implementation, review, fix passes, and readiness.
 7. Apply the readiness gate.
 8. Run the verification gate.
-9. If verification fails and `maxFixPasses` has budget, repair through fix pass + final review + readiness, then rerun verification.
+9. If verification fails and `maxFixPasses` has budget, repair through a fix pass, code refinement, numbered Review A/B, and readiness, then rerun verification.
 10. On success, commit code changes and push the branch.
 11. A PR publishing agent writes a reviewer-friendly PR title/body from the source issue, workflow artifacts, and verification result, then opens the PR.
 12. Reviewer-generated follow-up issues are created after the PR exists, and a PR body update agent adds their links while preserving the human-authored PR explanation.

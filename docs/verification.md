@@ -13,7 +13,7 @@ flowchart LR
   readiness --> verify["Verification gate"]
   verify --> publish["PR"]
   readiness --> fail["Stop and recover"]
-  verify --> repair["Fix pass + final review"]
+  verify --> repair["Fix + refinement + Review A/B"]
   repair --> readiness
   verify --> fail
 ```
@@ -52,7 +52,7 @@ Readiness answers whether the workflow believes the change is ready to publish.
 
 Roark runs the verification command through `sh -c` in the issue workspace. Exit code `0` passes.
 
-Verification answers whether the repository checks actually pass. A non-zero exit code is repairable while `maxFixPasses` has remaining budget: Roark archives the failure, runs the next fix pass, runs final review, recomputes readiness, and then reruns verification. It does not rerun implementation or Review A/B solely for verification repair.
+Verification answers whether the repository checks actually pass. A non-zero exit code is repairable while `maxFixPasses` has remaining budget: Roark archives the failure, runs the next fix pass, refines the result, runs the corresponding numbered Review A/B cycle, recomputes readiness, and then reruns verification. It does not rerun the initial implementation phase solely for verification repair.
 
 The command, exit code, stdout tail, and stderr tail are written to:
 
@@ -112,7 +112,7 @@ Store path names in config, not secret values. See [Managed workspaces](managed-
 
 ## Failure Recovery
 
-When verification fails and fix budget remains, Roark normally repairs it automatically through the fix/final-review loop. If it stops, then either the fix budget is exhausted or the failure looks like setup/tooling rather than a local code issue.
+When verification fails and fix budget remains, Roark normally repairs it automatically through the fix/refinement/Review A/B loop. If it stops, then either the fix budget is exhausted or the failure looks like setup/tooling rather than a local code issue.
 
 1. Open `verification.md` and any `verification-before-fix-*.md` artifacts.
 2. Fix missing host setup, ignored files, hooks, or code issues.

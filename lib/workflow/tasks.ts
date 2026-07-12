@@ -7,6 +7,7 @@ import {
   artifactRelativePath,
   type ArtifactRef,
   baselineResetLogRef,
+  finalReviewInputRefs,
   finalReviewRef,
   fixLogRef,
   implementationRestartLogRef,
@@ -171,14 +172,15 @@ export function fixTask(pass: number): AgentTask {
   };
 }
 
-export function finalReviewTask(pass: number): AgentTask {
+export function finalReviewTask(reviewCycle: number): AgentTask {
+  const inputs = finalReviewInputRefs(reviewCycle);
   return {
-    artifact: finalReviewRef(pass),
-    label: `Final review pass ${pass}`,
+    artifact: finalReviewRef(reviewCycle),
+    label: `Standalone final review cycle ${reviewCycle}`,
     fileEditingToolsEnabled: false,
     thinkingStage: "finalReview",
-    prerequisites: ["issue", "implementationPlan", reviewARef(Math.max(0, pass - 1)), reviewBRef(Math.max(0, pass - 1)), fixLogRef(pass)],
-    prompt: (context) => finalReviewPrompt(context, pass),
+    prerequisites: [inputs.issue, inputs.implementationPlan, inputs.implementationLog, inputs.refinementLog, inputs.reviewA, inputs.reviewB],
+    prompt: (context) => finalReviewPrompt(context, reviewCycle),
   };
 }
 

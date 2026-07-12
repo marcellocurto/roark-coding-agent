@@ -12,8 +12,6 @@ export interface ReadinessDecisionInput {
   plan: string;
   reviewA: string;
   reviewB: string;
-  finalReview: string;
-  allowLegacyFinalReview?: boolean | undefined;
 }
 
 export interface ReadinessDecision {
@@ -21,7 +19,6 @@ export interface ReadinessDecision {
   triageVerdict: string;
   reviewAVerdict: string;
   reviewBVerdict: string;
-  finalVerdict: string;
   planReady: boolean;
   fixesWereNeeded: boolean;
   restartRequired: boolean;
@@ -99,15 +96,10 @@ export function needsRestart(...reviews: string[]): boolean {
   return reviews.some((markdown) => parseVerdict(markdown) === "restart-required");
 }
 
-export function shouldRunAnotherFixPass(finalReview: string): boolean {
-  return parseVerdict(finalReview) === "fixes-required";
-}
-
 export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecision {
   const triageVerdict = parseVerdict(input.triage) ?? "missing";
   const reviewAVerdict = parseVerdict(input.reviewA) ?? "missing";
   const reviewBVerdict = parseVerdict(input.reviewB) ?? "missing";
-  const finalVerdict = parseVerdict(input.finalReview) ?? "not-run";
   const planReady = input.plan ? parseReadyForImplementation(input.plan) : false;
 
   const reviewAFindings = parseReviewFindings(input.reviewA, "review-a");
@@ -135,8 +127,6 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
   const blockedByReview = externalBlockers.length > 0 || fallbackBlocked;
   const hasRejectedFindings = rejectedFindings.length > 0;
 
-  const legacyFinalReviewWasRun = Boolean(input.allowLegacyFinalReview) && input.finalReview.trim().length > 0;
-
   const readyFromLatestReviews =
     triageVerdict === "proceed" &&
     planReady &&
@@ -144,23 +134,13 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
     !fixesWereNeeded &&
     !restartRequired &&
     !blockedByReview &&
-    !legacyFinalReviewWasRun &&
     !hasRejectedFindings;
 
-  const readyAfterLegacyFinalReview =
-    triageVerdict === "proceed" &&
-    planReady &&
-    legacyFinalReviewWasRun &&
-    !blockedByReview &&
-    !hasRejectedFindings &&
-    finalVerdict === "ready-for-pr";
-
   return {
-    status: readyFromLatestReviews || readyAfterLegacyFinalReview ? "ready-for-pr" : "not-ready",
+    status: readyFromLatestReviews ? "ready-for-pr" : "not-ready",
     triageVerdict,
     reviewAVerdict,
     reviewBVerdict,
-    finalVerdict,
     planReady,
     fixesWereNeeded,
     restartRequired,

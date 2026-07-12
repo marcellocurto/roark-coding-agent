@@ -237,6 +237,25 @@ describe("fix-oriented prompt finding handling", () => {
     expect(prompt).toContain("Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings");
   });
 
+  test("standalone final review reads the selected numbered review cycle", () => {
+    for (const reviewCycle of [0, 3]) {
+      const prompt = finalReviewPrompt(context, reviewCycle);
+      expect(prompt).toContain(`<artifact kind="refinement_log">.roark/runs/issue/123/refinement-log-${reviewCycle}.md</artifact>`);
+      expect(prompt).toContain(`<artifact kind="review_a">.roark/runs/issue/123/review-a-${reviewCycle}.md</artifact>`);
+      expect(prompt).toContain(`<artifact kind="review_b">.roark/runs/issue/123/review-b-${reviewCycle}.md</artifact>`);
+      expect(prompt).not.toContain('<artifact kind="review_a">review-a.md</artifact>');
+      expect(prompt).not.toContain('<artifact kind="review_b">review-b.md</artifact>');
+    }
+  });
+
+  test("final review prompt clearly defines standalone advisory semantics", () => {
+    const prompt = finalReviewPrompt(context, 0);
+    expect(prompt).toContain("explicitly requested standalone audit");
+    expect(prompt).toContain("not part of automatic workflow progression");
+    expect(prompt).toContain("does not calculate or override deterministic workflow readiness");
+    expect(prompt).toContain("deterministic readiness remains based on numbered Review A/B");
+  });
+
   test("code refinement prompt changes code only for concrete behavior-preserving improvements", () => {
     const prompt = codeRefinementPrompt(context, 0);
     expect(prompt).toContain("leave it unchanged and say so");

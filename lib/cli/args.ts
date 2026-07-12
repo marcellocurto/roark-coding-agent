@@ -34,6 +34,7 @@ export interface IssueCliOptions {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number | undefined;
+  reviewPass?: number | undefined;
   attempt?: number | undefined;
 }
 
@@ -141,6 +142,7 @@ export interface RawIssueCliOptions {
   yes?: true | undefined;
   maxFixPasses?: number | undefined;
   fixPass?: number | undefined;
+  reviewPass?: number | undefined;
   attempt?: number | undefined;
 }
 
@@ -276,7 +278,7 @@ Commands:
   review <issue>         Run both review agents for the latest refinement cycle.
   fix <issue>            Run only the fix agent.
   reset-baseline <issue> Reset non-.roark worktree state to the captured baseline.
-  final-review <issue>   Run only the legacy final review agent.
+  final-review <issue>   Independently audit the latest completed Review A/B cycle.
   readiness <issue>      Write deterministic PR readiness markdown.
   curate-issues <issue>  Write a deterministic issue creation plan from reviewer findings.
   create-issues <issue>  Create approved GitHub issues from the issue curation plan; dry-run unless --yes.
@@ -293,7 +295,8 @@ Options:
   --fast                 Use the fast workflow thinking profile (cannot combine with --thinking or --deep).
   --deep                 Use the deep workflow thinking profile (cannot combine with --thinking or --fast).
   --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
-  --fix-pass <n>         Pass number for standalone fix/refine-code/review/reset-baseline/final-review.
+  --fix-pass <n>         Pass number for a standalone fix.
+  --review-pass <n>      Numbered review cycle for standalone final-review (0 or greater).
   --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
   --all                  Status command only: summarize all known issue runs.
   --label <label>        Auto eligibility label. Defaults to ${defaultAutorunReadyLabel}.
@@ -541,6 +544,7 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
 
   let maxFixPassesProvided = false;
   let fixPassProvided = false;
+  let reviewPassProvided = false;
 
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
@@ -556,6 +560,9 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
     } else if (arg === "--fix-pass") {
       options.fixPass = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
       fixPassProvided = true;
+    } else if (arg === "--review-pass") {
+      options.reviewPass = parseNonNegativeInteger(requiredValue(rest, ++index, arg), arg);
+      reviewPassProvided = true;
     } else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
@@ -565,8 +572,11 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
   if (maxFixPassesProvided && command !== "do") {
     throw new Error("--max-fix-passes is only valid with the do command.");
   }
-  if (fixPassProvided && command !== "fix" && command !== "final-review") {
-    throw new Error("--fix-pass is only valid with fix or final-review.");
+  if (fixPassProvided && command !== "fix") {
+    throw new Error("--fix-pass is only valid with fix.");
+  }
+  if (reviewPassProvided && command !== "final-review") {
+    throw new Error("--review-pass is only valid with final-review.");
   }
   validateThinkingSelection(options);
 
@@ -604,6 +614,12 @@ function formatCliArg(arg: string | undefined): string {
 function parsePositiveInteger(value: string, flag: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer.`);
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string, flag: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${flag} must be a non-negative integer.`);
   return parsed;
 }
 

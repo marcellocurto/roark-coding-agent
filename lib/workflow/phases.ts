@@ -10,7 +10,7 @@ import {
   baselineResetLogRef,
   fixLogRef,
   implementationRestartLogRef,
-  inferNextFinalReviewPass,
+  inferFinalReviewCycle,
   inferNextFixPass,
   inferNextRefinementPass,
   readArtifact,
@@ -173,10 +173,10 @@ export async function resetBaselinePhase(context: WorkflowContext, pass: number)
 
 export async function finalReviewPhase(
   context: WorkflowContext,
-  pass = inferNextFinalReviewPass(context),
+  reviewCycle = inferFinalReviewCycle(context),
   runner: AgentRunner = runPiAgent,
 ): Promise<string> {
-  return runAgentTask(context, runner, finalReviewTask(pass));
+  return runAgentTask(context, runner, finalReviewTask(reviewCycle));
 }
 
 export async function readinessPhase(context: WorkflowContext): Promise<string> {
@@ -355,6 +355,6 @@ function standalonePhasePass(context: WorkflowContext, phase: StandaloneWorkflow
   if (phase === "refine-code") return context.fixPass ?? inferNextRefinementPass(context);
   if (phase === "fix") return context.fixPass ?? inferNextFixPass(context);
   if (phase === "reset-baseline") return context.fixPass ?? 1;
-  if (phase === "final-review") return context.fixPass ?? inferNextFinalReviewPass(context);
+  if (phase === "final-review") return context.reviewPass ?? inferFinalReviewCycle(context);
   return undefined;
 }
