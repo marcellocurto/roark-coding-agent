@@ -14,10 +14,11 @@ const menu = `1. Auto discover
 2. Auto specific issue
 3. Continue
 4. Do full workflow
-5. Revise PR
-6. Status
-7. Workspace remove
-8. Help
+5. Review PR
+6. Address PR feedback
+7. Status
+8. Workspace remove
+9. Help
 `;
 
 export async function resolveInteractiveArgv(options: {
@@ -72,10 +73,11 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
 
     if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
     if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
-    if (choice === "5") return ["revise-pr", await promptRequiredPrNumber(prompt)];
-    if (choice === "6") return ["status", await promptRequiredIssue(prompt)];
+    if (choice === "5") return ["review-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "6") return ["revise-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "7") return ["status", await promptRequiredIssue(prompt)];
 
-    if (choice === "7") {
+    if (choice === "8") {
       const targetKind = await promptWorkspaceRemoveTargetKind(prompt);
       const flag = targetKind === "pr" ? "--pr" : "--issue";
       const number = targetKind === "pr" ? await promptRequiredPrNumber(prompt) : await promptRequiredIssue(prompt);
@@ -83,9 +85,9 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
       return force ? ["workspace", "remove", flag, number, "--force"] : ["workspace", "remove", flag, number];
     }
 
-    if (choice === "8") return ["--help"];
+    if (choice === "9") return ["--help"];
 
-    prompt.write?.("Invalid choice. Please choose 1-8.\n");
+    prompt.write?.("Invalid choice. Please choose 1-9.\n");
   }
 }
 

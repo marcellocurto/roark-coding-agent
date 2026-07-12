@@ -13,11 +13,14 @@ describe("pull request feedback parsing", () => {
             state: "OPEN",
             baseRefName: "main",
             headRefName: "roark/issue-46",
+            baseRefOid: "base123",
+            headRefOid: "head123",
             baseRepository: { nameWithOwner: "owner/repo" },
             headRepository: { nameWithOwner: "owner/repo" },
             comments: { nodes: [
               { id: "C1", databaseId: 101, body: "please fix", author: { login: "reviewer" } },
               { id: "C2", databaseId: 102, body: "<!-- roark:pr=12 revision=1 phase=revision-summary -->\nsummary" },
+              { id: "C3", databaseId: 103, body: "<!-- roark:pr=12 phase=pr-review -->\nrequired fix" },
             ] },
             reviewThreads: { nodes: [
               { id: "T1", isResolved: false, isOutdated: false, path: "lib/a.ts", comments: { nodes: [
@@ -30,10 +33,13 @@ describe("pull request feedback parsing", () => {
     }), { repo: "owner/repo", prNumber: 12 });
 
     expect(feedback.pr.headRefName).toBe("roark/issue-46");
+    expect(feedback.pr.baseRefOid).toBe("base123");
+    expect(feedback.pr.headRefOid).toBe("head123");
     expect(feedback.reviewThreads[0]?.isResolved).toBe(false);
-    expect(feedback.comments).toHaveLength(2);
-    expect(feedback.plannerComments).toHaveLength(1);
+    expect(feedback.comments).toHaveLength(3);
+    expect(feedback.plannerComments).toHaveLength(2);
     expect(feedback.plannerComments[0]?.body).toBe("please fix");
+    expect(feedback.plannerComments[1]?.body).toContain("phase=pr-review");
     expect(feedback.excludedRoarkSummaryCommentIds).toEqual([102]);
   });
 

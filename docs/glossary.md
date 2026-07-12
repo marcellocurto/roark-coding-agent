@@ -45,9 +45,13 @@ An isolated clone where Roark runs the agent and verification away from the cont
 
 The gate that checks `readiness.md` for `ready-for-pr`.
 
+## PR Review Generation
+
+One immutable local `review-pr` result under `review-<n>`, covering a pinned PR head without changing it.
+
 ## Revision
 
-A Roark run against an existing pull request through `roark revise-pr`.
+A mutation-authorized Roark run that addresses existing pull-request feedback through `roark revise-pr`.
 
 ## Skip Label
 
@@ -56,4 +60,3 @@ A GitHub label that prevents `roark auto` from selecting an issue.
 ## Verification Gate
 
 The gate that runs the configured shell command and requires exit code `0`.
-

@@ -225,6 +225,24 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.hooks?.timeoutMs).toBe(2222);
   });
 
+  test("review-pr preserves verification precedence without inventing a required default", async () => {
+    const repo = await tempGitRepo();
+    await writeConfig(repo, { repo: "owner/repo", verify: "bun run configured-check" });
+    const configuredRaw = parseArgs(["review-pr", "12", "--cwd", repo]);
+    if ("help" in configuredRaw) throw new Error("expected options");
+    const configured = await hydrateCliOptions(configuredRaw);
+    if (configured.command !== "review-pr") throw new Error("expected review-pr options");
+    expect(configured.verifyCommand).toBe("bun run configured-check");
+    expect(configured.verificationSource).toBe("config");
+
+    const explicitRaw = parseArgs(["review-pr", "12", "--cwd", repo, "--verify", "bun test"]);
+    if ("help" in explicitRaw) throw new Error("expected options");
+    const explicit = await hydrateCliOptions(explicitRaw);
+    if (explicit.command !== "review-pr") throw new Error("expected review-pr options");
+    expect(explicit.verifyCommand).toBe("bun test");
+    expect(explicit.verificationSource).toBe("explicit");
+  });
+
   test("preserves fully-qualified issue refs over config repo unless --repo is explicit", async () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, { repo: "config/repo" });

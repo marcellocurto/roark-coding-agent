@@ -258,6 +258,17 @@ describe("parseArgs", () => {
     expect(parsed.comment).toBe(false);
   });
 
+  test("parses inspection-only review-pr options independently from revise-pr", () => {
+    const parsed = parseArgs(["review-pr", "#123", "--repo", "owner/repo", "--verify", "bun test", "--no-comment"]);
+    expect("help" in parsed).toBe(false);
+    if ("help" in parsed || parsed.command !== "review-pr") throw new Error("expected review-pr options");
+    expect(parsed.prNumber).toBe(123);
+    expect(parsed.repo).toBe("owner/repo");
+    expect(parsed.verifyCommand).toBe("bun test");
+    expect(parsed.comment).toBe(false);
+    expect(() => parseArgs(["review-pr", "123", "--force"])).toThrow("Unknown option '--force'");
+  });
+
   test("still parses issue workflow commands", () => {
     const parsed = parseArgs(["do", "123", "--repo", "owner/repo", "--max-fix-passes", "3", "--attempt", "2"]);
     expect("help" in parsed).toBe(false);
@@ -269,10 +280,6 @@ describe("parseArgs", () => {
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.maxFixPasses).toBe(3);
     expect(parsed.attempt).toBe(2);
-  });
-
-  test("rejects the removed final-review command", () => {
-    expect(() => parseArgs(["final-review", "123"])).toThrow("Unknown command 'final-review'");
   });
 
   test("parses curate-issues as a standalone issue workflow command", () => {

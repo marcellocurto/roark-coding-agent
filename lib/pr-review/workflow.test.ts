@@ -1,0 +1,177 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
+import type { PullRequestFeedback } from "../github/pr.ts";
+import type { AgentRunRequest } from "../workflow/agent-runner.ts";
+import { noopAsync } from "../utils/async.ts";
+import { runPrReview } from "./workflow.ts";
+
+describe("runPrReview", () => {
+  test("reviews a comment-free PR with two inspection-only agents, one verification, and one current comment", async () => {
+    const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-control-"));
+    const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
+    const agentCalls: AgentRunRequest[] = [];
+    let verificationRuns = 0;
+    let publications = 0;
+    const feedback = reviewFeedback();
+
+    const result = await runPrReview({
+      command: "review-pr",
+      prNumber: 12,
+      cwd: control,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      verifyCommand: "bun test",
+      verificationSource: "explicit",
+      comment: true,
+      workspace: defaultWorkspaceConfig,
+      hooks: defaultLifecycleHooks,
+    }, {
+      fetchFeedback: async () => { await noopAsync(); return feedback; },
+      prepareWorkspace: async () => { await noopAsync(); return ({
+        path: agent,
+        metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
+        comparison: {
+          baseOid: feedback.pr.baseRefOid,
+          headOid: feedback.pr.headRefOid,
+          mergeBaseOid: "merge123",
+          changedFiles: ["lib/change.ts"],
+          diffStat: "lib/change.ts | 1 +",
+          inspectionCommand: `git diff merge123..${feedback.pr.headRefOid} --`,
+        },
+        releaseLock: async () => { await noopAsync(); },
+      }); },
+      runLifecycleHook: async () => { await noopAsync(); },
+      verificationRunner: async ({ command }) => {
+        await noopAsync();
+        verificationRuns++;
+        return { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
+      },
+      agentRunner: async (request) => {
+        await noopAsync();
+        agentCalls.push(request);
+        return approvedReview(request.phase?.endsWith("a") === true ? "A1" : "B1");
+      },
+      publishComment: async () => { await noopAsync(); publications++; },
+    });
+
+    expect(result.outcome).toBe("no-blocking-findings");
+    expect(result.published).toBe(true);
+    expect(verificationRuns).toBe(1);
+    expect(publications).toBe(1);
+    expect(agentCalls).toHaveLength(2);
+    expect(agentCalls.every((call) => !call.fileEditingToolsEnabled)).toBe(true);
+    expect(agentCalls.every((call) => call.prompt.includes(`git diff merge123..${feedback.pr.headRefOid} --`))).toBe(true);
+    expect(agentCalls[1]?.prompt).not.toContain("review-a.md");
+    expect(await readFile(path.join(result.context.reviewDir, "summary.json"), "utf8")).toContain("no-blocking-findings");
+    expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
+    await rm(control, { recursive: true, force: true });
+    await rm(agent, { recursive: true, force: true });
+  });
+
+  test("retains a stale review locally and does not publish it", async () => {
+    const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-control-"));
+    const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-agent-"));
+    const initial = reviewFeedback();
+    let fetches = 0;
+    let publications = 0;
+    const result = await runPrReview({
+      command: "review-pr",
+      prNumber: 12,
+      cwd: control,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      verificationSource: "unresolved",
+      comment: true,
+      workspace: defaultWorkspaceConfig,
+      hooks: defaultLifecycleHooks,
+    }, {
+      fetchFeedback: async () => {
+        await noopAsync();
+        fetches++;
+        return fetches === 1 ? initial : { ...initial, pr: { ...initial.pr, headRefOid: "newhead" } };
+      },
+      prepareWorkspace: async () => { await noopAsync(); return ({
+        path: agent,
+        metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
+        comparison: { baseOid: "base123", headOid: "head123", mergeBaseOid: "merge123", changedFiles: [], diffStat: "", inspectionCommand: "git diff merge123..head123 --" },
+        releaseLock: async () => { await noopAsync(); },
+      }); },
+      runLifecycleHook: async () => { await noopAsync(); },
+      agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
+      publishComment: async () => { await noopAsync(); publications++; },
+    });
+    expect(result.outcome).toBe("blocked");
+    expect(result.stale).toBe(true);
+    expect(publications).toBe(0);
+    expect(Bun.file(path.join(result.context.reviewDir, "review-a.md")).exists()).resolves.toBe(true);
+    await rm(control, { recursive: true, force: true });
+    await rm(agent, { recursive: true, force: true });
+  });
+
+  test("preserves completed artifacts when comment publishing fails", async () => {
+    const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-publish-control-"));
+    const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-publish-agent-"));
+    const feedback = reviewFeedback();
+    const run = runPrReview({
+      command: "review-pr",
+      prNumber: 12,
+      cwd: control,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      verificationSource: "unresolved",
+      comment: true,
+      workspace: defaultWorkspaceConfig,
+      hooks: defaultLifecycleHooks,
+    }, {
+      fetchFeedback: async () => { await noopAsync(); return feedback; },
+      prepareWorkspace: async () => { await noopAsync(); return {
+        path: agent,
+        metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
+        comparison: { baseOid: "base123", headOid: "head123", mergeBaseOid: "merge123", changedFiles: [], diffStat: "", inspectionCommand: "git diff merge123..head123 --" },
+        releaseLock: async () => { await noopAsync(); },
+      }; },
+      runLifecycleHook: async () => { await noopAsync(); },
+      agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
+      publishComment: async () => { await noopAsync(); throw new Error("GitHub unavailable"); },
+    });
+
+    expect(run).rejects.toThrow("artifacts were preserved");
+    await run.catch(() => undefined);
+    const reviewDir = path.join(control, ".roark/runs/pr/12/review-1");
+    expect(Bun.file(path.join(reviewDir, "review-a.md")).exists()).resolves.toBe(true);
+    expect(await readFile(path.join(reviewDir, "metadata.json"), "utf8")).toContain('"publication": "failed"');
+    await rm(control, { recursive: true, force: true });
+    await rm(agent, { recursive: true, force: true });
+  });
+});
+
+function reviewFeedback(): PullRequestFeedback {
+  return {
+    repo: "owner/repo",
+    pr: {
+      number: 12,
+      title: "Change behavior",
+      body: "Implement the requested behavior",
+      state: "OPEN",
+      isDraft: true,
+      baseRefName: "main",
+      headRefName: "contributor/change",
+      baseRefOid: "base123",
+      headRefOid: "head123",
+      baseRepository: "owner/repo",
+      headRepository: "someone/fork",
+    },
+    comments: [],
+    reviewThreads: [],
+    plannerComments: [],
+    excludedRoarkSummaryCommentIds: [],
+    fetchedAt: "2026-07-12T00:00:00.000Z",
+  };
+}
+
+function approvedReview(id: string): string {
+  return `# Review\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n\n## Evidence Reviewed\n- ${id}\n`;
+}

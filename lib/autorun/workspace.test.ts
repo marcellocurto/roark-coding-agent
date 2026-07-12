@@ -8,6 +8,7 @@ import {
   defaultWorkspaceConfig,
   listWorkspaces,
   prepareCloneWorkspace,
+  preparePrReviewWorkspace,
   preparePrRevisionWorkspace,
   refreshCopyToWorktree,
   removeWorkspace,
@@ -20,7 +21,7 @@ import {
   workspaceStateFile,
   type ProcessRunner,
 } from "./workspace.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
@@ -453,6 +454,51 @@ describe("managed clone workspaces", () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-hook-"));
     await writeFile(path.join(root, "file"), "ok");
     expect(runLifecycleHook("afterRun", { timeoutMs: 1000, afterRun: "false" }, root, ()=> Promise.resolve(fail("after failed")))).resolves.toBeUndefined();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("pins a PR pull ref and compares merge-base to head without mutation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-pinned-"));
+    const source = path.join(root, "source");
+    const remote = path.join(root, "remote.git");
+    await initGitRepo(source, ".roark\n");
+    const initial = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "checkout", "-b", "contributor/change"], { cwd: source });
+    await writeFile(path.join(source, "feature.txt"), "feature\n", "utf8");
+    await runProcessOrThrow(["git", "add", "feature.txt"], { cwd: source });
+    await runProcessOrThrow(["git", "commit", "-m", "feature"], { cwd: source });
+    const headOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "checkout", "main"], { cwd: source });
+    await writeFile(path.join(source, "base-only.txt"), "base advance\n", "utf8");
+    await runProcessOrThrow(["git", "add", "base-only.txt"], { cwd: source });
+    await runProcessOrThrow(["git", "commit", "-m", "advance base"], { cwd: source });
+    const baseOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "clone", "--bare", source, remote], { cwd: root });
+    await runProcessOrThrow(["git", "update-ref", "refs/pull/12/head", headOid], { cwd: remote });
+    await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: source });
+
+    const calls: string[][] = [];
+    const prepared = await preparePrReviewWorkspace({
+      controlCwd: source,
+      repo: "owner/repo",
+      prNumber: 12,
+      baseRefName: "main",
+      baseRefOid: baseOid,
+      headRefOid: headOid,
+      workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed") },
+      hooks: defaultLifecycleHooks,
+      runner: async (args, options) => {
+        calls.push(args);
+        return runProcess(args, options);
+      },
+    });
+
+    expect(prepared.comparison.mergeBaseOid).toBe(initial);
+    expect(prepared.comparison.changedFiles).toEqual(["feature.txt"]);
+    expect(prepared.comparison.inspectionCommand).toBe(`git diff ${initial}..${headOid} --`);
+    expect((await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
+    expect(calls.some((args) => args[0] === "git" && ["commit", "push"].includes(args[1] ?? ""))).toBe(false);
+    await prepared.releaseLock();
     await rm(root, { recursive: true, force: true });
   });
 });

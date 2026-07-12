@@ -1,6 +1,6 @@
 ---
 title: Artifacts
-summary: Layout, purpose, and inspection path for Roark run, attempt, phase, curation, and PR revision artifacts.
+summary: Layout, purpose, and inspection path for Roark run, attempt, phase, curation, PR review, and PR revision artifacts.
 dateCreated: 2026-05-08T06:27:02Z
 lastUpdated: 2026-05-08T07:00:00Z
 ---
@@ -11,7 +11,7 @@ Artifacts are useful for:
 - inspecting agent decisions
 - recovering failed attempts
 - debugging verification failures
-- auditing PR revisions and issue curation
+- auditing PR reviews, PR revisions, and issue curation
 
 ## Issue Attempt Layout
 
@@ -85,8 +85,11 @@ This records attempts for an issue and is used by `roark continue` when no expli
 .roark/runs/
 └── pr/
     └── <pr-number>/
+        ├── review-<n>/
         └── revision-<n>/
 ```
+
+PR review generations include pinned comparison metadata, PR and optional linked-issue context, verification, independent Review A/B outputs, a deterministic summary, and metadata. Every rerun is preserved under `review-<n>` even though the public marked comment is updated in place.
 
 PR revision artifacts include fetched feedback, revision plan, revision log, review, verification, and metadata when applicable.
 

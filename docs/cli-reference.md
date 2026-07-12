@@ -39,7 +39,8 @@ owner/repo#123
 | `roark do <issue>` | Run the full issue workflow without autorun discovery. |
 | `roark continue <issue>` | Continue a prior autorun attempt and publish if gates pass. |
 | `roark status [issue]` | Print persisted run observability status. Use `--all` for all known issues. |
-| `roark revise-pr <number>` | Revise an existing open PR from PR feedback. |
+| `roark review-pr <number>` | Fresh inspection-only review of any open or draft PR; posts one current comment by default. |
+| `roark revise-pr <number>` | Address existing feedback on an open PR; may commit and push verified changes. |
 | `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
 | `roark create-issues <issue>` | Create approved GitHub issues from the curation plan. Dry-run unless `--yes`. |
 
@@ -101,6 +102,15 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--success-label <label>` | Label applied when a PR is opened. Defaults to `roark-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
+## PR Review Options
+
+| Option | Purpose |
+| --- | --- |
+| `--verify <cmd>` | Explicit verification command. Otherwise use repo config, safe inference, or not-configured. |
+| `--no-comment` | Complete the local review without publishing a PR comment. |
+
+`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes.
+
 ## PR Revision Options
 
 | Option | Purpose |
@@ -126,6 +136,7 @@ roark do 123 --repo owner/repo
 roark auto --repo owner/repo --limit 1 --dry-run
 roark auto --repo owner/repo --limit 1
 roark continue 123 --repo owner/repo --attempt 1
+roark review-pr 456 --repo owner/repo
 roark revise-pr 456 --repo owner/repo --verify "bun run check"
 roark status --all --repo owner/repo
 roark workspace list

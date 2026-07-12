@@ -47,6 +47,20 @@ export interface PreparedPrRevisionWorkspace extends PreparedWorkspace {
   releaseLock: () => Promise<void>;
 }
 
+export interface PrReviewComparison {
+  baseOid: string;
+  headOid: string;
+  mergeBaseOid: string;
+  changedFiles: string[];
+  diffStat: string;
+  inspectionCommand: string;
+}
+
+export interface PreparedPrReviewWorkspace extends PreparedWorkspace {
+  comparison: PrReviewComparison;
+  releaseLock: () => Promise<void>;
+}
+
 export type WorkspaceRemoveTarget =
   | { kind: "issue"; number: number }
   | { kind: "pr"; number: number };
@@ -266,6 +280,139 @@ export async function preparePrRevisionWorkspace(input: {
     await releaseLock();
     throw error;
   }
+}
+
+export async function preparePrReviewWorkspace(input: {
+  controlCwd: string;
+  repo?: string | undefined;
+  prNumber: number;
+  baseRefName: string;
+  baseRefOid: string;
+  headRefOid: string;
+  workspace: WorkspaceConfig;
+  hooks: LifecycleHooksConfig;
+  workspacePath?: string | undefined;
+  runner?: ProcessRunner | undefined;
+}): Promise<PreparedPrReviewWorkspace> {
+  if (!input.baseRefOid || !input.headRefOid) {
+    throw new Error(`PR #${input.prNumber} metadata did not include immutable base and head commit identifiers.`);
+  }
+  const runner = input.runner ?? runProcess;
+  const root = normalizeWorkspaceRoot(input.workspace.root);
+  const workspacePath = path.resolve(input.workspacePath ?? workspacePathForPrRevision({
+    root,
+    repo: input.repo,
+    prNumber: input.prNumber,
+    controlCwd: input.controlCwd,
+  }));
+  await assertWorkspacePathSafe({ root, workspacePath });
+  const releaseLock = await acquireWorkspaceLock(workspacePath);
+
+  try {
+    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+    const createdNow = !existsSync(workspacePath);
+    if (createdNow) {
+      await mkdir(path.dirname(workspacePath), { recursive: true });
+      await runProcessOrThrowWithRunner(runner, buildCloneArgs({ url: remote.url, target: workspacePath, clone: input.workspace.clone }), {
+        cwd: input.controlCwd,
+        label: "git clone",
+      });
+    } else {
+      await assertNotPoisoned(workspacePath);
+      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath });
+      if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") throw new Error(`Workspace '${workspacePath}' is not a git work tree.`);
+      if (await hasGitChanges(workspacePath, runner)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before reviewing PR #${input.prNumber}.`);
+    }
+
+    try {
+      const comparison = await checkoutPinnedPrReview({
+        cwd: workspacePath,
+        prNumber: input.prNumber,
+        baseRefName: input.baseRefName,
+        baseRefOid: input.baseRefOid,
+        headRefOid: input.headRefOid,
+        runner,
+      });
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
+      if (createdNow) await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
+      return {
+        path: workspacePath,
+        comparison,
+        metadata: {
+          path: workspacePath,
+          strategy: "clone",
+          cloneRemote: remote.remote,
+          cloneUrl: remote.url,
+          createdNow,
+        },
+        releaseLock,
+      };
+    } catch (error) {
+      if (createdNow) await writePoisonState(workspacePath, error);
+      throw error;
+    }
+  } catch (error) {
+    await releaseLock();
+    throw error;
+  }
+}
+
+async function checkoutPinnedPrReview(input: {
+  cwd: string;
+  prNumber: number;
+  baseRefName: string;
+  baseRefOid: string;
+  headRefOid: string;
+  runner: ProcessRunner;
+}): Promise<PrReviewComparison> {
+  const baseReviewRef = `refs/remotes/roark/pr-${input.prNumber}-base`;
+  const headReviewRef = `refs/remotes/roark/pr-${input.prNumber}-head`;
+  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/heads/${input.baseRefName}:${baseReviewRef}`], {
+    cwd: input.cwd,
+    label: "git fetch PR base",
+  });
+  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/pull/${input.prNumber}/head:${headReviewRef}`], {
+    cwd: input.cwd,
+    label: "git fetch GitHub PR head",
+  });
+  await assertFetchedOid(input.runner, input.cwd, input.baseRefOid, "base");
+  await assertFetchedOid(input.runner, input.cwd, input.headRefOid, "head");
+  const fetchedHead = (await runProcessOrThrowWithRunner(input.runner, ["git", "rev-parse", headReviewRef], { cwd: input.cwd, label: "git rev-parse PR head" })).trim();
+  if (fetchedHead !== input.headRefOid) {
+    throw new Error(`PR #${input.prNumber} changed while its review workspace was prepared (expected ${input.headRefOid}, fetched ${fetchedHead}).`);
+  }
+  const mergeBaseOid = (await runProcessOrThrowWithRunner(input.runner, ["git", "merge-base", input.baseRefOid, input.headRefOid], {
+    cwd: input.cwd,
+    label: "git merge-base PR comparison",
+  })).trim();
+  if (!mergeBaseOid) throw new Error(`Could not determine merge base for PR #${input.prNumber}.`);
+  await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "--detach", input.headRefOid], { cwd: input.cwd, label: "git checkout pinned PR head" });
+  const changedFiles = (await runProcessOrThrowWithRunner(input.runner, ["git", "diff", "--name-only", `${mergeBaseOid}..${input.headRefOid}`, "--"], {
+    cwd: input.cwd,
+    label: "git diff PR changed files",
+  })).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  const diffStat = (await runProcessOrThrowWithRunner(input.runner, ["git", "diff", "--stat", `${mergeBaseOid}..${input.headRefOid}`, "--"], {
+    cwd: input.cwd,
+    label: "git diff PR stat",
+  })).trim();
+  return {
+    baseOid: input.baseRefOid,
+    headOid: input.headRefOid,
+    mergeBaseOid,
+    changedFiles,
+    diffStat,
+    inspectionCommand: `git diff ${mergeBaseOid}..${input.headRefOid} --`,
+  };
+}
+
+async function assertFetchedOid(runner: ProcessRunner, cwd: string, oid: string, label: string): Promise<void> {
+  let result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd });
+  if (result.exitCode !== 0) {
+    result = await runner(["git", "fetch", "origin", oid], { cwd });
+    if (result.exitCode !== 0) throw new Error(`Unable to fetch pinned PR ${label} commit ${oid}: ${tail(result.stderr || result.stdout)}`);
+    result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd });
+  }
+  if (result.exitCode !== 0) throw new Error(`Pinned PR ${label} commit ${oid} is unavailable after fetch.`);
 }
 
 export async function refreshCopyToWorktree(input: {

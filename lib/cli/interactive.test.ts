@@ -53,7 +53,7 @@ describe("promptForInteractiveArgv", () => {
     const cases: [string, string[]][] = [
       ["3", ["continue", "42"]],
       ["4", ["do", "42"]],
-      ["6", ["status", "42"]],
+      ["7", ["status", "42"]],
     ];
 
     for (const [choice, argv] of cases) {
@@ -63,38 +63,40 @@ describe("promptForInteractiveArgv", () => {
     }
   });
 
-  test("maps revise PR to argv and retries empty PR input", async () => {
+  test("keeps fresh PR review separate from feedback revision", async () => {
     await noopAsync();
-    const { prompt, output, prompts } = scriptedPrompt(["5", "", "123"]);
+    const review = scriptedPrompt(["5", "", "123"]);
+    expect(promptForInteractiveArgv(review.prompt)).resolves.toEqual(["review-pr", "123"]);
+    expect(review.prompts).toEqual(["Select an option: ", "PR number: ", "PR number: "]);
+    expect(review.output.join("")).toContain("PR number is required.");
 
-    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["revise-pr", "123"]);
-    expect(prompts).toEqual(["Select an option: ", "PR number: ", "PR number: "]);
-    expect(output.join("")).toContain("PR number is required.");
+    const revise = scriptedPrompt(["6", "123"]);
+    expect(promptForInteractiveArgv(revise.prompt)).resolves.toEqual(["revise-pr", "123"]);
   });
 
   test("maps workspace remove to argv and asks whether to force", async () => {
     await noopAsync();
-    const forcePrompt = scriptedPrompt(["7", "issue", "42", "yes"]);
+    const forcePrompt = scriptedPrompt(["8", "issue", "42", "yes"]);
     expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
     expect(forcePrompt.prompts).toEqual(["Select an option: ", "Remove issue or PR workspace? [issue/pr] ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
 
-    const cleanPrompt = scriptedPrompt(["7", "pr", "98", "no"]);
+    const cleanPrompt = scriptedPrompt(["8", "pr", "98", "no"]);
     expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--pr", "98"]);
   });
 
   test("maps help to argv", async () => {
     await noopAsync();
-    const { prompt } = scriptedPrompt(["8"]);
+    const { prompt } = scriptedPrompt(["9"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
   });
 
   test("retries invalid menu choices", async () => {
     await noopAsync();
-    const { prompt, output } = scriptedPrompt(["bad", "8"]);
+    const { prompt, output } = scriptedPrompt(["bad", "9"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
-    expect(output.join("")).toContain("Invalid choice. Please choose 1-8.");
+    expect(output.join("")).toContain("Invalid choice. Please choose 1-9.");
   });
 });
 

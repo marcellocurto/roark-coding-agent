@@ -19,6 +19,7 @@ import {
   type ContinueCliOptions,
   type InitCliOptions,
   type RawCliOptions,
+  type ReviewPrCliOptions,
   type RevisePrCliOptions,
   type StatusCliOptions,
 } from "./args.ts";
@@ -173,6 +174,24 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       workspace: workspaceConfig,
       hooks,
     } satisfies RevisePrCliOptions;
+  }
+
+  if (raw.command === "review-pr") {
+    return {
+      command: "review-pr",
+      prNumber: raw.prNumber,
+      cwd: workspace,
+      outDir: raw.outDir ?? ".roark/runs",
+      repo,
+      model: raw.model,
+      thinkingLevel: raw.thinkingLevel,
+      thinkingProfile: raw.thinkingProfile,
+      verifyCommand: raw.verifyCommand ?? config.verify,
+      verificationSource: raw.verifyCommand ? "explicit" : config.verify ? "config" : "unresolved",
+      comment: raw.comment ?? true,
+      workspace: workspaceConfig,
+      hooks,
+    } satisfies ReviewPrCliOptions;
   }
 
   if (raw.command === "status") {

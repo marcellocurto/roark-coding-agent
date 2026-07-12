@@ -16,7 +16,7 @@ export type StatusCommand = "status";
 export type InitCommand = "init";
 export type WorkspaceCommand = "workspace";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -105,6 +105,22 @@ export interface RevisePrCliOptions {
   hooks?: LifecycleHooksConfig | undefined;
 }
 
+export interface ReviewPrCliOptions {
+  command: "review-pr";
+  prNumber: number;
+  cwd: string;
+  outDir: string;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
+  verifyCommand?: string | undefined;
+  verificationSource: "explicit" | "config" | "unresolved";
+  comment: boolean;
+  workspace?: WorkspaceConfig | undefined;
+  hooks?: LifecycleHooksConfig | undefined;
+}
+
 export interface StatusCliOptions {
   command: "status";
   issue?: string | undefined;
@@ -126,7 +142,7 @@ export interface InitCliOptions {
   yes?: never;
 }
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions;
+export type CliOptions = IssueCliOptions | AutoCliOptions | ReviewPrCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions;
 
 export interface RawIssueCliOptions {
   command: IssueWorkflowCommand;
@@ -206,6 +222,19 @@ export interface RawRevisePrCliOptions {
   comment?: false | undefined;
 }
 
+export interface RawReviewPrCliOptions {
+  command: "review-pr";
+  prNumber: number;
+  cwd?: string | undefined;
+  outDir?: string | undefined;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
+  verifyCommand?: string | undefined;
+  comment?: false | undefined;
+}
+
 export interface RawStatusCliOptions {
   command: "status";
   issue?: string | undefined;
@@ -231,6 +260,7 @@ export type RawWorkspaceCliOptions =
 export type RawCliOptions =
   | RawIssueCliOptions
   | RawAutoCliOptions
+  | RawReviewPrCliOptions
   | RawRevisePrCliOptions
   | RawContinueCliOptions
   | RawStatusCliOptions
@@ -242,7 +272,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   ...singlePhaseCommands,
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "revise-pr", "continue", "status", "init", "workspace"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue", "status", "init", "workspace"]);
 
 export const defaultMaxFixPasses = 3;
 
@@ -256,7 +286,8 @@ export const usage = `roark <command> [issue] [options]
 Commands:
   init                  Scaffold repo-local .roark configuration.
   auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
-  revise-pr <number>     Manually revise an existing open PR from PR feedback.
+  review-pr <number>     Inspect an open PR, run two reviewers, and post actionable feedback without changing code.
+  revise-pr <number>     Address existing feedback on an open PR, then commit and push approved changes.
   continue <issue>       Continue a prior autorun attempt and publish if gates pass.
   status [issue]         Print persisted run observability status; use --all for all known issues.
   workspace list         List managed clone workspaces.
@@ -311,7 +342,7 @@ Options:
   --success-label <label>
                           Label applied to the issue when a PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
-  --no-comment           revise-pr only: do not post the terminal PR summary comment.
+  --no-comment           review-pr/revise-pr: do not post the terminal PR comment.
   --force                Re-run phases even if their markdown artifact already exists.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
   -v, --version          Top-level only: print the installed Roark version.
@@ -329,10 +360,35 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   if (rawCommand === "init") return parseInitArgs(rest);
   if (rawCommand === "workspace") return parseWorkspaceArgs(rest);
   if (rawCommand === "auto") return parseAutoArgs(rest);
+  if (rawCommand === "review-pr") return parseReviewPrArgs(rest);
   if (rawCommand === "revise-pr") return parseRevisePrArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
   if (rawCommand === "status") return parseStatusArgs(rest);
   return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
+}
+
+function parseReviewPrArgs(args: string[]): RawReviewPrCliOptions {
+  const [rawPrNumber, ...rest] = args;
+  if (rawPrNumber === undefined || rawPrNumber.startsWith("--")) throw new Error(`Missing PR number.\n\n${usage}`);
+  const options: RawReviewPrCliOptions = {
+    command: "review-pr",
+    prNumber: parsePositiveInteger(rawPrNumber.replace(/^#/, ""), "PR number"),
+  };
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
+    else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
+    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
+    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--no-comment") options.comment = false;
+    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+  }
+  validateThinkingSelection(options);
+  return options;
 }
 
 function parseInitArgs(args: string[]): RawInitCliOptions {

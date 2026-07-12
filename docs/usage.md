@@ -15,7 +15,8 @@ lastUpdated: 2026-05-08T07:00:00Z
 | Claim and run eligible issues | `roark auto --repo owner/repo --limit 1` |
 | Target one issue through autorun | `roark auto 123 --repo owner/repo` |
 | Continue a failed attempt | `roark continue 123 --repo owner/repo` |
-| Revise an existing PR | `roark revise-pr 456 --repo owner/repo` |
+| Review an existing PR without changing it | `roark review-pr 456 --repo owner/repo` |
+| Address existing PR feedback | `roark revise-pr 456 --repo owner/repo` |
 | Inspect run status | `roark status 123 --repo owner/repo` |
 | Manage workspaces | `roark workspace list` |
 | Create follow-up issues from findings | `roark create-issues 123 --repo owner/repo --yes` |
@@ -81,7 +82,15 @@ roark continue 123 --repo owner/repo --attempt 1
 
 Continue should run from the same control checkout when possible. It depends on local artifacts and the persistent managed workspace.
 
-## PR Revisions
+## PR Reviews and Revisions
+
+Use `review-pr` for a fresh review of any open or draft PR, including a fork PR. It inspects the complete pinned PR contribution, runs independent correctness and maintainability reviewers, and posts or updates one actionable PR comment. It never edits, commits, or pushes:
+
+```bash
+roark review-pr 456 --repo owner/repo
+```
+
+Use `--no-comment` to keep the complete review local. Verification is selected from `--verify`, `.roark/config.json`, or a safely inferred package script; if none is available, code review still runs and reports verification as not configured.
 
 Use `revise-pr` when a PR exists and you want Roark to respond to PR-scoped review feedback:
 
@@ -90,6 +99,8 @@ roark revise-pr 456 --repo owner/repo
 ```
 
 Roark classifies feedback, applies only `must-fix-current` items, verifies, pushes one revision commit, and posts one summary comment.
+
+These commands are intentionally separate. `review-pr` produces feedback; `revise-pr` consumes existing feedback and is the mutation-authorized step. Review never starts revision automatically.
 
 ## Workspace Commands
 

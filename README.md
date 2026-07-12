@@ -57,6 +57,7 @@ For the complete setup, dry-run, autorun, inspection, and recovery path, read th
 | Preview eligible issues | `roark auto --repo owner/repo --dry-run` | No code changes | None |
 | Claim, implement, and publish an issue | `roark auto --repo owner/repo --limit 1` | Managed clone | Opens a PR after gates pass |
 | Resume a stopped autorun attempt | `roark continue 123 --repo owner/repo` | Managed clone | Publishes after gates pass |
+| Review an existing PR | `roark review-pr 456 --repo owner/repo` | No code changes | Posts or updates one actionable review comment |
 | Address feedback on an existing PR | `roark revise-pr 456 --repo owner/repo` | Managed clone | Commits and pushes verified revisions |
 
 ## How it works

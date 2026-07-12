@@ -36,6 +36,8 @@ export interface PullRequestMetadata {
   isDraft?: boolean | undefined;
   baseRefName: string;
   headRefName: string;
+  baseRefOid: string;
+  headRefOid: string;
   baseRepository?: string | undefined;
   headRepository?: string | undefined;
   author?: string | undefined;
@@ -138,6 +140,8 @@ function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNu
     isDraft: booleanField(value, "isDraft"),
     baseRefName: stringField(value, "baseRefName") ?? "",
     headRefName: stringField(value, "headRefName") ?? "",
+    baseRefOid: stringField(value, "baseRefOid") ?? "",
+    headRefOid: stringField(value, "headRefOid") ?? "",
     baseRepository: repositoryName(value["baseRepository"]),
     headRepository: repositoryName(value["headRepository"]),
     author: login(value["author"]),
@@ -237,6 +241,8 @@ query($owner: String!, $name: String!, $number: Int!) {
       isDraft
       baseRefName
       headRefName
+      baseRefOid
+      headRefOid
       baseRepository { nameWithOwner }
       headRepository { nameWithOwner }
       author { login }

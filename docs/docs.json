@@ -15,6 +15,7 @@
       "items": [
         { "title": "Autorun", "path": "autorun.md" },
         { "title": "Recovery", "path": "recovery.md" },
+        { "title": "PR Reviews", "path": "pr-reviews.md" },
         { "title": "PR Revisions", "path": "pr-revisions.md" },
         { "title": "Issue Curation", "path": "issue-curation.md" },
         { "title": "Verification", "path": "verification.md" }
