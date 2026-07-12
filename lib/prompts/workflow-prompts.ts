@@ -370,7 +370,7 @@ export function codeRefinementPrompt(context: WorkflowContext, pass: number, sou
     name: "code_refinement",
     pass,
     role: `You are code refinement/taste-check agent pass ${pass}.`,
-    successCriteria: "Refinement succeeds when the just-written code is simplified where safe, behavior is preserved, intentional complexity is justified, and concrete behavior-risk decisions are recorded.",
+    successCriteria: "Refinement succeeds when the just-written code is left unchanged if already appropriate or improved only where there is a concrete net benefit, while required behavior is preserved and material decisions are recorded.",
     inputs: [
       ...renderInputArtifacts(context, [
         { kind: "issue", artifact: "issue" },
@@ -384,13 +384,13 @@ export function codeRefinementPrompt(context: WorkflowContext, pass: number, sou
     ],
     blocks: [
       renderInstructions([
-        "Inspect the current diff after the implementation/fix/restart pass and make only safe taste/simplicity refinements.",
-        "Preserve behavior and public contracts unless the issue, plan, or prior review explicitly requires a behavior change.",
-        "Do not broaden scope, do not address unrelated suggestions, and do not edit .roark workflow artifacts.",
-        "Prefer direct code, clearer names, smaller helpers, and removal of accidental complexity when safe.",
-        "If complexity is intentionally left in place, cite the issue, refined plan, or codebase reason.",
-        "In Behavior Risk Decisions, record specific decisions tied to files/behaviors; do not make generic \"behavior preserved\" claims.",
-        "Run the most relevant affordable validation for any changes you make, or record why it could not run.",
+        "Inspect the current diff after the implementation, fix, or restart pass.",
+        "Make changes only when they produce a concrete net improvement in simplicity, clarity, testability, or established codebase fit. If the implementation is already direct and appropriate, leave it unchanged and say so.",
+        "Preserve required behavior and public contracts. Do not introduce new behavior, dependencies, public interfaces, configuration, migrations, or architectural abstractions unless required by the issue, plan, or prior review.",
+        "Prefer direct control flow, clear names, fewer layers, and less indirection. Extract or split helpers only when doing so makes the behavior materially easier to understand or test.",
+        "Do not broaden scope, address unrelated suggestions, or edit .roark workflow artifacts.",
+        "In Behavior Risk Decisions, identify the affected file or behavior and explain the concrete improvement or reason for leaving complexity in place; do not make generic \"behavior preserved\" claims.",
+        "Run validation proportionate to any changes. If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason. If validation cannot run, record why.",
       ]),
     ],
     outputContract: markdownSections(`Refinement Log Pass ${pass}`, [

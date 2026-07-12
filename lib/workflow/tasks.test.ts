@@ -81,6 +81,7 @@ describe("runAgentTask thinking profiles", () => {
   test("routes task authority and thinking by assigned stage", async () => {
     const context = await createContext();
     context.thinkingConfig.implement = "minimal";
+    context.thinkingConfig.codeRefinement = "medium";
     context.thinkingConfig.fix = "low";
     context.thinkingConfig.reviewA = "medium";
     context.thinkingConfig.reviewB = "high";
@@ -105,7 +106,7 @@ describe("runAgentTask thinking profiles", () => {
     await runAgentTask(context, runner, fixTask(1));
     await runAgentTask(context, runner, finalReviewTask(1));
 
-    expect(requests).toEqual(["write:minimal", "write:low", "read:medium", "read:high", "write:low", "read:xhigh"]);
+    expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low", "read:xhigh"]);
   });
 
   test("restart refinement pass uses restart artifacts instead of requiring a fix log", async () => {

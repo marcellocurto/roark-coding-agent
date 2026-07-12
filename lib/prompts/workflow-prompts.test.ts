@@ -237,12 +237,16 @@ describe("fix-oriented prompt finding handling", () => {
     expect(prompt).toContain("Use <value>fixes-required</value> only for unresolved <value>must-fix-current</value> findings");
   });
 
-  test("code refinement prompt requires safe behavior-preserving simplification decisions", () => {
+  test("code refinement prompt changes code only for concrete behavior-preserving improvements", () => {
     const prompt = codeRefinementPrompt(context, 0);
-    expect(prompt).toContain("Preserve behavior and public contracts");
+    expect(prompt).toContain("leave it unchanged and say so");
+    expect(prompt).toContain("Preserve required behavior and public contracts");
+    expect(prompt).toContain("Do not introduce new behavior, dependencies, public interfaces, configuration, migrations, or architectural abstractions");
+    expect(prompt).toContain("fewer layers, and less indirection");
+    expect(prompt).toContain("Extract or split helpers only when doing so makes the behavior materially easier to understand or test");
     expect(prompt).toContain("Do not broaden scope");
-    expect(prompt).toContain("If complexity is intentionally left in place, cite the issue, refined plan, or codebase reason");
-    expect(prompt).toContain("record specific decisions tied to files/behaviors");
+    expect(prompt).toContain("identify the affected file or behavior");
+    expect(prompt).toContain("If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason");
     expect(prompt).toContain("## Behavior Risk Decisions");
   });
 

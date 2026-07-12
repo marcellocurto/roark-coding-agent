@@ -122,7 +122,7 @@ export function codeRefinementTask(pass: number, source: CodeRefinementSource = 
     artifact: refinementLogRef(pass),
     label: `Code refinement pass ${pass}`,
     fileEditingToolsEnabled: true,
-    thinkingStage: "fix",
+    thinkingStage: "codeRefinement",
     prerequisites: codeRefinementPrerequisites(pass, source),
     prompt: (context) => codeRefinementPrompt(context, pass, source),
   };
