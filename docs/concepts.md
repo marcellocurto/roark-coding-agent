@@ -2,7 +2,7 @@
 title: Concepts
 summary: Core Roark terms and workflow model.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-12T04:37:37Z
 ---
 
 ## Mental Model
@@ -67,6 +67,15 @@ Attempts are stored under:
 A phase is one workflow step, such as `fetch`, `triage`, `plan`, `implement`, `review`, `fix`, or `readiness`.
 
 Standalone phase commands are useful for debugging, but most users should prefer `roark do`, `roark auto`, or `roark continue`.
+
+## Independent Review Axes
+
+Roark reviews changes on two independent axes:
+
+- Spec and Correctness: did we build the right behavior correctly?
+- Standards and Maintainability: did we build it in a way that fits the repository?
+
+A change must pass both. Success on one axis never compensates for failure on the other.
 
 ## Readiness Gate
 

@@ -10,3 +10,10 @@ Roark is a versioned, distributable CLI package. It is not one-off automation fo
 - Treat machine-local integrations as explicit optional configuration only. They must not silently replace or define portable defaults.
 
 Before proposing a design, check it against global installation, CI, server, and managed-workspace execution. A design that works only in the current checkout or on the current machine is invalid.
+
+## Proportional implementation scope
+
+- Match the solution's scale to the actual requirement. Keep simple work simple, and execute genuinely large work at the scale needed to complete it correctly.
+- Use the simplest complete architecture proportional to the requirement and repository constraints. Every changed file or new abstraction must have a concrete reason to exist.
+- When asked to improve prompts or agent behavior, modify the existing specialized prompts first. Do not introduce runtime enforcement or new workflow infrastructure unless explicitly requested or demonstrably required by an existing contract.
+- Proceed autonomously through broad changes when the request or repository evidence requires them, and record the rationale. Do not stop or ask for permission merely because the work is large; ask only when unresolved ambiguity would materially change behavior, contracts, data semantics, security, scope, or authority.

@@ -34,8 +34,8 @@ ${context.runDirRelative}
 - Triage verdict: ${decision.triageVerdict}
 - Plan ready for implementation: ${decision.planReady ? "yes" : "no"}
 - Latest review cycle: ${latestReviewCycle ?? "unnumbered"}
-- Review A verdict: ${decision.reviewAVerdict}
-- Review B verdict: ${decision.reviewBVerdict}
+- Spec and Correctness verdict: ${decision.reviewAVerdict}
+- Standards and Maintainability verdict: ${decision.reviewBVerdict}
 - Fixes were needed in latest cycle: ${decision.fixesWereNeeded ? "yes" : "no"}
 - Restart required in latest cycle: ${decision.restartRequired ? "yes" : "no"}
 - Review blocked workflow: ${decision.blockedByReview ? "yes" : "no"}
