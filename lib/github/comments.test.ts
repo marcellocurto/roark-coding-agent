@@ -11,9 +11,11 @@ import {
   buildUpdateIssueCommentArgv,
   ensureCommentStartsWithMarker,
   findIssueCommentByMarker,
+  githubIssueCommentMaxChars,
   parseGitHubCommentRef,
   parseIssueComments,
   postOrUpdateIssueCommentByMarker,
+  truncateGitHubIssueComment,
 } from "./comments.ts";
 
 const tempDirs: string[] = [];
@@ -65,6 +67,15 @@ describe("GitHub comment helpers", () => {
     ]);
     expect(buildCurrentRepoArgv()).toEqual(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
     expect(buildCurrentCommentAuthorArgv()).toEqual(["gh", "api", "user", "--jq", ".login"]);
+  });
+
+  test("caps outbound issue comments at GitHub's 65,536-character limit", () => {
+    const oversized = "🙂".repeat(githubIssueCommentMaxChars + 1);
+    const truncated = truncateGitHubIssueComment(oversized);
+
+    expect(truncated).toBe("🙂".repeat(githubIssueCommentMaxChars));
+    expect(buildPostIssueCommentArgv({ repo: "owner/repo", issueNumber: 24, body: oversized }).at(-1)).toBe(`body=${truncated}`);
+    expect(buildUpdateIssueCommentArgv({ repo: "owner/repo", commentId: 99, body: oversized }).at(-1)).toBe(`body=${truncated}`);
   });
 
   test("parses comment refs and paginated comment lists", () => {

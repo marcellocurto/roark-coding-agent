@@ -15,9 +15,13 @@ export function redactSecrets(value: string): string {
     .replace(new RegExp(`\\b((${secretNamePattern})\\s*:\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`);
 }
 
-export function truncatePublicMarkdown(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, maxChars)}\n\n... (truncated ${value.length - maxChars} later characters) ...`;
+export function formatArtifactDetails(lines: readonly string[]): string {
+  return [
+    "<details><summary>Artifacts</summary>",
+    "",
+    ...lines,
+    "</details>",
+  ].join("\n");
 }
 
 export function redactLocalPaths(value: string, localRoots: readonly string[] = []): string {

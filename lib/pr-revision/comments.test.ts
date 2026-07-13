@@ -74,8 +74,8 @@ describe("PR revision summary comments", () => {
     ]);
 
     expect(excerpts).toEqual([
-      { title: "revision-log-fix-pass-1.md", content: "final log" },
-      { title: "revision-review-pass-1.md", content: "revision review" },
+      { content: "final log" },
+      { content: "revision review" },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe("PR revision summary comments", () => {
       changedFiles: ["lib/example.ts"],
       commitSha: "abc1234",
       artifactPaths: [".roark/runs/pr/12/revision-1/revision-plan.md"],
-      artifactExcerpts: [{ title: "revision-plan.md", content: "# Revision Plan\n\nTOKEN=secret\n" }],
+      artifactExcerpts: [{ content: "# Revision Plan\n\nTOKEN=secret\n" }],
     });
 
     expect(body).toStartWith("<!-- roark:pr=12 revision=1 phase=revision-summary -->");

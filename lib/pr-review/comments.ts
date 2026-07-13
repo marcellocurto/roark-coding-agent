@@ -1,4 +1,4 @@
-import { sanitizePublicMarkdown, truncatePublicMarkdown } from "../autorun/public-output.ts";
+import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
@@ -41,11 +41,11 @@ export function formatPrReviewComment(input: {
     "### Suggestions",
     ...renderFindings(input.decision.suggestions, sanitize),
     "",
-    reviewerDetails("Review A — correctness", input.reviewA, sanitize),
+    reviewerSection("Review A — correctness", input.reviewA, sanitize),
     "",
-    reviewerDetails("Review B — maintainability", input.reviewB, sanitize),
+    reviewerSection("Review B — maintainability", input.reviewB, sanitize),
   ];
-  return truncatePublicMarkdown(`${lines.join("\n").trimEnd()}\n`, 60_000);
+  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export async function publishPrReviewComment(input: Parameters<typeof formatPrReviewComment>[0]): Promise<void> {
@@ -69,18 +69,6 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize
   });
 }
 
-function reviewerDetails(title: string, content: string, sanitize: (value: string) => string): string {
-  const safe = truncatePublicMarkdown(sanitize(content), 8_000);
-  const fence = "`".repeat(Math.max(4, longestBacktickRun(safe) + 1));
-  return `<details><summary>${title}</summary>\n\n${fence}markdown\n${safe}\n${fence}\n</details>`;
-}
-
-function longestBacktickRun(value: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const char of value) {
-    current = char === "`" ? current + 1 : 0;
-    longest = Math.max(longest, current);
-  }
-  return longest;
+function reviewerSection(title: string, content: string, sanitize: (value: string) => string): string {
+  return `## ${title}\n\n${sanitize(content).trimEnd()}`;
 }

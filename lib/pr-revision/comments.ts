@@ -2,7 +2,7 @@ import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { VerificationResult } from "../autorun/verification.ts";
 import { postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
-import { sanitizePublicMarkdown, truncatePublicMarkdown } from "../autorun/public-output.ts";
+import { formatArtifactDetails, sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 
 export interface RevisionSummaryInput {
@@ -17,7 +17,7 @@ export interface RevisionSummaryInput {
   changedFiles?: string[] | undefined;
   commitSha?: string | undefined;
   artifactPaths: string[];
-  artifactExcerpts?: { title: string; content: string }[] | undefined;
+  artifactExcerpts?: { content: string }[] | undefined;
 }
 
 export function buildPrRevisionSummaryMarker(input: { prNumber: number; revision: number }): string {
@@ -49,15 +49,16 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   lines.push("");
   lines.push("### Changed files");
   pushList(lines, input.changedFiles);
-  lines.push("");
-  lines.push("### Artifacts");
-  pushList(lines, input.artifactPaths.map((artifactPath) => `\`${artifactPath}\``));
   const excerpts = input.artifactExcerpts ?? [];
   if (excerpts.length > 0) {
     lines.push("");
-    for (const excerpt of excerpts) {
-      lines.push(formatDetails(excerpt.title, excerpt.content), "");
+    for (const [index, excerpt] of excerpts.entries()) {
+      if (index > 0) lines.push("---", "");
+      lines.push(sanitizePublicMarkdown(excerpt.content).trimEnd(), "");
     }
+  }
+  if (input.artifactPaths.length > 0) {
+    lines.push(formatArtifactDetails(input.artifactPaths.map((artifactPath) => `- \`${artifactPath}\``)));
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -77,11 +78,11 @@ export async function postPrRevisionSummaryComment(input: RevisionSummaryInput):
   });
 }
 
-export async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: string[]): Promise<{ title: string; content: string }[]> {
-  const excerpts: { title: string; content: string }[] = [];
+export async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: string[]): Promise<{ content: string }[]> {
+  const excerpts: { content: string }[] = [];
   for (const filename of selectRevisionExcerptFilenames(artifactPaths)) {
     try {
-      excerpts.push({ title: filename, content: await readFile(path.join(context.revisionDir, filename), "utf8") });
+      excerpts.push({ content: await readFile(path.join(context.revisionDir, filename), "utf8") });
     } catch {
       // Missing excerpts should not block the GitHub comment.
     }
@@ -112,35 +113,6 @@ function latestPassArtifactFilename(filenames: string[], baseFilename: string, p
     if (!latestPass || pass > latestPass.pass) latestPass = { pass, filename };
   }
   return latestPass?.filename ?? (filenames.includes(baseFilename) ? baseFilename : undefined);
-}
-
-function formatDetails(summary: string, content: string): string {
-  const excerpt = truncatePublicMarkdown(sanitizePublicMarkdown(content), 8_000);
-  return [
-    `<details><summary>${summary} excerpt</summary>`,
-    "",
-    formatFencedBlock(excerpt, "markdown"),
-    "</details>",
-  ].join("\n");
-}
-
-function formatFencedBlock(value: string, language: string): string {
-  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
-  return `${fence}${language}\n${value}\n${fence}`;
-}
-
-function longestBacktickRun(value: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const char of value) {
-    if (char === "`") {
-      current += 1;
-      longest = Math.max(longest, current);
-    } else {
-      current = 0;
-    }
-  }
-  return longest;
 }
 
 function pushList(lines: string[], items: string[] | undefined): void {

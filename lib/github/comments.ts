@@ -1,5 +1,7 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 
+export const githubIssueCommentMaxChars = 65_536;
+
 export type RoarkCommentPhase = string;
 
 export interface RoarkMarkerInput {
@@ -54,7 +56,7 @@ export function buildPostIssueCommentArgv(options: { repo: string; issueNumber: 
     "--method",
     "POST",
     "--field",
-    `body=${options.body}`,
+    `body=${truncateGitHubIssueComment(options.body)}`,
   ];
 }
 
@@ -66,8 +68,19 @@ export function buildUpdateIssueCommentArgv(options: { repo: string; commentId: 
     "--method",
     "PATCH",
     "--field",
-    `body=${options.body}`,
+    `body=${truncateGitHubIssueComment(options.body)}`,
   ];
+}
+
+export function truncateGitHubIssueComment(body: string): string {
+  let characters = 0;
+  let end = 0;
+  for (const character of body) {
+    if (characters === githubIssueCommentMaxChars) return body.slice(0, end);
+    characters += 1;
+    end += character.length;
+  }
+  return body;
 }
 
 export function buildCurrentRepoArgv(): string[] {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { redactLocalPaths, redactSecrets, sanitizePublicMarkdown, truncatePublicMarkdown } from "./public-output.ts";
+import { redactLocalPaths, redactSecrets, sanitizePublicMarkdown } from "./public-output.ts";
 
 describe("redactLocalPaths", () => {
   test("redacts obvious POSIX local paths", () => {
@@ -58,9 +58,5 @@ describe("public markdown sanitization", () => {
     const sanitized = sanitizePublicMarkdown("cwd=/Users/alice/repo\nTOKEN=secret");
     expect(sanitized).toContain("[local path redacted]");
     expect(sanitized).toContain("TOKEN=[redacted]");
-  });
-
-  test("truncates with an explicit note", () => {
-    expect(truncatePublicMarkdown("abcdef", 3)).toBe("abc\n\n... (truncated 3 later characters) ...");
   });
 });

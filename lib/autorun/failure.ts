@@ -1,10 +1,8 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
-import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
+import { postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { formatArtifactDetails, redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
-
-const failureArtifactExcerptMaxChars = 6_000;
 
 export interface FailureCommentInput {
   issueNumber: number;
@@ -46,29 +44,27 @@ export interface FailureCommentArgvOptions {
 export function formatFailureComment(input: FailureCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
   const lead = `Roark stopped on issue ${issueDisplay} at phase **${input.phase}**: ${sanitizePublicMarkdown(input.reason)}.`;
-  const lines: string[] = [];
-
-  lines.push(`Issue: #${input.issueNumber}`);
+  const lines: string[] = [lead];
   if (input.branchName) lines.push(`Branch: \`${input.branchName}\``);
-  if (input.artifactPath) lines.push(`Artifact: \`${input.artifactPath}\``);
-  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
 
   if (input.artifactContent !== undefined && input.phase !== "verification") {
-    if (lines.length > 0) lines.push("");
-    lines.push("## Artifact contents");
-    if (input.artifactPath) lines.push(`\`${input.artifactPath}\``);
-    lines.push(formatFencedBlock(truncateArtifactContent(sanitizePublicMarkdown(input.artifactContent)), "markdown"));
+    lines.push("", sanitizePublicMarkdown(input.artifactContent).trimEnd());
   }
 
   if (input.recoveryCommand) {
-    if (lines.length > 0) lines.push("");
-    lines.push("## Recovery");
+    lines.push("", "## Recovery");
     lines.push("From the same checkout, run:");
     lines.push(formatFencedBlock(formatPublicRecoveryCommand(input.recoveryCommand), "bash"));
   }
 
-  if (lines.length === 0) return `${lead}\n`;
-  return `${lead}\n\n${lines.join("\n")}\n`;
+  const metadata: string[] = [];
+  if (input.artifactPath) metadata.push(`Artifact: \`${input.artifactPath}\``);
+  if (input.attemptMetadataPath) metadata.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  if (metadata.length > 0) {
+    lines.push("", formatArtifactDetails(metadata));
+  }
+
+  return `${lines.join("\n")}\n`;
 }
 
 export function buildFailureLabelArgv(options: FailureLabelArgvOptions): string[] {
@@ -83,7 +79,7 @@ export function buildRemoveLabelArgv(options: FailureLabelArgvOptions): string[]
 
 export function buildFailureCommentArgv(options: FailureCommentArgvOptions): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "comment", String(options.issueNumber), "--body", options.comment, ...repoArgs];
+  return ["gh", "issue", "comment", String(options.issueNumber), "--body", truncateGitHubIssueComment(options.comment), ...repoArgs];
 }
 
 export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<GitHubCommentRef | undefined> {
@@ -196,11 +192,6 @@ function parseShellWords(value: string): ShellWord[] {
   }
 
   return tokens;
-}
-
-function truncateArtifactContent(value: string): string {
-  if (value.length <= failureArtifactExcerptMaxChars) return value;
-  return `${value.slice(0, failureArtifactExcerptMaxChars)}\n\n... (truncated ${value.length - failureArtifactExcerptMaxChars} later characters) ...`;
 }
 
 function formatFencedBlock(value: string, language: string): string {

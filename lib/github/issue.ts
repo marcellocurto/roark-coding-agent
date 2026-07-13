@@ -1,5 +1,6 @@
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
+import { truncateGitHubIssueComment } from "./comments.ts";
 
 export interface ParsedIssueRef {
   issueNumber: string;
@@ -134,7 +135,7 @@ export async function claimGitHubIssue(options: { cwd: string; repo?: string | u
   if (options.postComment === false) return;
 
   await runProcessOrThrow(
-    ["gh", "issue", "comment", issueNumber, "--body", options.plan.commentBody, ...repoArgs],
+    ["gh", "issue", "comment", issueNumber, "--body", truncateGitHubIssueComment(options.plan.commentBody), ...repoArgs],
     { cwd: options.cwd, label: "gh issue comment" },
   );
 }
