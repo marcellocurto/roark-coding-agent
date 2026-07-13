@@ -1,5 +1,6 @@
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewComparison } from "../autorun/workspace.ts";
+import { escapePromptXmlAttribute, escapePromptXmlText } from "../prompts/xml.ts";
 import { renderFindingsLedgerContract, renderReviewVerdictSemantics, type ReviewLensDefinition } from "../review/contract.ts";
 
 export function prReviewPrompt(input: {
@@ -19,7 +20,7 @@ export function prReviewPrompt(input: {
     <base>${comparison.baseOid}</base>
     <head>${comparison.headOid}</head>
     <merge_base>${comparison.mergeBaseOid}</merge_base>
-    <inspection_command>${escapeXml(comparison.inspectionCommand)}</inspection_command>
+    <inspection_command>${escapePromptXmlText(comparison.inspectionCommand)}</inspection_command>
     <instruction>Run the exact inspection command, inspect every changed file relevant to this lens, and cite repository-relative file evidence.</instruction>
   </pinned_comparison>
   <inputs>
@@ -31,12 +32,12 @@ export function prReviewPrompt(input: {
     <instruction>The correctness and maintainability axes are independent. Judge only this axis.</instruction>
     <instruction>Do not consume or search for the other reviewer's output.</instruction>
   </review_axis_policy>
-  <success_criteria>${escapeXml(lens.successCriteria)}</success_criteria>
-  <review_focus name="${escapeXml(lens.focusName)}">
-    ${lens.focusItems.map((item) => `<item>${escapeXml(item)}</item>`).join("\n    ")}
+  <success_criteria>${escapePromptXmlText(lens.successCriteria)}</success_criteria>
+  <review_focus name="${escapePromptXmlAttribute(lens.focusName)}">
+    ${lens.focusItems.map((item) => `<item>${escapePromptXmlText(item)}</item>`).join("\n    ")}
   </review_focus>
   <source_policy>
-    ${lens.sourcePolicy.map((item) => `<instruction>${escapeXml(item)}</instruction>`).join("\n    ")}
+    ${lens.sourcePolicy.map((item) => `<instruction>${escapePromptXmlText(item)}</instruction>`).join("\n    ")}
   </source_policy>
   <required_fixes_policy>
     <instruction>${lens.requiredFixesPolicy}</instruction>
@@ -47,7 +48,7 @@ ${renderFindingsLedgerContract("the current PR")}
     <instruction>Use shell commands for static inspection only. Do not execute repository code, package scripts, tests, builds, installers, hooks, generated binaries, or the verification command; use the persisted verification artifact as the sole verification result.</instruction>
     <instruction>Do not edit or write repository files, change HEAD, commit, push, publish comments, or alter git configuration.</instruction>
     <instruction>Do not require a new test unless it has clear bug-finding value through an observable behavior seam.</instruction>
-    ${lens.extraConstraints.map((constraint) => `<instruction>${escapeXml(constraint)}</instruction>`).join("\n    ")}
+    ${lens.extraConstraints.map((constraint) => `<instruction>${escapePromptXmlText(constraint)}</instruction>`).join("\n    ")}
   </constraints>
   <output_contract>
 # Review ${lens.reviewerLabel}
@@ -65,8 +66,4 @@ approve|fixes-required|blocked
 None, or one or more entries containing all required fields.
   </output_contract>
 </pr_review>`;
-}
-
-function escapeXml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }

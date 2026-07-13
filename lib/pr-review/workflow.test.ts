@@ -18,6 +18,7 @@ describe("runPrReview", () => {
     let verificationRuns = 0;
     let publications = 0;
     let preparedCopyToWorktree: string[] | undefined;
+    let preparedRepositoryUrl: string | undefined;
     const feedback = reviewFeedback();
     feedback.comments = [
       { author: "reviewer", body: "Human context" },
@@ -43,7 +44,7 @@ describe("runPrReview", () => {
       workspace: { ...defaultWorkspaceConfig, copyToWorktree: ["local.env"] },
     }, {
       fetchFeedback: async () => { await noopAsync(); return feedback; },
-      prepareWorkspace: async (input) => { await noopAsync(); preparedCopyToWorktree = input.workspace.copyToWorktree; return ({
+      prepareWorkspace: async (input) => { await noopAsync(); preparedCopyToWorktree = input.workspace.copyToWorktree; preparedRepositoryUrl = input.repositoryUrl; return ({
         path: agent,
         metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
         comparison: {
@@ -76,6 +77,7 @@ describe("runPrReview", () => {
     expect(verificationRuns).toBe(1);
     expect(publications).toBe(1);
     expect(preparedCopyToWorktree).toEqual([]);
+    expect(preparedRepositoryUrl).toBe("https://github.com/owner/repo");
     expect(agentCalls).toHaveLength(2);
     expect(agentCalls.every((call) => !call.fileEditingToolsEnabled)).toBe(true);
     expect(agentCalls.every((call) => call.prompt.includes(`git diff merge123..${feedback.pr.headRefOid} --`))).toBe(true);
@@ -245,6 +247,7 @@ function reviewFeedback(): PullRequestFeedback {
       baseRefOid: "base123",
       headRefOid: "head123",
       baseRepository: "owner/repo",
+      baseRepositoryUrl: "https://github.com/owner/repo",
       headRepository: "someone/fork",
     },
     comments: [],

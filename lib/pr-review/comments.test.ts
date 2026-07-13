@@ -31,6 +31,25 @@ describe("PR review public comment", () => {
     expect(body).toContain("details truncated");
     expect(Array.from(body).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
+
+  test("bounds each actionable finding without hiding later fixes or external blockers", () => {
+    const huge = finding("must-fix-current", "Huge first fix", `${"e".repeat(70_000)} end-of-huge-finding`);
+    const later = finding("must-fix-current", "Later required fix", "lib/later.ts:10");
+    const blocker = finding("external-blocker", "External blocker", "External dependency is unavailable");
+    const body = formatPrReviewComment({
+      context: reviewContext(),
+      headOid: "abc123",
+      decision: { outcome: "blocked", requiredFixes: [huge, later], externalBlockers: [blocker], followUps: [], suggestions: [], reasons: [] },
+      verificationStatus: "passed",
+      reviewA: "Full correctness review",
+      reviewB: "Full maintainability review",
+    });
+
+    expect(body).toContain("finding truncated; full review retained in run artifacts");
+    expect(body).not.toContain("end-of-huge-finding");
+    expect(body).toContain("Later required fix");
+    expect(body).toContain("External blocker");
+  });
 });
 
 function reviewContext(): PrReviewContext {

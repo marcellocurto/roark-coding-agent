@@ -65,6 +65,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   const prepared = await prepareWorkspace({
     controlCwd: options.cwd,
     repo: initial.repo,
+    repositoryUrl: initial.pr.baseRepositoryUrl,
     prNumber: options.prNumber,
     baseRefName: initial.pr.baseRefName,
     baseRefOid: initial.pr.baseRefOid,

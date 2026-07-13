@@ -1,6 +1,6 @@
 import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { buildRoarkMarker, formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
@@ -169,11 +169,7 @@ export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifa
 
 export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "readiness" });
-  const lines = [
-    marker,
-    "",
-    sanitizePublicMarkdown(input.artifactContent).trimEnd(),
-  ];
+  const lines = [marker];
   const outcome: string[] = [];
   if (input.outcome) outcome.push(`Outcome: ${input.outcome}`);
   if (input.outcomeDetail) outcome.push(`Detail: ${sanitizePublicMarkdown(input.outcomeDetail)}`);
@@ -189,6 +185,8 @@ export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput)
     `Readiness artifact: \`${input.artifactPath}\``,
     ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
   ]));
+  const readiness = sanitizePublicMarkdown(input.artifactContent).trimEnd();
+  if (readiness) lines.push("", formatBoundedMarkdownDetails("Readiness details", readiness));
   return `${lines.join("\n")}\n`;
 }
 

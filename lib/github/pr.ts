@@ -39,6 +39,7 @@ export interface PullRequestMetadata {
   baseRefOid: string;
   headRefOid: string;
   baseRepository?: string | undefined;
+  baseRepositoryUrl?: string | undefined;
   headRepository?: string | undefined;
   author?: string | undefined;
 }
@@ -206,6 +207,7 @@ function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNu
     baseRefOid: stringField(value, "baseRefOid") ?? "",
     headRefOid: stringField(value, "headRefOid") ?? "",
     baseRepository: repositoryName(value["baseRepository"]),
+    baseRepositoryUrl: repositoryUrl(value["baseRepository"]),
     headRepository: repositoryName(value["headRepository"]),
     author: login(value["author"]),
   };
@@ -272,6 +274,10 @@ function repositoryName(value: unknown): string | undefined {
   return isRecord(value) ? stringField(value, "nameWithOwner") : undefined;
 }
 
+function repositoryUrl(value: unknown): string | undefined {
+  return isRecord(value) ? stringField(value, "url") : undefined;
+}
+
 function login(value: unknown): string | undefined {
   return isRecord(value) ? stringField(value, "login") : undefined;
 }
@@ -310,7 +316,7 @@ query($owner: String!, $name: String!, $number: Int!) {
       headRefName
       baseRefOid
       headRefOid
-      baseRepository { nameWithOwner }
+      baseRepository { nameWithOwner url }
       headRepository { nameWithOwner }
       author { login }
       closingIssuesReferences(first: 100) {

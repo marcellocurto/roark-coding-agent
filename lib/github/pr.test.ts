@@ -15,7 +15,7 @@ describe("pull request feedback parsing", () => {
             headRefName: "roark/issue-46",
             baseRefOid: "base123",
             headRefOid: "head123",
-            baseRepository: { nameWithOwner: "owner/repo" },
+            baseRepository: { nameWithOwner: "owner/repo", url: "https://github.com/owner/repo" },
             headRepository: { nameWithOwner: "owner/repo" },
             closingIssuesReferences: { nodes: [
               { number: 46, title: "Primary requirement", body: "Build it", state: "OPEN", repository: { nameWithOwner: "owner/repo" } },
@@ -39,6 +39,7 @@ describe("pull request feedback parsing", () => {
     expect(feedback.pr.headRefName).toBe("roark/issue-46");
     expect(feedback.pr.baseRefOid).toBe("base123");
     expect(feedback.pr.headRefOid).toBe("head123");
+    expect(feedback.pr.baseRepositoryUrl).toBe("https://github.com/owner/repo");
     expect(feedback.reviewThreads[0]?.isResolved).toBe(false);
     expect(feedback.reviewThreadsTruncated).toBe(true);
     expect(feedback.closingIssues?.map((issue) => [issue.repository, issue.number])).toEqual([["owner/repo", 46], ["other/repo", 7]]);

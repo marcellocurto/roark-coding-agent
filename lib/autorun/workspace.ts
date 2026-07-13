@@ -166,6 +166,30 @@ export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: str
   return { remote, url };
 }
 
+export async function resolvePrReviewCloneRemote(input: {
+  cwd: string;
+  repo?: string | undefined;
+  repositoryUrl?: string | undefined;
+  runner?: ProcessRunner | undefined;
+}): Promise<{ remote: "origin"; url: string }> {
+  const runner = input.runner ?? runProcess;
+  const repositoryUrl = input.repositoryUrl?.trim();
+  const url = repositoryUrl && repositoryUrl.length > 0 ? repositoryUrl : githubRepositoryUrl(input.repo);
+  const preflight = await runner(["git", "ls-remote", url, "HEAD"], { cwd: input.cwd });
+  if (preflight.exitCode !== 0) {
+    throw new Error(
+      [
+        `Unable to access PR repository '${input.repo ?? url}' (${url}).`,
+        `Command: git ls-remote ${url} HEAD`,
+        `Exit code: ${preflight.exitCode}`,
+        `stderr: ${tail(preflight.stderr || preflight.stdout)}`,
+        "Suggested fixes: verify --repo identifies the PR's base repository and ensure git credentials allow cloning it.",
+      ].join("\n"),
+    );
+  }
+  return { remote: "origin", url };
+}
+
 export async function prepareCloneWorkspace(input: {
   controlCwd: string;
   repo?: string | undefined  ;
@@ -287,6 +311,7 @@ export async function preparePrRevisionWorkspace(input: {
 export async function preparePrReviewWorkspace(input: {
   controlCwd: string;
   repo?: string | undefined;
+  repositoryUrl?: string | undefined;
   prNumber: number;
   baseRefName: string;
   baseRefOid: string;
@@ -311,7 +336,12 @@ export async function preparePrReviewWorkspace(input: {
   const releaseLock = await acquireWorkspaceLock(workspacePath);
 
   try {
-    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+    const remote = await resolvePrReviewCloneRemote({
+      cwd: input.controlCwd,
+      repo: input.repo,
+      repositoryUrl: input.repositoryUrl,
+      runner,
+    });
     const createdNow = !existsSync(workspacePath);
     if (createdNow) {
       await mkdir(path.dirname(workspacePath), { recursive: true });
@@ -324,6 +354,10 @@ export async function preparePrReviewWorkspace(input: {
       const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath });
       if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") throw new Error(`Workspace '${workspacePath}' is not a git work tree.`);
       if (await hasGitChanges(workspacePath, runner)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before reviewing PR #${input.prNumber}.`);
+      await runProcessOrThrowWithRunner(runner, ["git", "remote", "set-url", "origin", remote.url], {
+        cwd: workspacePath,
+        label: "git set PR review origin",
+      });
     }
 
     try {
@@ -358,6 +392,14 @@ export async function preparePrReviewWorkspace(input: {
     await releaseLock();
     throw error;
   }
+}
+
+function githubRepositoryUrl(repo: string | undefined): string {
+  const normalized = repo?.trim();
+  if (!normalized || !/^[^/\s]+\/[^/\s]+$/.test(normalized)) {
+    throw new Error("Cannot resolve the PR repository clone URL. Pass --repo owner/repo.");
+  }
+  return `https://github.com/${normalized}.git`;
 }
 
 export async function assertPinnedPrReviewWorkspace(input: {

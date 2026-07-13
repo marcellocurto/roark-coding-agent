@@ -4,6 +4,10 @@ import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewDecision } from "./outcome.ts";
 
+const blockingFindingSectionMaxChars = 10_000;
+const nonBlockingFindingSectionMaxChars = 5_000;
+const findingMaxChars = 3_000;
+
 export function buildPrReviewMarker(prNumber: number): string {
   return `<!-- roark:pr=${prNumber} phase=pr-review -->`;
 }
@@ -28,19 +32,19 @@ export function formatPrReviewComment(input: {
     `- Verification: ${sanitize(input.verificationStatus)}`,
     "",
     "### Required fixes",
-    ...renderFindings(input.decision.requiredFixes, sanitize),
+    ...renderFindings(input.decision.requiredFixes, sanitize, blockingFindingSectionMaxChars),
     "",
     "### External blockers",
-    ...renderFindings(input.decision.externalBlockers, sanitize),
+    ...renderFindings(input.decision.externalBlockers, sanitize, blockingFindingSectionMaxChars),
     "",
     "### Outcome notes",
     ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitize(reason)}`) : ["- None."]),
     "",
     "### Follow-ups",
-    ...renderFindings(input.decision.followUps, sanitize),
+    ...renderFindings(input.decision.followUps, sanitize, nonBlockingFindingSectionMaxChars),
     "",
     "### Suggestions",
-    ...renderFindings(input.decision.suggestions, sanitize),
+    ...renderFindings(input.decision.suggestions, sanitize, nonBlockingFindingSectionMaxChars),
     "",
     formatBoundedMarkdownDetails("Correctness review details", sanitize(input.reviewA)),
     "",
@@ -61,11 +65,22 @@ export async function publishPrReviewComment(input: Parameters<typeof formatPrRe
   });
 }
 
-function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize: (value: string) => string): string[] {
+function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize: (value: string) => string, sectionMaxChars: number): string[] {
   if (findings.length === 0) return ["- None."];
+  const maxChars = Math.min(findingMaxChars, Math.max(1, Math.floor(sectionMaxChars / findings.length)));
   return findings.map((finding) => {
     const evidence = sanitize(finding.evidence);
     const handling = sanitize(finding.recommendedHandling);
-    return `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
+    const rendered = `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
+    return truncateFinding(rendered, maxChars);
   });
+}
+
+function truncateFinding(value: string, maxChars: number): string {
+  const characters = Array.from(value);
+  if (characters.length <= maxChars) return value;
+  const notice = " … (finding truncated; full review retained in run artifacts)";
+  const noticeCharacters = Array.from(notice);
+  if (noticeCharacters.length >= maxChars) return noticeCharacters.slice(0, maxChars).join("");
+  return `${characters.slice(0, maxChars - noticeCharacters.length).join("").trimEnd()}${notice}`;
 }

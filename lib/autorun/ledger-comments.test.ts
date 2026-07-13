@@ -6,7 +6,7 @@ import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
 
-import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
+import { formatReadinessLedgerComment, publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
@@ -16,6 +16,25 @@ afterEach(async () => {
 });
 
 describe("autorun ledger comment publishing", () => {
+  test("keeps readiness outcome and recovery before bounded artifact details", () => {
+    const body = formatReadinessLedgerComment({
+      issueNumber: 24,
+      attempt: 2,
+      artifactPath: ".roark/runs/issue/24/attempts/2/readiness.md",
+      artifactContent: `# PR Readiness\n\n${"r".repeat(70_000)}\nend-of-readiness`,
+      outcome: "failed-readiness",
+      outcomeDetail: "Reviews require fixes.",
+      prUrl: "https://github.com/owner/repo/pull/99",
+      recoveryCommand: "roark continue 24",
+    });
+
+    expect(body.indexOf("Outcome: failed-readiness")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body.indexOf("PR: https://github.com/owner/repo/pull/99")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body.indexOf("roark continue 24")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body).toContain("details truncated; full output is retained in the run artifacts");
+    expect(body).not.toContain("end-of-readiness");
+  });
+
   test("publishes existing triage and implementation plan artifacts through the injected ledger publisher", async () => {
     await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-planning-"));
