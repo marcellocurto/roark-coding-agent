@@ -53,6 +53,22 @@ export function formatArtifactDetails(lines: readonly string[]): string {
   ].join("\n");
 }
 
+export function formatBoundedMarkdownDetails(summary: string, markdown: string, maxChars = 10_000): string {
+  const bounded = markdown.length <= maxChars
+    ? markdown
+    : `${markdown.slice(0, maxChars)}\n\n... (details truncated; full output is retained in the run artifacts) ...`;
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(bounded) + 1));
+  return [
+    `<details><summary>${summary}</summary>`,
+    "",
+    fence,
+    bounded.trimEnd(),
+    fence,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 export function buildListIssueCommentsArgv(options: { repo: string; issueNumber: number | string }): string[] {
   return ["gh", "api", `repos/${options.repo}/issues/${options.issueNumber}/comments`, "--paginate", "--slurp"];
 }
@@ -202,4 +218,18 @@ function flattenComments(value: unknown): GitHubIssueComment[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const character of value) {
+    if (character === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
 }

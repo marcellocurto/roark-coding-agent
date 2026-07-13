@@ -5,6 +5,7 @@ import path from "node:path";
 import { formatPrRevisionSummaryComment, readRevisionArtifactContents, selectRevisionCommentArtifactFilenames } from "./comments.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
+import { githubIssueCommentMaxChars } from "../github/comments.ts";
 
 const tempDirs: string[] = [];
 
@@ -89,7 +90,7 @@ describe("PR revision summary comments", () => {
       changedFiles: ["lib/example.ts"],
       commitSha: "abc1234",
       artifactPaths: [".roark/runs/pr/12/revision-1/revision-plan.md"],
-      artifactContents: ["# Revision Plan\n\nTOKEN=secret\n"],
+      artifactContents: [`# Revision Plan\n\nTOKEN=secret\n${"x".repeat(70_000)}`],
     });
 
     expect(body).toStartWith("<!-- roark:pr=12 revision=1 phase=revision-summary -->");
@@ -100,6 +101,8 @@ describe("PR revision summary comments", () => {
     expect(body).toContain("[local path redacted]");
     expect(body).toContain("TOKEN=[redacted]");
     expect(body).not.toContain("TOKEN=secret");
-    expect(body.indexOf("# Revision Plan")).toBeLessThan(body.indexOf("## Roark PR revision 1 summary"));
+    expect(body.indexOf("## Roark PR revision 1 summary")).toBeLessThan(body.indexOf("# Revision Plan"));
+    expect(body).toContain("details truncated");
+    expect(Array.from(body).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
 });

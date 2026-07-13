@@ -99,6 +99,14 @@ export async function runVerification(options: {
 }
 
 export function formatVerificationArtifact(result: VerificationResult): string {
+  return formatVerificationOutput(result, tailText, " (tail)");
+}
+
+export function formatCompleteVerificationArtifact(result: VerificationResult): string {
+  return formatVerificationOutput(result, (value) => value, "");
+}
+
+function formatVerificationOutput(result: VerificationResult, formatOutput: (value: string) => string, headingSuffix: string): string {
   return `# Verification
 
 ## Command
@@ -110,14 +118,14 @@ ${result.exitCode}
 ## Timed Out
 ${result.timedOut === true ? "yes" : "no"}
 
-## Stdout (tail)
+## Stdout${headingSuffix}
 \`\`\`
-${tailText(result.stdout)}
+${formatOutput(result.stdout)}
 \`\`\`
 
-## Stderr (tail)
+## Stderr${headingSuffix}
 \`\`\`
-${tailText(result.stderr)}
+${formatOutput(result.stderr)}
 \`\`\`
 `;
 }

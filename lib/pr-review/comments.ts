@@ -1,5 +1,5 @@
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
-import { postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment } from "../github/comments.ts";
 import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewDecision } from "./outcome.ts";
@@ -21,22 +21,11 @@ export function formatPrReviewComment(input: {
   const lines = [
     buildPrReviewMarker(input.context.prNumber),
     "",
-    sanitize(input.reviewA).trimEnd(),
-    "",
-    "---",
-    "",
-    sanitize(input.reviewB).trimEnd(),
-    "",
-    "---",
-    "",
     "## Roark PR review summary",
     "",
     `- Outcome: **${input.decision.outcome}**`,
     `- Reviewed commit: \`${input.headOid}\``,
     `- Verification: ${sanitize(input.verificationStatus)}`,
-    "",
-    "### Outcome notes",
-    ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitize(reason)}`) : ["- None."]),
     "",
     "### Required fixes",
     ...renderFindings(input.decision.requiredFixes, sanitize),
@@ -44,13 +33,20 @@ export function formatPrReviewComment(input: {
     "### External blockers",
     ...renderFindings(input.decision.externalBlockers, sanitize),
     "",
+    "### Outcome notes",
+    ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitize(reason)}`) : ["- None."]),
+    "",
     "### Follow-ups",
     ...renderFindings(input.decision.followUps, sanitize),
     "",
     "### Suggestions",
     ...renderFindings(input.decision.suggestions, sanitize),
+    "",
+    formatBoundedMarkdownDetails("Correctness review details", sanitize(input.reviewA)),
+    "",
+    formatBoundedMarkdownDetails("Maintainability review details", sanitize(input.reviewB)),
   ];
-  return `${lines.join("\n").trimEnd()}\n`;
+  return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
 
 export async function publishPrReviewComment(input: Parameters<typeof formatPrReviewComment>[0]): Promise<void> {

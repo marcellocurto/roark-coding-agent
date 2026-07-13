@@ -1,6 +1,7 @@
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
+  formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   runVerification,
   type VerificationResult,
@@ -13,8 +14,9 @@ import {
   preparePrReviewWorkspace,
   runLifecycleHook,
   type PreparedPrReviewWorkspace,
+  type WorkspaceConfig,
 } from "../autorun/workspace.ts";
-import { fetchPullRequestFeedback, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
+import { fetchPullRequestFeedback, isRoarkGeneratedPrSummaryComment, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { correctnessReviewLens, maintainabilityReviewLens, validateReviewOutput, type ReviewLensDefinition } from "../review/contract.ts";
@@ -59,6 +61,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   validateReviewablePr(initial);
   const hooks = options.hooks ?? defaultLifecycleHooks;
   const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
+  const workspace = prReviewWorkspaceConfig(initial, options.workspace ?? defaultWorkspaceConfig);
   const prepared = await prepareWorkspace({
     controlCwd: options.cwd,
     repo: initial.repo,
@@ -66,7 +69,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     baseRefName: initial.pr.baseRefName,
     baseRefOid: initial.pr.baseRefOid,
     headRefOid: initial.pr.headRefOid,
-    workspace: options.workspace ?? defaultWorkspaceConfig,
+    workspace,
     hooks,
   });
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
@@ -99,6 +102,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
       try {
         verification = await runVerification({ command: resolvedVerification.command, cwd: context.agentCwd, runner: deps.verificationRunner });
         await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
+        await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
         const classification = classifyVerificationFailure(verification);
         if (!verification.ok && !classification.repairable) verificationUnavailable = classification.recoveryGuidance ?? classification.reason;
         verificationStatus = `${verification.ok ? "passed" : "failed"} (${resolvedVerification.source}, \`${resolvedVerification.command}\`, exit ${verification.exitCode})`;
@@ -270,12 +274,27 @@ function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullReque
     feedback.pr.body || "None.",
     "",
     "## Existing PR Comments (secondary context)",
-    ...listOrNone(feedback.comments.map((comment) => `${comment.author ?? "unknown"}: ${comment.body}`)),
+    ...listOrNone(feedback.comments
+      .filter((comment) => !isRoarkGeneratedPrSummaryComment(comment.body))
+      .map((comment) => `${comment.author ?? "unknown"}: ${comment.body}`)),
     "",
     "## Review Threads (secondary context)",
+    ...(feedback.reviewThreadsTruncated === true
+      ? ["- Context incomplete: GitHub reported additional review threads beyond this fetch. Treat the listed threads as partial secondary context and review the pinned diff independently."]
+      : []),
     ...listOrNone(feedback.reviewThreads.flatMap((thread) => thread.comments.map((comment) => `${thread.path ?? "unknown"}:${thread.line ?? thread.originalLine ?? "?"} ${comment.author ?? "unknown"}: ${comment.body}`))),
   ];
   return `${lines.join("\n")}\n`;
+}
+
+function prReviewWorkspaceConfig(feedback: PullRequestFeedback, workspace: WorkspaceConfig): WorkspaceConfig {
+  if (workspace.copyToWorktree.length === 0) return workspace;
+  const baseRepository = feedback.pr.baseRepository?.toLowerCase();
+  const headRepository = feedback.pr.headRepository?.toLowerCase();
+  if (baseRepository !== undefined && headRepository !== undefined && baseRepository === headRepository) return workspace;
+
+  console.warn(`Skipping workspace.copyToWorktree for PR #${feedback.pr.number}: the PR head repository is external or unknown, so host-only files will not be copied into the review workspace.`);
+  return { ...workspace, copyToWorktree: [] };
 }
 
 function listOrNone(values: string[]): string[] {

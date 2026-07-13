@@ -107,7 +107,7 @@ It infers:
 | `cloneRemote` | string | `origin` | Remote used for clone and fetch behavior. |
 | `clone.filter` | string or null | `blob:none` | Partial clone filter. |
 | `clone.depth` | number or null | `null` | Clone depth. `null` means full history. |
-| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from control checkout into managed workspaces. |
+| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from control checkout into managed workspaces. `review-pr` skips these paths for fork or unknown-source PRs. |
 
 Use `copyToWorktree` for path names only, not secret values:
 

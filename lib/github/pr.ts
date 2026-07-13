@@ -77,6 +77,11 @@ export interface PullRequestGraphQLResult {
 }
 
 export const roarkPrRevisionSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+revision=\d+\s+phase=revision-summary\s*-->/;
+export const roarkPrReviewSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+phase=pr-review\s*-->/;
+
+export function isRoarkGeneratedPrSummaryComment(body: string): boolean {
+  return roarkPrRevisionSummaryMarkerPattern.test(body) || roarkPrReviewSummaryMarkerPattern.test(body);
+}
 
 export function buildPullRequestFeedbackGraphqlArgv(input: { repo: string; prNumber: number }): string[] {
   const [owner, name] = splitRepo(input.repo);

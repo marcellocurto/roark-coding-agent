@@ -1,7 +1,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { VerificationResult } from "../autorun/verification.ts";
-import { formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { formatArtifactDetails, formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment } from "../github/comments.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 
@@ -28,12 +28,6 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   const { context } = input;
   const lines: string[] = [];
   lines.push(buildPrRevisionSummaryMarker({ prNumber: context.prNumber, revision: context.revision }));
-  const artifactContents = input.artifactContents ?? [];
-  for (const [index, content] of artifactContents.entries()) {
-    lines.push("", sanitizePublicMarkdown(content).trimEnd());
-    if (index < artifactContents.length - 1) lines.push("", "---");
-  }
-  if (artifactContents.length > 0) lines.push("", "---");
   lines.push("", `## Roark PR revision ${context.revision} summary`);
   lines.push("");
   lines.push(`- Outcome: ${input.outcome}`);
@@ -58,7 +52,10 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   if (input.artifactPaths.length > 0) {
     lines.push("", formatArtifactDetails(input.artifactPaths.map((artifactPath) => `- \`${artifactPath}\``)));
   }
-  return `${lines.join("\n").trimEnd()}\n`;
+  for (const [index, content] of (input.artifactContents ?? []).entries()) {
+    lines.push("", formatBoundedMarkdownDetails(`Revision artifact ${index + 1}`, sanitizePublicMarkdown(content)));
+  }
+  return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
 
 export async function postPrRevisionSummaryComment(input: RevisionSummaryInput): Promise<void> {

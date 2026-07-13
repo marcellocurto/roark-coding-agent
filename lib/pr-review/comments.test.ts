@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { githubIssueCommentMaxChars } from "../github/comments.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
@@ -14,8 +15,8 @@ describe("PR review public comment", () => {
       headOid: "abc123",
       decision: { outcome: "changes-requested", requiredFixes: [required], externalBlockers: [], followUps: [], suggestions: [suggestion], reasons: [] },
       verificationStatus: "passed",
-      reviewA: "review A at /mnt/agent/repo/private/file",
-      reviewB: "review B",
+      reviewA: `review A at /mnt/agent/repo/private/file\n${"a".repeat(70_000)}`,
+      reviewB: `review B\n${"b".repeat(70_000)}`,
     });
 
     expect(body.indexOf("Required")).toBeLessThan(body.indexOf("Optional"));
@@ -25,8 +26,10 @@ describe("PR review public comment", () => {
     expect(body).toContain("[local path redacted]");
     expect(body).toContain("review A at [local path redacted]");
     expect(body).toContain("review B");
-    expect(body.indexOf("review A at")).toBeLessThan(body.indexOf("## Roark PR review summary"));
-    expect(body.indexOf("review B")).toBeLessThan(body.indexOf("## Roark PR review summary"));
+    expect(body.indexOf("## Roark PR review summary")).toBeLessThan(body.indexOf("review A at"));
+    expect(body.indexOf("### Required fixes")).toBeLessThan(body.indexOf("review A at"));
+    expect(body).toContain("details truncated");
+    expect(Array.from(body).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
 });
 

@@ -44,6 +44,8 @@ Use `workspace.copyToWorktree` when verification needs ignored local files. The 
 
 Roark checks that copied paths are still ignored before continuing. This helps avoid accidentally committing secrets.
 
+For `review-pr`, configured copies are applied only when GitHub identifies the PR head as belonging to the base repository. Fork and unknown-source reviews skip them, so host-only files are not placed inside those review workspaces.
+
 See [Managed workspaces](managed-workspaces.md).
 
 ## Untrusted GitHub Content

@@ -4,6 +4,7 @@ import {
   buildRemoveLabelArgv,
   formatFailureComment,
 } from "./failure.ts";
+import { githubIssueCommentMaxChars } from "../github/comments.ts";
 
 describe("autorun failure", () => {
   test("formatFailureComment omits verification artifact contents", () => {
@@ -29,7 +30,7 @@ describe("autorun failure", () => {
       branchName: "roark/issue-10",
       worktreePath: "/repo/.roark/worktrees/issue-10",
       artifactPath: ".roark/runs/issue/10/attempts/2/readiness.md",
-      artifactContent: "# PR Readiness\n\n## Status\nnot-ready\nlog: [/Users/alice/repo]\n",
+      artifactContent: `# PR Readiness\n\n## Status\nnot-ready\nlog: [/Users/alice/repo]\n${"x".repeat(70_000)}`,
       attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
       recoveryCommand: "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
     });
@@ -44,8 +45,11 @@ describe("autorun failure", () => {
     expect(comment).toContain("## Status\nnot-ready");
     expect(comment).toContain("log: [[local path redacted]]");
     expect(comment).toContain("## Recovery");
+    expect(comment.indexOf("## Recovery")).toBeLessThan(comment.indexOf("# PR Readiness"));
     expect(comment).not.toContain("--cwd");
     expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
+    expect(comment).toContain("details truncated");
+    expect(Array.from(comment).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
 
   test("formatFailureComment removes shell-quoted cwd values from recovery commands", () => {

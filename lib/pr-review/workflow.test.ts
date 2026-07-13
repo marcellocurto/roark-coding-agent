@@ -10,14 +10,21 @@ import { runPrReview } from "./workflow.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 
 describe("runPrReview", () => {
-  test("reviews a comment-free PR with two inspection-only agents, one verification, and one current comment", async () => {
+  test("reviews a PR with two inspection-only agents, bounded context, one verification, and one current comment", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
     await initAgentRepo(agent);
     const agentCalls: AgentRunRequest[] = [];
     let verificationRuns = 0;
     let publications = 0;
+    let preparedCopyToWorktree: string[] | undefined;
     const feedback = reviewFeedback();
+    feedback.comments = [
+      { author: "reviewer", body: "Human context" },
+      { author: "roark", body: "<!-- roark:pr=12 phase=pr-review -->\nStale generated review" },
+      { author: "roark", body: "<!-- roark:pr=12 revision=1 phase=revision-summary -->\nStale revision summary" },
+    ];
+    feedback.reviewThreadsTruncated = true;
     feedback.closingIssues = [
       { number: 126, title: "Shared contract", body: "Extract the contract", state: "OPEN", repository: "owner/repo", comments: [{ author: "maintainer", body: "Preserve backward compatibility" }] },
       { number: 127, title: "Pinned workspace", body: "Prepare the workspace", state: "OPEN", repository: "owner/repo" },
@@ -33,11 +40,11 @@ describe("runPrReview", () => {
       verifyCommand: "bun test",
       verificationSource: "explicit",
       comment: true,
-      workspace: defaultWorkspaceConfig,
+      workspace: { ...defaultWorkspaceConfig, copyToWorktree: ["local.env"] },
       hooks: defaultLifecycleHooks,
     }, {
       fetchFeedback: async () => { await noopAsync(); return feedback; },
-      prepareWorkspace: async () => { await noopAsync(); return ({
+      prepareWorkspace: async (input) => { await noopAsync(); preparedCopyToWorktree = input.workspace.copyToWorktree; return ({
         path: agent,
         metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
         comparison: {
@@ -55,7 +62,7 @@ describe("runPrReview", () => {
       verificationRunner: async ({ command }) => {
         await noopAsync();
         verificationRuns++;
-        return { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
+        return { ok: true, command, exitCode: 0, stdout: `diagnostic-at-start\n${"x".repeat(5_000)}\ndiagnostic-at-end`, stderr: "" };
       },
       agentRunner: async (request) => {
         await noopAsync();
@@ -69,15 +76,26 @@ describe("runPrReview", () => {
     expect(result.published).toBe(true);
     expect(verificationRuns).toBe(1);
     expect(publications).toBe(1);
+    expect(preparedCopyToWorktree).toEqual([]);
     expect(agentCalls).toHaveLength(2);
     expect(agentCalls.every((call) => !call.fileEditingToolsEnabled)).toBe(true);
     expect(agentCalls.every((call) => call.prompt.includes(`git diff merge123..${feedback.pr.headRefOid} --`))).toBe(true);
     expect(agentCalls[1]?.prompt).not.toContain("review-a.md");
     expect(await readFile(path.join(result.context.reviewDir, "summary.json"), "utf8")).toContain("no-blocking-findings");
+    const reviewerVerification = await readFile(path.join(result.context.reviewDir, "verification.md"), "utf8");
+    const fullVerification = await readFile(path.join(result.context.reviewDir, "verification-full.md"), "utf8");
+    expect(reviewerVerification).toContain("(truncated");
+    expect(reviewerVerification).not.toContain("diagnostic-at-start");
+    expect(fullVerification).toContain("diagnostic-at-start");
+    expect(fullVerification).toContain("diagnostic-at-end");
     const reviewContext = await readFile(path.join(result.context.reviewDir, "pr-context.md"), "utf8");
     expect(reviewContext).toContain("Shared contract");
     expect(reviewContext).toContain("Pinned workspace");
     expect(reviewContext).toContain("Preserve backward compatibility");
+    expect(reviewContext).toContain("Human context");
+    expect(reviewContext).toContain("Context incomplete");
+    expect(reviewContext).not.toContain("Stale generated review");
+    expect(reviewContext).not.toContain("Stale revision summary");
     expect(reviewContext).not.toContain("Unrelated external issue");
     expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
     expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);

@@ -1,5 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatArtifactDetails, postIssueComment, postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
+import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
@@ -41,10 +41,6 @@ export function formatFailureComment(input: FailureCommentInput): string {
   const lines: string[] = [lead];
   if (input.branchName) lines.push(`Branch: \`${input.branchName}\``);
 
-  if (input.artifactContent !== undefined && input.phase !== "verification") {
-    lines.push("", sanitizePublicMarkdown(input.artifactContent).trimEnd());
-  }
-
   if (input.recoveryCommand) {
     lines.push("", "## Recovery");
     lines.push("From the same checkout, run:");
@@ -58,7 +54,11 @@ export function formatFailureComment(input: FailureCommentInput): string {
     lines.push("", formatArtifactDetails(metadata));
   }
 
-  return `${lines.join("\n")}\n`;
+  if (input.artifactContent !== undefined && input.phase !== "verification") {
+    lines.push("", formatBoundedMarkdownDetails("Failure artifact excerpt", sanitizePublicMarkdown(input.artifactContent)));
+  }
+
+  return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
 }
 
 export function buildFailureLabelArgv(options: FailureLabelArgvOptions): string[] {

@@ -47,6 +47,7 @@ ${renderFindingsLedgerContract("the current PR")}
     <instruction>Use shell commands for static inspection only. Do not execute repository code, package scripts, tests, builds, installers, hooks, generated binaries, or the verification command; use the persisted verification artifact as the sole verification result.</instruction>
     <instruction>Do not edit or write repository files, change HEAD, commit, push, publish comments, or alter git configuration.</instruction>
     <instruction>Do not require a new test unless it has clear bug-finding value through an observable behavior seam.</instruction>
+    ${lens.extraConstraints.map((constraint) => `<instruction>${escapeXml(constraint)}</instruction>`).join("\n    ")}
   </constraints>
   <output_contract>
 # Review ${lens.reviewerLabel}

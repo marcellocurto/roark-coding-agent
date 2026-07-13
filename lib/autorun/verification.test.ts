@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   classifyVerificationFailure,
+  formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   parseVerificationArtifact,
   runVerification,
@@ -67,16 +68,22 @@ describe("autorun verification", () => {
   });
 
   test("formatVerificationArtifact tail-truncates very long output", () => {
-    const long = "a".repeat(10_000);
-    const artifact = formatVerificationArtifact({
+    const long = `diagnostic-at-start\n${"a".repeat(10_000)}\ndiagnostic-at-end`;
+    const result: VerificationResult = {
       ok: false,
       command: "noisy",
       exitCode: 1,
       stdout: long,
       stderr: "",
-    });
+    };
+    const artifact = formatVerificationArtifact(result);
+    const completeArtifact = formatCompleteVerificationArtifact(result);
     expect(artifact).toContain("(truncated");
     expect(artifact.length).toBeLessThan(long.length + 600);
+    expect(artifact).not.toContain("diagnostic-at-start");
+    expect(completeArtifact).toContain("diagnostic-at-start");
+    expect(completeArtifact).toContain("diagnostic-at-end");
+    expect(completeArtifact).not.toContain("(truncated");
   });
 
   test("classifies command-unavailable failures as non-repairable with hook guidance", () => {
