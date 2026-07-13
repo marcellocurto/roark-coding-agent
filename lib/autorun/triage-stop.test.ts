@@ -6,6 +6,7 @@ import {
   mapTriageVerdictToLabel,
   parseTriageStoppedVerdict,
 } from "./triage-stop.ts";
+import { githubIssueCommentMaxChars } from "../github/comments.ts";
 
 describe("triage stop handling", () => {
   test("maps verdicts to terminal labels", () => {
@@ -46,11 +47,14 @@ describe("triage stop handling", () => {
     const comment = formatTriageStoppedComment({
       issueNumber: 12,
       triageVerdict: "reject",
-      triageArtifactContent: "# Triage\n\nUnique terminal evidence at /Users/alice/private with TOKEN=secret.\n",
+      triageArtifactContent: `# Triage\n\nUnique terminal evidence at /Users/alice/private with TOKEN=secret.\n${"x".repeat(70_000)}`,
     });
 
     expect(comment).toContain("Unique terminal evidence at [local path redacted] with TOKEN=[redacted]");
     expect(comment).not.toContain("/Users/alice/private");
     expect(comment).not.toContain("TOKEN=secret");
+    expect(comment.indexOf("Roark stopped issue")).toBeLessThan(comment.indexOf("# Triage"));
+    expect(comment).toContain("details truncated");
+    expect(Array.from(comment).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
 });

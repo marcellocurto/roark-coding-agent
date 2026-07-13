@@ -71,7 +71,7 @@ After copying, Roark checks `git status --porcelain -- <path>` and refuses to co
 - Symlinks are dereferenced into target contents rather than preserved as symlinks.
 - File modes such as `0600` are preserved.
 - Copied files are refreshed before workspace run and before verification.
-- `review-pr` skips configured copies when the PR head repository is external or unavailable. Host-only files are never copied into a fork or unknown-source review workspace.
+- `review-pr` always ignores configured copies. Host-only files are never copied into a PR review workspace.
 
 Do not store secret values in `.roark/config.json`; store only path names such as `.secrets/env`.
 

@@ -1,5 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatArtifactDetails, postIssueComment, postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
+import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
@@ -39,9 +39,6 @@ export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked
 export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
   const lines: string[] = [];
-  if (input.triageArtifactContent) {
-    lines.push(sanitizePublicMarkdown(input.triageArtifactContent).trimEnd(), "");
-  }
   lines.push(
     `Roark stopped issue ${issueDisplay} during triage with verdict **${input.triageVerdict}**.`,
     "",
@@ -52,8 +49,11 @@ export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInpu
   if (input.triageArtifactPath) artifacts.push(`Triage artifact: \`${input.triageArtifactPath}\``);
   if (input.attemptMetadataPath) artifacts.push(`Attempt: \`${input.attemptMetadataPath}\``);
   if (artifacts.length > 0) lines.push("", formatArtifactDetails(artifacts));
+  if (input.triageArtifactContent) {
+    lines.push("", formatBoundedMarkdownDetails("Triage artifact excerpt", sanitizePublicMarkdown(input.triageArtifactContent)));
+  }
 
-  return `${lines.join("\n")}\n`;
+  return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
 }
 
 export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {

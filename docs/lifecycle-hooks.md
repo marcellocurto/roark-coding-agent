@@ -24,6 +24,8 @@ lastUpdated: 2026-05-08T07:00:00Z
 - `afterRun`: runs after workflow completion; failures warn instead of stopping the run.
 - `beforeRemove`: runs before workspace removal; failures warn instead of stopping removal.
 
+`review-pr` does not load repository configuration or run lifecycle hooks. Use an explicit `--verify` command when a PR review genuinely requires authorized execution.
+
 ## Timeout
 
 `timeoutMs` controls hook timeout. The default is `600000` milliseconds.

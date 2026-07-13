@@ -59,9 +59,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
   const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber });
   validateReviewablePr(initial);
-  const hooks = options.hooks ?? defaultLifecycleHooks;
+  const hooks = defaultLifecycleHooks;
   const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
-  const workspace = prReviewWorkspaceConfig(initial, options.workspace ?? defaultWorkspaceConfig);
+  const workspace = prReviewWorkspaceConfig(options.workspace ?? defaultWorkspaceConfig);
   const prepared = await prepareWorkspace({
     controlCwd: options.cwd,
     repo: initial.repo,
@@ -287,13 +287,9 @@ function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullReque
   return `${lines.join("\n")}\n`;
 }
 
-function prReviewWorkspaceConfig(feedback: PullRequestFeedback, workspace: WorkspaceConfig): WorkspaceConfig {
+function prReviewWorkspaceConfig(workspace: WorkspaceConfig): WorkspaceConfig {
   if (workspace.copyToWorktree.length === 0) return workspace;
-  const baseRepository = feedback.pr.baseRepository?.toLowerCase();
-  const headRepository = feedback.pr.headRepository?.toLowerCase();
-  if (baseRepository !== undefined && headRepository !== undefined && baseRepository === headRepository) return workspace;
-
-  console.warn(`Skipping workspace.copyToWorktree for PR #${feedback.pr.number}: the PR head repository is external or unknown, so host-only files will not be copied into the review workspace.`);
+  console.warn("Skipping workspace.copyToWorktree: review-pr never copies host-only files into a PR checkout.");
   return { ...workspace, copyToWorktree: [] };
 }
 

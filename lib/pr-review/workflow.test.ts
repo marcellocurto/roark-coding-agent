@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
+import { defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { noopAsync } from "../utils/async.ts";
@@ -41,7 +41,6 @@ describe("runPrReview", () => {
       verificationSource: "explicit",
       comment: true,
       workspace: { ...defaultWorkspaceConfig, copyToWorktree: ["local.env"] },
-      hooks: defaultLifecycleHooks,
     }, {
       fetchFeedback: async () => { await noopAsync(); return feedback; },
       prepareWorkspace: async (input) => { await noopAsync(); preparedCopyToWorktree = input.workspace.copyToWorktree; return ({
@@ -119,7 +118,6 @@ describe("runPrReview", () => {
       verificationSource: "unresolved",
       comment: true,
       workspace: defaultWorkspaceConfig,
-      hooks: defaultLifecycleHooks,
     }, {
       fetchFeedback: async () => {
         await noopAsync();
@@ -161,7 +159,6 @@ describe("runPrReview", () => {
       verificationSource: "unresolved",
       comment: true,
       workspace: defaultWorkspaceConfig,
-      hooks: defaultLifecycleHooks,
     }, {
       fetchFeedback: async () => { await noopAsync(); return feedback; },
       prepareWorkspace: async () => { await noopAsync(); return {
@@ -202,7 +199,6 @@ describe("runPrReview", () => {
       verificationSource: "unresolved",
       comment: false,
       workspace: defaultWorkspaceConfig,
-      hooks: defaultLifecycleHooks,
     }, {
       fetchFeedback: async () => (await noopAsync(), feedback),
       prepareWorkspace: async () => (await noopAsync(), {

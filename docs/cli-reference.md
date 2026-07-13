@@ -106,10 +106,10 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 
 | Option | Purpose |
 | --- | --- |
-| `--verify <cmd>` | Explicitly authorize this verification command. Repo-configured commands also run; inferred commands are suggested but not executed on the host. |
+| `--verify <cmd>` | Explicitly authorize this verification command. `review-pr` does not load repository config and never infers a command for execution. |
 | `--no-comment` | Complete the local review without publishing a PR comment. |
 
-`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes.
+`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes. It does not load `.roark/config.json`, run lifecycle hooks, or copy host-only workspace files. Pass `--repo` when Git origin does not identify the base repository.
 
 ## PR Revision Options
 

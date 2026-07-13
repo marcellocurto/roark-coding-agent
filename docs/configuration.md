@@ -107,7 +107,7 @@ It infers:
 | `cloneRemote` | string | `origin` | Remote used for clone and fetch behavior. |
 | `clone.filter` | string or null | `blob:none` | Partial clone filter. |
 | `clone.depth` | number or null | `null` | Clone depth. `null` means full history. |
-| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from control checkout into managed workspaces. `review-pr` skips these paths for fork or unknown-source PRs. |
+| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from control checkout into managed workspaces. `review-pr` always ignores this setting. |
 
 Use `copyToWorktree` for path names only, not secret values:
 
@@ -143,6 +143,8 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 ## Verification Configuration
 
 For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference. Failed verification consumes the same `maxFixPasses` budget as reviewer-requested fixes.
+
+`review-pr` treats the current checkout as untrusted and does not load `.roark/config.json`. It uses explicit CLI values, Git origin inference, and built-in workspace defaults; only an explicit `--verify` command may execute against the PR checkout.
 
 Good examples:
 

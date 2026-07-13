@@ -11,5 +11,8 @@ test("host review suggests but does not authorize an inferred PR script", async 
   expect(resolved.command).toBeUndefined();
   expect(resolved.suggestedCommand).toBe("bun run check");
   expect(resolved.source).toBe("not-configured");
+  const untrustedCommand = await resolvePrReviewVerification({ cwd, command: "malicious-command", source: "unresolved" });
+  expect(untrustedCommand.command).toBeUndefined();
+  expect(untrustedCommand.suggestedCommand).toBe("bun run check");
   await rm(cwd, { recursive: true, force: true });
 });
