@@ -2,7 +2,7 @@
 title: Troubleshooting
 summary: Common Roark failures, symptoms, and recovery steps.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-13T00:00:00Z
 ---
 
 ## No Eligible Issues
@@ -190,6 +190,20 @@ Use scheduler-level serialization:
 - one launchd job per control checkout
 
 See [Scheduling](scheduling.md) and [Operations runbook](operations-runbook.md).
+
+## macOS Exit Notification Does Not Appear
+
+Exit notifications require a valid repository `.roark/config.json` with:
+
+```json
+{
+  "notifications": { "onExit": true }
+}
+```
+
+They are macOS-only and best-effort. Check **System Settings → Notifications** for the application that presents `osascript` notifications, and check the active Focus mode. macOS may suppress presentation even when delivery succeeds.
+
+Roark waits up to two seconds for `/usr/bin/osascript`. A timeout, launch failure, or nonzero exit prints one non-fatal warning and preserves the original Roark exit code. No notification is attempted outside a Git repository, when config is missing or invalid, or on non-macOS hosts. Signals such as `SIGINT`, `SIGTERM`, and `SIGKILL`, runtime crashes, forced termination, and power loss are unsupported because they do not pass through Roark's controlled exit boundary.
 
 ## Model and Provider Failures
 

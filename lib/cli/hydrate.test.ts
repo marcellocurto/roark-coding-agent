@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { defaultMaxFixPasses, parseArgs } from "./args.ts";
-import { hydrateCliOptions, inferVerifyCommand, parseGithubRepoFromOrigin } from "./hydrate.ts";
+import { hydrateCliOptions, inferVerifyCommand, loadRoarkConfig, parseGithubRepoFromOrigin } from "./hydrate.ts";
 import { runProcessOrThrow } from "./process.ts";
 
 const tempDirs: string[] = [];
@@ -353,6 +353,28 @@ describe("hydrateCliOptions", () => {
       if ("help" in raw) throw new Error("expected options");
       expect(hydrateCliOptions(raw)).rejects.toThrow("Could not determine verification command");
     }
+  });
+});
+
+describe("loadRoarkConfig notifications", () => {
+  test("parses the exit notification opt-in and defaults to disabled when absent", async () => {
+    const enabledRepo = await tempGitRepo();
+    await writeConfig(enabledRepo, { notifications: { onExit: true } });
+    expect((await loadRoarkConfig(enabledRepo)).notifications).toEqual({ onExit: true });
+
+    const defaultRepo = await tempGitRepo();
+    await writeConfig(defaultRepo, {});
+    expect((await loadRoarkConfig(defaultRepo)).notifications?.onExit ?? false).toBe(false);
+  });
+
+  test("rejects invalid notification values and unknown nested keys", async () => {
+    const invalidTypeRepo = await tempGitRepo();
+    await writeConfig(invalidTypeRepo, { notifications: { onExit: "yes" } });
+    expect(loadRoarkConfig(invalidTypeRepo)).rejects.toThrow("notifications.onExit' must be a boolean");
+
+    const unknownKeyRepo = await tempGitRepo();
+    await writeConfig(unknownKeyRepo, { notifications: { onExit: true, sound: true } });
+    expect(loadRoarkConfig(unknownKeyRepo)).rejects.toThrow("Unknown Roark config key 'notifications.sound'");
   });
 });
 
