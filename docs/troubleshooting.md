@@ -111,7 +111,7 @@ roark continue 123 --repo owner/repo
 If the work is no longer needed:
 
 ```bash
-roark workspace remove --issue 123 --force
+roark remove 123 --force
 ```
 
 Do not remove a workspace if it may contain recoverable uncommitted work.

@@ -28,6 +28,7 @@ import {
   defaultWorkspaceConfig,
   validateCopyToWorktreeEntry,
   type LifecycleHooksConfig,
+  type RemoveCommandOptions,
   type WorkspaceConfig,
 } from "../autorun/workspace.ts";
 import { runProcess, type ProcessResult } from "./process.ts";
@@ -90,9 +91,20 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
   const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
   const hooks = config.hooks ?? defaultLifecycleHooks;
 
+  if (raw.command === "remove") {
+    return {
+      command: "remove",
+      targets: raw.targets,
+      cwd: workspace,
+      repo,
+      force: raw.force ?? false,
+      workspace: workspaceConfig,
+      hooks,
+    } satisfies RemoveCommandOptions;
+  }
+
   if (raw.command === "workspace") {
     if (raw.action === "list") return { command: "workspace", action: "list", cwd: workspace, repo, workspace: workspaceConfig, hooks };
-    if (raw.action === "remove") return { command: "workspace", action: "remove", target: raw.target, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
     return { command: "workspace", action: "prune", olderThan: raw.olderThan, cwd: workspace, repo, force: raw.force ?? false, workspace: workspaceConfig, hooks };
   }
 

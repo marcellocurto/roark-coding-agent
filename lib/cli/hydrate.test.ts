@@ -66,7 +66,7 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.dryRun).toBe(true);
   });
 
-  test("hydrates workspace and lifecycle hook config for auto and workspace commands", async () => {
+  test("hydrates workspace and lifecycle hook config for auto and remove commands", async () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, {
       repo: "config/repo",
@@ -110,12 +110,12 @@ describe("hydrateCliOptions", () => {
       timeoutMs: 1234,
     });
 
-    const workspaceRaw = parseArgs(["workspace", "remove", "--issue", "4", "--force", "--cwd", repo]);
+    const workspaceRaw = parseArgs(["remove", "4", "--force", "--cwd", repo]);
     if ("help" in workspaceRaw) throw new Error("expected options");
     const workspaceHydrated = await hydrateCliOptions(workspaceRaw);
-    expect(workspaceHydrated.command).toBe("workspace");
-    if (workspaceHydrated.command !== "workspace" || workspaceHydrated.action !== "remove") throw new Error("expected workspace remove options");
-    expect(workspaceHydrated.target).toEqual({ kind: "issue", number: 4 });
+    expect(workspaceHydrated.command).toBe("remove");
+    if (workspaceHydrated.command !== "remove") throw new Error("expected remove options");
+    expect(workspaceHydrated.targets).toEqual([{ kind: "issue", number: 4 }]);
     expect(workspaceHydrated.force).toBe(true);
     expect(workspaceHydrated.workspace.cloneRemote).toBe("upstream");
     expect(workspaceHydrated.hooks.beforeRemove).toBe("echo removing");

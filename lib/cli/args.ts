@@ -5,7 +5,7 @@ import {
   defaultAutorunReadyLabel,
 } from "../autorun/selection.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import type { LifecycleHooksConfig, WorkspaceCommandOptions, WorkspaceConfig, WorkspaceRemoveTarget } from "../autorun/workspace.ts";
+import type { LifecycleHooksConfig, RemoveCommandOptions, WorkspaceCommandOptions, WorkspaceConfig, WorkspaceRemoveTarget } from "../autorun/workspace.ts";
 import type { ThinkingProfileName } from "../workflow/thinking.ts";
 import { singlePhaseCommands, type SinglePhaseCommand } from "../workflow/phase-vocabulary.ts";
 
@@ -15,8 +15,9 @@ export type ContinueCommand = "continue";
 export type StatusCommand = "status";
 export type InitCommand = "init";
 export type WorkspaceCommand = "workspace";
+export type RemoveCommand = "remove";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand;
+export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand | RemoveCommand;
 
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
@@ -141,7 +142,7 @@ export interface InitCliOptions {
   yes?: never;
 }
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | ReviewPrCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions;
+export type CliOptions = IssueCliOptions | AutoCliOptions | ReviewPrCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions | RemoveCommandOptions;
 
 export interface RawIssueCliOptions {
   command: IssueWorkflowCommand;
@@ -253,8 +254,15 @@ export interface RawInitCliOptions {
 
 export type RawWorkspaceCliOptions =
   | { command: "workspace"; action: "list"; cwd?: string | undefined; repo?: string  | undefined}
-  | { command: "workspace"; action: "remove"; target: WorkspaceRemoveTarget; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined }
   | { command: "workspace"; action: "prune"; olderThan: string; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined };
+
+export interface RawRemoveCliOptions {
+  command: "remove";
+  targets: WorkspaceRemoveTarget[];
+  cwd?: string | undefined;
+  repo?: string | undefined;
+  force?: true | undefined;
+}
 
 export type RawCliOptions =
   | RawIssueCliOptions
@@ -264,6 +272,7 @@ export type RawCliOptions =
   | RawContinueCliOptions
   | RawStatusCliOptions
   | RawInitCliOptions
+  | RawRemoveCliOptions
   | RawWorkspaceCliOptions;
 
 const issueCommands = new Set<IssueWorkflowCommand>([
@@ -271,7 +280,7 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   ...singlePhaseCommands,
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue", "status", "init", "workspace"]);
+const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue", "status", "init", "remove", "workspace"]);
 
 export const defaultMaxFixPasses = 3;
 
@@ -289,9 +298,9 @@ Commands:
   revise-pr <number>     Address required PR review feedback and push verified fixes when needed.
   continue <issue>       Resume a stopped issue workflow and publish after all gates pass.
   status [issue]         View workflow status and recovery information; use --all for every known issue run.
+  remove [issue ...] [--pr <n>] [--force]
+                        Select and remove managed workspaces. With no targets, opens an interactive multi-select.
   workspace list         View managed workspaces.
-  workspace remove (--issue <n> | --pr <n>) [--force]
-                        Remove one managed workspace; dirty workspaces require --force.
   workspace prune --older-than <duration> [--force]
                         Remove old clean workspaces, e.g. --older-than 30d.
   do <issue>             Run the complete issue workflow in the current checkout without publishing.
@@ -342,7 +351,7 @@ Options:
                           Label applied to the issue when a PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
   --no-comment           review-pr/revise-pr: do not post the terminal PR comment.
-  --force                Re-run phases even if their markdown artifact already exists.
+  --force                Re-run phases, or remove managed workspaces that have uncommitted changes.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
   -v, --version          Top-level only: print the installed Roark version.
   -h, --help             Show this help.
@@ -357,6 +366,7 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   }
 
   if (rawCommand === "init") return parseInitArgs(rest);
+  if (rawCommand === "remove") return parseRemoveArgs(rest);
   if (rawCommand === "workspace") return parseWorkspaceArgs(rest);
   if (rawCommand === "auto") return parseAutoArgs(rest);
   if (rawCommand === "review-pr") return parseReviewPrArgs(rest);
@@ -407,15 +417,13 @@ function parseInitArgs(args: string[]): RawInitCliOptions {
 
 function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
   const [action, ...rest] = args;
-  if (action !== "list" && action !== "remove" && action !== "prune") {
-    throw new Error(`workspace requires one of: list, remove, prune.\n\n${usage}`);
+  if (action !== "list" && action !== "prune") {
+    throw new Error(`workspace requires one of: list, prune.\n\n${usage}`);
   }
 
   let cwd: string | undefined;
   let repo: string | undefined;
   let force: true | undefined;
-  let issue: number | undefined;
-  let pr: number | undefined;
   let olderThan: string | undefined;
 
   for (let index = 0; index < rest.length; index++) {
@@ -423,28 +431,40 @@ function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
     if (arg === "--cwd") cwd = requiredValue(rest, ++index, arg);
     else if (arg === "--repo") repo = requiredValue(rest, ++index, arg);
     else if (arg === "--force") force = true;
-    else if (arg === "--issue") issue = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
-    else if (arg === "--pr") pr = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--older-than") olderThan = requiredValue(rest, ++index, arg);
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
   }
 
   if (action === "list") {
-    if (force === true || issue !== undefined || pr !== undefined || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
+    if (force === true || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
     return { command: "workspace", action, cwd, repo };
-  }
-  if (action === "remove") {
-    if ((issue === undefined) === (pr === undefined)) throw new Error("workspace remove requires exactly one of --issue <n> or --pr <n>.");
-    if (olderThan !== undefined) throw new Error("workspace remove cannot be combined with --older-than.");
-    if (issue !== undefined) return { command: "workspace", action, target: { kind: "issue", number: issue }, cwd, repo, force };
-    if (pr !== undefined) return { command: "workspace", action, target: { kind: "pr", number: pr }, cwd, repo, force };
-    throw new Error("workspace remove requires exactly one of --issue <n> or --pr <n>.");
   }
 
   if (olderThan === undefined) throw new Error("workspace prune requires --older-than <duration>.");
-  if (issue !== undefined || pr !== undefined) throw new Error("workspace prune cannot be combined with --issue or --pr.");
   return { command: "workspace", action, olderThan, cwd, repo, force };
+}
+
+function parseRemoveArgs(args: string[]): RawRemoveCliOptions {
+  let cwd: string | undefined;
+  let repo: string | undefined;
+  let force: true | undefined;
+  const targets: WorkspaceRemoveTarget[] = [];
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--cwd") cwd = requiredValue(args, ++index, arg);
+    else if (arg === "--repo") repo = requiredValue(args, ++index, arg);
+    else if (arg === "--force") force = true;
+    else if (arg === "--pr") targets.push({ kind: "pr", number: parsePositiveInteger(requiredValue(args, ++index, arg), arg) });
+    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else targets.push({ kind: "issue", number: parsePositiveInteger(arg ?? "", "issue number") });
+  }
+
+  const uniqueTargets = targets.filter((target, index) =>
+    targets.findIndex((candidate) => candidate.kind === target.kind && candidate.number === target.number) === index
+  );
+  return { command: "remove", targets: uniqueTargets, cwd, repo, force };
 }
 
 function parseAutoArgs(args: string[]): RawAutoCliOptions {

@@ -39,6 +39,7 @@ owner/repo#123
 | `roark do <issue>` | Run the complete issue workflow in the current checkout without publishing. |
 | `roark continue <issue>` | Resume a stopped issue workflow and publish after all gates pass. |
 | `roark status [issue]` | View workflow status and recovery information. Use `--all` for every known issue run. |
+| `roark remove [issue ...]` | Interactively select managed workspaces to remove, or remove the listed issue workspaces. Use `--pr <n>` for PR workspaces and `--force` for dirty workspaces. |
 | `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts or updates one review comment by default. |
 | `roark revise-pr <number>` | Address required review feedback on an existing open PR and push verified fixes when needed. |
 | `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
@@ -49,7 +50,6 @@ owner/repo#123
 | Command | Purpose |
 | --- | --- |
 | `roark workspace list` | List managed clone workspaces. |
-| `roark workspace remove --issue <n>` | Remove one managed workspace. Dirty workspaces require `--force`. |
 | `roark workspace prune --older-than <duration>` | Remove old clean workspaces, for example `--older-than 30d`. |
 
 ## Phase Commands
@@ -123,7 +123,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 
 | Option | Purpose |
 | --- | --- |
-| `--issue <n>` | Select a managed issue workspace for removal. |
+| `--pr <n>` | Select a managed PR workspace for removal; issue workspaces use positional numbers. |
 | `--older-than <duration>` | Select clean workspaces older than a duration such as `30d`. |
 | `--force` | Remove dirty workspaces. Use only after inspecting recoverable work. |
 

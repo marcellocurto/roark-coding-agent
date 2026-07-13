@@ -133,7 +133,7 @@ roark workspace list
 Remove one clean workspace:
 
 ```bash
-roark workspace remove --issue 123
+roark remove 123
 ```
 
 Prune old clean workspaces:

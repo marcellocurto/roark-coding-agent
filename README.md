@@ -63,7 +63,7 @@ Running `roark` without arguments opens an interactive menu with the same task n
 | Review an existing PR | `roark review-pr 456 --repo owner/repo` | Inspect the complete PR with independent correctness and maintainability reviewers without changing code. Posts or updates one review comment by default. |
 | Address PR review feedback | `roark revise-pr 456 --repo owner/repo` | Classify existing PR feedback, apply required fixes in a managed workspace, verify them, and push a revision commit when needed. |
 | View workflow status | `roark status 123 --repo owner/repo` | Show persisted status and recovery information for an issue workflow. Use `--all` to show every known issue run. |
-| Remove a managed workspace | `roark workspace remove --issue 123` | Remove an issue or PR workspace. Use `--pr 456` for a PR workspace; dirty workspaces require `--force`. |
+| Remove managed workspaces | `roark remove` | List this repository's managed workspaces and select one or more to delete. Use `roark remove 123` for issue 123 or `--pr 456` for a PR workspace; dirty workspaces require `--force`. |
 | Help and command reference | `roark --help` | Show every command and option available in the installed version. |
 
 ## How it works

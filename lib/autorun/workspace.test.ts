@@ -7,6 +7,7 @@ import {
   assertPinnedPrReviewWorkspace,
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
+  listManagedWorkspaces,
   listWorkspaces,
   prepareCloneWorkspace,
   preparePrReviewWorkspace,
@@ -15,8 +16,8 @@ import {
   removeWorkspace,
   resolveCloneRemote,
   resolvePrReviewCloneRemote,
+  runRemoveCommand,
   runLifecycleHook,
-  runWorkspaceCommand,
   sanitizeWorkspaceSegment,
   workspacePathForIssue,
   workspacePathForPrRevision,
@@ -166,16 +167,15 @@ describe("managed clone workspaces", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  test("workspace remove resolves PR revision workspaces", async () => {
+  test("remove resolves PR revision workspaces", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-workspace-remove-"));
     const workspaceRoot = path.join(root, "managed");
     const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 98 });
     await mkdir(workspacePath, { recursive: true });
 
-    await runWorkspaceCommand({
-      command: "workspace",
-      action: "remove",
-      target: { kind: "pr", number: 98 },
+    await runRemoveCommand({
+      command: "remove",
+      targets: [{ kind: "pr", number: 98 }],
       cwd: root,
       repo: "owner/repo",
       force: true,
@@ -184,6 +184,68 @@ describe("managed clone workspaces", () => {
     });
 
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("managed workspace discovery preserves target identity for interactive selection", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-select-remove-"));
+    const workspaceRoot = path.join(root, "managed");
+    const issuePath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 12 });
+    const prPath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 34 });
+    await mkdir(issuePath, { recursive: true });
+    await mkdir(prPath, { recursive: true });
+
+    expect(await listManagedWorkspaces({
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      repo: "owner/repo",
+      cwd: root,
+    })).toEqual([
+      { path: issuePath, target: { kind: "issue" as const, number: 12 } },
+      { path: prPath, target: { kind: "pr" as const, number: 34 } },
+    ]);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("batch removal preflights dirty workspaces before deleting any selection", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-remove-preflight-"));
+    const workspaceRoot = path.join(root, "managed");
+    const cleanPath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 12 });
+    const dirtyPath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 34 });
+    await mkdir(cleanPath, { recursive: true });
+    await mkdir(dirtyPath, { recursive: true });
+    await runProcessOrThrow(["git", "init"], { cwd: cleanPath });
+    await runProcessOrThrow(["git", "init"], { cwd: dirtyPath });
+    await writeFile(path.join(dirtyPath, "recoverable.txt"), "keep me\n");
+
+    expect(runRemoveCommand({
+      command: "remove",
+      targets: [{ kind: "issue", number: 12 }, { kind: "issue", number: 34 }],
+      cwd: root,
+      repo: "owner/repo",
+      force: false,
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+    })).rejects.toThrow("Refusing to remove dirty workspace");
+
+    expect(lstat(cleanPath)).resolves.toBeDefined();
+    expect(lstat(dirtyPath)).resolves.toBeDefined();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("direct removal fails clearly when a managed workspace does not exist", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-remove-missing-"));
+    const workspaceRoot = path.join(root, "managed");
+    const missingPath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 404 });
+
+    expect(runRemoveCommand({
+      command: "remove",
+      targets: [{ kind: "issue", number: 404 }],
+      cwd: root,
+      repo: "owner/repo",
+      force: false,
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+    })).rejects.toThrow(`Managed workspace not found:\n${missingPath}`);
     await rm(root, { recursive: true, force: true });
   });
 

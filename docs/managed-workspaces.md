@@ -79,12 +79,13 @@ Do not store secret values in `.roark/config.json`; store only path names such a
 
 ```bash
 roark workspace list
-roark workspace remove --issue 123
-roark workspace remove --pr 98
+roark remove
+roark remove 123
+roark remove --pr 98
 roark workspace prune --older-than 30d
 ```
 
-`list` and `prune` include both issue and PR workspaces. Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
+`roark remove` lists the current repository's managed workspaces and accepts multiple selections. `list`, interactive removal, and `prune` include both issue and PR workspaces. Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
 
 ## Next steps
 
