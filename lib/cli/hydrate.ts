@@ -46,6 +46,7 @@ export interface RoarkConfig {
   workspace?: WorkspaceConfig | undefined  ;
   hooks?: LifecycleHooksConfig | undefined  ;
   sandbox?: { provider: "host" } | undefined;
+  notifications?: { onExit: boolean } | undefined;
 }
 
 type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
@@ -69,6 +70,7 @@ const configKeys = new Set([
   "workspace",
   "hooks",
   "sandbox",
+  "notifications",
 ]);
 
 const unsupportedConfigKeys = new Set(["model", "thinking", "updateStrategy"]);
@@ -296,6 +298,7 @@ export async function loadRoarkConfig(workspace: string): Promise<RoarkConfig> {
   if (record["workspace"] !== undefined) config.workspace = parseWorkspaceConfig(record["workspace"], configPath);
   if (record["hooks"] !== undefined) config.hooks = parseHooksConfig(record["hooks"], configPath);
   if (record["sandbox"] !== undefined) config.sandbox = parseSandboxConfig(record["sandbox"], configPath);
+  if (record["notifications"] !== undefined) config.notifications = parseNotificationsConfig(record["notifications"], configPath);
 
   return config;
 }
@@ -379,6 +382,19 @@ function parseSandboxConfig(value: unknown, configPath: string): { provider: "ho
   assertKnownNestedKeys(record, new Set(["provider"]), "sandbox", configPath);
   if (record["provider"] !== undefined && record["provider"] !== "host") throw new Error(`Invalid Roark config at ${configPath}: 'sandbox.provider' must be 'host'.`);
   return { provider: "host" };
+}
+
+function parseNotificationsConfig(value: unknown, configPath: string): { onExit: boolean } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid Roark config at ${configPath}: 'notifications' must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  assertKnownNestedKeys(record, new Set(["onExit"]), "notifications", configPath);
+  const onExit = record["onExit"] ?? false;
+  if (typeof onExit !== "boolean") {
+    throw new Error(`Invalid Roark config at ${configPath}: 'notifications.onExit' must be a boolean.`);
+  }
+  return { onExit };
 }
 
 function assertKnownNestedKeys(record: Record<string, unknown>, allowed: Set<string>, keyPath: string, configPath: string): void {
