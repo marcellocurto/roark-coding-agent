@@ -284,18 +284,18 @@ const thinkingProfileFlags = {
 export const usage = `roark <command> [issue] [options]
 
 Commands:
-  init                  Scaffold repo-local .roark configuration.
-  auto [issue]          Find and claim eligible GitHub issues, or target one issue, switch branches, and run the full workflow.
-  review-pr <number>     Inspect an open PR, run two reviewers, and post actionable feedback without changing code.
-  revise-pr <number>     Address existing feedback on an open PR, then commit and push approved changes.
-  continue <issue>       Continue a prior autorun attempt and publish if gates pass.
-  status [issue]         Print persisted run observability status; use --all for all known issues.
-  workspace list         List managed clone workspaces.
+  init                  Initialize Roark in the current repository.
+  auto [issue]          Work on the next ready issue, or a specific issue, in a managed workspace and publish after all gates pass.
+  review-pr <number>     Review an existing PR without changing code and post actionable feedback.
+  revise-pr <number>     Address required PR review feedback and push verified fixes when needed.
+  continue <issue>       Resume a stopped issue workflow and publish after all gates pass.
+  status [issue]         View workflow status and recovery information; use --all for every known issue run.
+  workspace list         View managed workspaces.
   workspace remove (--issue <n> | --pr <n>) [--force]
                         Remove one managed workspace; dirty workspaces require --force.
   workspace prune --older-than <duration> [--force]
                         Remove old clean workspaces, e.g. --older-than 30d.
-  do <issue>             Run the full issue workflow.
+  do <issue>             Run the complete issue workflow in the current checkout without publishing.
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
   plan-draft <issue>     Run only the draft planning agent.

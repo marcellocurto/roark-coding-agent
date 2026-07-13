@@ -34,13 +34,13 @@ owner/repo#123
 
 | Command | Purpose |
 | --- | --- |
-| `roark init` | Scaffold repo-local `.roark` configuration. |
-| `roark auto [issue]` | Discover and claim eligible issues, or target one issue, then run the full workflow. |
-| `roark do <issue>` | Run the full issue workflow without autorun discovery. |
-| `roark continue <issue>` | Continue a prior autorun attempt and publish if gates pass. |
-| `roark status [issue]` | Print persisted run observability status. Use `--all` for all known issues. |
-| `roark review-pr <number>` | Fresh inspection-only review of any open or draft PR; posts one current comment by default. |
-| `roark revise-pr <number>` | Address existing feedback on an open PR; may commit and push verified changes. |
+| `roark init` | Initialize Roark in the current repository. |
+| `roark auto [issue]` | Work on the next ready issue, or a specific issue, in a managed workspace and publish after all gates pass. |
+| `roark do <issue>` | Run the complete issue workflow in the current checkout without publishing. |
+| `roark continue <issue>` | Resume a stopped issue workflow and publish after all gates pass. |
+| `roark status [issue]` | View workflow status and recovery information. Use `--all` for every known issue run. |
+| `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts or updates one review comment by default. |
+| `roark revise-pr <number>` | Address required review feedback on an existing open PR and push verified fixes when needed. |
 | `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
 | `roark create-issues <issue>` | Create approved GitHub issues from the curation plan. Dry-run unless `--yes`. |
 

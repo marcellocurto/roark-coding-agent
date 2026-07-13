@@ -10,15 +10,20 @@ interface InteractivePrompt {
 type TtyInput = NodeJS.ReadStream & { isTTY?: boolean };
 type WritableOutput = NodeJS.WriteStream | { write(text: string): unknown };
 
-const menu = `1. Auto discover
-2. Auto specific issue
-3. Continue
-4. Do full workflow
-5. Review PR
-6. Address PR feedback
-7. Status
-8. Workspace remove
-9. Help
+const menu = `Issue workflows
+1. Work on next ready issue
+2. Work on a specific issue
+3. Resume an issue workflow
+4. Run issue workflow in current checkout
+
+Pull requests
+5. Review an existing PR
+6. Address PR review feedback
+
+Management
+7. View workflow status
+8. Remove a managed workspace
+9. Help and command reference
 `;
 
 export async function resolveInteractiveArgv(options: {
@@ -59,14 +64,14 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
     const choice = (await prompt.question("Select an option: ")).trim();
 
     if (choice === "1") {
-      if (await confirm(prompt, "Run auto discover?")) return ["auto"];
+      if (await confirm(prompt, "Work on the next ready issue?")) return ["auto"];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
 
     if (choice === "2") {
       const issue = await promptRequiredIssue(prompt);
-      if (await confirm(prompt, `Run auto for issue ${issue}?`)) return ["auto", issue];
+      if (await confirm(prompt, `Work on issue ${issue}?`)) return ["auto", issue];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
