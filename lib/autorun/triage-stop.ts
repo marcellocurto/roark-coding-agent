@@ -1,8 +1,8 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { formatArtifactDetails, postIssueComment, postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
-import { formatArtifactDetails, sanitizePublicMarkdown } from "./public-output.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 
 export type TriageStoppedVerdict = string;
 
@@ -66,11 +66,6 @@ export function buildTriageStopRemoveLabelArgv(options: { repo?: string | undefi
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
-export function buildTriageStopCommentArgv(options: { repo?: string | undefined; issueNumber: number; comment: string }): string[] {
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "comment", String(options.issueNumber), "--body", truncateGitHubIssueComment(options.comment), ...repoArgs];
-}
-
 export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions): Promise<GitHubCommentRef | undefined> {
   const label = mapTriageVerdictToLabel(options.triageVerdict);
   const comment = formatTriageStoppedComment(options);
@@ -106,10 +101,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
         existingCommentId: options.existingCommentId,
       });
     }
-    await runProcessOrThrow(
-      buildTriageStopCommentArgv({ repo: options.repo, issueNumber: options.issueNumber, comment }),
-      { cwd: options.cwd, label: "gh issue comment (triage stop)" },
-    );
+    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment });
   } catch (error) {
     console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
   }

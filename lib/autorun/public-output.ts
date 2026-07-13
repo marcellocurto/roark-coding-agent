@@ -15,15 +15,6 @@ export function redactSecrets(value: string): string {
     .replace(new RegExp(`\\b((${secretNamePattern})\\s*:\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`);
 }
 
-export function formatArtifactDetails(lines: readonly string[]): string {
-  return [
-    "<details><summary>Artifacts</summary>",
-    "",
-    ...lines,
-    "</details>",
-  ].join("\n");
-}
-
 export function redactLocalPaths(value: string, localRoots: readonly string[] = []): string {
   let source = value;
   for (const root of [...new Set(localRoots.map((entry) => entry.replace(/[\\/]+$/, "")).filter((entry) => entry.length > 1))].toSorted((a, b) => b.length - a.length)) {

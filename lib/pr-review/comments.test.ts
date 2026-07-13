@@ -23,6 +23,10 @@ describe("PR review public comment", () => {
     expect(body).not.toContain("/mnt/agent/repo");
     expect(body).not.toContain("TOKEN=secret");
     expect(body).toContain("[local path redacted]");
+    expect(body).toContain("review A at [local path redacted]");
+    expect(body).toContain("review B");
+    expect(body.indexOf("review A at")).toBeLessThan(body.indexOf("## Roark PR review summary"));
+    expect(body.indexOf("review B")).toBeLessThan(body.indexOf("## Roark PR review summary"));
   });
 });
 

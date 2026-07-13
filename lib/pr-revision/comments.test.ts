@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { formatPrRevisionSummaryComment, readRevisionExcerpts, selectRevisionExcerptFilenames } from "./comments.ts";
+import { formatPrRevisionSummaryComment, readRevisionArtifactContents, selectRevisionCommentArtifactFilenames } from "./comments.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 
@@ -39,8 +39,8 @@ function context(overrides: Partial<PrRevisionContext> = {}): PrRevisionContext 
 }
 
 describe("PR revision summary comments", () => {
-  test("selects final fix-pass artifacts for revision excerpts", () => {
-    expect(selectRevisionExcerptFilenames([
+  test("selects final artifacts in reviewer-value order", () => {
+    expect(selectRevisionCommentArtifactFilenames([
       ".roark/runs/pr/12/revision-1/pr-feedback.md",
       ".roark/runs/pr/12/revision-1/revision-plan.md",
       ".roark/runs/pr/12/revision-1/revision-log.md",
@@ -50,14 +50,14 @@ describe("PR revision summary comments", () => {
       ".roark/runs/pr/12/revision-1/revision-log-fix-pass-2.md",
       ".roark/runs/pr/12/revision-1/revision-review-pass-2.md",
     ])).toEqual([
-      "pr-feedback.md",
-      "revision-plan.md",
-      "revision-log-fix-pass-2.md",
       "revision-review-pass-2.md",
+      "revision-log-fix-pass-2.md",
+      "revision-plan.md",
+      "pr-feedback.md",
     ]);
   });
 
-  test("reads latest revision fix-pass excerpts instead of stale initial artifacts", async () => {
+  test("reads latest revision artifacts instead of stale initial artifacts", async () => {
     const revisionDir = await mkdtemp(path.join(tmpdir(), "roark-pr-revision-excerpts-"));
     tempDirs.push(revisionDir);
     await mkdir(revisionDir, { recursive: true });
@@ -66,20 +66,17 @@ describe("PR revision summary comments", () => {
     await writeFile(path.join(revisionDir, "revision-log-fix-pass-1.md"), "final log", "utf8");
     await writeFile(path.join(revisionDir, "revision-review-pass-1.md"), "revision review", "utf8");
 
-    const excerpts = await readRevisionExcerpts(context({ revisionDir }), [
+    const contents = await readRevisionArtifactContents(context({ revisionDir }), [
       ".roark/runs/pr/12/revision-1/revision-log.md",
       ".roark/runs/pr/12/revision-1/revision-review.md",
       ".roark/runs/pr/12/revision-1/revision-log-fix-pass-1.md",
       ".roark/runs/pr/12/revision-1/revision-review-pass-1.md",
     ]);
 
-    expect(excerpts).toEqual([
-      { content: "final log" },
-      { content: "revision review" },
-    ]);
+    expect(contents).toEqual(["revision review", "final log"]);
   });
 
-  test("formats reviewer-focused revision details with marker and sanitized excerpts", () => {
+  test("formats reviewer-focused revision details with sanitized artifact contents", () => {
     const body = formatPrRevisionSummaryComment({
       context: context(),
       outcome: "published",
@@ -92,7 +89,7 @@ describe("PR revision summary comments", () => {
       changedFiles: ["lib/example.ts"],
       commitSha: "abc1234",
       artifactPaths: [".roark/runs/pr/12/revision-1/revision-plan.md"],
-      artifactExcerpts: [{ content: "# Revision Plan\n\nTOKEN=secret\n" }],
+      artifactContents: ["# Revision Plan\n\nTOKEN=secret\n"],
     });
 
     expect(body).toStartWith("<!-- roark:pr=12 revision=1 phase=revision-summary -->");
@@ -103,5 +100,6 @@ describe("PR revision summary comments", () => {
     expect(body).toContain("[local path redacted]");
     expect(body).toContain("TOKEN=[redacted]");
     expect(body).not.toContain("TOKEN=secret");
+    expect(body.indexOf("# Revision Plan")).toBeLessThan(body.indexOf("## Roark PR revision 1 summary"));
   });
 });

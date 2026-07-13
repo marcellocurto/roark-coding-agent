@@ -44,6 +44,15 @@ export function ensureCommentStartsWithMarker(body: string, marker: string): str
   return body.startsWith(marker) ? body : `${marker}\n${body}`;
 }
 
+export function formatArtifactDetails(lines: readonly string[]): string {
+  return [
+    "<details><summary>Artifacts</summary>",
+    "",
+    ...lines,
+    "</details>",
+  ].join("\n");
+}
+
 export function buildListIssueCommentsArgv(options: { repo: string; issueNumber: number | string }): string[] {
   return ["gh", "api", `repos/${options.repo}/issues/${options.issueNumber}/comments`, "--paginate", "--slurp"];
 }
@@ -159,11 +168,7 @@ export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMa
     return await updateIssueComment({ cwd: options.cwd, repo, commentId: existing.id, body, marker: options.marker });
   }
 
-  const stdout = await runProcessOrThrow(
-    buildPostIssueCommentArgv({ repo, issueNumber: options.issueNumber, body }),
-    { cwd: options.cwd, label: "gh api issue comment create" },
-  );
-  return parseGitHubCommentRef(stdout, options.marker);
+  return await postIssueComment({ cwd: options.cwd, repo, issueNumber: options.issueNumber, body });
 }
 
 async function resolveCommentRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {

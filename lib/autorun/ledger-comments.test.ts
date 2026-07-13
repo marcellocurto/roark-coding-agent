@@ -34,8 +34,8 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n\nUnique triage evidence at /Users/alice/private.\n");
+    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n\nUnique plan action with TOKEN=secret.\n");
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -45,7 +45,7 @@ describe("autorun ledger comment publishing", () => {
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     });
-    const phases: string[] = [];
+    const published: { phase: string; body: string }[] = [];
 
     await publishPlanningLedgerComments({
       cwd,
@@ -56,15 +56,19 @@ describe("autorun ledger comment publishing", () => {
     }, {
       publishIssueLedgerComment: async (input) => {
         await noopAsync();
-        phases.push(input.phase);
+        published.push({ phase: input.phase, body: input.body });
       },
     });
 
-    expect(phases).toEqual(["triage", "implementation-plan"]);
+    expect(published.map(({ phase }) => phase)).toEqual(["triage", "implementation-plan"]);
+    expect(published[0]?.body).toContain("Unique triage evidence at [local path redacted]");
+    expect(published[0]?.body).not.toContain("/Users/alice/private");
+    expect(published[1]?.body).toContain("Unique plan action with TOKEN=[redacted]");
+    expect(published[1]?.body).not.toContain("TOKEN=secret");
   });
 
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
-        await noopAsync();
+    await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -81,8 +85,8 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n");
-    await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+    await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n\nUnique review A evidence at /Users/alice/private.\n");
+    await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n\nUnique review B evidence with TOKEN=secret.\n");
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -92,7 +96,7 @@ describe("autorun ledger comment publishing", () => {
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     });
-    const phases: string[] = [];
+    const published: { phase: string; body: string }[] = [];
 
     await publishReviewLedgerComments({
       cwd,
@@ -103,7 +107,7 @@ describe("autorun ledger comment publishing", () => {
     }, {
       publishIssueLedgerComment: async (input) => {
         await noopAsync();
-        phases.push(input.phase);
+        published.push({ phase: input.phase, body: input.body });
         recordAttemptIssueComment(input.attemptMetadata, input.phase, {
           id: input.phase === "review-a" ? 101 : 102,
           marker: `marker:${input.phase}`,
@@ -111,7 +115,11 @@ describe("autorun ledger comment publishing", () => {
       },
     });
 
-    expect(phases).toEqual(["review-a", "review-b"]);
+    expect(published.map(({ phase }) => phase)).toEqual(["review-a", "review-b"]);
+    expect(published[0]?.body).toContain("Unique review A evidence at [local path redacted]");
+    expect(published[1]?.body).toContain("Unique review B evidence with TOKEN=[redacted]");
+    expect(published[0]?.body).not.toContain("/Users/alice/private");
+    expect(published[1]?.body).not.toContain("TOKEN=secret");
     expect(attemptMetadata.githubComments?.issue?.["review-a"]?.id).toBe(101);
     expect(attemptMetadata.githubComments?.issue?.["review-b"]?.id).toBe(102);
   });

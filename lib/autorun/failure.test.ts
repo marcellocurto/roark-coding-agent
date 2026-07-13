@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import {
-  buildFailureCommentArgv,
   buildFailureLabelArgv,
   buildRemoveLabelArgv,
   formatFailureComment,
@@ -91,11 +90,5 @@ describe("autorun failure", () => {
       "--repo",
       "owner/repo",
     ]);
-  });
-
-  test("buildFailureCommentArgv composes a gh issue comment command", () => {
-    expect(
-      buildFailureCommentArgv({ issueNumber: 8, comment: "hi", repo: "owner/repo" }),
-    ).toEqual(["gh", "issue", "comment", "8", "--body", "hi", "--repo", "owner/repo"]);
   });
 });

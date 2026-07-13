@@ -1,6 +1,6 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
-import { formatArtifactDetails, redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
+import { formatArtifactDetails, postIssueComment, postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
+import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
@@ -33,12 +33,6 @@ export interface FailureLabelArgvOptions {
   repo?: string | undefined  ;
   issueNumber: number;
   label: string;
-}
-
-export interface FailureCommentArgvOptions {
-  repo?: string | undefined  ;
-  issueNumber: number;
-  comment: string;
 }
 
 export function formatFailureComment(input: FailureCommentInput): string {
@@ -77,23 +71,12 @@ export function buildRemoveLabelArgv(options: FailureLabelArgvOptions): string[]
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
-export function buildFailureCommentArgv(options: FailureCommentArgvOptions): string[] {
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "comment", String(options.issueNumber), "--body", truncateGitHubIssueComment(options.comment), ...repoArgs];
-}
-
 export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<GitHubCommentRef | undefined> {
   const labelArgv = buildFailureLabelArgv({
     repo: options.repo,
     issueNumber: options.issueNumber,
     label: options.label,
   });
-  const commentArgv = buildFailureCommentArgv({
-    repo: options.repo,
-    issueNumber: options.issueNumber,
-    comment: options.comment,
-  });
-
   try {
     await runProcessOrThrow(labelArgv, { cwd: options.cwd, label: "gh issue edit --add-label (failure)" });
   } catch (error) {
@@ -122,7 +105,7 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
         existingCommentId: options.existingCommentId,
       });
     }
-    await runProcessOrThrow(commentArgv, { cwd: options.cwd, label: "gh issue comment (failure)" });
+    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: options.comment });
   } catch (error) {
     console.warn(`Failed to post failure comment: ${formatError(error)}`);
   }

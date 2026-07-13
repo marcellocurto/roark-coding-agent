@@ -20,7 +20,16 @@ export function formatPrReviewComment(input: {
   const sanitize = (value: string) => sanitizePublicMarkdown(value, { localRoots });
   const lines = [
     buildPrReviewMarker(input.context.prNumber),
-    "## Roark PR review",
+    "",
+    sanitize(input.reviewA).trimEnd(),
+    "",
+    "---",
+    "",
+    sanitize(input.reviewB).trimEnd(),
+    "",
+    "---",
+    "",
+    "## Roark PR review summary",
     "",
     `- Outcome: **${input.decision.outcome}**`,
     `- Reviewed commit: \`${input.headOid}\``,
@@ -40,10 +49,6 @@ export function formatPrReviewComment(input: {
     "",
     "### Suggestions",
     ...renderFindings(input.decision.suggestions, sanitize),
-    "",
-    reviewerSection("Review A — correctness", input.reviewA, sanitize),
-    "",
-    reviewerSection("Review B — maintainability", input.reviewB, sanitize),
   ];
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -67,8 +72,4 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize
     const handling = sanitize(finding.recommendedHandling);
     return `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
   });
-}
-
-function reviewerSection(title: string, content: string, sanitize: (value: string) => string): string {
-  return `## ${title}\n\n${sanitize(content).trimEnd()}`;
 }

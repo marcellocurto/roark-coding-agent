@@ -1,8 +1,8 @@
 import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { buildRoarkMarker, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
-import { formatArtifactDetails, sanitizePublicMarkdown } from "./public-output.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 
 export type LedgerCommentPhase = string;

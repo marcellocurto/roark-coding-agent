@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildTriageStopAddLabelArgv,
-  buildTriageStopCommentArgv,
   buildTriageStopRemoveLabelArgv,
+  formatTriageStoppedComment,
   mapTriageVerdictToLabel,
   parseTriageStoppedVerdict,
 } from "./triage-stop.ts";
@@ -19,7 +19,7 @@ describe("triage stop handling", () => {
     expect(parseTriageStoppedVerdict("# Triage\n\n## Verdict\nneeds-human-decision\n")).toBe("needs-human-decision");
   });
 
-  test("builds gh argv for labels and comments", () => {
+  test("builds gh argv for labels", () => {
     expect(buildTriageStopAddLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "blocked" })).toEqual([
       "gh",
       "issue",
@@ -40,15 +40,17 @@ describe("triage stop handling", () => {
       "--repo",
       "owner/repo",
     ]);
-    expect(buildTriageStopCommentArgv({ repo: "owner/repo", issueNumber: 12, comment: "body" })).toEqual([
-      "gh",
-      "issue",
-      "comment",
-      "12",
-      "--body",
-      "body",
-      "--repo",
-      "owner/repo",
-    ]);
+  });
+
+  test("publishes sanitized triage artifact content", () => {
+    const comment = formatTriageStoppedComment({
+      issueNumber: 12,
+      triageVerdict: "reject",
+      triageArtifactContent: "# Triage\n\nUnique terminal evidence at /Users/alice/private with TOKEN=secret.\n",
+    });
+
+    expect(comment).toContain("Unique terminal evidence at [local path redacted] with TOKEN=[redacted]");
+    expect(comment).not.toContain("/Users/alice/private");
+    expect(comment).not.toContain("TOKEN=secret");
   });
 });

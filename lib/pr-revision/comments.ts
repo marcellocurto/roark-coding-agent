@@ -1,8 +1,8 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { VerificationResult } from "../autorun/verification.ts";
-import { postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
-import { formatArtifactDetails, sanitizePublicMarkdown } from "../autorun/public-output.ts";
+import { formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 
 export interface RevisionSummaryInput {
@@ -17,7 +17,7 @@ export interface RevisionSummaryInput {
   changedFiles?: string[] | undefined;
   commitSha?: string | undefined;
   artifactPaths: string[];
-  artifactExcerpts?: { content: string }[] | undefined;
+  artifactContents?: string[] | undefined;
 }
 
 export function buildPrRevisionSummaryMarker(input: { prNumber: number; revision: number }): string {
@@ -28,7 +28,13 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   const { context } = input;
   const lines: string[] = [];
   lines.push(buildPrRevisionSummaryMarker({ prNumber: context.prNumber, revision: context.revision }));
-  lines.push(`## Roark PR revision ${context.revision}`);
+  const artifactContents = input.artifactContents ?? [];
+  for (const [index, content] of artifactContents.entries()) {
+    lines.push("", sanitizePublicMarkdown(content).trimEnd());
+    if (index < artifactContents.length - 1) lines.push("", "---");
+  }
+  if (artifactContents.length > 0) lines.push("", "---");
+  lines.push("", `## Roark PR revision ${context.revision} summary`);
   lines.push("");
   lines.push(`- Outcome: ${input.outcome}`);
   if (input.planStatus) lines.push(`- Plan status: ${input.planStatus}`);
@@ -49,16 +55,8 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   lines.push("");
   lines.push("### Changed files");
   pushList(lines, input.changedFiles);
-  const excerpts = input.artifactExcerpts ?? [];
-  if (excerpts.length > 0) {
-    lines.push("");
-    for (const [index, excerpt] of excerpts.entries()) {
-      if (index > 0) lines.push("---", "");
-      lines.push(sanitizePublicMarkdown(excerpt.content).trimEnd(), "");
-    }
-  }
   if (input.artifactPaths.length > 0) {
-    lines.push(formatArtifactDetails(input.artifactPaths.map((artifactPath) => `- \`${artifactPath}\``)));
+    lines.push("", formatArtifactDetails(input.artifactPaths.map((artifactPath) => `- \`${artifactPath}\``)));
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -73,33 +71,33 @@ export async function postPrRevisionSummaryComment(input: RevisionSummaryInput):
     marker,
     body: formatPrRevisionSummaryComment({
       ...input,
-      artifactExcerpts: input.artifactExcerpts ?? await readRevisionExcerpts(input.context, input.artifactPaths),
+      artifactContents: input.artifactContents ?? await readRevisionArtifactContents(input.context, input.artifactPaths),
     }),
   });
 }
 
-export async function readRevisionExcerpts(context: PrRevisionContext, artifactPaths: string[]): Promise<{ content: string }[]> {
-  const excerpts: { content: string }[] = [];
-  for (const filename of selectRevisionExcerptFilenames(artifactPaths)) {
+export async function readRevisionArtifactContents(context: PrRevisionContext, artifactPaths: string[]): Promise<string[]> {
+  const contents: string[] = [];
+  for (const filename of selectRevisionCommentArtifactFilenames(artifactPaths)) {
     try {
-      excerpts.push({ content: await readFile(path.join(context.revisionDir, filename), "utf8") });
+      contents.push(await readFile(path.join(context.revisionDir, filename), "utf8"));
     } catch {
-      // Missing excerpts should not block the GitHub comment.
+      // Missing artifacts should not block the GitHub comment.
     }
   }
-  return excerpts;
+  return contents;
 }
 
-export function selectRevisionExcerptFilenames(artifactPaths: string[]): string[] {
+export function selectRevisionCommentArtifactFilenames(artifactPaths: string[]): string[] {
   const filenames = [...new Set(artifactPaths.map((artifactPath) => path.basename(artifactPath)))];
   const selected: string[] = [];
-  for (const filename of ["pr-feedback.md", "revision-plan.md"]) {
-    if (filenames.includes(filename)) selected.push(filename);
-  }
-  const latestLog = latestPassArtifactFilename(filenames, "revision-log.md", /^revision-log-fix-pass-(\d+)\.md$/);
-  if (latestLog) selected.push(latestLog);
   const latestReview = latestPassArtifactFilename(filenames, "revision-review.md", /^revision-review-pass-(\d+)\.md$/);
   if (latestReview) selected.push(latestReview);
+  const latestLog = latestPassArtifactFilename(filenames, "revision-log.md", /^revision-log-fix-pass-(\d+)\.md$/);
+  if (latestLog) selected.push(latestLog);
+  for (const filename of ["revision-plan.md", "pr-feedback.md"]) {
+    if (filenames.includes(filename)) selected.push(filename);
+  }
   return selected;
 }
 
