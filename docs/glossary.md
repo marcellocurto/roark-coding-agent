@@ -37,6 +37,10 @@ An iteration where Roark applies reviewer findings after implementation and then
 
 The Git branch used for one issue, normally `roark/issue-<number>`.
 
+## Invocation
+
+One execution of the Roark CLI, from command start until Roark returns control to its caller, regardless of the command or outcome.
+
 ## Managed Workspace
 
 An isolated clone where Roark runs the agent and verification away from the control checkout.
