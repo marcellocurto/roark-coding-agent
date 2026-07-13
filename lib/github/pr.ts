@@ -50,6 +50,7 @@ export interface PullRequestClosingIssue {
   state: string;
   url?: string | undefined;
   repository?: string | undefined;
+  comments?: PullRequestComment[] | undefined;
 }
 
 export interface PullRequestFeedback {
@@ -101,10 +102,17 @@ export async function fetchPullRequestFeedback(options: { cwd: string; repo?: st
     label: "gh api graphql pull request feedback",
   });
   const feedback = parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
+  const closingIssues = await Promise.all((feedback.closingIssues ?? []).map(async (issue) => {
+    if (issue.repository?.toLowerCase() !== repo.toLowerCase()) return issue;
+    const raw = await runProcessOrThrow([
+      "gh", "api", `repos/${repo}/issues/${issue.number}/comments`, "--paginate", "--slurp",
+    ], { cwd: options.cwd, label: `gh api closing issue #${issue.number} comments` });
+    return { ...issue, comments: parseRestPullRequestComments(raw) };
+  }));
   const commentsRaw = await runProcessOrThrow([
     "gh", "api", `repos/${repo}/issues/${options.prNumber}/comments`, "--paginate", "--slurp",
   ], { cwd: options.cwd, label: "gh api pull request comments" });
-  return withPlannerComments(feedback, parseRestPullRequestComments(commentsRaw));
+  return withPlannerComments({ ...feedback, closingIssues }, parseRestPullRequestComments(commentsRaw));
 }
 
 export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {

@@ -201,6 +201,41 @@ describe("managed clone workspaces", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  test("does not poison a new review workspace when the PR head changes during setup", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-race-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 12 });
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "clone") {
+        await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+        return ok();
+      }
+      if (args[0] === "git" && args[1] === "fetch") return ok();
+      if (args[0] === "git" && args[1] === "cat-file" && args[3] === "old-head^{commit}") return fail("old head is unavailable");
+      if (args[0] === "git" && args[1] === "cat-file") return ok();
+      if (args[0] === "git" && args[1] === "rev-parse") return ok("new-head\n");
+      return fail(`unexpected command: ${args.join(" ")}`);
+    };
+
+    expect(preparePrReviewWorkspace({
+      controlCwd: root,
+      repo: "owner/repo",
+      prNumber: 12,
+      baseRefName: "main",
+      baseRefOid: "base-head",
+      headRefOid: "old-head",
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      runner,
+    })).rejects.toThrow("changed while its review workspace was prepared");
+
+    expect(Bun.file(path.join(workspacePath, workspaceStateFile)).exists()).resolves.toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
   test("reused PR revision workspace refuses to reset unpushed local commits", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-workspace-unpushed-"));
     const workspaceRoot = path.join(root, "managed");
@@ -476,7 +511,7 @@ describe("managed clone workspaces", () => {
     const baseOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
     await runProcessOrThrow(["git", "clone", "--bare", source, remote], { cwd: root });
     await runProcessOrThrow(["git", "update-ref", "refs/pull/12/head", headOid], { cwd: remote });
-    await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: source });
+    await runProcessOrThrow(["git", "remote", "add", "origin", `file://${remote}`], { cwd: source });
 
     const calls: string[][] = [];
     const prepared = await preparePrReviewWorkspace({
@@ -486,7 +521,7 @@ describe("managed clone workspaces", () => {
       baseRefName: "main",
       baseRefOid: baseOid,
       headRefOid: headOid,
-      workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed") },
+      workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed"), clone: { ...defaultWorkspaceConfig.clone, depth: 1 } },
       hooks: defaultLifecycleHooks,
       runner: async (args, options) => {
         calls.push(args);
@@ -498,6 +533,7 @@ describe("managed clone workspaces", () => {
     expect(prepared.comparison.changedFiles).toEqual(["feature.txt"]);
     expect(prepared.comparison.inspectionCommand).toBe(`git diff ${initial}..${headOid} --`);
     expect((await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
+    expect(calls.some((args) => args[0] === "git" && args[1] === "fetch" && args[2] === "--unshallow")).toBe(true);
     expect(calls.some((args) => args[0] === "git" && ["commit", "push"].includes(args[1] ?? ""))).toBe(false);
     await writeFile(path.join(prepared.path, "unexpected.txt"), "mutation\n", "utf8");
     expect(assertPinnedPrReviewWorkspace({ cwd: prepared.path, headOid })).rejects.toThrow("changed during inspection");

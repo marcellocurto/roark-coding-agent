@@ -61,6 +61,8 @@ export interface PreparedPrReviewWorkspace extends PreparedWorkspace {
   releaseLock: () => Promise<void>;
 }
 
+class PrReviewHeadChangedError extends Error {}
+
 export type WorkspaceRemoveTarget =
   | { kind: "issue"; number: number }
   | { kind: "pr"; number: number };
@@ -349,7 +351,7 @@ export async function preparePrReviewWorkspace(input: {
         releaseLock,
       };
     } catch (error) {
-      if (createdNow) await writePoisonState(workspacePath, error);
+      if (createdNow && !(error instanceof PrReviewHeadChangedError)) await writePoisonState(workspacePath, error);
       throw error;
     }
   } catch (error) {
@@ -396,17 +398,18 @@ async function checkoutPinnedPrReview(input: {
     cwd: input.cwd,
     label: "git fetch GitHub PR head",
   });
-  await assertFetchedOid(input.runner, input.cwd, input.baseRefOid, "base");
-  await assertFetchedOid(input.runner, input.cwd, input.headRefOid, "head");
   const fetchedHead = (await runProcessOrThrowWithRunner(input.runner, ["git", "rev-parse", headReviewRef], { cwd: input.cwd, label: "git rev-parse PR head" })).trim();
   if (fetchedHead !== input.headRefOid) {
-    throw new Error(`PR #${input.prNumber} changed while its review workspace was prepared (expected ${input.headRefOid}, fetched ${fetchedHead}).`);
+    throw new PrReviewHeadChangedError(`PR #${input.prNumber} changed while its review workspace was prepared (expected ${input.headRefOid}, fetched ${fetchedHead}).`);
   }
-  const mergeBaseOid = (await runProcessOrThrowWithRunner(input.runner, ["git", "merge-base", input.baseRefOid, input.headRefOid], {
-    cwd: input.cwd,
-    label: "git merge-base PR comparison",
-  })).trim();
-  if (!mergeBaseOid) throw new Error(`Could not determine merge base for PR #${input.prNumber}.`);
+  await assertFetchedOid(input.runner, input.cwd, input.baseRefOid, "base");
+  await assertFetchedOid(input.runner, input.cwd, input.headRefOid, "head");
+  await ensureCompleteHistory(input.runner, input.cwd, input.prNumber);
+  const mergeBaseResult = await input.runner(["git", "merge-base", input.baseRefOid, input.headRefOid], { cwd: input.cwd });
+  const mergeBaseOid = mergeBaseResult.stdout.trim();
+  if (mergeBaseResult.exitCode !== 0 || !mergeBaseOid) {
+    throw new Error(`Could not determine merge base for PR #${input.prNumber} after ensuring complete clone history: ${tail(mergeBaseResult.stderr || mergeBaseResult.stdout) || "no common ancestor was available"}`);
+  }
   await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "--detach", input.headRefOid], { cwd: input.cwd, label: "git checkout pinned PR head" });
   const changedFiles = (await runProcessOrThrowWithRunner(input.runner, ["git", "diff", "--name-only", `${mergeBaseOid}..${input.headRefOid}`, "--"], {
     cwd: input.cwd,
@@ -424,6 +427,23 @@ async function checkoutPinnedPrReview(input: {
     diffStat,
     inspectionCommand: `git diff ${mergeBaseOid}..${input.headRefOid} --`,
   };
+}
+
+async function ensureCompleteHistory(runner: ProcessRunner, cwd: string, prNumber: number): Promise<void> {
+  let shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd });
+  if (shallow.exitCode !== 0) {
+    throw new Error(`Unable to inspect clone history before calculating the merge base for PR #${prNumber}: ${tail(shallow.stderr || shallow.stdout)}`);
+  }
+  if (shallow.stdout.trim() !== "true") return;
+
+  const unshallow = await runner(["git", "fetch", "--unshallow", "origin"], { cwd });
+  if (unshallow.exitCode !== 0) {
+    throw new Error(`Unable to fetch complete history for shallow PR review workspace #${prNumber}: ${tail(unshallow.stderr || unshallow.stdout)}`);
+  }
+  shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd });
+  if (shallow.exitCode !== 0 || shallow.stdout.trim() === "true") {
+    throw new Error(`PR review workspace #${prNumber} remains shallow after fetching complete history; its merge base cannot be calculated reliably.`);
+  }
 }
 
 async function assertFetchedOid(runner: ProcessRunner, cwd: string, oid: string, label: string): Promise<void> {

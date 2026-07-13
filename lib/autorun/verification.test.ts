@@ -41,10 +41,12 @@ describe("autorun verification", () => {
     expect(result.stderr).toBe("boom");
   });
 
-  test("default verification terminates a command that exceeds its timeout", async () => {
-    const result = await runVerification({ command: "sleep 1", cwd: "/tmp", timeoutMs: 10 });
+  test("default verification terminates the process tree when a command exceeds its timeout", async () => {
+    const startedAt = Date.now();
+    const result = await runVerification({ command: "sh -c 'sleep 2 & wait'", cwd: "/tmp", timeoutMs: 10 });
     expect(result.ok).toBe(false);
     expect(result.timedOut).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(1_000);
     expect(classifyVerificationFailure(result).reason).toBe("verification timed out");
   });
 

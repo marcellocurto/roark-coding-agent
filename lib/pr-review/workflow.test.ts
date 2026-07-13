@@ -19,7 +19,7 @@ describe("runPrReview", () => {
     let publications = 0;
     const feedback = reviewFeedback();
     feedback.closingIssues = [
-      { number: 126, title: "Shared contract", body: "Extract the contract", state: "OPEN", repository: "owner/repo" },
+      { number: 126, title: "Shared contract", body: "Extract the contract", state: "OPEN", repository: "owner/repo", comments: [{ author: "maintainer", body: "Preserve backward compatibility" }] },
       { number: 127, title: "Pinned workspace", body: "Prepare the workspace", state: "OPEN", repository: "owner/repo" },
       { number: 9, title: "Unrelated external issue", body: "Ignore this", state: "OPEN", repository: "other/repo" },
     ];
@@ -77,6 +77,7 @@ describe("runPrReview", () => {
     const reviewContext = await readFile(path.join(result.context.reviewDir, "pr-context.md"), "utf8");
     expect(reviewContext).toContain("Shared contract");
     expect(reviewContext).toContain("Pinned workspace");
+    expect(reviewContext).toContain("Preserve backward compatibility");
     expect(reviewContext).not.toContain("Unrelated external issue");
     expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
     expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
@@ -84,7 +85,7 @@ describe("runPrReview", () => {
     await rm(agent, { recursive: true, force: true });
   });
 
-  test("retains a review when PR state or base identity changes and does not publish it", async () => {
+  test("retains a review when PR requirement text changes and does not publish it", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-agent-"));
     await initAgentRepo(agent);
@@ -105,7 +106,7 @@ describe("runPrReview", () => {
       fetchFeedback: async () => {
         await noopAsync();
         fetches++;
-        return fetches === 1 ? initial : { ...initial, pr: { ...initial.pr, state: "CLOSED", baseRefOid: "newbase" } };
+        return fetches === 1 ? initial : { ...initial, pr: { ...initial.pr, title: "Changed title", body: "Changed requirements" } };
       },
       prepareWorkspace: async () => { await noopAsync(); return ({
         path: agent,
@@ -120,6 +121,8 @@ describe("runPrReview", () => {
     });
     expect(result.outcome).toBe("blocked");
     expect(result.stale).toBe(true);
+    expect(result.decision.reasons[0]).toContain("title changed");
+    expect(result.decision.reasons[0]).toContain("description changed");
     expect(publications).toBe(0);
     expect(Bun.file(path.join(result.context.reviewDir, "review-a.md")).exists()).resolves.toBe(true);
     await rm(control, { recursive: true, force: true });

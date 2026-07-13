@@ -56,11 +56,15 @@ export interface VerificationFailureClassification {
 }
 
 export const defaultVerificationRunner: VerificationRunner = async ({ command, cwd, timeoutMs }) => {
-  const child = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe" });
+  const child = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe", detached: true });
   const state = { timedOut: false };
   const timer = setTimeout(() => {
     state.timedOut = true;
-    child.kill();
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      child.kill("SIGKILL");
+    }
   }, timeoutMs);
   try {
     const [stdout, rawStderr, exitCode] = await Promise.all([
