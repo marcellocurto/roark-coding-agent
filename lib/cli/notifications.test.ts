@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { singlePhaseCommands } from "../workflow/phase-vocabulary.ts";
 import {
   deliverMacNotification,
   formatNotificationContent,
@@ -97,6 +98,15 @@ describe("sendExitNotification", () => {
 });
 
 describe("notification content", () => {
+  test("recognizes remove and every single-phase command", () => {
+    for (const command of ["remove", ...singlePhaseCommands]) {
+      expect(formatNotificationContent(
+        { argv: [command, "137"], succeeded: true },
+        "/work/repository",
+      )).toEqual({ title: "Roark finished", body: `${command} #137 · repository` });
+    }
+  });
+
   test("uses fixed titles and only normalized command, target, and repository context", () => {
     const success = formatNotificationContent(
       {

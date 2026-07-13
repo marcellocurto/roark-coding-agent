@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isWorkflowCommand } from "./args.ts";
 import type { RoarkConfig } from "./hydrate.ts";
 import { loadRoarkConfig, resolveWorkspace } from "./hydrate.ts";
 
@@ -9,30 +10,6 @@ const notificationScript = `on run argv
   set notificationBody to item 2 of argv
   display notification notificationBody with title notificationTitle
 end run`;
-
-const knownCommands = new Set([
-  "init",
-  "auto",
-  "review-pr",
-  "revise-pr",
-  "continue",
-  "status",
-  "workspace",
-  "do",
-  "fetch",
-  "triage",
-  "plan-draft",
-  "plan",
-  "capture-baseline",
-  "implement",
-  "refine-code",
-  "review",
-  "fix",
-  "reset-baseline",
-  "readiness",
-  "curate-issues",
-  "create-issues",
-]);
 
 export interface ExitNotificationRequest {
   argv: string[];
@@ -163,7 +140,7 @@ function commandIdentity(argv: string[]): string {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v")) return "version";
   if (argv.includes("--help") || argv.includes("-h")) return "help";
   const command = argv[0];
-  return command && knownCommands.has(command) ? command : "roark";
+  return command && isWorkflowCommand(command) ? command : "roark";
 }
 
 function targetIdentity(command: string, argv: string[]): string {
@@ -179,7 +156,7 @@ function targetIdentity(command: string, argv: string[]): string {
     return number ? ` #${number}` : "";
   }
 
-  if (knownCommands.has(command) && !["init", "workspace", "review-pr", "revise-pr"].includes(command)) {
+  if (isWorkflowCommand(command) && !["init", "workspace", "review-pr", "revise-pr"].includes(command)) {
     const number = normalizedIssueNumber(argv[1]);
     return number ? ` #${number}` : "";
   }

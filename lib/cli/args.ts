@@ -282,6 +282,10 @@ const issueCommands = new Set<IssueWorkflowCommand>([
 
 const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue", "status", "init", "remove", "workspace"]);
 
+export function isWorkflowCommand(value: string): value is WorkflowCommand {
+  return commands.has(value as WorkflowCommand);
+}
+
 export const defaultMaxFixPasses = 3;
 
 const thinkingProfileFlags = {
@@ -361,7 +365,7 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { help: true };
 
   const [rawCommand, ...rest] = argv;
-  if (!rawCommand || !commands.has(rawCommand as WorkflowCommand)) {
+  if (!rawCommand || !isWorkflowCommand(rawCommand)) {
     throw new Error(`Unknown command '${rawCommand ?? ""}'.\n\n${usage}`);
   }
 
@@ -373,7 +377,7 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
   if (rawCommand === "revise-pr") return parseRevisePrArgs(rest);
   if (rawCommand === "continue") return parseContinueArgs(rest);
   if (rawCommand === "status") return parseStatusArgs(rest);
-  return parseIssueArgs(rawCommand as IssueWorkflowCommand, rest);
+  return parseIssueArgs(rawCommand, rest);
 }
 
 function parseReviewPrArgs(args: string[]): RawReviewPrCliOptions {
