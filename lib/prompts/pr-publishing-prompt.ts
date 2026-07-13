@@ -44,7 +44,8 @@ ${formatArtifactPaths(input.artifactPaths)}
     <instruction>Before the regular PR body sections, add a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what Roark did, what happened, what changed, the result, and what the human should do next if anything.</instruction>
     <instruction>Write for a human code reviewer. Lead with what changed, why it changed, how to review it, verification, and risks/non-goals. Put automation details and artifact links at the bottom in a collapsed details block.</instruction>
     <instruction>Do not invent facts, scope, tests, files, risks, or follow-up work. If the artifacts are thin, say so plainly and keep the body concise.</instruction>
-    <instruction>The PR body must include a closing reference for the source issue: Closes #${input.sourceIssue.number}.</instruction>
+    <instruction>Add a standalone \`Closes #${input.sourceIssue.number}\` line for the source issue. Add one standalone \`Closes #N\` line for every additional same-repository issue that the implementation actually completes and that is supported by the source issue or workflow artifacts.</instruction>
+    <instruction>Keep closing references outside code blocks and collapsed details so GitHub recognizes them. Do not close parent, blocker, dependency, contextual, or follow-up issues unless this PR actually completes them.</instruction>
     <instruction>Create the PR with gh using base ${input.baseBranch} and head ${input.branchName}. Use a body file or safe shell quoting for the authored body.</instruction>
   </instructions>
   <suggested_body_structure>Summary; What changed; How to review; Verification; Risks / non-goals; Follow-up issues; Automation details.</suggested_body_structure>
@@ -72,6 +73,8 @@ ${formatArtifactPaths(input.artifactPaths)}
     <instruction>Preserve the existing human-authored PR explanation unless it is clearly stale according to the workflow artifacts.</instruction>
     <instruction>Before the regular PR body sections, add or update a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what Roark did, what happened, what changed, the result, and what the human should do next if anything.</instruction>
     <instruction>Update the Follow-up issues section with the follow-up issues listed above. If there are none, state that none were created at PR creation time.</instruction>
+    <instruction>Preserve or add a standalone \`Closes #${input.sourceIssue.number}\` line for the source issue. Preserve or add one standalone \`Closes #N\` line for every additional same-repository issue that the implementation actually completes according to the source issue or workflow artifacts.</instruction>
+    <instruction>Keep closing references outside code blocks and collapsed details so GitHub recognizes them. Never use closing references for parent, blocker, dependency, contextual, or follow-up issues unless this PR actually completes them.</instruction>
     <instruction>Update or add collapsed automation details for current run metadata, verification, ledger comments, and key workflow artifacts.</instruction>
     <instruction>Do not replace the PR body with a deterministic template or artifact dump.</instruction>
     <instruction>Edit the PR body with gh. Use a body file or safe shell quoting for the updated body.</instruction>
