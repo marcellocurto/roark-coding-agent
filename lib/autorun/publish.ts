@@ -4,6 +4,8 @@ import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { prBodyUpdatePrompt, prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import { buildRemoveLabelArgv } from "./failure.ts";
 import {
@@ -480,14 +482,31 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
 }
 
 export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
+  const display: AgentDisplayContext = {
+    command: input.workflowContext.displayCommand ?? "auto",
+    repository: input.options.repo,
+    target: `#${input.issue.number}`,
+    phaseId: "pr-publishing",
+    phaseLabel: "Publish pull request",
+    expectedArtifact: input.attemptMetadataPath,
+    operation: "publish",
+  };
+  return runPresentedPhase(
+    display,
+    () => performAutorunPublication(input, display),
+    (prUrl) => ({ outcome: prUrl ? `published ${prUrl}` : "published" }),
+  );
+}
+
+async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext): Promise<string | undefined> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath, agentRunner = runPiAgent } = input;
   const agentCwd = workflowContext.agentCwd;
   const controlCwd = workflowContext.controlCwd;
 
-  console.log(`\n=== Publish #${issue.number} ===`);
+  presenter().line(`Publishing issue #${issue.number}`);
 
   if (await hasUncommittedChanges({ cwd: agentCwd })) {
-    console.log("- Committing worktree changes");
+    presenter().line("Committing worktree changes");
     await runProcessOrThrow(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" });
     await runProcess(["git", "reset", "-q", "--", ".roark"], { cwd: agentCwd });
     await runProcessOrThrow(
@@ -495,10 +514,10 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       { cwd: agentCwd, label: "git commit" },
     );
   } else {
-    console.log("- No uncommitted changes; skipping commit.");
+    presenter().line("No uncommitted changes; skipping commit");
   }
 
-  console.log(`- Pushing ${branchPlan.branchName} to ${options.remote}`);
+  presenter().line(`Pushing ${branchPlan.branchName} to ${options.remote}`);
   await runProcessOrThrow(
     buildPushArgv({ remote: options.remote, branchName: branchPlan.branchName }),
     { cwd: agentCwd, label: `git push ${options.remote}` },
@@ -506,7 +525,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
 
   await writePrNarrativeArtifact(workflowContext);
 
-  console.log("- Authoring and creating pull request");
+  presenter().line("Authoring and creating pull request");
   const publishedPr = await publishPullRequestWithAgent({
     options,
     issue,
@@ -516,9 +535,9 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     attemptMetadata,
     attemptMetadataPath,
     agentRunner,
-  });
+  }, display);
   const prUrl = publishedPr.url;
-  if (prUrl) console.log(`- PR: ${prUrl}`);
+  if (prUrl) presenter().line(`PR: ${prUrl}`);
 
   try {
     await runProcessOrThrow(
@@ -526,8 +545,8 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       { cwd: controlCwd, label: "gh issue edit --add-label (success)" },
     );
   } catch (error) {
-    console.warn(
-      `Failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
+    presenter().warning(
+      `WARNING failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
@@ -538,8 +557,8 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
         { cwd: controlCwd, label: "gh issue edit --remove-label (success cleanup)" },
       );
     } catch (error) {
-      console.warn(
-        `Failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
+      presenter().warning(
+        `WARNING failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -554,7 +573,10 @@ interface PublishedPullRequest {
   stdout?: string | undefined;
 }
 
-async function publishPullRequestWithAgent(input: PublishAutorunResultInput & { agentRunner: AgentRunner }): Promise<PublishedPullRequest> {
+async function publishPullRequestWithAgent(
+  input: PublishAutorunResultInput & { agentRunner: AgentRunner },
+  display: AgentDisplayContext,
+): Promise<PublishedPullRequest> {
   const output = await input.agentRunner({
     cwd: input.workflowContext.controlCwd,
     model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
@@ -573,7 +595,7 @@ async function publishPullRequestWithAgent(input: PublishAutorunResultInput & { 
     }),
     fileEditingToolsEnabled: false,
     observer: input.workflowContext.observer,
-    phase: "pr-publishing",
+    display,
   });
   const parsed = parsePrPublishingAgentResponse(output);
   if (!parsed.url) throw new Error("PR publishing agent response did not include a non-empty url.");
@@ -595,30 +617,40 @@ export async function updatePrBodyWithAgent(input: {
   agentRunner?: AgentRunner | undefined;
 }): Promise<void> {
   const agentRunner = input.agentRunner ?? runPiAgent;
-  const output = await agentRunner({
-    cwd: input.cwd,
-    model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
-    thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
-    systemPrompt: prPublishingSystemPrompt(),
-    prompt: prBodyUpdatePrompt({
-      context: input.workflowContext,
-      repo: input.repo,
-      sourceIssue: { number: input.issueNumber, title: input.issueTitle, ...(input.issueUrl ? { url: input.issueUrl } : {}) },
-      branchName: input.attemptMetadata?.branch ?? `issue-${input.issueNumber}`,
-      baseBranch: input.attemptMetadata?.baseBranch ?? "unknown",
-      prUrl: input.pr,
-      verification: input.verification,
-      attemptMetadata: input.attemptMetadata,
-      attemptMetadataPath: input.attemptMetadataPath,
-      followUpIssues: input.followUpIssues,
-      artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
-    }),
-    fileEditingToolsEnabled: false,
-    observer: input.workflowContext.observer,
-    phase: "pr-body-update",
-  });
-  const result = parsePrBodyUpdateAgentResponse(output);
-  if (!result.updated) throw new Error(result.message ?? "PR body update agent did not report a successful update.");
+  const display: AgentDisplayContext = {
+    command: input.workflowContext.displayCommand ?? "auto",
+    repository: input.repo,
+    target: `#${input.issueNumber}`,
+    phaseId: "pr-body-update",
+    phaseLabel: "Update PR body",
+    operation: "publish",
+  };
+  await runPresentedPhase(display, async () => {
+    const output = await agentRunner({
+      cwd: input.cwd,
+      model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
+      thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
+      systemPrompt: prPublishingSystemPrompt(),
+      prompt: prBodyUpdatePrompt({
+        context: input.workflowContext,
+        repo: input.repo,
+        sourceIssue: { number: input.issueNumber, title: input.issueTitle, ...(input.issueUrl ? { url: input.issueUrl } : {}) },
+        branchName: input.attemptMetadata?.branch ?? `issue-${input.issueNumber}`,
+        baseBranch: input.attemptMetadata?.baseBranch ?? "unknown",
+        prUrl: input.pr,
+        verification: input.verification,
+        attemptMetadata: input.attemptMetadata,
+        attemptMetadataPath: input.attemptMetadataPath,
+        followUpIssues: input.followUpIssues,
+        artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
+      }),
+      fileEditingToolsEnabled: false,
+      observer: input.workflowContext.observer,
+      display,
+    });
+    const result = parsePrBodyUpdateAgentResponse(output);
+    if (!result.updated) throw new Error(result.message ?? "PR body update agent did not report a successful update.");
+  }, () => ({ outcome: "updated" }));
 }
 
 function parsePrPublishingAgentResponse(output: string): PublishedPullRequest {

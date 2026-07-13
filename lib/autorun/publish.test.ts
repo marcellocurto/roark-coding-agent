@@ -11,8 +11,11 @@ import {
   formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
+  updatePrBodyWithAgent,
 } from "./publish.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 
 const tempDirs: string[] = [];
 
@@ -104,7 +107,99 @@ describe("publish git staging", () => {
   });
 });
 
+describe("PR body update presentation", () => {
+  test("completes the continuation phase when the agent rejects", async () => {
+    let output = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream });
+    let command: string | undefined;
+
+    try {
+      const update = updatePrBodyWithAgent({
+        cwd: "/tmp",
+        repo: "owner/repo",
+        pr: "https://github.com/owner/repo/pull/1",
+        issueNumber: 9,
+        issueTitle: "Fix bug",
+        workflowContext: {
+          controlCwd: "/tmp",
+          agentCwd: "/tmp",
+          outDir: "/tmp/.roark/runs",
+          runDir: "/tmp/.roark/runs/issue/9/attempts/1",
+          runDirRelative: ".roark/runs/issue/9/attempts/1",
+          issueInput: "9",
+          issueNumber: "9",
+          displayCommand: "continue",
+          attempt: 1,
+          force: false,
+          yes: false,
+          maxFixPasses: 1,
+          thinkingConfig: getWorkflowThinkingConfig(),
+        },
+        agentRunner: (request) => {
+          command = request.display.command;
+          return Promise.reject(new Error("agent unavailable"));
+        },
+      });
+      let failure: unknown;
+      try {
+        await update;
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).toBe("agent unavailable");
+
+      expect(command).toBe("continue");
+      expect(output).toContain("PHASE #9 · Update PR body");
+      expect(output).toContain("FAILED #9 · Update PR body · agent unavailable");
+    } finally {
+      configurePresenter({});
+    }
+  });
+});
+
 describe("publishAutorunResult", () => {
+  test("announces publication before starting git operations", () => {
+    let output = "";
+    const stream: TerminalStream = { isTTY: true, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, env: { TERM: "xterm" } });
+    const missingCwd = path.join(tmpdir(), `roark-missing-publish-${crypto.randomUUID()}`);
+
+    try {
+      expect(publishAutorunResult({
+        options: {
+          cwd: missingCwd,
+          repo: "owner/repo",
+          failureLabel: "roark-failed",
+          successLabel: "roark-pr-opened",
+          inProgressLabel: "roark-in-progress",
+          remote: "origin",
+          baseBranch: "main",
+        },
+        issue: { number: 9, title: "Fix bug" },
+        branchPlan: { issueNumber: 9, branchName: "roark/issue-9", baseBranch: "main" },
+        workflowContext: {
+          controlCwd: missingCwd,
+          agentCwd: missingCwd,
+          outDir: path.join(missingCwd, ".roark/runs"),
+          runDir: path.join(missingCwd, ".roark/runs/issue/9/attempts/1"),
+          runDirRelative: ".roark/runs/issue/9/attempts/1",
+          issueInput: "9",
+          issueNumber: "9",
+          attempt: 1,
+          force: false,
+          yes: false,
+          maxFixPasses: 1,
+          thinkingConfig: getWorkflowThinkingConfig(),
+        },
+      })).rejects.toThrow();
+      expect(output).toContain("PHASE #9 · Publish pull request");
+    } finally {
+      configurePresenter({});
+    }
+  });
+
   test("uses agent cwd for git and control cwd for PR authoring agent and issue labels", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
     tempDirs.push(root);
@@ -138,7 +233,7 @@ describe("publishAutorunResult", () => {
     process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
     process.env["ROARK_GH_LOG"] = ghLog;
     try {
-      const agentRequests: { cwd: string; prompt: string; skillPaths?: string[] | undefined }[] = [];
+      const agentRequests: { cwd: string; prompt: string; command: string; skillPaths?: string[] | undefined }[] = [];
       const prUrl = await publishAutorunResult({
         options: {
           cwd: controlCwd,
@@ -159,6 +254,7 @@ describe("publishAutorunResult", () => {
           runDirRelative: ".roark/runs/issue/9/attempts/1",
           issueInput: "9",
           issueNumber: "9",
+          displayCommand: "continue",
           attempt: 1,
           force: false,
           yes: false,
@@ -166,7 +262,7 @@ describe("publishAutorunResult", () => {
           thinkingConfig: getWorkflowThinkingConfig(),
         },
         agentRunner: (request) => {
-          agentRequests.push({ cwd: request.cwd, prompt: request.prompt, skillPaths: request.skillPaths });
+          agentRequests.push({ cwd: request.cwd, prompt: request.prompt, command: request.display.command, skillPaths: request.skillPaths });
           return Promise.resolve(JSON.stringify({ url: "https://github.com/owner/repo/pull/1", title: "Fix bug" }));
         },
       });
@@ -174,6 +270,7 @@ describe("publishAutorunResult", () => {
       expect(prUrl).toBe("https://github.com/owner/repo/pull/1");
       expect(agentRequests).toHaveLength(1);
       expect(agentRequests[0]?.cwd).toBe(controlCwd);
+      expect(agentRequests[0]?.command).toBe("continue");
       expect(agentRequests[0]?.skillPaths).toBeUndefined();
       expect(agentRequests[0]?.prompt).toContain("Write the final PR title and body yourself");
       expect(agentRequests[0]?.prompt).toContain("<branch>roark/issue-9</branch>");

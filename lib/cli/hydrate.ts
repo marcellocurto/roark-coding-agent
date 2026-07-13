@@ -19,6 +19,7 @@ import {
   type ContinueCliOptions,
   type InitCliOptions,
   type RawCliOptions,
+  type RawPresentationCliOptions,
   type ReviewPrCliOptions,
   type RevisePrCliOptions,
   type StatusCliOptions,
@@ -141,6 +142,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       yes: raw.yes ?? false,
       workspace: workspaceConfig,
       hooks,
+      ...hydratePresentation(raw),
     } satisfies AutoCliOptions;
   }
 
@@ -166,6 +168,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       remote: raw.remote ?? defaultAutorunRemote,
       workspace: workspaceConfig,
       hooks,
+      ...hydratePresentation(raw),
     } satisfies ContinueCliOptions;
   }
 
@@ -187,6 +190,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       comment: raw.comment ?? true,
       workspace: workspaceConfig,
       hooks,
+      ...hydratePresentation(raw),
     } satisfies RevisePrCliOptions;
   }
 
@@ -204,6 +208,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       verificationSource: raw.verifyCommand ? "explicit" : "unresolved",
       comment: raw.comment ?? true,
       workspace: { ...workspaceConfig, copyToWorktree: [] },
+      ...hydratePresentation(raw),
     } satisfies ReviewPrCliOptions;
   }
 
@@ -233,7 +238,12 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
     maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,
     fixPass: raw.fixPass,
     attempt: raw.attempt,
+    ...hydratePresentation(raw),
   };
+}
+
+function hydratePresentation(raw: RawPresentationCliOptions): { verbose: boolean; title: boolean } {
+  return { verbose: raw.verbose ?? false, title: raw.noTitle !== true };
 }
 
 export async function resolveWorkspace(startCwd: string, runner: ProcessRunner = runProcess): Promise<string> {

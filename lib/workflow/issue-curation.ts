@@ -1,6 +1,8 @@
 import path from "node:path";
 import { reviewerIssueClassificationLabels, reviewerIssueHumanLabels, type ReviewerIssueClassificationLabel } from "../issue-curation/labels.ts";
 import { ISSUE_CURATION_STATIC_ARTIFACT_REFS } from "./artifact-catalog.ts";
+import type { AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import {
   artifactExists,
   artifactRelativePath,
@@ -102,10 +104,20 @@ export async function issueCurationPhase(
   clock: Clock = issueCurationDefaultClock,
   options: IssueCurationOptions = {},
 ): Promise<IssueCurationPlan> {
-  const plan = await buildIssueCurationPlan(context, clock, options);
-  await writeJsonArtifact(context, "issueCurationPlan", plan);
-  console.log(`✓ Issue curation: wrote ${artifactRelativePath(context, "issueCurationPlan")}`);
-  return plan;
+  const display: AgentDisplayContext = {
+    command: context.displayCommand ?? "issue-workflow",
+    repository: context.repo,
+    target: `#${context.issueNumber}`,
+    phaseId: "issue-curation",
+    phaseLabel: "Issue curation",
+    expectedArtifact: artifactRelativePath(context, "issueCurationPlan"),
+    operation: "inspect",
+  };
+  return runPresentedPhase(display, async () => {
+    const plan = await buildIssueCurationPlan(context, clock, options);
+    await writeJsonArtifact(context, "issueCurationPlan", plan);
+    return plan;
+  }, (plan) => ({ outcome: `planned ${plan.issuesToCreate.length}`, artifact: display.expectedArtifact }));
 }
 
 export async function buildIssueCurationPlan(

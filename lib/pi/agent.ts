@@ -14,7 +14,8 @@ import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { defaultRoarkModel } from "../workflow/model-routing.ts";
 import { agentSkillPaths, assertBundledSkillsPresent } from "./bundled-skills.ts";
 import { resolveThinkingLevel } from "./thinking-level.ts";
-import { formatCompletedToolLine, formatToolRunSummary, type CompletedToolRunForLog } from "./tool-log.ts";
+import { presenter } from "../presentation/presenter.ts";
+import { AgentOutputCollector } from "./agent-output.ts";
 
 export const roarkPiSettings = {
   transport: "sse" as const,
@@ -68,12 +69,13 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   assertBundledSkillsPresent();
   const skillPaths = agentSkillPaths(options.skillPaths);
   const modelSpec = requestedModelSpec(options.model);
-  console.log(`model: ${modelSpec}`);
+  const presentation = presenter();
+  if (presentation.verbose) presentation.line(`model: ${modelSpec}`);
   const authStorage = AuthStorage.create();
   const modelRegistry = ModelRegistry.create(authStorage);
   const model = resolveModel(modelRegistry, modelSpec);
   const thinking = resolveThinkingLevel(model, options.thinkingLevel);
-  console.log(thinking.clamped
+  if (presentation.verbose) presentation.line(thinking.clamped
     ? `thinking: ${thinking.requested} -> ${thinking.effective} (${thinking.requested} unsupported by ${modelSpec})`
     : `thinking: ${thinking.effective}`);
   const settingsManager = SettingsManager.inMemory(roarkPiSettings);
@@ -102,12 +104,11 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     tools: [...toolsForFileEditingMode(options.fileEditingToolsEnabled)],
   });
 
-  if (modelFallbackMessage) console.log(`! ${modelFallbackMessage}`);
+  if (modelFallbackMessage) presentation.warning(modelFallbackMessage);
 
-  const phase = options.phase ?? "agent";
+  const phase = options.display.phaseId;
   const pendingObservability: Promise<void>[] = [];
-  const toolStarts = new Map<string, { startedAt: number; args: unknown }>();
-  const completedTools: CompletedToolRunForLog[] = [];
+  const output = new AgentOutputCollector(options.display, presentation, Date.now, [options.cwd]);
   const emit = (promise: Promise<void> | undefined) => {
     if (promise !== undefined) pendingObservability.push(promise.catch(() => undefined));
   };
@@ -120,15 +121,13 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     effectiveThinkingLevel: thinking.effective,
   }));
 
-  let streamedText = "";
   session.subscribe((event) => {
     if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      const delta = event.assistantMessageEvent.delta;
-      streamedText += delta;
-      process.stdout.write(delta);
+      output.event({ type: "text_delta", delta: event.assistantMessageEvent.delta });
     }
     if (event.type === "tool_execution_start") {
-      toolStarts.set(event.toolCallId, { startedAt: Date.now(), args: event.args });
+      const startedAt = Date.now();
+      output.event({ type: "tool_start", toolCallId: event.toolCallId, args: event.args, startedAt });
       emit(options.observer?.toolStarted({
         phase,
         sessionId: session.sessionId,
@@ -137,25 +136,22 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
       }));
     }
     if (event.type === "tool_execution_end") {
-      const startedTool = toolStarts.get(event.toolCallId);
-      toolStarts.delete(event.toolCallId);
-      const durationMs = startedTool === undefined ? undefined : Date.now() - startedTool.startedAt;
+      const endedAt = Date.now();
+      const completed = output.event({
+        type: "tool_end",
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        isError: event.isError,
+        endedAt,
+      });
       emit(options.observer?.toolCompleted({
         phase,
         sessionId: session.sessionId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        durationMs,
+        durationMs: completed?.durationMs,
         isError: event.isError,
       }));
-      const completedDurationMs = durationMs ?? 0;
-      completedTools.push({ toolName: event.toolName, durationMs: completedDurationMs });
-      process.stdout.write(`\n${formatCompletedToolLine({
-        toolName: event.toolName,
-        args: startedTool?.args,
-        durationMs: completedDurationMs,
-        isError: event.isError,
-      })}\n`);
     }
     if (event.type === "auto_retry_start") {
       emit(options.observer?.autoRetryStarted({
@@ -182,14 +178,13 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
     await session.prompt(options.prompt, { expandPromptTemplates: false });
     const agentError = extractAgentErrorMessage(session.messages);
     if (agentError) throw new Error(agentError);
-    return extractLastAssistantText(session.messages) || streamedText.trim();
+    return output.finish(extractLastAssistantText(session.messages));
   } finally {
     try {
       emit(options.observer?.agentSessionStats({ phase, stats: session.getSessionStats() }));
     } catch (error) {
-      console.warn(`! observability session stats failed: ${formatError(error)}`);
+      presentation.warning(`observability session stats failed: ${formatError(error)}`);
     }
-    process.stdout.write(`\n${formatToolRunSummary(completedTools)}\n`);
     await Promise.allSettled(pendingObservability);
     session.dispose();
   }

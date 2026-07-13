@@ -1,16 +1,43 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
+import { artifactExists, createWorkflowContext, readArtifact, verificationBeforeFixFullRef } from "../workflow/artifacts.ts";
 import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   parseVerificationArtifact,
   runVerification,
+  writeVerificationArtifact,
+  writeVerificationBeforeFixArtifact,
   verificationFailureReason,
   type VerificationResult,
   type VerificationRunner,
 } from "./verification.ts";
 
 describe("autorun verification", () => {
+  test("announces verification before waiting for the runner", async () => {
+    let output = "";
+    const stream: TerminalStream = { isTTY: true, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, env: { TERM: "xterm" } });
+    let resolveRunner: ((result: VerificationResult) => void) | undefined;
+    const runnerResult = new Promise<VerificationResult>((resolve) => { resolveRunner = resolve; });
+
+    try {
+      const running = runVerification({ command: "bun test", cwd: "/tmp/wt", runner: () => runnerResult });
+      expect(output).toContain("Verification");
+      expect(output).not.toContain("PASSED");
+      resolveRunner?.({ ok: true, command: "bun test", exitCode: 0, stdout: "", stderr: "" });
+      await running;
+      expect(output).toContain("VERIFY PASSED");
+    } finally {
+      configurePresenter({});
+    }
+  });
+
   test("runVerification reports ok when the runner exits 0", async () => {
     const runner: VerificationRunner = ({ command, cwd })=> Promise.resolve(({
       ok: true,
@@ -25,6 +52,44 @@ describe("autorun verification", () => {
     expect(result.exitCode).toBe(0);
     expect(result.command).toBe("noop");
     expect(result.stdout).toBe("ran in /tmp/wt");
+    expect(result).toEqual({
+      ok: true,
+      command: "noop",
+      exitCode: 0,
+      stdout: "ran in /tmp/wt",
+      stderr: "",
+    });
+  });
+
+  test("runner exceptions are presented and preserve rejection semantics", async () => {
+    let output = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream });
+    const times = [100, 350];
+    const failure = new Error("spawn failed\u001b]0;owned");
+
+    try {
+      const running = runVerification({
+        command: "bun test",
+        cwd: "/tmp/wt",
+        runner: () => Promise.reject(failure),
+        now: () => times.shift() ?? 350,
+      });
+
+      let thrown: unknown;
+      try {
+        await running;
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBe(failure);
+      expect(output).toContain("VERIFY FAILED");
+      expect(output).toContain("250ms");
+      expect(output).toContain("verification could not be executed");
+      expect(output).not.toContain("\u001b]0;owned");
+    } finally {
+      configurePresenter({});
+    }
   });
 
   test("runVerification reports failure when the runner exits non-zero", async () => {
@@ -84,6 +149,29 @@ describe("autorun verification", () => {
     expect(completeArtifact).toContain("diagnostic-at-start");
     expect(completeArtifact).toContain("diagnostic-at-end");
     expect(completeArtifact).not.toContain("(truncated");
+  });
+
+  test("writes complete verification companions through the workflow artifact catalog", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-verification-artifacts-"));
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "1",
+      cwd,
+      outDir: ".roark/runs",
+      force: false,
+      yes: false,
+      maxFixPasses: 1,
+    });
+    const result: VerificationResult = { ok: false, command: "bun test", exitCode: 1, stdout: "complete stdout", stderr: "complete stderr" };
+    try {
+      await writeVerificationArtifact(context, result);
+      await writeVerificationBeforeFixArtifact(context, 2, result);
+      expect(artifactExists(context, "verificationFull")).toBe(true);
+      expect(artifactExists(context, verificationBeforeFixFullRef(2))).toBe(true);
+      expect(await readArtifact(context, "verificationFull")).toContain("complete stdout");
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
   });
 
   test("classifies command-unavailable failures as non-repairable with hook guidance", () => {

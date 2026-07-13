@@ -22,7 +22,17 @@ export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "rev
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
 
-export interface IssueCliOptions {
+export interface PresentationCliOptions {
+  verbose?: boolean | undefined;
+  title?: boolean | undefined;
+}
+
+export interface RawPresentationCliOptions {
+  verbose?: true | undefined;
+  noTitle?: true | undefined;
+}
+
+export interface IssueCliOptions extends PresentationCliOptions {
   command: IssueWorkflowCommand;
   issue: string;
   cwd: string;
@@ -38,7 +48,7 @@ export interface IssueCliOptions {
   attempt?: number | undefined;
 }
 
-export interface AutoCliOptions {
+export interface AutoCliOptions extends PresentationCliOptions {
   command: "auto";
   issue?: string | undefined;
   cwd: string;
@@ -65,7 +75,7 @@ export interface AutoCliOptions {
   hooks?: LifecycleHooksConfig | undefined  ;
 }
 
-export interface ContinueCliOptions {
+export interface ContinueCliOptions extends PresentationCliOptions {
   command: "continue";
   issue: string;
   cwd: string;
@@ -87,7 +97,7 @@ export interface ContinueCliOptions {
   hooks?: LifecycleHooksConfig | undefined  ;
 }
 
-export interface RevisePrCliOptions {
+export interface RevisePrCliOptions extends PresentationCliOptions {
   command: "revise-pr";
   prNumber: number;
   cwd: string;
@@ -106,7 +116,7 @@ export interface RevisePrCliOptions {
   hooks?: LifecycleHooksConfig | undefined;
 }
 
-export interface ReviewPrCliOptions {
+export interface ReviewPrCliOptions extends PresentationCliOptions {
   command: "review-pr";
   prNumber: number;
   cwd: string;
@@ -144,7 +154,7 @@ export interface InitCliOptions {
 
 export type CliOptions = IssueCliOptions | AutoCliOptions | ReviewPrCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions | RemoveCommandOptions;
 
-export interface RawIssueCliOptions {
+export interface RawIssueCliOptions extends RawPresentationCliOptions {
   command: IssueWorkflowCommand;
   issue: string;
   cwd?: string | undefined  ;
@@ -160,7 +170,7 @@ export interface RawIssueCliOptions {
   attempt?: number | undefined;
 }
 
-export interface RawAutoCliOptions {
+export interface RawAutoCliOptions extends RawPresentationCliOptions {
   command: "auto";
   issue?: string | undefined;
   cwd?: string | undefined  ;
@@ -185,7 +195,7 @@ export interface RawAutoCliOptions {
   yes?: true | undefined;
 }
 
-export interface RawContinueCliOptions {
+export interface RawContinueCliOptions extends RawPresentationCliOptions {
   command: "continue";
   issue: string;
   cwd?: string | undefined  ;
@@ -205,7 +215,7 @@ export interface RawContinueCliOptions {
   remote?: string | undefined;
 }
 
-export interface RawRevisePrCliOptions {
+export interface RawRevisePrCliOptions extends RawPresentationCliOptions {
   command: "revise-pr";
   prNumber: number;
   cwd?: string | undefined  ;
@@ -222,7 +232,7 @@ export interface RawRevisePrCliOptions {
   comment?: false | undefined;
 }
 
-export interface RawReviewPrCliOptions {
+export interface RawReviewPrCliOptions extends RawPresentationCliOptions {
   command: "review-pr";
   prNumber: number;
   cwd?: string | undefined;
@@ -280,10 +290,15 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   ...singlePhaseCommands,
 ]);
 
-const commands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue", "status", "init", "remove", "workspace"]);
+const longRunningCommands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue"]);
+const commands = new Set<WorkflowCommand>([...longRunningCommands, "status", "init", "remove", "workspace"]);
 
 export function isWorkflowCommand(value: string): value is WorkflowCommand {
   return commands.has(value as WorkflowCommand);
+}
+
+export function isLongRunningCommand(value: string | undefined): boolean {
+  return value !== undefined && longRunningCommands.has(value as WorkflowCommand);
 }
 
 export const defaultMaxFixPasses = 3;
@@ -357,6 +372,8 @@ Options:
   --no-comment           review-pr/revise-pr: do not post the terminal PR comment.
   --force                Re-run phases, or remove managed workspaces that have uncommitted changes.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
+  --verbose              Long-running commands: show completed agent responses and detailed tool statistics.
+  --no-title             Long-running commands: do not manage the interactive terminal title.
   -v, --version          Top-level only: print the installed Roark version.
   -h, --help             Show this help.
 `;
@@ -397,6 +414,7 @@ function parseReviewPrArgs(args: string[]): RawReviewPrCliOptions {
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
     else if (arg === "--no-comment") options.comment = false;
+    else if (applyPresentationFlag(options, arg)) continue;
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
   }
@@ -510,6 +528,7 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
     else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
+    else if (applyPresentationFlag(options, arg)) continue;
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else if (issueArg !== undefined) throw new Error(`The auto command accepts at most one issue argument. Got '${issueArg}' and '${formatCliArg(arg)}'.\n\n${usage}`);
     else issueArg = arg;
@@ -547,6 +566,7 @@ function parseRevisePrArgs(args: string[]): RawRevisePrCliOptions {
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (arg === "--no-comment") options.comment = false;
+    else if (applyPresentationFlag(options, arg)) continue;
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
   }
@@ -602,6 +622,7 @@ function parseContinueArgs(args: string[]): RawContinueCliOptions {
     else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
+    else if (applyPresentationFlag(options, arg)) continue;
     else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
     else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
   }
@@ -637,6 +658,7 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
     } else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
+    else if (applyPresentationFlag(options, arg)) continue;
     else throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
   }
 
@@ -653,6 +675,13 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
 
 function isThinkingProfileFlag(arg: string | undefined): arg is keyof typeof thinkingProfileFlags {
   return arg !== undefined && Object.hasOwn(thinkingProfileFlags, arg);
+}
+
+function applyPresentationFlag(options: RawPresentationCliOptions, arg: string | undefined): boolean {
+  if (arg === "--verbose") options.verbose = true;
+  else if (arg === "--no-title") options.noTitle = true;
+  else return false;
+  return true;
 }
 
 function applyThinkingProfileFlag(options: { thinkingProfile?: ThinkingProfileName  | undefined}, flag: keyof typeof thinkingProfileFlags): void {

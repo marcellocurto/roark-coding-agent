@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "../cli/args.ts";
 import type { RunObserver } from "../observability/observer.ts";
+import type { AgentDisplayContext } from "../presentation/presenter.ts";
 
 export interface AgentRunRequest {
   cwd: string;
@@ -10,7 +11,7 @@ export interface AgentRunRequest {
   fileEditingToolsEnabled: boolean;
   skillPaths?: string[] | undefined;
   observer?: RunObserver | undefined;
-  phase?: string | undefined;
+  display: AgentDisplayContext;
 }
 
 export type AgentRunner = (request: AgentRunRequest) => Promise<string>;

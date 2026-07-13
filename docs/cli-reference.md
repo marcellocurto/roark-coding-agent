@@ -81,8 +81,18 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--all` | `status` | Summarize all known issue runs. |
 | `--force` | phase, implementation, fix, PR revision | Re-run phases or continue past supported dirty-tree preflights. |
 | `--yes` | supported mutation paths | Continue past supported prompts or approve `create-issues` mutations. |
+| `--verbose` | long-running agent commands | Show each completed agent response as readable plain text plus detailed, explicitly labelled aggregate tool statistics. Raw prompts, events, tool results, and debug payloads remain hidden. |
+| `--no-title` | long-running agent commands | Disable Roark terminal-title management. |
 | `-v`, `--version` | top-level only | Print the installed Roark version. |
 | `-h`, `--help` | all commands | Show help. |
+
+## Live output and terminal titles
+
+Long-running commands print an operational stream by default: run identity, phase and pass, compact tool activity, phase wall time, verification status, artifact path, and final outcome. Complete generated Markdown is validated and saved in the run artifacts but is not copied to normal terminal output. Use `--verbose` when you also want the completed response rendered as plain readable text; `-v` remains the version flag.
+
+On supported interactive terminals, Roark updates the window title with the issue or PR, current phase, pass, and short repository name. Titles are sanitized and length-bounded. Pass `--no-title` when your shell or terminal owns its title. Redirected/piped output, CI, and `TERM=dumb` never receive title or ANSI control sequences, and their lines are not width-truncated. Operational warnings continue to use stderr.
+
+Paths in normal status output are repository/run relative when possible, and long lines are shortened only for an interactive terminal's detected width. Phase duration is wall-clock elapsed time. Verbose `aggregate tool execution` is the sum of individual tool durations and is not elapsed runtime (tools may run concurrently).
 
 ## Autorun Options
 

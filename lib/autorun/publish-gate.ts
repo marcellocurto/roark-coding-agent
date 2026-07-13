@@ -1,4 +1,5 @@
 import type { VerificationResult } from "./verification.ts";
+import { requireMarkdownToken } from "../workflow/markdown-token.ts";
 
 export type ReadinessStatus = "ready-for-pr" | "not-ready";
 
@@ -12,14 +13,7 @@ export type PublishGateDecision =
   | { publish: false; phase: "readiness" | "verification"; reason: string; artifactPath: string };
 
 export function parseReadinessStatus(markdown: string): ReadinessStatus | undefined {
-  const match = /##\s*Status\s*\r?\n+\s*([^\r\n]+)/i.exec(markdown);
-  const candidate = match?.[1];
-  if (!candidate) return undefined;
-
-  const normalized = candidate.replace(/[`*_]/g, "").trim().toLowerCase();
-  if (normalized === "ready-for-pr") return "ready-for-pr";
-  if (normalized === "not-ready") return "not-ready";
-  return undefined;
+  return requireMarkdownToken(markdown, "Status", ["ready-for-pr", "not-ready"] as const);
 }
 
 export function decidePublish(input: PublishGateInput): PublishGateDecision {

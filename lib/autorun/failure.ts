@@ -1,6 +1,7 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export const defaultAutorunFailureLabel = "roark-failed";
 
@@ -80,7 +81,7 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
   try {
     await runProcessOrThrow(labelArgv, { cwd: options.cwd, label: "gh issue edit --add-label (failure)" });
   } catch (error) {
-    console.warn(`Failed to apply failure label '${options.label}': ${formatError(error)}`);
+    presenter().warning(`failed to apply failure label '${options.label}': ${formatError(error)}`);
   }
 
   for (const label of uniqueLabels(options.removeLabels ?? []).filter((label) => label !== options.label)) {
@@ -90,7 +91,7 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
         { cwd: options.cwd, label: "gh issue edit --remove-label (failure cleanup)" },
       );
     } catch (error) {
-      console.warn(`Failed to remove label '${label}': ${formatError(error)}`);
+      presenter().warning(`failed to remove label '${label}': ${formatError(error)}`);
     }
   }
 
@@ -107,7 +108,7 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
     }
     await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: options.comment });
   } catch (error) {
-    console.warn(`Failed to post failure comment: ${formatError(error)}`);
+    presenter().warning(`failed to post failure comment: ${formatError(error)}`);
   }
   return undefined;
 }

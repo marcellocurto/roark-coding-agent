@@ -3,6 +3,7 @@ import { chmod, copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, w
 import os from "node:os";
 import path from "node:path";
 import { runProcess, runProcessOrThrow, type ProcessResult } from "../cli/process.ts";
+import { presenter } from "../presentation/presenter.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 
 export type WorkspaceStrategy = "clone";
@@ -633,7 +634,7 @@ export async function runLifecycleHook(
   if (result.exitCode === 0) return;
   const message = `${name} hook failed with exit code ${result.exitCode}: ${command}\n${tail(result.stderr || result.stdout)}`;
   if (name === "afterRun" || name === "beforeRemove") {
-    console.warn(message);
+    presenter().warning(message);
     return;
   }
   throw new WorkspaceHookError(message, { hook: name, command, result });

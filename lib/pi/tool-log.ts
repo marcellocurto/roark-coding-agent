@@ -1,40 +1,9 @@
-export interface CompletedToolCallForLog {
-  readonly toolName: string;
-  readonly args: unknown;
-  readonly durationMs: number;
-  readonly isError: boolean;
-}
-
-export interface CompletedToolRunForLog {
-  readonly toolName: string;
-  readonly durationMs: number;
-}
+import { shortenPath } from "../presentation/terminal.ts";
 
 const maxPathLength = 72;
 const maxCommandLength = 96;
 const maxPatternLength = 64;
 const maxGenericLength = 72;
-
-export function formatCompletedToolLine(tool: CompletedToolCallForLog): string {
-  const marker = tool.isError ? "✗" : "•";
-  return `${marker} ${summarizeToolCall(tool.toolName, tool.args)} (${formatToolDuration(tool.durationMs)})`;
-}
-
-export function formatToolRunSummary(tools: readonly CompletedToolRunForLog[]): string {
-  if (tools.length === 0) return "tools: none · 0ms";
-
-  const counts = new Map<string, number>();
-  let totalDurationMs = 0;
-  for (const tool of tools) {
-    counts.set(tool.toolName, (counts.get(tool.toolName) ?? 0) + 1);
-    totalDurationMs += normalizeDurationMs(tool.durationMs);
-  }
-
-  const countText = [...counts]
-    .map(([toolName, count]) => `${sanitizeInline(toolName, maxGenericLength) || "unknown"} ${count}`)
-    .join(", ");
-  return `tools: ${countText} · ${formatToolDuration(totalDurationMs)}`;
-}
 
 export function formatToolDuration(durationMs: number): string {
   const safeDurationMs = normalizeDurationMs(durationMs);
@@ -45,38 +14,38 @@ export function formatToolDuration(durationMs: number): string {
   return `${secondsText}s`;
 }
 
-export function summarizeToolCall(toolName: string, args: unknown): string {
+export function summarizeToolCall(toolName: string, args: unknown, roots: readonly string[] = []): string {
   switch (toolName) {
     case "read":
-      return summarizeRead(args);
+      return summarizeRead(args, roots);
     case "grep":
-      return summarizeGrep(args);
+      return summarizeGrep(args, roots);
     case "bash":
       return summarizeBash(args);
     case "edit":
-      return summarizeEdit(args);
+      return summarizeEdit(args, roots);
     case "write":
-      return summarizeWrite(args);
+      return summarizeWrite(args, roots);
     case "find":
-      return summarizeFind(args);
+      return summarizeFind(args, roots);
     case "ls":
-      return summarizeLs(args);
+      return summarizeLs(args, roots);
     default:
       return sanitizeInline(toolName, maxGenericLength) || "tool";
   }
 }
 
-function summarizeRead(args: unknown): string {
+function summarizeRead(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
-  const path = formatPath(objectArgs?.["path"]);
+  const path = formatPath(objectArgs?.["path"], roots);
   const range = formatReadRange(objectArgs?.["offset"], objectArgs?.["limit"]);
   return `read ${path}${range}`;
 }
 
-function summarizeGrep(args: unknown): string {
+function summarizeGrep(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
   const pattern = formatSlashPattern(objectArgs?.["pattern"]);
-  const target = formatTarget(objectArgs?.["path"], objectArgs?.["glob"]);
+  const target = formatTarget(objectArgs?.["path"], objectArgs?.["glob"], roots);
   return `grep ${pattern}${target ? ` in ${target}` : ""}`;
 }
 
@@ -85,41 +54,42 @@ function summarizeBash(args: unknown): string {
   return `bash ${formatQuoted(objectArgs?.["command"], maxCommandLength)}`;
 }
 
-function summarizeEdit(args: unknown): string {
+function summarizeEdit(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
-  const path = formatPath(objectArgs?.["path"]);
+  const path = formatPath(objectArgs?.["path"], roots);
   const edits = objectArgs?.["edits"];
   const editCount = Array.isArray(edits) ? edits.length : undefined;
   return editCount === undefined ? `edit ${path}` : `edit ${path} (${editCount} ${editCount === 1 ? "edit" : "edits"})`;
 }
 
-function summarizeWrite(args: unknown): string {
+function summarizeWrite(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
-  const path = formatPath(objectArgs?.["path"]);
+  const path = formatPath(objectArgs?.["path"], roots);
   const content = objectArgs?.["content"];
   return typeof content === "string" ? `write ${path} (${content.length} chars)` : `write ${path}`;
 }
 
-function summarizeFind(args: unknown): string {
+function summarizeFind(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
   const pattern = sanitizeInline(objectArgs?.["pattern"], maxPatternLength) || "<pattern>";
-  const path = formatPath(objectArgs?.["path"] ?? ".");
+  const path = formatPath(objectArgs?.["path"] ?? ".", roots);
   return `find ${pattern} in ${path}`;
 }
 
-function summarizeLs(args: unknown): string {
+function summarizeLs(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
-  return `ls ${formatPath(objectArgs?.["path"] ?? ".")}`;
+  return `ls ${formatPath(objectArgs?.["path"] ?? ".", roots)}`;
 }
 
-function formatTarget(path: unknown, glob: unknown): string {
-  const formattedPath = sanitizeInline(path, maxPathLength);
+function formatTarget(path: unknown, glob: unknown, roots: readonly string[]): string {
+  const formattedPath = formatPath(path, roots, "");
   if (formattedPath) return formattedPath;
   return sanitizeInline(glob, maxPathLength);
 }
 
-function formatPath(value: unknown): string {
-  return sanitizeInline(value, maxPathLength) || "<path>";
+function formatPath(value: unknown, roots: readonly string[], fallback = "<path>"): string {
+  const clean = sanitizeInline(value, Number.MAX_SAFE_INTEGER);
+  return clean ? shortenPath(clean, roots, maxPathLength) : fallback;
 }
 
 function formatQuoted(value: unknown, maxLength: number): string {

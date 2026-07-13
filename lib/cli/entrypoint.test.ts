@@ -2,7 +2,8 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runCli } from "../../roark.ts";
+import { presentAutorunOutcome, runCli, workflowOutcomeStatus } from "../../roark.ts";
+import { configurePresenter, Presenter, presenter } from "../presentation/presenter.ts";
 import { runProcess, runProcessOrThrow } from "./process.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "../..");
@@ -14,6 +15,47 @@ afterEach(async () => {
 });
 
 describe("runCli lifecycle", () => {
+  test("presents published, stopped, blocked, readiness-failed, and verification-failed outcomes distinctly", () => {
+    let output = "";
+    configurePresenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
+    try {
+      presentAutorunOutcome({ issueNumber: 1, outcome: "published", outcomeDetail: null });
+      presentAutorunOutcome({ issueNumber: 2, outcome: "triage-stopped", outcomeDetail: "not actionable" });
+      presentAutorunOutcome({ issueNumber: 3, outcome: "failed-readiness", outcomeDetail: "not ready" });
+      presentAutorunOutcome({ issueNumber: 4, outcome: "failed-verification", outcomeDetail: "tests failed" });
+
+      expect(output).toContain("SUCCESS #1 · published");
+      expect(output).toContain("STOPPED #2 · not actionable");
+      expect(output).toContain("FAILED #3 · not ready");
+      expect(output).toContain("FAILED #4 · tests failed");
+      expect(output).not.toContain("continue:");
+      expect(workflowOutcomeStatus("review-blocked")).toBe("BLOCKED");
+    } finally {
+      configurePresenter({ titleEnabled: false });
+    }
+  });
+
+  test("preserves a discovered autorun target in the final failure", async () => {
+    let output = "";
+    const presentation = new Presenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
+    const exitCode = await runCli(["auto"], {
+      presentation,
+      execute: () => {
+        presenter().run({ command: "auto", repository: "owner/repo" });
+        presenter().updateTarget("#140");
+        return Promise.reject(new Error("failed"));
+      },
+      notify: () => Promise.resolve(),
+      reportError: () => {
+        // The expected failure is asserted through the operational output.
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(output).toContain("FAILED #140 · run failed");
+    expect(output).not.toContain("FAILED auto");
+  });
+
   test("dispatches exactly once after a successful quick command", async () => {
     const notifications: { argv: string[]; succeeded: boolean }[] = [];
     const exitCode = await runCli(["status", "--all"], {

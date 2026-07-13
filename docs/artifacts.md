@@ -31,7 +31,9 @@ Artifacts are useful for:
                 ├── fix-log-1.md
                 ├── readiness.md
                 ├── verification.md
+                ├── verification-full.md
                 ├── verification-before-fix-1.md
+                ├── verification-before-fix-1-full.md
                 ├── attempt.json
                 ├── summary.json
                 ├── events.jsonl
@@ -66,7 +68,9 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `fix-log-<n>.md` | Fix pass output. |
 | `readiness.md` | Final readiness gate artifact. |
 | `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
-| `verification-before-fix-<n>.md` | Archived failed verification output that triggered fix pass `n`. |
+| `verification-full.md` | Complete stdout and stderr from the latest verification command. |
+| `verification-before-fix-<n>.md` | Archived failed verification output tail that triggered fix pass `n`. |
+| `verification-before-fix-<n>-full.md` | Complete stdout and stderr for the archived failed verification. |
 | `attempt.json` | Branch, workspace, and lifecycle metadata. |
 | `summary.json` | Artifact index and run summary. |
 | `events.jsonl` | Observable phase events. |
@@ -91,7 +95,7 @@ This records attempts for an issue and is used by `roark continue` when no expli
 
 PR review generations include pinned comparison metadata, PR and optional linked-issue context, verification, independent Review A/B outputs, a deterministic summary, and metadata. Every rerun is preserved under `review-<n>` even though the public marked comment is updated in place.
 
-PR revision artifacts include fetched feedback, revision plan, revision log, review, verification, and metadata when applicable.
+PR revision artifacts include fetched feedback, revision plan, revision log, review, bounded verification files, complete `verification-full.md` and `verification-before-fix-<n>-full.md` companions, and metadata when applicable.
 
 ## Git Behavior
 

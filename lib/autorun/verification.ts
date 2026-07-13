@@ -1,7 +1,8 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { verificationBeforeFixFullRef, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export const defaultAutorunVerifyCommand = "bun run typecheck";
 
@@ -84,17 +85,38 @@ export async function runVerification(options: {
   cwd: string;
   runner?: VerificationRunner | undefined  ;
   timeoutMs?: number | undefined;
+  now?: (() => number) | undefined;
 }): Promise<VerificationResult> {
   const runner = options.runner ?? defaultVerificationRunner;
-  console.log(`\n=== Verification ===`);
-  console.log(`Command: ${options.command}`);
-  console.log(`Cwd: ${options.cwd}`);
-  const result = await runner({ command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs });
-  if (result.ok) {
-    console.log(`✓ Verification: command exited 0`);
-  } else {
-    console.log(`✗ Verification: command exited ${result.exitCode}`);
+  const now = options.now ?? Date.now;
+  const startedAt = now();
+  presenter().verificationStarted(options.command);
+  let result: VerificationResult;
+  try {
+    result = await runner({ command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs });
+  } catch (error) {
+    presenter().verification({
+      command: options.command,
+      ok: false,
+      exitCode: -1,
+      elapsedMs: now() - startedAt,
+      reason: "verification could not be executed",
+      diagnostic: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
+  const classification = classifyVerificationFailure(result);
+  presenter().verification({
+    command: options.command,
+    ok: result.ok,
+    exitCode: result.exitCode,
+    elapsedMs: now() - startedAt,
+    timedOut: result.timedOut,
+    ...(!result.ok ? {
+      reason: classification.reason,
+      diagnostic: tailText(result.stderr || result.stdout).slice(-500),
+    } : {}),
+  });
   return result;
 }
 
@@ -135,6 +157,7 @@ export async function writeVerificationArtifact(
   result: VerificationResult,
 ): Promise<void> {
   await writeArtifact(context, "verification", formatVerificationArtifact(result));
+  await writeArtifact(context, "verificationFull", formatCompleteVerificationArtifact(result));
 }
 
 export async function writeVerificationBeforeFixArtifact(
@@ -143,6 +166,7 @@ export async function writeVerificationBeforeFixArtifact(
   result: VerificationResult,
 ): Promise<void> {
   await writeArtifact(context, verificationBeforeFixRef(pass), formatVerificationArtifact(result));
+  await writeArtifact(context, verificationBeforeFixFullRef(pass), formatCompleteVerificationArtifact(result));
 }
 
 export function classifyVerificationFailure(result: VerificationResult): VerificationFailureClassification {

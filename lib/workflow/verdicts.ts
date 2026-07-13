@@ -6,6 +6,7 @@ import {
   type RejectedReviewerFinding,
   type ReviewFindingSource,
 } from "./findings.ts";
+import { extractMarkdownToken } from "./markdown-token.ts";
 
 export interface ReadinessDecisionInput {
   triage: string;
@@ -32,8 +33,8 @@ export interface ReadinessDecision {
 }
 
 export function parseVerdict(markdown: string): string | undefined {
-  const sectionMatch = /##\s*(?:Verdict|Status)\s*\n+([^\n]+)/i.exec(markdown);
-  const candidate = sectionMatch?.[1] ?? (/(?:Verdict|Status):\s*([^\n]+)/i.exec(markdown))?.[1];
+  const structured = extractMarkdownToken(markdown, "Verdict") ?? extractMarkdownToken(markdown, "Status");
+  const candidate = structured ?? (/(?:Verdict|Status):\s*([^\n]+)/i.exec(markdown))?.[1];
   if (!candidate) return undefined;
 
   const normalized = candidate
