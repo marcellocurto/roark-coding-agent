@@ -6,6 +6,7 @@ import { parseArgs, usage } from "./lib/cli/args.ts";
 import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
 import { resolveInteractiveArgv } from "./lib/cli/interactive.ts";
+import { sendExitNotification, type ExitNotificationRequest } from "./lib/cli/notifications.ts";
 import { runPrRevision } from "./lib/pr-revision/workflow.ts";
 import { runPrReview } from "./lib/pr-review/workflow.ts";
 import { formatDoLocalModeStartMessage, printDoLocalModeReadyMessageIfReady } from "./lib/cli/local-mode.ts";
@@ -92,11 +93,36 @@ async function readPackageVersion(): Promise<string> {
   return packageJson.version;
 }
 
-if (import.meta.main) {
-  try {
-    await main();
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : error);
-    process.exit(1);
-  }
+interface CliLifecycleDependencies {
+  execute?: (argv: string[]) => Promise<void>;
+  notify?: (request: ExitNotificationRequest) => Promise<void>;
+  reportError?: (error: unknown) => void;
 }
+
+export async function runCli(
+  argv = Bun.argv.slice(2),
+  dependencies: CliLifecycleDependencies = {},
+): Promise<number> {
+  const execute = dependencies.execute ?? main;
+  const notify = dependencies.notify ?? sendExitNotification;
+  const reportError = dependencies.reportError ?? ((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+  });
+
+  let exitCode = 0;
+  try {
+    await execute(argv);
+  } catch (error) {
+    exitCode = 1;
+    reportError(error);
+  }
+
+  try {
+    await notify({ argv, succeeded: exitCode === 0 });
+  } catch {
+    console.error("Warning: Roark could not deliver the exit notification.");
+  }
+  return exitCode;
+}
+
+if (import.meta.main) process.exitCode = await runCli();

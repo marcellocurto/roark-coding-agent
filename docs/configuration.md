@@ -2,7 +2,7 @@
 title: Configuration
 summary: Reference for `.roark/config.json`, precedence, supported keys, defaults, and examples.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-13T00:00:00Z
 ---
 
 ## Precedence
@@ -77,7 +77,8 @@ It infers:
     "beforeVerify": "bun install --frozen-lockfile",
     "timeoutMs": 600000
   },
-  "sandbox": { "provider": "host" }
+  "sandbox": { "provider": "host" },
+  "notifications": { "onExit": true }
 }
 ```
 
@@ -97,6 +98,25 @@ It infers:
 | `workspace` | object | clone strategy defaults | none | Managed workspace configuration. |
 | `hooks` | object | no commands, default timeout | none | Lifecycle hook configuration. |
 | `sandbox` | object | `{ "provider": "host" }` | none | Currently host execution only. |
+| `notifications` | object | exit notifications disabled | none | Opt-in macOS exit notification configuration. |
+
+## Exit Notifications
+
+Set `notifications.onExit` to `true` to request one silent macOS system notification when a Roark invocation finishes successfully or with a caught top-level error:
+
+```json
+{
+  "notifications": {
+    "onExit": true
+  }
+}
+```
+
+`notifications.onExit` defaults to `false` and must be a boolean when set. Unknown keys under `notifications` fail validation. The opt-in applies to every command, including quick commands such as `status` and workspace operations, with no minimum duration.
+
+Delivery uses the system-provided `/usr/bin/osascript` and is macOS-only and best-effort. Non-macOS hosts silently do nothing. Notifications contain only the command, normalized issue or PR number when available, and repository directory name; they do not include raw errors or arbitrary arguments. Roark waits at most two seconds for delivery. A launch failure, timeout, or nonzero notifier exit writes one warning but does not change the command's result.
+
+Roark can use this opt-in only after locating and parsing a valid repository `.roark/config.json`. It does not notify outside a Git repository, without config, or when config is invalid. Abrupt termination—including `SIGINT`, `SIGTERM`, `SIGKILL`, runtime crashes, and power loss—is not covered.
 
 ## Workspace Keys
 
@@ -144,7 +164,7 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 
 For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference. Failed verification consumes the same `maxFixPasses` budget as reviewer-requested fixes.
 
-`review-pr` treats the current checkout as untrusted and does not load `.roark/config.json`. It uses explicit CLI values, Git origin inference, and built-in workspace defaults; only an explicit `--verify` command may execute against the PR checkout.
+`review-pr` treats the current checkout as untrusted and does not hydrate behavior from `.roark/config.json`. It uses explicit CLI values, Git origin inference, and built-in workspace defaults; only an explicit `--verify` command may execute against the PR checkout. At the invocation boundary, Roark may separately validate the config and read only `notifications.onExit`; this does not hydrate hooks, verification, or workspace-copy settings.
 
 Good examples:
 
