@@ -11,7 +11,7 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
-import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
+import { defaultAutorunVerifyCommand, inferVerificationCommand } from "../autorun/verification.ts";
 import {
   defaultMaxFixPasses,
   type AutoCliOptions,
@@ -445,24 +445,7 @@ async function hydrateRequiredVerifyCommand(
 
 export async function inferVerifyCommand(workspace: string, runner: ProcessRunner = runProcess): Promise<string | undefined> {
   void runner;
-  const packageJsonPath = path.join(workspace, "package.json");
-  if (existsSync(packageJsonPath)) {
-    try {
-      const parsed = JSON.parse(await readFile(packageJsonPath, "utf8")) as { scripts?: Record<string, unknown> };
-      if (typeof parsed.scripts?.["typecheck"] === "string") return "bun run typecheck";
-      if (typeof parsed.scripts?.["test"] === "string") return "bun run test";
-    } catch {
-      // Ignore malformed package.json for inference and continue to Makefile detection.
-    }
-  }
-
-  const makefilePath = path.join(workspace, "Makefile");
-  if (existsSync(makefilePath)) {
-    const makefile = await readFile(makefilePath, "utf8");
-    if (/^test\s*:/m.test(makefile)) return "make test";
-  }
-
-  return undefined;
+  return inferVerificationCommand(workspace);
 }
 
 async function promptForRepoIfInteractive(workspace: string): Promise<string | undefined> {

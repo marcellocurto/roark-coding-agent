@@ -3,6 +3,23 @@ import { parseVerdict } from "../workflow/verdicts.ts";
 
 export type ReviewLensName = "correctness" | "maintainability";
 
+export function renderFindingsLedgerContract(subject: string): string {
+  return `  <findings_ledger_contract>
+    <instruction>Output a structured Findings Ledger as the canonical list of review findings.</instruction>
+    <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
+    <instruction>Each finding must include: identifier, classification, title, severity, confidence, evidence, current-issue impact, recommended handling, and optional suggested issue title.</instruction>
+    <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed.</instruction>
+    <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
+    <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval.</instruction>
+    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
+  </findings_ledger_contract>`;
+}
+
+export function renderReviewVerdictSemantics(subject: string, allowRestart: boolean): string {
+  const restart = allowRestart ? ", <value>restart-required</value> when the implementation direction is fundamentally wrong and resetting is safer than incremental fixes" : "";
+  return `Verdict semantics: use <value>approve</value> when ${subject} has no current required fixes, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding blocks ${subject}${restart}, and <value>blocked</value> when outside information, access, dependency resolution, or a human decision prevents a safe verdict.`;
+}
+
 export interface ReviewLensDefinition {
   name: ReviewLensName;
   phase: "review_a" | "review_b";
@@ -13,7 +30,6 @@ export interface ReviewLensDefinition {
   focusItems: readonly string[];
   sourcePolicy: readonly string[];
   requiredFixesPolicy: string;
-  requiresStandardsInspection: boolean;
   extraConstraints: readonly string[];
 }
 
@@ -39,7 +55,6 @@ export const correctnessReviewLens: ReviewLensDefinition = {
     "For every spec finding, cite the authoritative requirement and explain how the diff is missing, partial, incorrect, or extra.",
   ],
   requiredFixesPolicy: "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current review subject.",
-  requiresStandardsInspection: false,
   extraConstraints: [],
 };
 
@@ -65,11 +80,8 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
     "Skip formatting, style, and mechanical concerns already enforced by configured linting, formatting, typechecking, or other tooling.",
   ],
   requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
-  requiresStandardsInspection: true,
   extraConstraints: ["Do not read Review Agent A's output."],
 };
-
-export const reviewLenses = [correctnessReviewLens, maintainabilityReviewLens] as const;
 
 export interface ValidatedReviewOutput {
   verdict: "approve" | "fixes-required" | "blocked";
@@ -84,5 +96,6 @@ export function validateReviewOutput(markdown: string, source: ReviewFindingSour
   const findings = parseReviewFindings(markdown, source);
   if (!findings.hasLedger) throw new Error(`${source} output is missing the Findings Ledger.`);
   if (findings.rejected.length > 0) throw new Error(`${source} output contains invalid Findings Ledger entries.`);
+  if (findings.warnings.length > 0) throw new Error(`${source} output contains incomplete or ambiguous Findings Ledger entries: ${findings.warnings.join("; ")}`);
   return { verdict, findings };
 }

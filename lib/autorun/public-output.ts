@@ -2,8 +2,8 @@ const redactedLocalPath = "[local path redacted]";
 const redactedSecret = "[redacted]";
 const fileUriPrefix = "file://";
 
-export function sanitizePublicMarkdown(value: string): string {
-  return redactSecrets(redactLocalPaths(value));
+export function sanitizePublicMarkdown(value: string, options: { localRoots?: readonly string[] | undefined } = {}): string {
+  return redactSecrets(redactLocalPaths(value, options.localRoots));
 }
 
 export function redactSecrets(value: string): string {
@@ -20,19 +20,23 @@ export function truncatePublicMarkdown(value: string, maxChars: number): string 
   return `${value.slice(0, maxChars)}\n\n... (truncated ${value.length - maxChars} later characters) ...`;
 }
 
-export function redactLocalPaths(value: string): string {
+export function redactLocalPaths(value: string, localRoots: readonly string[] = []): string {
+  let source = value;
+  for (const root of [...new Set(localRoots.map((entry) => entry.replace(/[\\/]+$/, "")).filter((entry) => entry.length > 1))].toSorted((a, b) => b.length - a.length)) {
+    source = source.replaceAll(root, redactedLocalPath);
+  }
   let result = "";
   let index = 0;
 
-  while (index < value.length) {
-    const end = localPathEnd(value, index);
+  while (index < source.length) {
+    const end = localPathEnd(source, index);
     if (end !== undefined) {
       result += redactedLocalPath;
       index = end;
       continue;
     }
 
-    result += value[index] ?? "";
+    result += source[index] ?? "";
     index += 1;
   }
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
-import { buildPrReviewMarker, formatPrReviewComment } from "./comments.ts";
+import { formatPrReviewComment } from "./comments.ts";
 
 describe("PR review public comment", () => {
   test("keeps one stable marker, orders blocking work first, and sanitizes public evidence", () => {
@@ -12,15 +12,15 @@ describe("PR review public comment", () => {
     const body = formatPrReviewComment({
       context,
       headOid: "abc123",
-      decision: { outcome: "changes-requested", requiredFixes: [required], externalBlockers: [], followUps: [], suggestions: [suggestion], rejectedFindings: [], reasons: [] },
+      decision: { outcome: "changes-requested", requiredFixes: [required], externalBlockers: [], followUps: [], suggestions: [suggestion], reasons: [] },
       verificationStatus: "passed",
-      reviewA: "review A at /tmp/private/file",
+      reviewA: "review A at /mnt/agent/repo/private/file",
       reviewB: "review B",
     });
 
-    expect(buildPrReviewMarker(12)).toBe(buildPrReviewMarker(context.prNumber));
     expect(body.indexOf("Required")).toBeLessThan(body.indexOf("Optional"));
     expect(body).not.toContain("/Users/person");
+    expect(body).not.toContain("/mnt/agent/repo");
     expect(body).not.toContain("TOKEN=secret");
     expect(body).toContain("[local path redacted]");
   });
@@ -29,18 +29,17 @@ describe("PR review public comment", () => {
 function reviewContext(): PrReviewContext {
   return {
     controlCwd: "/repo",
-    agentCwd: "/workspace",
+    agentCwd: "/mnt/agent/repo",
     outDir: "/repo/.roark/runs",
     repo: "owner/repo",
     prNumber: 12,
     generation: 2,
     reviewDir: "/repo/.roark/runs/pr/12/review-2",
     reviewDirRelative: ".roark/runs/pr/12/review-2",
-    agentReviewDir: "/workspace/.roark/runs/pr/12/review-2",
-    agentReviewDirRelative: ".roark/runs/pr/12/review-2",
+    agentReviewDir: "/mnt/agent/repo/.git/roark/pr-review/12/review-2",
+    agentReviewDirRelative: ".git/roark/pr-review/12/review-2",
     thinkingConfig: getWorkflowThinkingConfig(),
     comment: true,
-    verificationSource: "not-configured",
   };
 }
 

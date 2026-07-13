@@ -5,7 +5,10 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
+import type { PrReviewContext } from "../pr-review/artifacts.ts";
+import { formatPrReviewComment } from "../pr-review/comments.ts";
 import { noopAsync } from "../utils/async.ts";
+import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
 
 async function tempGitRepo(): Promise<string> {
@@ -96,6 +99,51 @@ function feedback(): PullRequestFeedback {
   };
 }
 
+function freshReviewComment(controlCwd: string, agentCwd: string): string {
+  const context: PrReviewContext = {
+    controlCwd,
+    agentCwd,
+    outDir: path.join(controlCwd, ".roark", "runs"),
+    repo: "owner/repo",
+    prNumber: 12,
+    generation: 1,
+    reviewDir: path.join(controlCwd, ".roark", "runs", "pr", "12", "review-1"),
+    reviewDirRelative: ".roark/runs/pr/12/review-1",
+    agentReviewDir: path.join(agentCwd, ".git", "roark", "pr-review", "12", "review-1"),
+    agentReviewDirRelative: ".git/roark/pr-review/12/review-1",
+    thinkingConfig: getWorkflowThinkingConfig(),
+    comment: true,
+  };
+  return formatPrReviewComment({
+    context,
+    headOid: "head123",
+    decision: {
+      outcome: "changes-requested",
+      requiredFixes: [{
+        source: "review-a",
+        sourceLocalId: "finding-1",
+        workflowId: "review-a:finding-1",
+        title: "Preserve the public response contract",
+        classification: "must-fix-current",
+        severity: "high",
+        confidence: "high",
+        evidence: "The changed handler omits the required field.",
+        currentIssueImpact: "Clients cannot parse successful responses.",
+        recommendedHandling: "Restore the field before merging.",
+        warnings: [],
+        rawExcerpt: "",
+      }],
+      externalBlockers: [],
+      followUps: [],
+      suggestions: [],
+      reasons: [],
+    },
+    verificationStatus: "not configured",
+    reviewA: "## Verdict\nfixes-required\n",
+    reviewB: "## Verdict\napprove\n",
+  });
+}
+
 describe("runPrRevision", () => {
   test("legacy checkout fallback uses the control checkout as the agent workspace", async () => {
     await noopAsync();
@@ -166,6 +214,32 @@ describe("runPrRevision", () => {
 
     expect(result.outcome).toBe("no-action-needed");
     expect(commentCalled).toBe(false);
+  });
+
+  test("passes a published fresh-review finding into revision planning", async () => {
+    await noopAsync();
+    const control = await tempGitRepo();
+    const { workspace, prepareWorkspace } = await isolatedWorkspace();
+    const reviewComment = freshReviewComment(control, workspace);
+    let plannerSawFinding = false;
+
+    const result = await runPrRevision(options(control, { comment: false }), {
+      fetchFeedback: async () => {
+        await noopAsync();
+        const value = feedback();
+        const comment = { author: "roark-bot", body: reviewComment };
+        return { ...value, comments: [comment], plannerComments: [comment] };
+      },
+      prepareWorkspace,
+      agentRunner: async (request) => {
+        const artifact = await readFile(path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "pr-feedback.md"), "utf8");
+        plannerSawFinding = artifact.includes("Preserve the public response contract");
+        return "# Revision Plan\n\n## Status\nno-action-needed\n";
+      },
+    });
+
+    expect(result.outcome).toBe("no-action-needed");
+    expect(plannerSawFinding).toBe(true);
   });
 
   test("allocates revisions across the control checkout and isolated workspace", async () => {

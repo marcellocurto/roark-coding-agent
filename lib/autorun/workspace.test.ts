@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   assertWorkspacePathSafe,
+  assertPinnedPrReviewWorkspace,
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
   listWorkspaces,
@@ -498,6 +499,8 @@ describe("managed clone workspaces", () => {
     expect(prepared.comparison.inspectionCommand).toBe(`git diff ${initial}..${headOid} --`);
     expect((await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
     expect(calls.some((args) => args[0] === "git" && ["commit", "push"].includes(args[1] ?? ""))).toBe(false);
+    await writeFile(path.join(prepared.path, "unexpected.txt"), "mutation\n", "utf8");
+    expect(assertPinnedPrReviewWorkspace({ cwd: prepared.path, headOid })).rejects.toThrow("changed during inspection");
     await prepared.releaseLock();
     await rm(root, { recursive: true, force: true });
   });

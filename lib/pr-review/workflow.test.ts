@@ -7,11 +7,13 @@ import type { PullRequestFeedback } from "../github/pr.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { noopAsync } from "../utils/async.ts";
 import { runPrReview } from "./workflow.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
 
 describe("runPrReview", () => {
   test("reviews a comment-free PR with two inspection-only agents, one verification, and one current comment", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
+    await initAgentRepo(agent);
     const agentCalls: AgentRunRequest[] = [];
     let verificationRuns = 0;
     let publications = 0;
@@ -44,6 +46,7 @@ describe("runPrReview", () => {
         releaseLock: async () => { await noopAsync(); },
       }); },
       runLifecycleHook: async () => { await noopAsync(); },
+      assertWorkspace: async () => { await noopAsync(); },
       verificationRunner: async ({ command }) => {
         await noopAsync();
         verificationRuns++;
@@ -67,13 +70,15 @@ describe("runPrReview", () => {
     expect(agentCalls[1]?.prompt).not.toContain("review-a.md");
     expect(await readFile(path.join(result.context.reviewDir, "summary.json"), "utf8")).toContain("no-blocking-findings");
     expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
+    expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
 
-  test("retains a stale review locally and does not publish it", async () => {
+  test("retains a review when PR state or base identity changes and does not publish it", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-stale-agent-"));
+    await initAgentRepo(agent);
     const initial = reviewFeedback();
     let fetches = 0;
     let publications = 0;
@@ -91,7 +96,7 @@ describe("runPrReview", () => {
       fetchFeedback: async () => {
         await noopAsync();
         fetches++;
-        return fetches === 1 ? initial : { ...initial, pr: { ...initial.pr, headRefOid: "newhead" } };
+        return fetches === 1 ? initial : { ...initial, pr: { ...initial.pr, state: "CLOSED", baseRefOid: "newbase" } };
       },
       prepareWorkspace: async () => { await noopAsync(); return ({
         path: agent,
@@ -100,6 +105,7 @@ describe("runPrReview", () => {
         releaseLock: async () => { await noopAsync(); },
       }); },
       runLifecycleHook: async () => { await noopAsync(); },
+      assertWorkspace: async () => { await noopAsync(); },
       agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
       publishComment: async () => { await noopAsync(); publications++; },
     });
@@ -114,6 +120,7 @@ describe("runPrReview", () => {
   test("preserves completed artifacts when comment publishing fails", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-publish-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-publish-agent-"));
+    await initAgentRepo(agent);
     const feedback = reviewFeedback();
     const run = runPrReview({
       command: "review-pr",
@@ -134,6 +141,7 @@ describe("runPrReview", () => {
         releaseLock: async () => { await noopAsync(); },
       }; },
       runLifecycleHook: async () => { await noopAsync(); },
+      assertWorkspace: async () => { await noopAsync(); },
       agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
       publishComment: async () => { await noopAsync(); throw new Error("GitHub unavailable"); },
     });
@@ -143,6 +151,55 @@ describe("runPrReview", () => {
     const reviewDir = path.join(control, ".roark/runs/pr/12/review-1");
     expect(Bun.file(path.join(reviewDir, "review-a.md")).exists()).resolves.toBe(true);
     expect(await readFile(path.join(reviewDir, "metadata.json"), "utf8")).toContain('"publication": "failed"');
+    await rm(control, { recursive: true, force: true });
+    await rm(agent, { recursive: true, force: true });
+  });
+
+  test("waits for both reviewers before cleaning up after one reviewer fails", async () => {
+    const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-failure-control-"));
+    const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-failure-agent-"));
+    await initAgentRepo(agent);
+    const feedback = reviewFeedback();
+    let secondReviewerFinished = false;
+    let lockReleasedEarly = false;
+
+    const run = runPrReview({
+      command: "review-pr",
+      prNumber: 12,
+      cwd: control,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      verificationSource: "unresolved",
+      comment: false,
+      workspace: defaultWorkspaceConfig,
+      hooks: defaultLifecycleHooks,
+    }, {
+      fetchFeedback: async () => (await noopAsync(), feedback),
+      prepareWorkspace: async () => (await noopAsync(), {
+        path: agent,
+        metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
+        comparison: { baseOid: "base123", headOid: "head123", mergeBaseOid: "merge123", changedFiles: [], diffStat: "", inspectionCommand: "git diff merge123..head123 --" },
+        releaseLock: async () => {
+          await noopAsync();
+          lockReleasedEarly = !secondReviewerFinished;
+        },
+      }),
+      runLifecycleHook: async () => { await noopAsync(); },
+      assertWorkspace: async () => { await noopAsync(); },
+      agentRunner: async (request) => {
+        if (request.phase === "pr-review-a") throw new Error("review A unavailable");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        secondReviewerFinished = true;
+        return approvedReview("B1");
+      },
+    });
+
+    expect(run).rejects.toThrow("review A unavailable");
+    await run.catch(() => undefined);
+    expect(secondReviewerFinished).toBe(true);
+    expect(lockReleasedEarly).toBe(false);
+    expect(Bun.file(path.join(control, ".roark/runs/pr/12/review-1/review-b.md")).exists()).resolves.toBe(true);
+    expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
@@ -174,4 +231,8 @@ function reviewFeedback(): PullRequestFeedback {
 
 function approvedReview(id: string): string {
   return `# Review\n\n## Verdict\napprove\n\n## Findings Ledger\nNone\n\n## Evidence Reviewed\n- ${id}\n`;
+}
+
+async function initAgentRepo(cwd: string): Promise<void> {
+  await runProcessOrThrow(["git", "init", "-b", "main"], { cwd });
 }

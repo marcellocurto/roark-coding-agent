@@ -1,5 +1,4 @@
 import { sanitizePublicMarkdown, truncatePublicMarkdown } from "../autorun/public-output.ts";
-import type { VerificationResult } from "../autorun/verification.ts";
 import { postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
 import type { PrReviewContext } from "./artifacts.ts";
@@ -13,39 +12,40 @@ export function formatPrReviewComment(input: {
   context: PrReviewContext;
   headOid: string;
   decision: PrReviewDecision;
-  verification?: VerificationResult | undefined;
   verificationStatus: string;
   reviewA: string;
   reviewB: string;
 }): string {
+  const localRoots = [input.context.controlCwd, input.context.agentCwd, input.context.outDir, input.context.reviewDir];
+  const sanitize = (value: string) => sanitizePublicMarkdown(value, { localRoots });
   const lines = [
     buildPrReviewMarker(input.context.prNumber),
     "## Roark PR review",
     "",
     `- Outcome: **${input.decision.outcome}**`,
     `- Reviewed commit: \`${input.headOid}\``,
-    `- Verification: ${sanitizePublicMarkdown(input.verificationStatus)}`,
+    `- Verification: ${sanitize(input.verificationStatus)}`,
     "",
     "### Outcome notes",
-    ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitizePublicMarkdown(reason)}`) : ["- None."]),
+    ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitize(reason)}`) : ["- None."]),
     "",
     "### Required fixes",
-    ...renderFindings(input.decision.requiredFixes),
+    ...renderFindings(input.decision.requiredFixes, sanitize),
     "",
     "### External blockers",
-    ...renderFindings(input.decision.externalBlockers),
+    ...renderFindings(input.decision.externalBlockers, sanitize),
     "",
     "### Follow-ups",
-    ...renderFindings(input.decision.followUps),
+    ...renderFindings(input.decision.followUps, sanitize),
     "",
     "### Suggestions",
-    ...renderFindings(input.decision.suggestions),
+    ...renderFindings(input.decision.suggestions, sanitize),
     "",
-    reviewerDetails("Review A — correctness", input.reviewA),
+    reviewerDetails("Review A — correctness", input.reviewA, sanitize),
     "",
-    reviewerDetails("Review B — maintainability", input.reviewB),
+    reviewerDetails("Review B — maintainability", input.reviewB, sanitize),
   ];
-  return `${lines.join("\n").trimEnd()}\n`;
+  return truncatePublicMarkdown(`${lines.join("\n").trimEnd()}\n`, 60_000);
 }
 
 export async function publishPrReviewComment(input: Parameters<typeof formatPrReviewComment>[0]): Promise<void> {
@@ -60,17 +60,27 @@ export async function publishPrReviewComment(input: Parameters<typeof formatPrRe
   });
 }
 
-function renderFindings(findings: readonly NormalizedReviewerFinding[]): string[] {
+function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize: (value: string) => string): string[] {
   if (findings.length === 0) return ["- None."];
   return findings.map((finding) => {
-    const evidence = sanitizePublicMarkdown(finding.evidence);
-    const handling = sanitizePublicMarkdown(finding.recommendedHandling);
-    return `- **${sanitizePublicMarkdown(finding.title)}** (${sanitizePublicMarkdown(finding.severity)}, ${sanitizePublicMarkdown(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
+    const evidence = sanitize(finding.evidence);
+    const handling = sanitize(finding.recommendedHandling);
+    return `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
   });
 }
 
-function reviewerDetails(title: string, content: string): string {
-  const safe = truncatePublicMarkdown(sanitizePublicMarkdown(content), 8_000);
-  const fence = safe.includes("````") ? "`````" : "````";
+function reviewerDetails(title: string, content: string, sanitize: (value: string) => string): string {
+  const safe = truncatePublicMarkdown(sanitize(content), 8_000);
+  const fence = "`".repeat(Math.max(4, longestBacktickRun(safe) + 1));
   return `<details><summary>${title}</summary>\n\n${fence}markdown\n${safe}\n${fence}\n</details>`;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const char of value) {
+    current = char === "`" ? current + 1 : 0;
+    longest = Math.max(longest, current);
+  }
+  return longest;
 }

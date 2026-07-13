@@ -10,6 +10,7 @@ import {
 import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
+  assertPinnedPrReviewWorkspace,
   preparePrReviewWorkspace,
   runLifecycleHook,
   type PreparedPrReviewWorkspace,
@@ -26,6 +27,8 @@ import {
   removeAgentPrReviewArtifacts,
   type PrReviewContext,
   writePrReviewArtifact,
+  writePrReviewInputArtifact,
+  writePrReviewInputJson,
   writePrReviewJson,
 } from "./artifacts.ts";
 import { publishPrReviewComment } from "./comments.ts";
@@ -50,6 +53,7 @@ export interface RunPrReviewDependencies {
   verificationRunner?: VerificationRunner | undefined;
   publishComment?: typeof publishPrReviewComment | undefined;
   fetchLinkedIssue?: ((input: { cwd: string; repo: string; issueNumber: number }) => Promise<unknown>) | undefined;
+  assertWorkspace?: typeof assertPinnedPrReviewWorkspace | undefined;
 }
 
 export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReviewDependencies = {}): Promise<PrReviewResult> {
@@ -69,62 +73,84 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     hooks,
   });
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
+  const assertWorkspace = deps.assertWorkspace ?? assertPinnedPrReviewWorkspace;
+  let context: PrReviewContext | undefined;
 
   try {
-    const context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path });
+    context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path });
     console.log(`Run directory: ${context.reviewDirRelative}`);
     console.log(`Review workspace: ${context.agentCwd}`);
     await hookRunner("beforeRun", hooks, context.agentCwd);
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
     const linkedIssueNumber = inferIssueFromPrBody(initial.pr.body);
     const linkedIssue = linkedIssueNumber === undefined
       ? undefined
       : await fetchOptionalLinkedIssue({ cwd: options.cwd, repo: initial.repo, issueNumber: linkedIssueNumber }, deps.fetchLinkedIssue);
-    await writePrReviewJson(context, "pr-context.json", { ...initial, linkedIssue });
-    await writePrReviewArtifact(context, "pr-context.md", formatPrContext(initial, linkedIssue));
-    await writePrReviewJson(context, "comparison.json", prepared.comparison);
+    await writePrReviewInputJson(context, "pr-context.json", { ...initial, linkedIssue });
+    await writePrReviewInputArtifact(context, "pr-context.md", formatPrContext(initial, linkedIssue));
+    await writePrReviewInputJson(context, "comparison.json", prepared.comparison);
 
     const resolvedVerification = await resolvePrReviewVerification({
       cwd: context.agentCwd,
-      command: context.verifyCommand,
+      command: options.verifyCommand,
       source: options.verificationSource,
     });
-    context.verifyCommand = resolvedVerification.command;
-    context.verificationSource = resolvedVerification.source;
 
     let verification: VerificationResult | undefined;
     let verificationUnavailable: string | undefined;
-    let verificationStatus = "not configured";
+    let verificationStatus = resolvedVerification.reason ?? "not configured";
     if (resolvedVerification.command) {
       await hookRunner("beforeVerify", hooks, context.agentCwd);
       try {
         verification = await runVerification({ command: resolvedVerification.command, cwd: context.agentCwd, runner: deps.verificationRunner });
-        await writePrReviewArtifact(context, "verification.md", formatVerificationArtifact(verification));
+        await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
         const classification = classifyVerificationFailure(verification);
         if (!verification.ok && !classification.repairable) verificationUnavailable = classification.recoveryGuidance ?? classification.reason;
         verificationStatus = `${verification.ok ? "passed" : "failed"} (${resolvedVerification.source}, \`${resolvedVerification.command}\`, exit ${verification.exitCode})`;
       } catch (error) {
         verificationUnavailable = `Verification could not run: ${errorMessage(error)}`;
         verificationStatus = verificationUnavailable;
-        await writePrReviewArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${verificationUnavailable}\n`);
+        await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${verificationUnavailable}\n`);
       }
+      await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
     } else {
-      await writePrReviewArtifact(context, "verification.md", "# Verification\n\n## Status\nNot configured\n");
+      await writePrReviewInputArtifact(context, "verification.md", [
+        "# Verification",
+        "",
+        "## Status",
+        "Not configured",
+        "",
+        "## Reason",
+        resolvedVerification.reason ?? "No verification command was configured.",
+        ...(resolvedVerification.suggestedCommand ? ["", "## Suggested Explicit Command", `\`${resolvedVerification.suggestedCommand}\``] : []),
+        "",
+      ].join("\n"));
     }
 
     await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
       outcome: "reviewing",
       verificationSource: resolvedVerification.source,
       verificationCommand: resolvedVerification.command,
+      suggestedVerificationCommand: resolvedVerification.suggestedCommand,
     }));
 
     const runner = deps.agentRunner ?? runPiAgent;
-    const [reviewA, reviewB] = await Promise.all([
+    const [reviewAResult, reviewBResult] = await Promise.allSettled([
       runReviewer(context, prepared, runner, correctnessReviewLens, "reviewA"),
       runReviewer(context, prepared, runner, maintainabilityReviewLens, "reviewB"),
     ]);
-    await writePrReviewArtifact(context, "review-a.md", reviewA);
-    await writePrReviewArtifact(context, "review-b.md", reviewB);
+    if (reviewAResult.status === "fulfilled") await writePrReviewArtifact(context, "review-a.md", reviewAResult.value);
+    if (reviewBResult.status === "fulfilled") await writePrReviewArtifact(context, "review-b.md", reviewBResult.value);
+    if (reviewAResult.status === "rejected" || reviewBResult.status === "rejected") {
+      const failures = [reviewAResult, reviewBResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => errorMessage(result.reason));
+      throw new Error(`PR reviewer failed: ${failures.join("; ")}`);
+    }
+    const reviewA = reviewAResult.value;
+    const reviewB = reviewBResult.value;
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
     let decision: PrReviewDecision;
     try {
@@ -140,12 +166,11 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus });
 
     const latest = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
-    const stale = latest.pr.headRefOid !== initial.pr.headRefOid;
-    if (stale) {
-      decision = blockedPrReviewDecision(`PR head changed from ${initial.pr.headRefOid} to ${latest.pr.headRefOid} during review; findings were retained but not published as current.`);
+    const staleReasons = prIdentityChanges(initial, latest);
+    if (staleReasons.length > 0) {
+      decision = blockedPrReviewDecision(`PR changed during review (${staleReasons.join("; ")}); findings were retained but not published as current.`);
       await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus, stale: true });
-      await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestHeadOid: latest.pr.headRefOid, endedAt: new Date().toISOString() }));
-      await removeAgentPrReviewArtifacts(context);
+      await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestPr: latest.pr, endedAt: new Date().toISOString() }));
       return { outcome: "blocked", context, decision, verification, published: false, stale: true };
     }
 
@@ -153,16 +178,25 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     let published = false;
     if (context.comment) {
       try {
-        await (deps.publishComment ?? publishPrReviewComment)({
+        const publish = deps.publishComment ?? publishPrReviewComment;
+        await publish({
           context,
           headOid: initial.pr.headRefOid,
           decision,
-          verification,
           verificationStatus,
           reviewA,
           reviewB,
         });
         published = true;
+        const afterPublish = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
+        const afterPublishStaleReasons = prIdentityChanges(initial, afterPublish);
+        if (afterPublishStaleReasons.length > 0) {
+          decision = blockedPrReviewDecision(`PR changed while the review comment was being published (${afterPublishStaleReasons.join("; ")}); this comment is stale and must not be treated as current.`);
+          await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus, stale: true });
+          await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestPr: afterPublish.pr, endedAt: new Date().toISOString() }));
+          await publish({ context, headOid: initial.pr.headRefOid, decision, verificationStatus, reviewA, reviewB });
+          return { outcome: "blocked", context, decision, verification, published: true, stale: true };
+        }
       } catch (error) {
         await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
           outcome: decision.outcome,
@@ -173,10 +207,10 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
         throw new Error(`PR review completed and artifacts were preserved, but comment publishing failed: ${errorMessage(error)}`);
       }
     }
-    await removeAgentPrReviewArtifacts(context);
     return { outcome: decision.outcome, context, decision, verification, published, stale: false };
   } finally {
     try {
+      if (context) await removeAgentPrReviewArtifacts(context);
       await hookRunner("afterRun", hooks, prepared.path);
     } finally {
       await prepared.releaseLock();
@@ -187,6 +221,21 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
 function validateReviewablePr(feedback: PullRequestFeedback): void {
   if (feedback.pr.state !== "OPEN") throw new Error(`PR #${feedback.pr.number} must be open. Current state: ${feedback.pr.state}.`);
   if (!feedback.pr.baseRefOid || !feedback.pr.headRefOid) throw new Error(`PR #${feedback.pr.number} metadata did not include immutable base and head commit identifiers.`);
+}
+
+function prIdentityChanges(initial: PullRequestFeedback, latest: PullRequestFeedback): string[] {
+  const changes: string[] = [];
+  if (latest.pr.state !== "OPEN") changes.push(`state is ${latest.pr.state}`);
+  for (const [label, before, after] of [
+    ["base repository", initial.pr.baseRepository, latest.pr.baseRepository],
+    ["base ref", initial.pr.baseRefName, latest.pr.baseRefName],
+    ["base commit", initial.pr.baseRefOid, latest.pr.baseRefOid],
+    ["head repository", initial.pr.headRepository, latest.pr.headRepository],
+    ["head commit", initial.pr.headRefOid, latest.pr.headRefOid],
+  ] as const) {
+    if (before !== after) changes.push(`${label} changed from ${before ?? "(unknown)"} to ${after ?? "(unknown)"}`);
+  }
+  return changes;
 }
 
 async function runReviewer(
@@ -222,11 +271,13 @@ function formatPrContext(feedback: PullRequestFeedback, linkedIssue: unknown): s
   const lines = [
     `# PR #${feedback.pr.number}: ${feedback.pr.title}`,
     "",
-    "## PR Body (primary requirements)",
-    feedback.pr.body || "None.",
+    "## Authoritative Requirements",
+    linkedIssue === undefined
+      ? "No linked same-repository issue was available. Use the PR title and description below as the best available requirements."
+      : `Linked same-repository issue:\n\n\`\`\`json\n${JSON.stringify(linkedIssue, null, 2)}\n\`\`\``,
     "",
-    "## Linked Issue Context",
-    linkedIssue === undefined ? "Not available." : `\`\`\`json\n${JSON.stringify(linkedIssue, null, 2)}\n\`\`\``,
+    "## PR Description",
+    feedback.pr.body || "None.",
     "",
     "## Existing PR Comments (secondary context)",
     ...listOrNone(feedback.comments.map((comment) => `${comment.author ?? "unknown"}: ${comment.body}`)),

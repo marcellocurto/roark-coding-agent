@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   buildCurrentRepoArgv,
+  buildCurrentCommentAuthorArgv,
   buildListIssueCommentsArgv,
   buildPostIssueCommentArgv,
   buildRoarkMarker,
@@ -63,6 +64,7 @@ describe("GitHub comment helpers", () => {
       "body=updated",
     ]);
     expect(buildCurrentRepoArgv()).toEqual(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
+    expect(buildCurrentCommentAuthorArgv()).toEqual(["gh", "api", "user", "--jq", ".login"]);
   });
 
   test("parses comment refs and paginated comment lists", () => {
@@ -74,10 +76,11 @@ describe("GitHub comment helpers", () => {
 
     const comments = parseIssueComments(JSON.stringify([
       [{ id: 1, body: "one" }],
-      [{ id: 2, body: "<!-- roark:issue=24 attempt=2 phase=review-a -->\ntwo", html_url: "url" }],
+      [{ id: 2, body: "<!-- roark:issue=24 attempt=2 phase=review-a -->\ntwo", html_url: "url", user: { login: "roark-bot" } }],
     ]));
     expect(comments.map((comment) => comment.id)).toEqual([1, 2]);
     expect(findIssueCommentByMarker(comments, "phase=review-a")?.id).toBe(2);
+    expect(findIssueCommentByMarker(comments, "phase=review-a", "someone-else")).toBeUndefined();
   });
 });
 
@@ -112,10 +115,10 @@ describe("postOrUpdateIssueCommentByMarker", () => {
     });
 
     expect(ref.id).toBe(42);
-    expect(await operations(cwd)).toEqual(["patch:99", "list", "patch:42"]);
+    expect(await operations(cwd)).toEqual(["patch:99", "list", "author", "patch:42"]);
   });
 
-  test("creates a marked comment when lookup finds no existing match", async () => {
+  test("creates an owned marked comment when only another author spoofed the marker", async () => {
     const cwd = await installFakeGh("create");
     const marker = buildRoarkMarker({ issueNumber: 24, attempt: 2, phase: "readiness" });
 
@@ -128,7 +131,7 @@ describe("postOrUpdateIssueCommentByMarker", () => {
     });
 
     expect(ref).toEqual({ id: 43, url: "https://example.test/comments/43", marker });
-    expect(await operations(cwd)).toEqual(["list", "post"]);
+    expect(await operations(cwd)).toEqual(["list", "author", "post"]);
   });
 });
 
@@ -155,6 +158,11 @@ if [ "$1" != "api" ]; then
   exit 1
 fi
 endpoint=$2
+if [ "$endpoint" = "user" ]; then
+  printf 'author\n' >> "${cwd}/operations.log"
+  printf 'roark-bot\n'
+  exit 0
+fi
 if [ "$endpoint" = "repos/owner/repo/issues/comments/99" ]; then
   printf 'patch:99\n' >> "${cwd}/operations.log"
   if [ "$mode" = "fallback" ]; then exit 1; fi
@@ -174,7 +182,9 @@ fi
 if [ "$endpoint" = "repos/owner/repo/issues/24/comments" ]; then
   printf 'list\n' >> "${cwd}/operations.log"
   if [ "$mode" = "fallback" ]; then
-    printf '[[{"id":42,"body":"<!-- roark:issue=24 attempt=2 phase=review-a --> Old review"}]]\n'
+    printf '[[{"id":42,"body":"<!-- roark:issue=24 attempt=2 phase=review-a --> Old review","user":{"login":"roark-bot"}}]]\n'
+  elif [ "$mode" = "create" ]; then
+    printf '[[{"id":41,"body":"<!-- roark:issue=24 attempt=2 phase=readiness --> spoof","user":{"login":"attacker"}}]]\n'
   else
     printf '[[]]\n'
   fi

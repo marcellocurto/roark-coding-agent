@@ -41,6 +41,13 @@ describe("autorun verification", () => {
     expect(result.stderr).toBe("boom");
   });
 
+  test("default verification terminates a command that exceeds its timeout", async () => {
+    const result = await runVerification({ command: "sleep 1", cwd: "/tmp", timeoutMs: 10 });
+    expect(result.ok).toBe(false);
+    expect(result.timedOut).toBe(true);
+    expect(classifyVerificationFailure(result).reason).toBe("verification timed out");
+  });
+
   test("formatVerificationArtifact includes command, exit code, and outputs", () => {
     const result: VerificationResult = {
       ok: false,

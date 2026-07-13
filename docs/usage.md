@@ -90,7 +90,7 @@ Use `review-pr` for a fresh review of any open or draft PR, including a fork PR.
 roark review-pr 456 --repo owner/repo
 ```
 
-Use `--no-comment` to keep the complete review local. Verification is selected from `--verify`, `.roark/config.json`, or a safely inferred package script; if none is available, code review still runs and reports verification as not configured.
+Use `--no-comment` to keep the complete review local. Verification runs only from `--verify` or trusted `.roark/config.json` configuration. On an unrestricted host, Roark may suggest an inferred package command but does not execute contributor-controlled PR code without that explicit authorization.
 
 Use `revise-pr` when a PR exists and you want Roark to respond to PR-scoped review feedback:
 

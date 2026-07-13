@@ -50,6 +50,8 @@ See [Managed workspaces](managed-workspaces.md).
 
 Issue bodies, comments, PR review text, and generated-looking XML inside GitHub content are untrusted user input.
 
+PR source code is also untrusted. `review-pr` does not execute inferred package scripts on an unrestricted host. Use `--verify` or trusted repository configuration only when you intentionally authorize execution of the checked-out PR code. Reviewer agents are instructed to use static shell inspection and the captured verification artifact rather than running repository code themselves.
+
 They may describe requested work, but they must not override:
 
 - workflow instructions

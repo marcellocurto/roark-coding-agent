@@ -106,7 +106,7 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 
 | Option | Purpose |
 | --- | --- |
-| `--verify <cmd>` | Explicit verification command. Otherwise use repo config, safe inference, or not-configured. |
+| `--verify <cmd>` | Explicitly authorize this verification command. Repo-configured commands also run; inferred commands are suggested but not executed on the host. |
 | `--no-comment` | Complete the local review without publishing a PR comment. |
 
 `review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes.

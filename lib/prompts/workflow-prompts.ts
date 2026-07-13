@@ -13,6 +13,8 @@ import {
 import {
   correctnessReviewLens,
   maintainabilityReviewLens,
+  renderFindingsLedgerContract,
+  renderReviewVerdictSemantics,
   type ReviewLensDefinition,
 } from "../review/contract.ts";
 
@@ -59,20 +61,12 @@ export const sharedSystemPrompt = `<system_prompt>
   <output_contract>Return only the requested Markdown for workflow phases. Treat listed sections as the preferred shape for downstream agents, not as a reason to add filler. Keep required verdict/status/ready tokens exact.</output_contract>
 </system_prompt>`;
 
-const findingsLedgerContract = `  <findings_ledger_contract>
-    <instruction>Output a structured Findings Ledger as the canonical list of review findings.</instruction>
-    <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
-    <instruction>Each finding must include: identifier, classification, title, severity, confidence, evidence, current-issue impact, recommended handling, and optional suggested issue title.</instruction>
-    <instruction>Use <value>must-fix-current</value> only when the current issue cannot be approved until this repository change is fixed.</instruction>
-    <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
-    <instruction>Use <value>follow-up</value> for valid concerns that should be handled outside the current issue and must not block approval for this issue.</instruction>
-    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
-  </findings_ledger_contract>`;
+const findingsLedgerContract = renderFindingsLedgerContract("the current issue");
 
 const doNotBroadenScopeInstruction = "Do not broaden scope.";
 const doNotEditWorkflowArtifactsInstruction = "Do not edit .roark workflow artifacts.";
 const inspectionOnlyConstraint = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
-const reviewVerdictSemantics = "Verdict semantics: use <value>approve</value> when approved for the current issue with no <value>must-fix-current</value> findings, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix, <value>restart-required</value> when the implementation direction is fundamentally wrong and incremental fixes would be more expensive/risky than resetting to the pre-implementation baseline, and <value>blocked</value> when the workflow cannot safely proceed.";
+const reviewVerdictSemantics = renderReviewVerdictSemantics("the current issue", true);
 const changedCodeValidationInstruction = "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
 const bugFeedbackLoopPolicy = `  <bug_feedback_loop_policy>
     <instruction>Apply this policy only when the requested work is a bug, regression, failing test, error, broken behavior, flaky behavior, or performance regression.</instruction>

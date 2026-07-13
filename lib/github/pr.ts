@@ -50,6 +50,7 @@ export interface PullRequestFeedback {
   reviewThreads: PullRequestReviewThread[];
   plannerComments: PullRequestComment[];
   excludedRoarkSummaryCommentIds: (string | number)[];
+  reviewThreadsTruncated?: boolean | undefined;
   fetchedAt: string;
 }
 
@@ -89,7 +90,11 @@ export async function fetchPullRequestFeedback(options: { cwd: string; repo?: st
     cwd: options.cwd,
     label: "gh api graphql pull request feedback",
   });
-  return parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
+  const feedback = parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
+  const commentsRaw = await runProcessOrThrow([
+    "gh", "api", `repos/${repo}/issues/${options.prNumber}/comments`, "--paginate", "--slurp",
+  ], { cwd: options.cwd, label: "gh api pull request comments" });
+  return withPlannerComments(feedback, parseRestPullRequestComments(commentsRaw));
 }
 
 export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
@@ -111,22 +116,43 @@ export function parsePullRequestFeedback(raw: string, input: { repo: string; prN
   const pr = normalizePullRequestMetadata(pullRequest, input.prNumber);
   const comments = connectionNodes(pullRequest["comments"]).map(normalizePullRequestComment);
   const reviewThreads = requiredConnectionNodes(pullRequest["reviewThreads"], "pull request reviewThreads").map(normalizeReviewThread);
+  return withPlannerComments({
+    repo: input.repo,
+    pr,
+    comments,
+    reviewThreads,
+    plannerComments: [],
+    excludedRoarkSummaryCommentIds: [],
+    reviewThreadsTruncated: connectionHasNextPage(pullRequest["reviewThreads"]),
+    fetchedAt: new Date().toISOString(),
+  }, comments);
+}
+
+function withPlannerComments(feedback: PullRequestFeedback, comments: PullRequestComment[]): PullRequestFeedback {
   const excludedRoarkSummaryCommentIds: (string | number)[] = [];
   const plannerComments = comments.filter((comment) => {
     if (!roarkPrRevisionSummaryMarkerPattern.test(comment.body)) return true;
     excludedRoarkSummaryCommentIds.push(comment.databaseId ?? comment.id ?? "unknown");
     return false;
   });
+  return { ...feedback, comments, plannerComments, excludedRoarkSummaryCommentIds };
+}
 
-  return {
-    repo: input.repo,
-    pr,
-    comments,
-    reviewThreads,
-    plannerComments,
-    excludedRoarkSummaryCommentIds,
-    fetchedAt: new Date().toISOString(),
-  };
+export function parseRestPullRequestComments(raw: string): PullRequestComment[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("GitHub REST response for pull request comments was not an array.");
+  const values = (parsed as unknown[]).flatMap<unknown>((page) => Array.isArray(page) ? page as unknown[] : [page]);
+  return values.map((value) => {
+    if (!isRecord(value)) return { body: "" };
+    return {
+      id: typeof value["node_id"] === "string" ? value["node_id"] : undefined,
+      databaseId: numberField(value, "id"),
+      author: login(value["user"]),
+      body: stringField(value, "body") ?? "",
+      createdAt: stringField(value, "created_at"),
+      url: stringField(value, "html_url"),
+    };
+  });
 }
 
 function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNumber: number): PullRequestMetadata {
@@ -193,6 +219,10 @@ function requiredConnectionNodes(value: unknown, label: string): unknown[] {
     throw new Error(`GitHub GraphQL response did not include a valid ${label}.nodes connection.`);
   }
   return value["nodes"].filter((node) => node !== null && node !== undefined);
+}
+
+function connectionHasNextPage(value: unknown): boolean {
+  return isRecord(value) && isRecord(value["pageInfo"]) && value["pageInfo"]["hasNextPage"] === true;
 }
 
 function splitRepo(repo: string): [string, string] {
@@ -279,6 +309,7 @@ query($owner: String!, $name: String!, $number: Int!) {
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }

@@ -19,6 +19,7 @@ interface GitHubIssueComment {
   body?: string | undefined;
   html_url?: string | undefined;
   url?: string | undefined  ;
+  authorLogin?: string | undefined;
 }
 
 export interface IssueCommentOptions {
@@ -73,6 +74,10 @@ export function buildCurrentRepoArgv(): string[] {
   return ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"];
 }
 
+export function buildCurrentCommentAuthorArgv(): string[] {
+  return ["gh", "api", "user", "--jq", ".login"];
+}
+
 export function parseGitHubCommentRef(raw: string, marker: string): GitHubCommentRef {
   const parsed = JSON.parse(raw) as unknown;
   const comment = normalizeComment(parsed);
@@ -85,8 +90,11 @@ export function parseIssueComments(raw: string): GitHubIssueComment[] {
   return flattenComments(parsed);
 }
 
-export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker: string): GitHubIssueComment | undefined {
-  return comments.find((comment) => comment.body?.includes(marker) === true && typeof comment.id === "number");
+export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker: string, authorLogin?: string): GitHubIssueComment | undefined {
+  return comments.find((comment) =>
+    comment.body?.includes(marker) === true &&
+    typeof comment.id === "number" &&
+    (authorLogin === undefined || comment.authorLogin === authorLogin));
 }
 
 export async function postIssueComment(options: IssueCommentOptions): Promise<GitHubCommentRef> {
@@ -131,7 +139,9 @@ export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMa
     buildListIssueCommentsArgv({ repo, issueNumber: options.issueNumber }),
     { cwd: options.cwd, label: "gh api issue comments list" },
   );
-  const existing = findIssueCommentByMarker(parseIssueComments(commentsRaw), options.marker);
+  const currentAuthor = (await runProcessOrThrow(buildCurrentCommentAuthorArgv(), { cwd: options.cwd, label: "gh api current comment author" })).trim();
+  if (!currentAuthor) throw new Error("Could not resolve the authenticated GitHub comment author.");
+  const existing = findIssueCommentByMarker(parseIssueComments(commentsRaw), options.marker, currentAuthor);
   if (existing?.id !== undefined) {
     return await updateIssueComment({ cwd: options.cwd, repo, commentId: existing.id, body, marker: options.marker });
   }
@@ -162,6 +172,7 @@ function normalizeComment(value: unknown): GitHubIssueComment {
     body: typeof value["body"] === "string" ? value["body"] : undefined,
     html_url: typeof value["html_url"] === "string" ? value["html_url"] : undefined,
     url: typeof value["url"] === "string" ? value["url"] : undefined,
+    authorLogin: isRecord(value["user"]) && typeof value["user"]["login"] === "string" ? value["user"]["login"] : undefined,
   };
 }
 

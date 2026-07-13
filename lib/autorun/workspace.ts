@@ -335,6 +335,7 @@ export async function preparePrReviewWorkspace(input: {
       });
       await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
       if (createdNow) await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
+      await assertPinnedPrReviewWorkspace({ cwd: workspacePath, headOid: input.headRefOid, runner });
       return {
         path: workspacePath,
         comparison,
@@ -354,6 +355,26 @@ export async function preparePrReviewWorkspace(input: {
   } catch (error) {
     await releaseLock();
     throw error;
+  }
+}
+
+export async function assertPinnedPrReviewWorkspace(input: {
+  cwd: string;
+  headOid: string;
+  runner?: ProcessRunner | undefined;
+}): Promise<void> {
+  const runner = input.runner ?? runProcess;
+  const currentHead = (await runProcessOrThrowWithRunner(runner, ["git", "rev-parse", "HEAD"], {
+    cwd: input.cwd,
+    label: "git rev-parse review HEAD",
+  })).trim();
+  if (currentHead !== input.headOid) {
+    throw new Error(`PR review workspace HEAD changed from pinned commit ${input.headOid} to ${currentHead || "(unknown)"}. Refusing to publish this review.`);
+  }
+  const status = await runner(["git", "status", "--porcelain", "--untracked-files=all"], { cwd: input.cwd });
+  if (status.exitCode !== 0) throw new Error(`Unable to verify PR review workspace cleanliness: ${tail(status.stderr || status.stdout)}`);
+  if (status.stdout.trim()) {
+    throw new Error(`PR review workspace changed during inspection. Refusing to publish this review.\n${status.stdout.trim()}`);
   }
 }
 

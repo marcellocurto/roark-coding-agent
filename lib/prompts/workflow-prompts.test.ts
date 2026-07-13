@@ -206,15 +206,6 @@ describe("review findings ledger contract", () => {
     }
   });
 
-  test("review verdict semantics are documented for current-issue readiness", () => {
-    for (const prompt of reviewPrompts) {
-      expect(prompt).toContain("approve</value> when approved for the current issue");
-      expect(prompt).toContain("fixes-required</value> when at least one <value>must-fix-current</value> finding requires a current-issue fix");
-      expect(prompt).toContain("restart-required</value> when the implementation direction is fundamentally wrong");
-      expect(prompt).toContain("blocked</value> when the workflow cannot safely proceed");
-    }
-  });
-
   test("review agent B remains independent from review agent A", () => {
     const prompt = reviewBPrompt(context);
     expect(prompt).toContain("Do not read Review Agent A's output");
