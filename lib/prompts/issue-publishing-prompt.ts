@@ -1,4 +1,5 @@
 import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import { escapePromptXmlText } from "./xml.ts";
 
 export interface IssuePublishingPromptItem {
   planItemId: string;
@@ -18,15 +19,17 @@ export function issuePublishingPrompt(input: {
   approvalReason?: string | undefined;
   allowedItems: IssuePublishingPromptItem[];
 }): string {
-  const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");
-  const resultPath = input.resultPath ?? artifactRelativePath(input.context, "issueCreationResults");
-  const allowedItemsJson = JSON.stringify(input.allowedItems, null, 2);
+  const sourcePlanPath = escapePromptXmlText(input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan"));
+  const resultPath = escapePromptXmlText(input.resultPath ?? artifactRelativePath(input.context, "issueCreationResults"));
+  const approvalReason = escapePromptXmlText(input.approvalReason ?? "The user passed --yes");
+  const targetRepo = escapePromptXmlText(input.context.repo ?? "Use gh's current default repository after preflight.");
+  const allowedItemsJson = escapePromptXmlText(JSON.stringify(input.allowedItems, null, 2));
 
   return `<workflow_phase name="create_reviewer_generated_issues">
   <role>You are the approved issue-authoring and issue-publishing agent for Roark.</role>
-  <approval_boundary>${input.approvalReason ?? "The user passed --yes"}. This approves publishing only the accepted plan items listed below.</approval_boundary>
+  <approval_boundary>${approvalReason}. This approves publishing only the accepted plan items listed below.</approval_boundary>
   <source_of_truth>The curation plan at \`${sourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, parser warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
-  <target_repo>${input.context.repo ?? "Use gh's current default repository after preflight."}</target_repo>
+  <target_repo>${targetRepo}</target_repo>
   <allowed_plan_items_json>
 ${allowedItemsJson}
   </allowed_plan_items_json>
