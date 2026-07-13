@@ -1,4 +1,5 @@
 import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import { escapePromptXmlText } from "./xml.ts";
 
 export interface IssuePublishingPromptItem {
   planItemId: string;
@@ -20,18 +21,20 @@ export function issuePublishingPrompt(input: {
 }): string {
   const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");
   const resultPath = input.resultPath ?? artifactRelativePath(input.context, "issueCreationResults");
-  const allowedItemsJson = JSON.stringify(input.allowedItems, null, 2);
+  const escapedSourcePlanPath = escapePromptXmlText(sourcePlanPath);
+  const escapedResultPath = escapePromptXmlText(resultPath);
+  const allowedItemsJson = escapePromptXmlText(JSON.stringify(input.allowedItems, null, 2));
 
   return `<workflow_phase name="create_reviewer_generated_issues">
   <role>You are the approved issue-authoring and issue-publishing agent for Roark.</role>
-  <approval_boundary>${input.approvalReason ?? "The user passed --yes"}. This approves publishing only the accepted plan items listed below.</approval_boundary>
-  <source_of_truth>The curation plan at \`${sourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, parser warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
-  <target_repo>${input.context.repo ?? "Use gh's current default repository after preflight."}</target_repo>
+  <approval_boundary>${escapePromptXmlText(input.approvalReason ?? "The user passed --yes")}. This approves publishing only the accepted plan items listed below.</approval_boundary>
+  <source_of_truth>The curation plan at \`${escapedSourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, parser warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
+  <target_repo>${escapePromptXmlText(input.context.repo ?? "Use gh's current default repository after preflight.")}</target_repo>
   <allowed_plan_items_json>
 ${allowedItemsJson}
   </allowed_plan_items_json>
   <issue_authoring_instructions>
-    <instruction>Read \`${sourcePlanPath}\` and create issues only for the allowed planItemId values above.</instruction>
+    <instruction>Read \`${escapedSourcePlanPath}\` and create issues only for the allowed planItemId values above.</instruction>
     <instruction>For each allowed item, write the final GitHub issue title and body yourself from the structured context in the curation plan: source issue, related PR, reviewer finding IDs, classification, evidence, impact, recommended handling, non-goals, and run artifacts.</instruction>
     <instruction>Before the regular issue body sections, add a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what the issue is, why it matters, what should change, and what the human should do next if anything.</instruction>
     <instruction>Do not copy the plan's proposedBody as the final body. Treat proposedBody, if present, only as legacy fallback context. The created GitHub issue should read like a maintainer-authored issue, not a stitched artifact dump.</instruction>
@@ -50,7 +53,7 @@ ${allowedItemsJson}
     <instruction>Create each issue with the final title, the authored body, and the allowed labels for that plan item. Preserve the human-review labels (\`needs-triage\`, \`needs-human\`) and classification labels (\`external-blocker\`, \`follow-up\`, \`suggestion\`).</instruction>
     <instruction>Use body files or safe shell quoting for long issue bodies.</instruction>
     <instruction>Create native GitHub parent/sub-issue or blocked-by relationships only if the curation plan explicitly approves them. Body links are not a substitute for native relationships.</instruction>
-    <instruction>Do not edit files outside temporary body files needed for publishing, and do not edit workflow artifacts. Roark will write \`${resultPath}\` from your response.</instruction>
+    <instruction>Do not edit files outside temporary body files needed for publishing, and do not edit workflow artifacts. Roark will write \`${escapedResultPath}\` from your response.</instruction>
   </publishing_instructions>
   <response_contract>Return only JSON with keys: created, failed, relationshipOutcomes. Every allowed planItemId must appear exactly once across created and failed. Each created entry must include planItemId and may include title, url, number, stdout. Each failed entry must include planItemId and message. Each relationshipOutcomes entry must include planItemId, status, and message, and may include relationship, targetPlanItemId, sourceIssueNumber, targetIssueNumber, or url. Do not wrap in Markdown fences.</response_contract>
 </workflow_phase>`;

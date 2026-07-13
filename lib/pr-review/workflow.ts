@@ -283,7 +283,11 @@ function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullReque
     ...(feedback.reviewThreadsTruncated === true
       ? ["- Context incomplete: GitHub reported additional review threads beyond this fetch. Treat the listed threads as partial secondary context and review the pinned diff independently."]
       : []),
-    ...listOrNone(feedback.reviewThreads.flatMap((thread) => thread.comments.map((comment) => `${thread.path ?? "unknown"}:${thread.line ?? thread.originalLine ?? "?"} ${comment.author ?? "unknown"}: ${comment.body}`))),
+    ...listOrNone(feedback.reviewThreads.flatMap((thread) => {
+      const resolution = thread.isResolved ? "resolved" : "unresolved";
+      const freshness = thread.isOutdated === true ? "outdated" : thread.isOutdated === false ? "current" : "freshness unknown";
+      return thread.comments.map((comment) => `[${resolution}, ${freshness}] ${thread.path ?? "unknown"}:${thread.line ?? thread.originalLine ?? "?"} ${comment.author ?? "unknown"}: ${comment.body}`);
+    })),
   ];
   return `${lines.join("\n")}\n`;
 }

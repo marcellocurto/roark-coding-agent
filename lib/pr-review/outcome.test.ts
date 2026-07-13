@@ -34,6 +34,24 @@ describe("decidePrReview", () => {
     expect(decision.outcome).toBe("changes-requested");
     expect(decision.reasons).toEqual([]);
   });
+
+  test("prefers complete ledger classifications over conflicting broad verdicts", () => {
+    const followUpOnly = validateReviewOutput(review("fixes-required", "follow-up"), "review-a");
+    const suggestionOnly = validateReviewOutput(review("blocked", "suggestion"), "review-b");
+
+    const decision = decidePrReview({ reviewA: followUpOnly, reviewB: suggestionOnly });
+
+    expect(decision.outcome).toBe("no-blocking-findings");
+    expect(decision.requiredFixes).toEqual([]);
+    expect(decision.externalBlockers).toEqual([]);
+  });
+
+  test("uses the broad verdict when the findings ledger is missing", () => {
+    const missingLedger = validateReviewOutput("# Review\n\n## Verdict\nfixes-required\n\n## Required Fixes\n- Fix the bug.\n", "review-a");
+    const decision = decidePrReview({ reviewA: missingLedger, reviewB: validateReviewOutput(cleanReview(), "review-b") });
+
+    expect(decision.outcome).toBe("changes-requested");
+  });
 });
 
 function cleanReview(): string {

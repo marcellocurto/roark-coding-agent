@@ -26,6 +26,24 @@ describe("runPrReview", () => {
       { author: "roark", body: "<!-- roark:pr=12 revision=1 phase=revision-summary -->\nStale revision summary" },
     ];
     feedback.reviewThreadsTruncated = true;
+    feedback.reviewThreads = [
+      {
+        id: "resolved-thread",
+        isResolved: true,
+        isOutdated: true,
+        path: "lib/old.ts",
+        originalLine: 10,
+        comments: [{ author: "reviewer", body: "Historical concern" }],
+      },
+      {
+        id: "active-thread",
+        isResolved: false,
+        isOutdated: false,
+        path: "lib/current.ts",
+        line: 20,
+        comments: [{ author: "reviewer", body: "Active concern" }],
+      },
+    ];
     feedback.closingIssues = [
       { number: 126, title: "Shared contract", body: "Extract the contract", state: "OPEN", repository: "owner/repo", comments: [{ author: "maintainer", body: "Preserve backward compatibility" }] },
       { number: 127, title: "Pinned workspace", body: "Prepare the workspace", state: "OPEN", repository: "owner/repo" },
@@ -95,6 +113,8 @@ describe("runPrReview", () => {
     expect(reviewContext).toContain("Preserve backward compatibility");
     expect(reviewContext).toContain("Human context");
     expect(reviewContext).toContain("Context incomplete");
+    expect(reviewContext).toContain("[resolved, outdated] lib/old.ts:10 reviewer: Historical concern");
+    expect(reviewContext).toContain("[unresolved, current] lib/current.ts:20 reviewer: Active concern");
     expect(reviewContext).not.toContain("Stale generated review");
     expect(reviewContext).not.toContain("Stale revision summary");
     expect(reviewContext).not.toContain("Unrelated external issue");
