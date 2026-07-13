@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildTriageStopAddLabelArgv,
-  buildTriageStopCommentArgv,
   buildTriageStopRemoveLabelArgv,
   formatTriageStoppedComment,
   mapTriageVerdictToLabel,
   parseTriageStoppedVerdict,
 } from "./triage-stop.ts";
+import { githubIssueCommentMaxChars } from "../github/comments.ts";
 
 describe("triage stop handling", () => {
   test("maps verdicts to terminal labels", () => {
@@ -20,34 +20,7 @@ describe("triage stop handling", () => {
     expect(parseTriageStoppedVerdict("# Triage\n\n## Verdict\nneeds-human-decision\n")).toBe("needs-human-decision");
   });
 
-  test("formats concise non-failure comment", () => {
-    const comment = formatTriageStoppedComment({
-      issueNumber: 12,
-      triageVerdict: "blocked",
-      triageArtifactPath: ".roark/runs/issue/12/triage.md",
-      attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
-    });
-
-    expect(comment).toContain("verdict **blocked**");
-    expect(comment).toContain("clean terminal triage outcome");
-    expect(comment).toContain("did not run verification, push the branch, or create a PR");
-    expect(comment.toLowerCase()).not.toContain("failed");
-    expect(comment.toLowerCase()).not.toContain("error");
-  });
-
-  test("includes a sanitized collapsed triage excerpt when content is provided", () => {
-    const comment = formatTriageStoppedComment({
-      issueNumber: 12,
-      triageVerdict: "blocked",
-      triageArtifactContent: "# Triage\n\n## Verdict\nblocked\nAPI_KEY=secret\n",
-    });
-
-    expect(comment).toContain("<details><summary>Triage artifact excerpt</summary>");
-    expect(comment).toContain("API_KEY=[redacted]");
-    expect(comment).not.toContain("API_KEY=secret");
-  });
-
-  test("builds gh argv for labels and comments", () => {
+  test("builds gh argv for labels", () => {
     expect(buildTriageStopAddLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "blocked" })).toEqual([
       "gh",
       "issue",
@@ -68,15 +41,20 @@ describe("triage stop handling", () => {
       "--repo",
       "owner/repo",
     ]);
-    expect(buildTriageStopCommentArgv({ repo: "owner/repo", issueNumber: 12, comment: "body" })).toEqual([
-      "gh",
-      "issue",
-      "comment",
-      "12",
-      "--body",
-      "body",
-      "--repo",
-      "owner/repo",
-    ]);
+  });
+
+  test("publishes sanitized triage artifact content", () => {
+    const comment = formatTriageStoppedComment({
+      issueNumber: 12,
+      triageVerdict: "reject",
+      triageArtifactContent: `# Triage\n\nUnique terminal evidence at /Users/alice/private with TOKEN=secret.\n${"x".repeat(70_000)}`,
+    });
+
+    expect(comment).toContain("Unique terminal evidence at [local path redacted] with TOKEN=[redacted]");
+    expect(comment).not.toContain("/Users/alice/private");
+    expect(comment).not.toContain("TOKEN=secret");
+    expect(comment.indexOf("Roark stopped issue")).toBeLessThan(comment.indexOf("# Triage"));
+    expect(comment).toContain("details truncated");
+    expect(Array.from(comment).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
   });
 });

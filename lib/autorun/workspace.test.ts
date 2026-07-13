@@ -4,14 +4,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   assertWorkspacePathSafe,
+  assertPinnedPrReviewWorkspace,
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
   listWorkspaces,
   prepareCloneWorkspace,
+  preparePrReviewWorkspace,
   preparePrRevisionWorkspace,
   refreshCopyToWorktree,
   removeWorkspace,
   resolveCloneRemote,
+  resolvePrReviewCloneRemote,
   runLifecycleHook,
   runWorkspaceCommand,
   sanitizeWorkspaceSegment,
@@ -20,7 +23,7 @@ import {
   workspaceStateFile,
   type ProcessRunner,
 } from "./workspace.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
@@ -58,6 +61,26 @@ describe("managed clone workspaces", () => {
       ["git", "remote", "get-url", "upstream"],
       ["git", "ls-remote", "git@github.com:owner/repo.git", "HEAD"],
     ]);
+  });
+
+  test("resolves a PR review clone from the requested repository instead of the control checkout", async () => {
+    await noopAsync();
+    const calls: string[][] = [];
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      calls.push(args);
+      return args.join(" ") === "git ls-remote https://github.com/target/repo HEAD"
+        ? ok("abc\tHEAD\n")
+        : fail(`unexpected command: ${args.join(" ")}`);
+    };
+
+    expect(resolvePrReviewCloneRemote({
+      cwd: "/unrelated-control-checkout",
+      repo: "target/repo",
+      repositoryUrl: "https://github.com/target/repo",
+      runner,
+    })).resolves.toEqual({ remote: "origin", url: "https://github.com/target/repo" });
+    expect(calls).toEqual([["git", "ls-remote", "https://github.com/target/repo", "HEAD"]]);
   });
 
   test("existing legacy lock directory does not block workspace preparation", async () => {
@@ -196,6 +219,41 @@ describe("managed clone workspaces", () => {
     const state = JSON.parse(await readFile(path.join(workspacePath, workspaceStateFile), "utf8")) as { hook: string; stderrTail: string };
     expect(state.hook).toBe("afterCreate");
     expect(state.stderrTail).toContain("install failed");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  test("does not poison a new review workspace when the PR head changes during setup", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-race-"));
+    const workspaceRoot = path.join(root, "managed");
+    const workspacePath = workspacePathForPrRevision({ root: workspaceRoot, repo: "owner/repo", prNumber: 12 });
+    const runner: ProcessRunner = async (args) => {
+      await noopAsync();
+      if (args[0] === "git" && args[1] === "remote") return ok(`${root}/remote.git\n`);
+      if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
+      if (args[0] === "git" && args[1] === "clone") {
+        await mkdir(path.join(workspacePath, ".git"), { recursive: true });
+        return ok();
+      }
+      if (args[0] === "git" && args[1] === "fetch") return ok();
+      if (args[0] === "git" && args[1] === "cat-file" && args[3] === "old-head^{commit}") return fail("old head is unavailable");
+      if (args[0] === "git" && args[1] === "cat-file") return ok();
+      if (args[0] === "git" && args[1] === "rev-parse") return ok("new-head\n");
+      return fail(`unexpected command: ${args.join(" ")}`);
+    };
+
+    expect(preparePrReviewWorkspace({
+      controlCwd: root,
+      repo: "owner/repo",
+      prNumber: 12,
+      baseRefName: "main",
+      baseRefOid: "base-head",
+      headRefOid: "old-head",
+      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+      hooks: defaultLifecycleHooks,
+      runner,
+    })).rejects.toThrow("changed while its review workspace was prepared");
+
+    expect(Bun.file(path.join(workspacePath, workspaceStateFile)).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
 
@@ -455,6 +513,70 @@ describe("managed clone workspaces", () => {
     expect(runLifecycleHook("afterRun", { timeoutMs: 1000, afterRun: "false" }, root, ()=> Promise.resolve(fail("after failed")))).resolves.toBeUndefined();
     await rm(root, { recursive: true, force: true });
   });
+
+  test("pins a PR pull ref, repairs its origin, and compares merge-base to head without mutation", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-pinned-"));
+    const source = path.join(root, "source");
+    const remote = path.join(root, "remote.git");
+    await initGitRepo(source, ".roark\n");
+    const initial = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "checkout", "-b", "contributor/change"], { cwd: source });
+    await writeFile(path.join(source, "feature.txt"), "feature\n", "utf8");
+    await runProcessOrThrow(["git", "add", "feature.txt"], { cwd: source });
+    await runProcessOrThrow(["git", "commit", "-m", "feature"], { cwd: source });
+    const headOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "checkout", "main"], { cwd: source });
+    await writeFile(path.join(source, "base-only.txt"), "base advance\n", "utf8");
+    await runProcessOrThrow(["git", "add", "base-only.txt"], { cwd: source });
+    await runProcessOrThrow(["git", "commit", "-m", "advance base"], { cwd: source });
+    const baseOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrow(["git", "clone", "--bare", source, remote], { cwd: root });
+    await runProcessOrThrow(["git", "update-ref", "refs/pull/12/head", headOid], { cwd: remote });
+    await runProcessOrThrow(["git", "remote", "add", "origin", `file://${remote}`], { cwd: source });
+
+    const calls: string[][] = [];
+    const prepared = await preparePrReviewWorkspace({
+      controlCwd: source,
+      repo: "owner/repo",
+      repositoryUrl: `file://${remote}`,
+      prNumber: 12,
+      baseRefName: "main",
+      baseRefOid: baseOid,
+      headRefOid: headOid,
+      workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed"), clone: { ...defaultWorkspaceConfig.clone, depth: 1 } },
+      hooks: defaultLifecycleHooks,
+      runner: async (args, options) => {
+        calls.push(args);
+        return runProcess(args, options);
+      },
+    });
+
+    expect(prepared.comparison.mergeBaseOid).toBe(initial);
+    expect(prepared.comparison.changedFiles).toEqual(["feature.txt"]);
+    expect(prepared.comparison.inspectionCommand).toBe(`git diff ${initial}..${headOid} --`);
+    expect((await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
+    expect(calls.some((args) => args[0] === "git" && args[1] === "fetch" && args[2] === "--unshallow")).toBe(true);
+    expect(calls.some((args) => args[0] === "git" && ["commit", "push"].includes(args[1] ?? ""))).toBe(false);
+    await prepared.releaseLock();
+
+    await runProcessOrThrow(["git", "remote", "set-url", "origin", `file://${source}`], { cwd: prepared.path });
+    const reused = await preparePrReviewWorkspace({
+      controlCwd: source,
+      repo: "owner/repo",
+      repositoryUrl: `file://${remote}`,
+      prNumber: 12,
+      baseRefName: "main",
+      baseRefOid: baseOid,
+      headRefOid: headOid,
+      workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed") },
+      hooks: defaultLifecycleHooks,
+    });
+    expect((await runProcessOrThrow(["git", "remote", "get-url", "origin"], { cwd: reused.path })).trim()).toBe(`file://${remote}`);
+    await writeFile(path.join(reused.path, "unexpected.txt"), "mutation\n", "utf8");
+    expect(assertPinnedPrReviewWorkspace({ cwd: reused.path, headOid })).rejects.toThrow("changed during inspection");
+    await reused.releaseLock();
+    await rm(root, { recursive: true, force: true });
+  }, 15_000);
 });
 
 async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{

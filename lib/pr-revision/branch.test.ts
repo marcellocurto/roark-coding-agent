@@ -9,6 +9,8 @@ const basePr: PullRequestMetadata = {
   state: "OPEN",
   baseRefName: "main",
   headRefName: "feature/pr-12",
+  baseRefOid: "base123",
+  headRefOid: "head123",
   baseRepository: "owner/repo",
   headRepository: "owner/repo",
 };

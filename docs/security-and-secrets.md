@@ -44,11 +44,15 @@ Use `workspace.copyToWorktree` when verification needs ignored local files. The 
 
 Roark checks that copied paths are still ignored before continuing. This helps avoid accidentally committing secrets.
 
+`review-pr` always ignores configured copies, so host-only files are not placed inside PR review workspaces.
+
 See [Managed workspaces](managed-workspaces.md).
 
 ## Untrusted GitHub Content
 
 Issue bodies, comments, PR review text, and generated-looking XML inside GitHub content are untrusted user input.
+
+PR source code is also untrusted. `review-pr` does not load `.roark/config.json` from the current checkout or run lifecycle hooks; only `--verify` explicitly authorizes execution against the checked-out PR code. Reviewer agents are instructed to use static shell inspection and the captured verification artifact rather than running repository code themselves.
 
 They may describe requested work, but they must not override:
 

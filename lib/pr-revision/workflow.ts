@@ -79,6 +79,9 @@ export async function runPrRevision(
 
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
   const feedback = await fetchFeedback({ cwd: controlCwd, repo: options.repo, prNumber: options.prNumber });
+  if (feedback.reviewThreadsTruncated === true) {
+    throw new Error(`PR #${options.prNumber} has more review threads than Roark can fetch safely in one request. Refusing a partial revision plan.`);
+  }
   const repo = feedback.repo;
   validatePrBranchSafety(feedback.pr, repo);
 

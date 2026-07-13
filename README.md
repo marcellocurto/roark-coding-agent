@@ -48,16 +48,23 @@ roark do 123 --repo owner/repo
 
 For the complete setup, dry-run, autorun, inspection, and recovery path, read the [Quickstart](docs/quickstart.md).
 
-## Choose a workflow
+## Choose a command
 
-| Goal | Command | Where code changes | Publishing behavior |
-| --- | --- | --- | --- |
-| Initialize repository configuration | `roark init` | Current checkout | None |
-| Run one issue locally | `roark do 123 --repo owner/repo` | Current checkout | None |
-| Preview eligible issues | `roark auto --repo owner/repo --dry-run` | No code changes | None |
-| Claim, implement, and publish an issue | `roark auto --repo owner/repo --limit 1` | Managed clone | Opens a PR after gates pass |
-| Resume a stopped autorun attempt | `roark continue 123 --repo owner/repo` | Managed clone | Publishes after gates pass |
-| Address feedback on an existing PR | `roark revise-pr 456 --repo owner/repo` | Managed clone | Commits and pushes verified revisions |
+Running `roark` without arguments opens an interactive menu with the same task names shown below.
+
+| Command name | Command | Description |
+| --- | --- | --- |
+| Initialize Roark | `roark init` | Create the repository-local `.roark` configuration. |
+| Work on next ready issue | `roark auto --repo owner/repo` | Select and claim the next eligible issue, run the workflow in a managed workspace, and open a PR after all gates pass. |
+| Work on a specific issue | `roark auto 123 --repo owner/repo` | Claim a specific issue, run the workflow in a managed workspace, and open a PR after all gates pass. |
+| Preview ready issues | `roark auto --repo owner/repo --dry-run` | Show eligible issues without claiming them or changing code. |
+| Resume an issue workflow | `roark continue 123 --repo owner/repo` | Resume a stopped autorun attempt in its managed workspace and publish after all gates pass. |
+| Run issue workflow in current checkout | `roark do 123 --repo owner/repo` | Run the complete issue workflow locally without claiming the issue, pushing a branch, or opening a PR. |
+| Review an existing PR | `roark review-pr 456 --repo owner/repo` | Inspect the complete PR with independent correctness and maintainability reviewers without changing code. Posts or updates one review comment by default. |
+| Address PR review feedback | `roark revise-pr 456 --repo owner/repo` | Classify existing PR feedback, apply required fixes in a managed workspace, verify them, and push a revision commit when needed. |
+| View workflow status | `roark status 123 --repo owner/repo` | Show persisted status and recovery information for an issue workflow. Use `--all` to show every known issue run. |
+| Remove a managed workspace | `roark workspace remove --issue 123` | Remove an issue or PR workspace. Use `--pr 456` for a PR workspace; dirty workspaces require `--force`. |
+| Help and command reference | `roark --help` | Show every command and option available in the installed version. |
 
 ## How it works
 

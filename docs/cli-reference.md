@@ -34,12 +34,13 @@ owner/repo#123
 
 | Command | Purpose |
 | --- | --- |
-| `roark init` | Scaffold repo-local `.roark` configuration. |
-| `roark auto [issue]` | Discover and claim eligible issues, or target one issue, then run the full workflow. |
-| `roark do <issue>` | Run the full issue workflow without autorun discovery. |
-| `roark continue <issue>` | Continue a prior autorun attempt and publish if gates pass. |
-| `roark status [issue]` | Print persisted run observability status. Use `--all` for all known issues. |
-| `roark revise-pr <number>` | Revise an existing open PR from PR feedback. |
+| `roark init` | Initialize Roark in the current repository. |
+| `roark auto [issue]` | Work on the next ready issue, or a specific issue, in a managed workspace and publish after all gates pass. |
+| `roark do <issue>` | Run the complete issue workflow in the current checkout without publishing. |
+| `roark continue <issue>` | Resume a stopped issue workflow and publish after all gates pass. |
+| `roark status [issue]` | View workflow status and recovery information. Use `--all` for every known issue run. |
+| `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts or updates one review comment by default. |
+| `roark revise-pr <number>` | Address required review feedback on an existing open PR and push verified fixes when needed. |
 | `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
 | `roark create-issues <issue>` | Create approved GitHub issues from the curation plan. Dry-run unless `--yes`. |
 
@@ -101,6 +102,15 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--success-label <label>` | Label applied when a PR is opened. Defaults to `roark-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
+## PR Review Options
+
+| Option | Purpose |
+| --- | --- |
+| `--verify <cmd>` | Explicitly authorize this verification command. `review-pr` does not load repository config and never infers a command for execution. |
+| `--no-comment` | Complete the local review without publishing a PR comment. |
+
+`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes. It does not load `.roark/config.json`, run lifecycle hooks, or copy host-only workspace files. Pass `--repo` when Git origin does not identify the base repository.
+
 ## PR Revision Options
 
 | Option | Purpose |
@@ -126,6 +136,7 @@ roark do 123 --repo owner/repo
 roark auto --repo owner/repo --limit 1 --dry-run
 roark auto --repo owner/repo --limit 1
 roark continue 123 --repo owner/repo --attempt 1
+roark review-pr 456 --repo owner/repo
 roark revise-pr 456 --repo owner/repo --verify "bun run check"
 roark status --all --repo owner/repo
 roark workspace list

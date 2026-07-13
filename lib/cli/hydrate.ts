@@ -11,7 +11,7 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
-import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
+import { defaultAutorunVerifyCommand, inferVerificationCommand } from "../autorun/verification.ts";
 import {
   defaultMaxFixPasses,
   type AutoCliOptions,
@@ -19,6 +19,7 @@ import {
   type ContinueCliOptions,
   type InitCliOptions,
   type RawCliOptions,
+  type ReviewPrCliOptions,
   type RevisePrCliOptions,
   type StatusCliOptions,
 } from "./args.ts";
@@ -84,7 +85,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
     } satisfies InitCliOptions;
   }
 
-  const config = await loadRoarkConfig(workspace);
+  const config = raw.command === "review-pr" ? {} : await loadRoarkConfig(workspace);
   const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo);
   const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
   const hooks = config.hooks ?? defaultLifecycleHooks;
@@ -173,6 +174,23 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       workspace: workspaceConfig,
       hooks,
     } satisfies RevisePrCliOptions;
+  }
+
+  if (raw.command === "review-pr") {
+    return {
+      command: "review-pr",
+      prNumber: raw.prNumber,
+      cwd: workspace,
+      outDir: raw.outDir ?? ".roark/runs",
+      repo,
+      model: raw.model,
+      thinkingLevel: raw.thinkingLevel,
+      thinkingProfile: raw.thinkingProfile,
+      verifyCommand: raw.verifyCommand,
+      verificationSource: raw.verifyCommand ? "explicit" : "unresolved",
+      comment: raw.comment ?? true,
+      workspace: { ...workspaceConfig, copyToWorktree: [] },
+    } satisfies ReviewPrCliOptions;
   }
 
   if (raw.command === "status") {
@@ -426,24 +444,7 @@ async function hydrateRequiredVerifyCommand(
 
 export async function inferVerifyCommand(workspace: string, runner: ProcessRunner = runProcess): Promise<string | undefined> {
   void runner;
-  const packageJsonPath = path.join(workspace, "package.json");
-  if (existsSync(packageJsonPath)) {
-    try {
-      const parsed = JSON.parse(await readFile(packageJsonPath, "utf8")) as { scripts?: Record<string, unknown> };
-      if (typeof parsed.scripts?.["typecheck"] === "string") return "bun run typecheck";
-      if (typeof parsed.scripts?.["test"] === "string") return "bun run test";
-    } catch {
-      // Ignore malformed package.json for inference and continue to Makefile detection.
-    }
-  }
-
-  const makefilePath = path.join(workspace, "Makefile");
-  if (existsSync(makefilePath)) {
-    const makefile = await readFile(makefilePath, "utf8");
-    if (/^test\s*:/m.test(makefile)) return "make test";
-  }
-
-  return undefined;
+  return inferVerificationCommand(workspace);
 }
 
 async function promptForRepoIfInteractive(workspace: string): Promise<string | undefined> {

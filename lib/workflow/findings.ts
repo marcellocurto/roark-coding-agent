@@ -51,15 +51,6 @@ const classifications = new Set<FindingClassification>([
   "suggestion",
 ]);
 
-const requiredFields = [
-  "title",
-  "severity",
-  "confidence",
-  "evidence",
-  "currentIssueImpact",
-  "recommendedHandling",
-] as const;
-
 type FieldKey =
   | "identifier"
   | "classification"
@@ -111,15 +102,10 @@ export function parseReviewFindings(markdown: string, source: ReviewFindingSourc
   }
 
   rawEntries.forEach((entry, index) => {
-    const entryWarnings: string[] = [];
     const explicitId = clean(entry.fields.identifier);
     const sourceLocalId = explicitId || `finding-${index + 1}`;
-    if (!explicitId) entryWarnings.push("missing Identifier; generated a source-local identifier");
 
     const workflowId = allocateWorkflowId(source, sourceLocalId, idCounts);
-    if (idCounts.get(sourceLocalId) !== 1) {
-      entryWarnings.push(`duplicate Identifier '${sourceLocalId}' within ${source}; workflow id namespaced as '${workflowId}'`);
-    }
 
     const rawClassification = clean(entry.fields.classification).toLowerCase();
     const classification = normalizeClassification(rawClassification);
@@ -139,11 +125,6 @@ export function parseReviewFindings(markdown: string, source: ReviewFindingSourc
       return;
     }
 
-    for (const field of requiredFields) {
-      if (!clean(entry.fields[field])) entryWarnings.push(`missing ${displayField(field)}`);
-    }
-
-    warnings.push(...entryWarnings.map((warning) => `${source}:${sourceLocalId}: ${warning}`));
     findings.push({
       source,
       sourceLocalId,
@@ -156,7 +137,7 @@ export function parseReviewFindings(markdown: string, source: ReviewFindingSourc
       currentIssueImpact: clean(entry.fields.currentIssueImpact) || "unspecified",
       recommendedHandling: clean(entry.fields.recommendedHandling) || "unspecified",
       suggestedIssueTitle: clean(entry.fields.suggestedIssueTitle) || undefined,
-      warnings: entryWarnings,
+      warnings: [],
       rawExcerpt: excerpt(entry.raw),
     });
   });
@@ -196,6 +177,10 @@ function parseRawEntries(ledger: string): RawEntry[] {
   let activeField: FieldKey | undefined;
 
   for (const line of ledger.split(/\r?\n/)) {
+    if (/^\s*#{3,}\s+/.test(line)) {
+      activeField = undefined;
+      continue;
+    }
     const parsed = parseFieldLine(line);
     if (parsed) {
       if (parsed.key === "identifier" && current && hasAnyField(current)) {
@@ -224,22 +209,68 @@ function parseRawEntries(ledger: string): RawEntry[] {
 }
 
 function parseFieldLine(line: string): { key: FieldKey; value: string } | undefined {
-  const match = /^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*)?\s*(Identifier|Classification|Title|Severity|Confidence|Evidence|Current[-\s]+issue impact|Recommended handling|Suggested issue title(?:\s*\(optional\))?)(?:\*\*)?\s*:\s*(.*)$/i.exec(line);
-  if (!match) return undefined;
+  const content = line.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "");
+  const tableCells = content.startsWith("|") && content.endsWith("|")
+    ? content.slice(1, -1).split("|").map((cell) => cell.trim())
+    : [];
+  const pair: [string, string] | undefined = tableCells.length >= 2
+    ? [tableCells[0] ?? "", tableCells.slice(1).join("|")]
+    : splitFieldPair(content);
+  if (!pair) return undefined;
 
-  const label = match[1];
-  const value = match[2] ?? "";
-  if (!label) return undefined;
-
-  return { key: labelToFieldKey(label), value: value.trim() };
+  const key = labelToFieldKey(pair[0]);
+  if (!key) return undefined;
+  return { key, value: stripMarkdownDecoration(pair[1]) };
 }
 
-function labelToFieldKey(label: string): FieldKey {
-  const normalized = label.toLowerCase().replace(/\s*\(optional\)\s*/g, "").replace(/[\s-]+/g, " ").trim();
-  if (normalized === "current issue impact") return "currentIssueImpact";
-  if (normalized === "recommended handling") return "recommendedHandling";
-  if (normalized === "suggested issue title") return "suggestedIssueTitle";
-  return normalized as FieldKey;
+function splitFieldPair(value: string): [string, string] | undefined {
+  const colon = value.indexOf(":");
+  if (colon > 0) return [value.slice(0, colon), value.slice(colon + 1)];
+  const separator = /\s+[—–-]\s+/.exec(value);
+  if (separator?.index !== undefined) {
+    return [value.slice(0, separator.index), value.slice(separator.index + separator[0].length)];
+  }
+  return undefined;
+}
+
+function labelToFieldKey(label: string): FieldKey | undefined {
+  const normalized = stripMarkdownDecoration(label)
+    .toLowerCase()
+    .replace(/\boptional\b/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  const aliases: Record<string, FieldKey> = {
+    identifier: "identifier",
+    id: "identifier",
+    "finding id": "identifier",
+    classification: "classification",
+    class: "classification",
+    type: "classification",
+    title: "title",
+    summary: "title",
+    severity: "severity",
+    priority: "severity",
+    confidence: "confidence",
+    certainty: "confidence",
+    evidence: "evidence",
+    proof: "evidence",
+    location: "evidence",
+    "current issue impact": "currentIssueImpact",
+    "current pr impact": "currentIssueImpact",
+    "current impact": "currentIssueImpact",
+    impact: "currentIssueImpact",
+    "recommended handling": "recommendedHandling",
+    recommendation: "recommendedHandling",
+    "recommended fix": "recommendedHandling",
+    remediation: "recommendedHandling",
+    "suggested issue title": "suggestedIssueTitle",
+    "follow up issue title": "suggestedIssueTitle",
+  };
+  return aliases[normalized];
+}
+
+function stripMarkdownDecoration(value: string): string {
+  return value.trim().replace(/^[\s*_`]+|[\s*_`]+$/g, "").trim();
 }
 
 function hasAnyField(entry: RawEntry): boolean {
@@ -264,10 +295,4 @@ function clean(value: string | undefined): string {
 function excerpt(value: string): string {
   const trimmed = value.trim();
   return trimmed.length > 500 ? `${trimmed.slice(0, 497)}...` : trimmed;
-}
-
-function displayField(field: typeof requiredFields[number]): string {
-  if (field === "currentIssueImpact") return "Current-issue impact";
-  if (field === "recommendedHandling") return "Recommended handling";
-  return field.charAt(0).toUpperCase() + field.slice(1);
 }

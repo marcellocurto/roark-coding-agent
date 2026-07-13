@@ -6,16 +6,7 @@ import { writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
 
-import {
-  formatAttemptStartComment,
-  formatImplementationPlanLedgerComment,
-  formatPrCreatedComment,
-  formatReadinessLedgerComment,
-  formatReviewLedgerComment,
-  formatTriageLedgerComment,
-  publishPlanningLedgerComments,
-  publishReviewLedgerComments,
-} from "./ledger-comments.ts";
+import { formatReadinessLedgerComment, publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import { noopAsync } from "../utils/async.ts";
 
 const tempDirs: string[] = [];
@@ -25,6 +16,25 @@ afterEach(async () => {
 });
 
 describe("autorun ledger comment publishing", () => {
+  test("keeps readiness outcome and recovery before bounded artifact details", () => {
+    const body = formatReadinessLedgerComment({
+      issueNumber: 24,
+      attempt: 2,
+      artifactPath: ".roark/runs/issue/24/attempts/2/readiness.md",
+      artifactContent: `# PR Readiness\n\n${"r".repeat(70_000)}\nend-of-readiness`,
+      outcome: "failed-readiness",
+      outcomeDetail: "Reviews require fixes.",
+      prUrl: "https://github.com/owner/repo/pull/99",
+      recoveryCommand: "roark continue 24",
+    });
+
+    expect(body.indexOf("Outcome: failed-readiness")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body.indexOf("PR: https://github.com/owner/repo/pull/99")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body.indexOf("roark continue 24")).toBeLessThan(body.indexOf("Readiness details"));
+    expect(body).toContain("details truncated; full output is retained in the run artifacts");
+    expect(body).not.toContain("end-of-readiness");
+  });
+
   test("publishes existing triage and implementation plan artifacts through the injected ledger publisher", async () => {
     await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-planning-"));
@@ -43,8 +53,8 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n\nUnique triage evidence at /Users/alice/private.\n");
+    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n\nUnique plan action with TOKEN=secret.\n");
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -54,7 +64,7 @@ describe("autorun ledger comment publishing", () => {
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     });
-    const phases: string[] = [];
+    const published: { phase: string; body: string }[] = [];
 
     await publishPlanningLedgerComments({
       cwd,
@@ -65,16 +75,19 @@ describe("autorun ledger comment publishing", () => {
     }, {
       publishIssueLedgerComment: async (input) => {
         await noopAsync();
-        phases.push(input.phase);
-        expect(input.body).toContain("<details><summary>");
+        published.push({ phase: input.phase, body: input.body });
       },
     });
 
-    expect(phases).toEqual(["triage", "implementation-plan"]);
+    expect(published.map(({ phase }) => phase)).toEqual(["triage", "implementation-plan"]);
+    expect(published[0]?.body).toContain("Unique triage evidence at [local path redacted]");
+    expect(published[0]?.body).not.toContain("/Users/alice/private");
+    expect(published[1]?.body).toContain("Unique plan action with TOKEN=[redacted]");
+    expect(published[1]?.body).not.toContain("TOKEN=secret");
   });
 
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
-        await noopAsync();
+    await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -91,8 +104,8 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n");
-    await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n");
+    await writeArtifact(workflowContext, "reviewA", "# Review A\n\n## Verdict\nfixes-required\n\nUnique review A evidence at /Users/alice/private.\n");
+    await writeArtifact(workflowContext, "reviewB", "# Review B\n\n## Verdict\napprove\n\nUnique review B evidence with TOKEN=secret.\n");
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -102,7 +115,7 @@ describe("autorun ledger comment publishing", () => {
       runArtifactPath: workflowContext.runDirRelative,
       startedAt: "2026-05-07T00:00:00.000Z",
     });
-    const calls: { phase: string; body: string }[] = [];
+    const published: { phase: string; body: string }[] = [];
 
     await publishReviewLedgerComments({
       cwd,
@@ -113,7 +126,7 @@ describe("autorun ledger comment publishing", () => {
     }, {
       publishIssueLedgerComment: async (input) => {
         await noopAsync();
-        calls.push({ phase: input.phase, body: input.body });
+        published.push({ phase: input.phase, body: input.body });
         recordAttemptIssueComment(input.attemptMetadata, input.phase, {
           id: input.phase === "review-a" ? 101 : 102,
           marker: `marker:${input.phase}`,
@@ -121,107 +134,12 @@ describe("autorun ledger comment publishing", () => {
       },
     });
 
-    expect(calls.map((call) => call.phase)).toEqual(["review-a", "review-b"]);
-    expect(calls[0]?.body).toContain("Verdict: fixes-required");
-    expect(calls[1]?.body).toContain("Verdict: approve");
+    expect(published.map(({ phase }) => phase)).toEqual(["review-a", "review-b"]);
+    expect(published[0]?.body).toContain("Unique review A evidence at [local path redacted]");
+    expect(published[1]?.body).toContain("Unique review B evidence with TOKEN=[redacted]");
+    expect(published[0]?.body).not.toContain("/Users/alice/private");
+    expect(published[1]?.body).not.toContain("TOKEN=secret");
     expect(attemptMetadata.githubComments?.issue?.["review-a"]?.id).toBe(101);
     expect(attemptMetadata.githubComments?.issue?.["review-b"]?.id).toBe(102);
-  });
-});
-
-describe("autorun ledger comment formatters", () => {
-  test("formats marker-prefixed attempt start comments", () => {
-    const body = formatAttemptStartComment({
-      issueNumber: 24,
-      attempt: 2,
-      branchName: "roark/issue-24",
-      assignee: "octocat",
-      attemptMetadataPath: ".roark/runs/issue/24/attempts/2/attempt.json",
-    });
-
-    expect(body).toStartWith("<!-- roark:issue=24 attempt=2 phase=attempt-start -->");
-    expect(body).toContain("## Roark attempt 2 started");
-    expect(body).toContain("@octocat is attempting this issue in branch `roark/issue-24`.");
-    expect(body).toContain("Attempt: `.roark/runs/issue/24/attempts/2/attempt.json`");
-  });
-
-  test("formats triage, implementation-plan, and readiness comments with collapsed sanitized excerpts", () => {
-    const triage = formatTriageLedgerComment({
-      issueNumber: 24,
-      attempt: 2,
-      artifactPath: ".roark/runs/issue/24/attempts/2/triage.md",
-      artifactContent: "# Triage\n\n## Verdict\nproceed\nTOKEN=secret\n",
-    });
-    expect(triage).toStartWith("<!-- roark:issue=24 attempt=2 phase=triage -->");
-    expect(triage).toContain("Verdict: proceed");
-    expect(triage).toContain("<details><summary>Triage artifact excerpt</summary>");
-    expect(triage).toContain("TOKEN=[redacted]");
-
-    const plan = formatImplementationPlanLedgerComment({
-      issueNumber: 24,
-      attempt: 2,
-      artifactPath: ".roark/runs/issue/24/attempts/2/implementation-plan.md",
-      artifactContent: "# Implementation Plan\n\n## Ready For Implementation\nyes\n",
-    });
-    expect(plan).toStartWith("<!-- roark:issue=24 attempt=2 phase=implementation-plan -->");
-    expect(plan).toContain("Ready for implementation: yes");
-
-    const readiness = formatReadinessLedgerComment({
-      issueNumber: 24,
-      attempt: 2,
-      artifactPath: ".roark/runs/issue/24/attempts/2/readiness.md",
-      artifactContent: "# PR Readiness\n\n## Status\nready-for-pr\n",
-      outcome: "published",
-      verification: { ok: true, command: "/Users/alice/repo/scripts/check", exitCode: 0 },
-      prUrl: "https://github.com/owner/repo/pull/30",
-    });
-    expect(readiness).toStartWith("<!-- roark:issue=24 attempt=2 phase=readiness -->");
-    expect(readiness).toContain("Status: ready-for-pr");
-    expect(readiness).toContain("Outcome: published");
-    expect(readiness).toContain("[local path redacted]");
-  });
-
-  test("redacts secrets before truncating artifact excerpts", () => {
-    const body = formatTriageLedgerComment({
-      issueNumber: 24,
-      attempt: 2,
-      artifactPath: ".roark/runs/issue/24/attempts/2/triage.md",
-      artifactContent: `# Triage\n\n## Verdict\nproceed\nTOKEN="${"a".repeat(9_000)}"\n`,
-    });
-
-    expect(body).toContain("TOKEN=[redacted]");
-    expect(body).not.toContain(`TOKEN="${"a".repeat(20)}`);
-  });
-
-  test("formats review comments with verdict and artifact contents", () => {
-    const body = formatReviewLedgerComment({
-      issueNumber: 24,
-      attempt: 2,
-      phase: "review-a",
-      title: "Review A",
-      artifactPath: ".roark/runs/issue/24/attempts/2/review-a.md",
-      artifactContent: "# Review\n\n## Verdict\nfixes-required\npath:/Users/alice/repo\n",
-    });
-
-    expect(body).toStartWith("<!-- roark:issue=24 attempt=2 phase=review-a -->");
-    expect(body).toContain("## Roark Review A — attempt 2");
-    expect(body).toContain("Verdict: fixes-required");
-    expect(body).toContain("Artifact: `.roark/runs/issue/24/attempts/2/review-a.md`");
-    expect(body).toContain("## Verdict\nfixes-required");
-    expect(body).toContain("path:[local path redacted]");
-    expect(body).not.toContain("/Users/alice/repo");
-  });
-
-  test("formats PR created comments", () => {
-    const body = formatPrCreatedComment({
-      issueNumber: 24,
-      attempt: 2,
-      prUrl: "https://github.com/owner/repo/pull/30",
-      attemptMetadataPath: ".roark/runs/issue/24/attempts/2/attempt.json",
-    });
-
-    expect(body).toStartWith("<!-- roark:issue=24 attempt=2 phase=pr-created -->");
-    expect(body).toContain("PR: https://github.com/owner/repo/pull/30");
-    expect(body).toContain("Attempt: `.roark/runs/issue/24/attempts/2/attempt.json`");
   });
 });

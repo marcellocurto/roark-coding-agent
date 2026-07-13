@@ -19,14 +19,15 @@ For the full first-run path, read [Quickstart](quickstart.md).
 
 - [Quickstart](quickstart.md) - install, initialize a target repository, run one issue, inspect results, and recover.
 - [Concepts](concepts.md) - control checkout, managed workspace, attempt, readiness gate, verification gate, and artifacts.
-- [Usage](usage.md) - choose between `do`, `auto`, `continue`, `revise-pr`, workspace commands, and issue curation.
+- [Usage](usage.md) - choose between `do`, `auto`, `continue`, `review-pr`, `revise-pr`, workspace commands, and issue curation.
 - [Glossary](glossary.md) - short definitions for common Roark terms.
 
 ## Workflows
 
 - [Autorun](autorun.md) - label-gated one-shot automation and PR publishing.
 - [Recovery](recovery.md) - inspect and continue stopped or failed attempts.
-- [PR revisions](pr-revisions.md) - respond to feedback on an existing pull request.
+- [PR reviews](pr-reviews.md) - inspect an existing pull request without changing it.
+- [PR revisions](pr-revisions.md) - respond to existing feedback on a pull request.
 - [Issue curation](issue-curation.md) - turn reviewer findings into approved follow-up GitHub issues.
 - [Verification](verification.md) - readiness and verification gates.
 

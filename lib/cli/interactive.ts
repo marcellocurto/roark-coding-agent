@@ -10,14 +10,20 @@ interface InteractivePrompt {
 type TtyInput = NodeJS.ReadStream & { isTTY?: boolean };
 type WritableOutput = NodeJS.WriteStream | { write(text: string): unknown };
 
-const menu = `1. Auto discover
-2. Auto specific issue
-3. Continue
-4. Do full workflow
-5. Revise PR
-6. Status
-7. Workspace remove
-8. Help
+const menu = `Issue workflows
+1. Work on next ready issue
+2. Work on a specific issue
+3. Resume an issue workflow
+4. Run issue workflow in current checkout
+
+Pull requests
+5. Review an existing PR
+6. Address PR review feedback
+
+Management
+7. View workflow status
+8. Remove a managed workspace
+9. Help and command reference
 `;
 
 export async function resolveInteractiveArgv(options: {
@@ -58,24 +64,25 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
     const choice = (await prompt.question("Select an option: ")).trim();
 
     if (choice === "1") {
-      if (await confirm(prompt, "Run auto discover?")) return ["auto"];
+      if (await confirm(prompt, "Work on the next ready issue?")) return ["auto"];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
 
     if (choice === "2") {
       const issue = await promptRequiredIssue(prompt);
-      if (await confirm(prompt, `Run auto for issue ${issue}?`)) return ["auto", issue];
+      if (await confirm(prompt, `Work on issue ${issue}?`)) return ["auto", issue];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
 
     if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
     if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
-    if (choice === "5") return ["revise-pr", await promptRequiredPrNumber(prompt)];
-    if (choice === "6") return ["status", await promptRequiredIssue(prompt)];
+    if (choice === "5") return ["review-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "6") return ["revise-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "7") return ["status", await promptRequiredIssue(prompt)];
 
-    if (choice === "7") {
+    if (choice === "8") {
       const targetKind = await promptWorkspaceRemoveTargetKind(prompt);
       const flag = targetKind === "pr" ? "--pr" : "--issue";
       const number = targetKind === "pr" ? await promptRequiredPrNumber(prompt) : await promptRequiredIssue(prompt);
@@ -83,9 +90,9 @@ export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promi
       return force ? ["workspace", "remove", flag, number, "--force"] : ["workspace", "remove", flag, number];
     }
 
-    if (choice === "8") return ["--help"];
+    if (choice === "9") return ["--help"];
 
-    prompt.write?.("Invalid choice. Please choose 1-8.\n");
+    prompt.write?.("Invalid choice. Please choose 1-9.\n");
   }
 }
 

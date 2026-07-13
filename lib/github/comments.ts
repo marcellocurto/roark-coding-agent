@@ -1,5 +1,7 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 
+export const githubIssueCommentMaxChars = 65_536;
+
 export type RoarkCommentPhase = string;
 
 export interface RoarkMarkerInput {
@@ -19,6 +21,7 @@ interface GitHubIssueComment {
   body?: string | undefined;
   html_url?: string | undefined;
   url?: string | undefined  ;
+  authorLogin?: string | undefined;
 }
 
 export interface IssueCommentOptions {
@@ -41,6 +44,31 @@ export function ensureCommentStartsWithMarker(body: string, marker: string): str
   return body.startsWith(marker) ? body : `${marker}\n${body}`;
 }
 
+export function formatArtifactDetails(lines: readonly string[]): string {
+  return [
+    "<details><summary>Artifacts</summary>",
+    "",
+    ...lines,
+    "</details>",
+  ].join("\n");
+}
+
+export function formatBoundedMarkdownDetails(summary: string, markdown: string, maxChars = 10_000): string {
+  const bounded = markdown.length <= maxChars
+    ? markdown
+    : `${markdown.slice(0, maxChars)}\n\n... (details truncated; full output is retained in the run artifacts) ...`;
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(bounded) + 1));
+  return [
+    `<details><summary>${summary}</summary>`,
+    "",
+    fence,
+    bounded.trimEnd(),
+    fence,
+    "",
+    "</details>",
+  ].join("\n");
+}
+
 export function buildListIssueCommentsArgv(options: { repo: string; issueNumber: number | string }): string[] {
   return ["gh", "api", `repos/${options.repo}/issues/${options.issueNumber}/comments`, "--paginate", "--slurp"];
 }
@@ -53,7 +81,7 @@ export function buildPostIssueCommentArgv(options: { repo: string; issueNumber: 
     "--method",
     "POST",
     "--field",
-    `body=${options.body}`,
+    `body=${truncateGitHubIssueComment(options.body)}`,
   ];
 }
 
@@ -65,12 +93,27 @@ export function buildUpdateIssueCommentArgv(options: { repo: string; commentId: 
     "--method",
     "PATCH",
     "--field",
-    `body=${options.body}`,
+    `body=${truncateGitHubIssueComment(options.body)}`,
   ];
+}
+
+export function truncateGitHubIssueComment(body: string): string {
+  let characters = 0;
+  let end = 0;
+  for (const character of body) {
+    if (characters === githubIssueCommentMaxChars) return body.slice(0, end);
+    characters += 1;
+    end += character.length;
+  }
+  return body;
 }
 
 export function buildCurrentRepoArgv(): string[] {
   return ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"];
+}
+
+export function buildCurrentCommentAuthorArgv(): string[] {
+  return ["gh", "api", "user", "--jq", ".login"];
 }
 
 export function parseGitHubCommentRef(raw: string, marker: string): GitHubCommentRef {
@@ -85,8 +128,11 @@ export function parseIssueComments(raw: string): GitHubIssueComment[] {
   return flattenComments(parsed);
 }
 
-export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker: string): GitHubIssueComment | undefined {
-  return comments.find((comment) => comment.body?.includes(marker) === true && typeof comment.id === "number");
+export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker: string, authorLogin?: string): GitHubIssueComment | undefined {
+  return comments.find((comment) =>
+    comment.body?.includes(marker) === true &&
+    typeof comment.id === "number" &&
+    (authorLogin === undefined || comment.authorLogin === authorLogin));
 }
 
 export async function postIssueComment(options: IssueCommentOptions): Promise<GitHubCommentRef> {
@@ -131,16 +177,14 @@ export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMa
     buildListIssueCommentsArgv({ repo, issueNumber: options.issueNumber }),
     { cwd: options.cwd, label: "gh api issue comments list" },
   );
-  const existing = findIssueCommentByMarker(parseIssueComments(commentsRaw), options.marker);
+  const currentAuthor = (await runProcessOrThrow(buildCurrentCommentAuthorArgv(), { cwd: options.cwd, label: "gh api current comment author" })).trim();
+  if (!currentAuthor) throw new Error("Could not resolve the authenticated GitHub comment author.");
+  const existing = findIssueCommentByMarker(parseIssueComments(commentsRaw), options.marker, currentAuthor);
   if (existing?.id !== undefined) {
     return await updateIssueComment({ cwd: options.cwd, repo, commentId: existing.id, body, marker: options.marker });
   }
 
-  const stdout = await runProcessOrThrow(
-    buildPostIssueCommentArgv({ repo, issueNumber: options.issueNumber, body }),
-    { cwd: options.cwd, label: "gh api issue comment create" },
-  );
-  return parseGitHubCommentRef(stdout, options.marker);
+  return await postIssueComment({ cwd: options.cwd, repo, issueNumber: options.issueNumber, body });
 }
 
 async function resolveCommentRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
@@ -162,6 +206,7 @@ function normalizeComment(value: unknown): GitHubIssueComment {
     body: typeof value["body"] === "string" ? value["body"] : undefined,
     html_url: typeof value["html_url"] === "string" ? value["html_url"] : undefined,
     url: typeof value["url"] === "string" ? value["url"] : undefined,
+    authorLogin: isRecord(value["user"]) && typeof value["user"]["login"] === "string" ? value["user"]["login"] : undefined,
   };
 }
 
@@ -173,4 +218,18 @@ function flattenComments(value: unknown): GitHubIssueComment[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const character of value) {
+    if (character === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
 }

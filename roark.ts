@@ -7,6 +7,7 @@ import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
 import { resolveInteractiveArgv } from "./lib/cli/interactive.ts";
 import { runPrRevision } from "./lib/pr-revision/workflow.ts";
+import { runPrReview } from "./lib/pr-review/workflow.ts";
 import { formatDoLocalModeStartMessage, printDoLocalModeReadyMessageIfReady } from "./lib/cli/local-mode.ts";
 import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
@@ -50,6 +51,12 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   if (parsed.command === "revise-pr") {
     const result = await runPrRevision(parsed);
     console.log(`\nDone. Revision outcome: ${result.outcome}. Artifacts: ${result.context.revisionDirRelative}`);
+    return;
+  }
+
+  if (parsed.command === "review-pr") {
+    const result = await runPrReview(parsed);
+    console.log(`\nDone. PR review outcome: ${result.outcome}. Artifacts: ${result.context.reviewDirRelative}`);
     return;
   }
 

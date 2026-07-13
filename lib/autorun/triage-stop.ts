@@ -1,8 +1,8 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { postOrUpdateIssueCommentByMarker, type GitHubCommentRef } from "../github/comments.ts";
+import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
-import { sanitizePublicMarkdown, truncatePublicMarkdown } from "./public-output.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 
 export type TriageStoppedVerdict = string;
 
@@ -38,23 +38,22 @@ export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked
 
 export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInput): string {
   const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
-  const lines = [
+  const lines: string[] = [];
+  lines.push(
     `Roark stopped issue ${issueDisplay} during triage with verdict **${input.triageVerdict}**.`,
     "",
     "This is a clean terminal triage outcome, so Roark did not run verification, push the branch, or create a PR.",
-  ];
+  );
 
-  if (input.triageArtifactPath !== undefined || input.attemptMetadataPath !== undefined) {
-    lines.push("");
-    if (input.triageArtifactPath) lines.push(`Triage artifact: \`${input.triageArtifactPath}\``);
-    if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  }
-
+  const artifacts: string[] = [];
+  if (input.triageArtifactPath) artifacts.push(`Triage artifact: \`${input.triageArtifactPath}\``);
+  if (input.attemptMetadataPath) artifacts.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  if (artifacts.length > 0) lines.push("", formatArtifactDetails(artifacts));
   if (input.triageArtifactContent) {
-    lines.push("", "<details><summary>Triage artifact excerpt</summary>", "", formatFencedBlock(truncatePublicMarkdown(sanitizePublicMarkdown(input.triageArtifactContent), 8_000), "markdown"), "</details>");
+    lines.push("", formatBoundedMarkdownDetails("Triage artifact excerpt", sanitizePublicMarkdown(input.triageArtifactContent)));
   }
 
-  return `${lines.join("\n")}\n`;
+  return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
 }
 
 export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {
@@ -65,11 +64,6 @@ export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined
 export function buildTriageStopRemoveLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
-}
-
-export function buildTriageStopCommentArgv(options: { repo?: string | undefined; issueNumber: number; comment: string }): string[] {
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "comment", String(options.issueNumber), "--body", options.comment, ...repoArgs];
 }
 
 export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions): Promise<GitHubCommentRef | undefined> {
@@ -107,33 +101,11 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
         existingCommentId: options.existingCommentId,
       });
     }
-    await runProcessOrThrow(
-      buildTriageStopCommentArgv({ repo: options.repo, issueNumber: options.issueNumber, comment }),
-      { cwd: options.cwd, label: "gh issue comment (triage stop)" },
-    );
+    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment });
   } catch (error) {
     console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
   }
   return undefined;
-}
-
-function formatFencedBlock(value: string, language: string): string {
-  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
-  return `${fence}${language}\n${value}\n${fence}`;
-}
-
-function longestBacktickRun(value: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const char of value) {
-    if (char === "`") {
-      current += 1;
-      longest = Math.max(longest, current);
-    } else {
-      current = 0;
-    }
-  }
-  return longest;
 }
 
 function uniqueLabels(labels: string[]): string[] {

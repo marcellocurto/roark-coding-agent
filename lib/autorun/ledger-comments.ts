@@ -1,13 +1,9 @@
 import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { parseReadyForImplementationValue, parseVerdict } from "../workflow/verdicts.ts";
-import { buildRoarkMarker, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
-import { sanitizePublicMarkdown, truncatePublicMarkdown } from "./public-output.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-
-const reviewExcerptMaxChars = 24_000;
-const artifactExcerptMaxChars = 8_000;
 
 export type LedgerCommentPhase = string;
 
@@ -20,7 +16,6 @@ export interface LedgerCommentArtifactInput {
 }
 
 export interface ReadinessLedgerCommentInput extends LedgerCommentArtifactInput {
-  status?: string | undefined;
   outcome?: string | undefined;
   outcomeDetail?: string | null | undefined;
   verification?: { ok: boolean; command: string; exitCode: number } | undefined;
@@ -43,7 +38,7 @@ export function formatAttemptStartComment(input: {
     "",
     `${actor} is attempting this issue in branch \`${input.branchName}\`.`,
   ];
-  if (input.attemptMetadataPath) lines.push("", `Attempt: \`${input.attemptMetadataPath}\``);
+  if (input.attemptMetadataPath) lines.push("", formatArtifactDetails([`Attempt: \`${input.attemptMetadataPath}\``]));
   return `${lines.join("\n")}\n`;
 }
 
@@ -143,57 +138,55 @@ export async function publishIssueLedgerComment(input: {
 
 export function formatTriageLedgerComment(input: LedgerCommentArtifactInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "triage" });
-  const verdict = parseVerdict(input.artifactContent) ?? "unknown";
   const lines = [
     marker,
-    `## Roark triage — attempt ${input.attempt}`,
     "",
-    `Verdict: ${verdict}`,
+    sanitizePublicMarkdown(input.artifactContent).trimEnd(),
     "",
-    `Artifact: \`${input.artifactPath}\``,
+    formatArtifactDetails([
+      `Triage artifact: \`${input.artifactPath}\``,
+      ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
+    ]),
   ];
-  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  lines.push("", formatDetails("Triage artifact excerpt", input.artifactContent));
   return `${lines.join("\n")}\n`;
 }
 
 export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifactInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "implementation-plan" });
-  const ready = parseReadyForImplementationValue(input.artifactContent) ?? "unknown";
+  const content = sanitizePublicMarkdown(input.artifactContent);
   const lines = [
     marker,
-    `## Roark implementation plan — attempt ${input.attempt}`,
     "",
-    `Ready for implementation: ${ready}`,
+    content.trimEnd(),
     "",
-    `Artifact: \`${input.artifactPath}\``,
+    formatArtifactDetails([
+      `Implementation plan: \`${input.artifactPath}\``,
+      ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
+    ]),
   ];
-  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  lines.push("", formatDetails("Implementation plan excerpt", input.artifactContent));
   return `${lines.join("\n")}\n`;
 }
 
 export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "readiness" });
-  const status = input.status ?? parseVerdict(input.artifactContent) ?? "unknown";
-  const lines = [
-    marker,
-    `## Roark readiness — attempt ${input.attempt}`,
-    "",
-    `Status: ${status}`,
-  ];
-  if (input.outcome) lines.push(`Outcome: ${input.outcome}`);
-  if (input.outcomeDetail) lines.push(`Detail: ${sanitizePublicMarkdown(input.outcomeDetail)}`);
+  const lines = [marker];
+  const outcome: string[] = [];
+  if (input.outcome) outcome.push(`Outcome: ${input.outcome}`);
+  if (input.outcomeDetail) outcome.push(`Detail: ${sanitizePublicMarkdown(input.outcomeDetail)}`);
   if (input.verification) {
-    lines.push(`Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`);
+    outcome.push(`Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`);
   }
-  if (input.prUrl) lines.push(`PR: ${input.prUrl}`);
-  lines.push("", `Artifact: \`${input.artifactPath}\``);
-  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  if (input.prUrl) outcome.push(`PR: ${input.prUrl}`);
+  if (outcome.length > 0) lines.push("", "## Run outcome", "", ...outcome);
   if (input.recoveryCommand) {
-    lines.push("", "Recovery:", formatFencedBlock(sanitizePublicMarkdown(input.recoveryCommand), "bash"));
+    lines.push("", "## Recovery", "", formatFencedBlock(sanitizePublicMarkdown(input.recoveryCommand), "bash"));
   }
-  lines.push("", formatDetails("Readiness artifact excerpt", input.artifactContent));
+  lines.push("", formatArtifactDetails([
+    `Readiness artifact: \`${input.artifactPath}\``,
+    ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
+  ]));
+  const readiness = sanitizePublicMarkdown(input.artifactContent).trimEnd();
+  if (readiness) lines.push("", formatBoundedMarkdownDetails("Readiness details", readiness));
   return `${lines.join("\n")}\n`;
 }
 
@@ -207,18 +200,13 @@ export function formatReviewLedgerComment(input: {
   artifactContent: string;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: input.markerPhase ?? input.phase });
-  const verdict = parseVerdict(input.artifactContent) ?? "unknown";
-  const excerpt = truncatePublicMarkdown(sanitizePublicMarkdown(input.artifactContent), reviewExcerptMaxChars);
+  const content = sanitizePublicMarkdown(input.artifactContent);
   return [
     marker,
-    `## Roark ${input.title} — attempt ${input.attempt}`,
     "",
-    `Verdict: ${verdict}`,
+    content.trimEnd(),
     "",
-    `Artifact: \`${input.artifactPath}\``,
-    "",
-    "## Artifact contents",
-    formatFencedBlock(excerpt, "markdown"),
+    formatArtifactDetails([`${input.title}: \`${input.artifactPath}\``]),
   ].join("\n") + "\n";
 }
 
@@ -235,7 +223,7 @@ export function formatPrCreatedComment(input: {
     "",
     `PR: ${input.prUrl}`,
   ];
-  if (input.attemptMetadataPath) lines.push(`Attempt: \`${input.attemptMetadataPath}\``);
+  if (input.attemptMetadataPath) lines.push("", formatArtifactDetails([`Attempt: \`${input.attemptMetadataPath}\``]));
   return `${lines.join("\n")}\n`;
 }
 
@@ -296,16 +284,6 @@ async function publishReviewLedgerComment(input: {
     phase: input.phase,
     body,
   });
-}
-
-function formatDetails(summary: string, content: string): string {
-  const excerpt = truncatePublicMarkdown(sanitizePublicMarkdown(content), artifactExcerptMaxChars);
-  return [
-    `<details><summary>${summary}</summary>`,
-    "",
-    formatFencedBlock(excerpt, "markdown"),
-    "</details>",
-  ].join("\n");
 }
 
 function formatFencedBlock(value: string, language: string): string {

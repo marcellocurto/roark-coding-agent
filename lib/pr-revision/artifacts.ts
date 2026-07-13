@@ -163,6 +163,7 @@ export function formatPrFeedbackMarkdown(feedback: PullRequestFeedback): string 
   lines.push(`- Base: ${feedback.pr.baseRefName}`);
   lines.push(`- Head: ${feedback.pr.headRefName}`);
   if (feedback.pr.url) lines.push(`- URL: ${feedback.pr.url}`);
+  if (feedback.reviewThreadsTruncated === true) lines.push(`- Feedback completeness: incomplete; additional review threads exist on GitHub`);
   lines.push("");
   lines.push(`## Review Threads`);
   if (feedback.reviewThreads.length === 0) lines.push("None.");

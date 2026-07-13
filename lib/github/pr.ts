@@ -36,9 +36,22 @@ export interface PullRequestMetadata {
   isDraft?: boolean | undefined;
   baseRefName: string;
   headRefName: string;
+  baseRefOid: string;
+  headRefOid: string;
   baseRepository?: string | undefined;
+  baseRepositoryUrl?: string | undefined;
   headRepository?: string | undefined;
   author?: string | undefined;
+}
+
+export interface PullRequestClosingIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  url?: string | undefined;
+  repository?: string | undefined;
+  comments?: PullRequestComment[] | undefined;
 }
 
 export interface PullRequestFeedback {
@@ -48,6 +61,8 @@ export interface PullRequestFeedback {
   reviewThreads: PullRequestReviewThread[];
   plannerComments: PullRequestComment[];
   excludedRoarkSummaryCommentIds: (string | number)[];
+  closingIssues?: PullRequestClosingIssue[] | undefined;
+  reviewThreadsTruncated?: boolean | undefined;
   fetchedAt: string;
 }
 
@@ -63,6 +78,11 @@ export interface PullRequestGraphQLResult {
 }
 
 export const roarkPrRevisionSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+revision=\d+\s+phase=revision-summary\s*-->/;
+export const roarkPrReviewSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+phase=pr-review\s*-->/;
+
+export function isRoarkGeneratedPrSummaryComment(body: string): boolean {
+  return roarkPrRevisionSummaryMarkerPattern.test(body) || roarkPrReviewSummaryMarkerPattern.test(body);
+}
 
 export function buildPullRequestFeedbackGraphqlArgv(input: { repo: string; prNumber: number }): string[] {
   const [owner, name] = splitRepo(input.repo);
@@ -87,7 +107,18 @@ export async function fetchPullRequestFeedback(options: { cwd: string; repo?: st
     cwd: options.cwd,
     label: "gh api graphql pull request feedback",
   });
-  return parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
+  const feedback = parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
+  const closingIssues = await Promise.all((feedback.closingIssues ?? []).map(async (issue) => {
+    if (issue.repository?.toLowerCase() !== repo.toLowerCase()) return issue;
+    const raw = await runProcessOrThrow([
+      "gh", "api", `repos/${repo}/issues/${issue.number}/comments`, "--paginate", "--slurp",
+    ], { cwd: options.cwd, label: `gh api closing issue #${issue.number} comments` });
+    return { ...issue, comments: parseRestPullRequestComments(raw) };
+  }));
+  const commentsRaw = await runProcessOrThrow([
+    "gh", "api", `repos/${repo}/issues/${options.prNumber}/comments`, "--paginate", "--slurp",
+  ], { cwd: options.cwd, label: "gh api pull request comments" });
+  return withPlannerComments({ ...feedback, closingIssues }, parseRestPullRequestComments(commentsRaw));
 }
 
 export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
@@ -109,22 +140,57 @@ export function parsePullRequestFeedback(raw: string, input: { repo: string; prN
   const pr = normalizePullRequestMetadata(pullRequest, input.prNumber);
   const comments = connectionNodes(pullRequest["comments"]).map(normalizePullRequestComment);
   const reviewThreads = requiredConnectionNodes(pullRequest["reviewThreads"], "pull request reviewThreads").map(normalizeReviewThread);
+  const closingIssues = connectionNodes(pullRequest["closingIssuesReferences"]).map(normalizeClosingIssue);
+  return withPlannerComments({
+    repo: input.repo,
+    pr,
+    comments,
+    reviewThreads,
+    plannerComments: [],
+    excludedRoarkSummaryCommentIds: [],
+    closingIssues,
+    reviewThreadsTruncated: connectionHasNextPage(pullRequest["reviewThreads"]),
+    fetchedAt: new Date().toISOString(),
+  }, comments);
+}
+
+function normalizeClosingIssue(value: unknown): PullRequestClosingIssue {
+  if (!isRecord(value)) return { number: 0, title: "", body: "", state: "UNKNOWN" };
+  return {
+    number: numberField(value, "number") ?? 0,
+    title: stringField(value, "title") ?? "",
+    body: stringField(value, "body") ?? "",
+    state: stringField(value, "state") ?? "UNKNOWN",
+    url: stringField(value, "url"),
+    repository: repositoryName(value["repository"]),
+  };
+}
+
+function withPlannerComments(feedback: PullRequestFeedback, comments: PullRequestComment[]): PullRequestFeedback {
   const excludedRoarkSummaryCommentIds: (string | number)[] = [];
   const plannerComments = comments.filter((comment) => {
     if (!roarkPrRevisionSummaryMarkerPattern.test(comment.body)) return true;
     excludedRoarkSummaryCommentIds.push(comment.databaseId ?? comment.id ?? "unknown");
     return false;
   });
+  return { ...feedback, comments, plannerComments, excludedRoarkSummaryCommentIds };
+}
 
-  return {
-    repo: input.repo,
-    pr,
-    comments,
-    reviewThreads,
-    plannerComments,
-    excludedRoarkSummaryCommentIds,
-    fetchedAt: new Date().toISOString(),
-  };
+export function parseRestPullRequestComments(raw: string): PullRequestComment[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("GitHub REST response for pull request comments was not an array.");
+  const values = (parsed as unknown[]).flatMap<unknown>((page) => Array.isArray(page) ? page as unknown[] : [page]);
+  return values.map((value) => {
+    if (!isRecord(value)) return { body: "" };
+    return {
+      id: typeof value["node_id"] === "string" ? value["node_id"] : undefined,
+      databaseId: numberField(value, "id"),
+      author: login(value["user"]),
+      body: stringField(value, "body") ?? "",
+      createdAt: stringField(value, "created_at"),
+      url: stringField(value, "html_url"),
+    };
+  });
 }
 
 function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNumber: number): PullRequestMetadata {
@@ -138,7 +204,10 @@ function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNu
     isDraft: booleanField(value, "isDraft"),
     baseRefName: stringField(value, "baseRefName") ?? "",
     headRefName: stringField(value, "headRefName") ?? "",
+    baseRefOid: stringField(value, "baseRefOid") ?? "",
+    headRefOid: stringField(value, "headRefOid") ?? "",
     baseRepository: repositoryName(value["baseRepository"]),
+    baseRepositoryUrl: repositoryUrl(value["baseRepository"]),
     headRepository: repositoryName(value["headRepository"]),
     author: login(value["author"]),
   };
@@ -191,6 +260,10 @@ function requiredConnectionNodes(value: unknown, label: string): unknown[] {
   return value["nodes"].filter((node) => node !== null && node !== undefined);
 }
 
+function connectionHasNextPage(value: unknown): boolean {
+  return isRecord(value) && isRecord(value["pageInfo"]) && value["pageInfo"]["hasNextPage"] === true;
+}
+
 function splitRepo(repo: string): [string, string] {
   const match = /^([^/]+)\/([^/]+)$/.exec(repo);
   if (!match?.[1] || !match[2]) throw new Error(`Repository must be in owner/repo format. Got '${repo}'.`);
@@ -199,6 +272,10 @@ function splitRepo(repo: string): [string, string] {
 
 function repositoryName(value: unknown): string | undefined {
   return isRecord(value) ? stringField(value, "nameWithOwner") : undefined;
+}
+
+function repositoryUrl(value: unknown): string | undefined {
+  return isRecord(value) ? stringField(value, "url") : undefined;
 }
 
 function login(value: unknown): string | undefined {
@@ -237,9 +314,21 @@ query($owner: String!, $name: String!, $number: Int!) {
       isDraft
       baseRefName
       headRefName
-      baseRepository { nameWithOwner }
+      baseRefOid
+      headRefOid
+      baseRepository { nameWithOwner url }
       headRepository { nameWithOwner }
       author { login }
+      closingIssuesReferences(first: 100) {
+        nodes {
+          number
+          title
+          body
+          state
+          url
+          repository { nameWithOwner }
+        }
+      }
       comments(first: 100) {
         nodes {
           id
@@ -273,6 +362,7 @@ query($owner: String!, $name: String!, $number: Int!) {
             }
           }
         }
+        pageInfo { hasNextPage endCursor }
       }
     }
   }

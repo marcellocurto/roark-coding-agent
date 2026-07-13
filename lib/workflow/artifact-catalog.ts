@@ -51,8 +51,6 @@ export interface ArtifactContract {
   readonly requiresReadyForImplementation?: true;
 }
 
-export const REVIEW_VERDICTS = ["approve", "fixes-required", "restart-required", "blocked"] as const;
-
 export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "issue", filename: "issue.md", displayName: "Issue" },
   { name: "triage", filename: "triage.md", displayName: "Triage" },
@@ -112,8 +110,6 @@ const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> = {
     requiresReadyForImplementation: true,
   },
   implementationLog: { requiredHeading: "Implementation Log" },
-  reviewA: { allowedVerdicts: REVIEW_VERDICTS },
-  reviewB: { allowedVerdicts: REVIEW_VERDICTS },
 };
 
 const numberedContracts: Record<NumberedArtifactName, (pass: number) => ArtifactContract> = {
@@ -121,8 +117,8 @@ const numberedContracts: Record<NumberedArtifactName, (pass: number) => Artifact
   verificationBeforeFix: () => ({}),
   implementationRestartLog: (pass) => ({ requiredHeading: `Implementation Restart Log Pass ${pass}` }),
   refinementLog: (pass) => ({ requiredHeading: `Refinement Log Pass ${pass}` }),
-  reviewA: (pass) => ({ requiredHeading: `Review A Pass ${pass}`, allowedVerdicts: REVIEW_VERDICTS }),
-  reviewB: (pass) => ({ requiredHeading: `Review B Pass ${pass}`, allowedVerdicts: REVIEW_VERDICTS }),
+  reviewA: () => ({}),
+  reviewB: () => ({}),
   baselineResetLog: (pass) => ({ requiredHeading: `Baseline Reset Pass ${pass}` }),
 };
 
