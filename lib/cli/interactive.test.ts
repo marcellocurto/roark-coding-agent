@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { promptForInteractiveArgv, resolveInteractiveArgv } from "./interactive.ts";
+import { promptForInteractiveArgv, promptForWorkspaceRemoval, resolveInteractiveArgv } from "./interactive.ts";
 import { noopAsync } from "../utils/async.ts";
 
 function scriptedPrompt(responses: string[]) {
@@ -74,14 +74,11 @@ describe("promptForInteractiveArgv", () => {
     expect(promptForInteractiveArgv(revise.prompt)).resolves.toEqual(["revise-pr", "123"]);
   });
 
-  test("maps workspace remove to argv and asks whether to force", async () => {
+  test("maps workspace removal to the interactive remove command", async () => {
     await noopAsync();
-    const forcePrompt = scriptedPrompt(["8", "issue", "42", "yes"]);
-    expect(promptForInteractiveArgv(forcePrompt.prompt)).resolves.toEqual(["workspace", "remove", "--issue", "42", "--force"]);
-    expect(forcePrompt.prompts).toEqual(["Select an option: ", "Remove issue or PR workspace? [issue/pr] ", "Issue: ", "Force remove dirty workspace? [y/N] "]);
-
-    const cleanPrompt = scriptedPrompt(["8", "pr", "98", "no"]);
-    expect(promptForInteractiveArgv(cleanPrompt.prompt)).resolves.toEqual(["workspace", "remove", "--pr", "98"]);
+    const { prompt, prompts } = scriptedPrompt(["8"]);
+    expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["remove"]);
+    expect(prompts).toEqual(["Select an option: "]);
   });
 
   test("maps help to argv", async () => {
@@ -97,6 +94,35 @@ describe("promptForInteractiveArgv", () => {
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["--help"]);
     expect(output.join("")).toContain("Invalid choice. Please choose 1-9.");
+  });
+});
+
+describe("promptForWorkspaceRemoval", () => {
+  const workspacePaths: [string, string, string] = ["/workspaces/repo/issue-12", "/workspaces/repo/issue-34", "/workspaces/repo/pr-56"];
+
+  test("lists workspaces and supports multi-selection with ranges", async () => {
+    await noopAsync();
+    const { prompt, prompts, output } = scriptedPrompt(["1,3-3", "yes"]);
+    expect(promptForWorkspaceRemoval({ workspacePaths, prompt })).resolves.toEqual({
+      selectedIndexes: [0, 2],
+    });
+    expect(output.join("")).toContain("1. issue-12");
+    expect(output.join("")).toContain("3. pr-56");
+    expect(prompts).toEqual([
+      "Select workspaces to remove (for example 1,3-5 or all; Enter to cancel): ",
+      "Remove 2 selected workspaces? [y/N] ",
+    ]);
+  });
+
+  test("retries invalid selections and allows cancellation", async () => {
+    await noopAsync();
+    const invalid = scriptedPrompt(["4", "all", "yes"]);
+    expect(promptForWorkspaceRemoval({ workspacePaths, prompt: invalid.prompt })).resolves.toEqual({ selectedIndexes: [0, 1, 2] });
+    expect(invalid.output.join("")).toContain("Invalid selection.");
+
+    const cancelled = scriptedPrompt([""]);
+    expect(promptForWorkspaceRemoval({ workspacePaths, prompt: cancelled.prompt })).resolves.toBeUndefined();
+    expect(cancelled.output.join("")).toContain("Cancelled.");
   });
 });
 

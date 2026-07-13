@@ -110,17 +110,25 @@ List managed workspaces:
 roark workspace list
 ```
 
-Remove one issue workspace:
+List and interactively select one or more workspaces to remove:
 
 ```bash
-roark workspace remove --issue 123
+roark remove
+```
+
+Remove issue workspace 123 directly:
+
+```bash
+roark remove 123
 ```
 
 Dirty workspaces require `--force`:
 
 ```bash
-roark workspace remove --issue 123 --force
+roark remove 123 --force
 ```
+
+Use `roark remove --pr 456` for a PR workspace.
 
 Prune old clean workspaces:
 

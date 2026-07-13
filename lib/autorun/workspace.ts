@@ -67,10 +67,24 @@ export type WorkspaceRemoveTarget =
   | { kind: "issue"; number: number }
   | { kind: "pr"; number: number };
 
+export interface ManagedWorkspace {
+  path: string;
+  target: WorkspaceRemoveTarget;
+}
+
 export type WorkspaceCommandOptions =
   | { command: "workspace"; action: "list"; cwd: string; repo?: string | undefined; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
-  | { command: "workspace"; action: "remove"; target: WorkspaceRemoveTarget; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig }
   | { command: "workspace"; action: "prune"; olderThan: string; cwd: string; repo?: string | undefined; force: boolean; workspace: WorkspaceConfig; hooks: LifecycleHooksConfig };
+
+export interface RemoveCommandOptions {
+  command: "remove";
+  targets: WorkspaceRemoveTarget[];
+  cwd: string;
+  repo?: string | undefined;
+  force: boolean;
+  workspace: WorkspaceConfig;
+  hooks: LifecycleHooksConfig;
+}
 
 export const workspaceStateFile = ".roark-workspace-state.json";
 export const defaultWorkspaceConfig: WorkspaceConfig = {
@@ -638,14 +652,27 @@ export class WorkspaceHookError extends Error {
   }
 }
 
-export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo?: string | undefined; cwd?: string  | undefined}): Promise<string[]> {
+export async function listManagedWorkspaces(options: { workspace: WorkspaceConfig; repo?: string | undefined; cwd?: string | undefined }): Promise<ManagedWorkspace[]> {
   const repoRoot = path.dirname(workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: 1, controlCwd: options.cwd }));
   if (!existsSync(repoRoot)) return [];
   const entries = await readdir(repoRoot, { withFileTypes: true });
   return entries
-    .filter((entry) => entry.isDirectory() && (entry.name.startsWith("issue-") || entry.name.startsWith("pr-")) && !entry.name.endsWith(".lock"))
-    .map((entry) => path.join(repoRoot, entry.name))
-    .toSorted();
+    .flatMap((entry): ManagedWorkspace[] => {
+      if (!entry.isDirectory()) return [];
+      const match = /^(issue|pr)-([1-9]\d*)$/.exec(entry.name);
+      if (!match) return [];
+      const number = Number(match[2]);
+      if (!Number.isSafeInteger(number)) return [];
+      return [{
+        path: path.join(repoRoot, entry.name),
+        target: { kind: match[1] === "pr" ? "pr" : "issue", number },
+      }];
+    })
+    .toSorted((left, right) => left.path.localeCompare(right.path));
+}
+
+export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo?: string | undefined; cwd?: string | undefined }): Promise<string[]> {
+  return (await listManagedWorkspaces(options)).map((managedWorkspace) => managedWorkspace.path);
 }
 
 export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Promise<void> {
@@ -656,15 +683,6 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
     return;
   }
 
-  if (options.action === "remove") {
-    const workspacePath = options.target.kind === "issue"
-      ? workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: options.target.number, controlCwd: options.cwd })
-      : workspacePathForPrRevision({ root: options.workspace.root, repo: options.repo, prNumber: options.target.number, controlCwd: options.cwd });
-    await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks });
-    console.log(`Removed workspace: ${workspacePath}`);
-    return;
-  }
-
   const olderThanMs = parseDurationMs(options.olderThan);
   const cutoff = Date.now() - olderThanMs;
   const paths = await listWorkspaces({ workspace: options.workspace, repo: options.repo, cwd: options.cwd });
@@ -672,24 +690,59 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
   for (const workspacePath of paths) {
     const stats = await stat(workspacePath);
     if (stats.mtimeMs > cutoff) continue;
-    await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks });
-    removed++;
+    if (await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks })) removed++;
   }
   console.log(`Pruned ${removed} workspace(s).`);
 }
 
-export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<void> {
+export async function runRemoveCommand(options: RemoveCommandOptions): Promise<void> {
+  if (options.targets.length === 0) throw new Error("No managed workspaces selected for removal.");
+  const paths = [...new Set(options.targets.map((target) => target.kind === "issue"
+    ? workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: target.number, controlCwd: options.cwd })
+    : workspacePathForPrRevision({ root: options.workspace.root, repo: options.repo, prNumber: target.number, controlCwd: options.cwd })))];
+
+  const missingPaths = paths.filter((workspacePath) => !existsSync(workspacePath));
+  if (missingPaths.length > 0) {
+    throw new Error(`Managed workspace${missingPaths.length === 1 ? "" : "s"} not found:\n${missingPaths.join("\n")}`);
+  }
+
+  if (!options.force) {
+    const dirtyPaths: string[] = [];
+    for (const workspacePath of paths) {
+      if (await hasGitChanges(workspacePath, runProcess)) dirtyPaths.push(workspacePath);
+    }
+    if (dirtyPaths.length > 0) {
+      throw new Error(`Refusing to remove dirty workspace${dirtyPaths.length === 1 ? "" : "s"}:\n${dirtyPaths.join("\n")}\nPass --force to remove ${dirtyPaths.length === 1 ? "it" : "them"} anyway.`);
+    }
+  }
+
+  for (const workspacePath of paths) {
+    if (!await removeWorkspaceFiles({ workspacePath, hooks: options.hooks })) {
+      throw new Error(`Managed workspace disappeared before it could be removed: ${workspacePath}`);
+    }
+    console.log(`Removed workspace: ${workspacePath}`);
+  }
+}
+
+export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<boolean> {
   const legacyLockPath = `${input.workspacePath}.lock`;
   if (!existsSync(input.workspacePath)) {
     await rm(legacyLockPath, { recursive: true, force: true });
-    return;
+    return false;
   }
   if (!input.force && await hasGitChanges(input.workspacePath, runProcess)) {
     throw new Error(`Refusing to remove dirty workspace '${input.workspacePath}'. Pass --force to remove it anyway.`);
   }
+  return removeWorkspaceFiles({ workspacePath: input.workspacePath, hooks: input.hooks });
+}
+
+async function removeWorkspaceFiles(input: { workspacePath: string; hooks: LifecycleHooksConfig }): Promise<boolean> {
+  if (!existsSync(input.workspacePath)) return false;
+  const legacyLockPath = `${input.workspacePath}.lock`;
   await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath);
   await rm(input.workspacePath, { recursive: true, force: true });
   await rm(legacyLockPath, { recursive: true, force: true });
+  return true;
 }
 
 async function acquireWorkspaceLock(workspacePath: string): Promise<() => Promise<void>> {

@@ -4,6 +4,16 @@ All notable changes to Roark are tracked here.
 
 This project uses [Semantic Versioning](https://semver.org/). While Roark is pre-1.0, incompatible CLI/config changes may ship in minor releases.
 
+## Unreleased
+
+### Added
+
+- Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
+
+### Removed
+
+- Removed the pre-1.0 `roark workspace remove` command in favor of the simpler `roark remove` interface.
+
 ## [0.0.2] - 2026-07-11
 
 ### Added
