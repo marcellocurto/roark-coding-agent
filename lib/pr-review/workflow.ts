@@ -221,6 +221,8 @@ function prIdentityChanges(initial: PullRequestFeedback, latest: PullRequestFeed
   const changes: string[] = [];
   if (latest.pr.state !== "OPEN") changes.push(`state is ${latest.pr.state}`);
   for (const [label, before, after] of [
+    ["title", initial.pr.title, latest.pr.title],
+    ["description", initial.pr.body, latest.pr.body],
     ["base repository", initial.pr.baseRepository, latest.pr.baseRepository],
     ["base ref", initial.pr.baseRefName, latest.pr.baseRefName],
     ["base commit", initial.pr.baseRefOid, latest.pr.baseRefOid],
