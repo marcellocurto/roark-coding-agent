@@ -43,6 +43,15 @@ export interface PullRequestMetadata {
   author?: string | undefined;
 }
 
+export interface PullRequestClosingIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  url?: string | undefined;
+  repository?: string | undefined;
+}
+
 export interface PullRequestFeedback {
   repo: string;
   pr: PullRequestMetadata;
@@ -50,6 +59,7 @@ export interface PullRequestFeedback {
   reviewThreads: PullRequestReviewThread[];
   plannerComments: PullRequestComment[];
   excludedRoarkSummaryCommentIds: (string | number)[];
+  closingIssues?: PullRequestClosingIssue[] | undefined;
   reviewThreadsTruncated?: boolean | undefined;
   fetchedAt: string;
 }
@@ -116,6 +126,7 @@ export function parsePullRequestFeedback(raw: string, input: { repo: string; prN
   const pr = normalizePullRequestMetadata(pullRequest, input.prNumber);
   const comments = connectionNodes(pullRequest["comments"]).map(normalizePullRequestComment);
   const reviewThreads = requiredConnectionNodes(pullRequest["reviewThreads"], "pull request reviewThreads").map(normalizeReviewThread);
+  const closingIssues = connectionNodes(pullRequest["closingIssuesReferences"]).map(normalizeClosingIssue);
   return withPlannerComments({
     repo: input.repo,
     pr,
@@ -123,9 +134,22 @@ export function parsePullRequestFeedback(raw: string, input: { repo: string; prN
     reviewThreads,
     plannerComments: [],
     excludedRoarkSummaryCommentIds: [],
+    closingIssues,
     reviewThreadsTruncated: connectionHasNextPage(pullRequest["reviewThreads"]),
     fetchedAt: new Date().toISOString(),
   }, comments);
+}
+
+function normalizeClosingIssue(value: unknown): PullRequestClosingIssue {
+  if (!isRecord(value)) return { number: 0, title: "", body: "", state: "UNKNOWN" };
+  return {
+    number: numberField(value, "number") ?? 0,
+    title: stringField(value, "title") ?? "",
+    body: stringField(value, "body") ?? "",
+    state: stringField(value, "state") ?? "UNKNOWN",
+    url: stringField(value, "url"),
+    repository: repositoryName(value["repository"]),
+  };
 }
 
 function withPlannerComments(feedback: PullRequestFeedback, comments: PullRequestComment[]): PullRequestFeedback {
@@ -276,6 +300,16 @@ query($owner: String!, $name: String!, $number: Int!) {
       baseRepository { nameWithOwner }
       headRepository { nameWithOwner }
       author { login }
+      closingIssuesReferences(first: 100) {
+        nodes {
+          number
+          title
+          body
+          state
+          url
+          repository { nameWithOwner }
+        }
+      }
       comments(first: 100) {
         nodes {
           id

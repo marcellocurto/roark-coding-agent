@@ -18,6 +18,11 @@ describe("runPrReview", () => {
     let verificationRuns = 0;
     let publications = 0;
     const feedback = reviewFeedback();
+    feedback.closingIssues = [
+      { number: 126, title: "Shared contract", body: "Extract the contract", state: "OPEN", repository: "owner/repo" },
+      { number: 127, title: "Pinned workspace", body: "Prepare the workspace", state: "OPEN", repository: "owner/repo" },
+      { number: 9, title: "Unrelated external issue", body: "Ignore this", state: "OPEN", repository: "other/repo" },
+    ];
 
     const result = await runPrReview({
       command: "review-pr",
@@ -69,6 +74,10 @@ describe("runPrReview", () => {
     expect(agentCalls.every((call) => call.prompt.includes(`git diff merge123..${feedback.pr.headRefOid} --`))).toBe(true);
     expect(agentCalls[1]?.prompt).not.toContain("review-a.md");
     expect(await readFile(path.join(result.context.reviewDir, "summary.json"), "utf8")).toContain("no-blocking-findings");
+    const reviewContext = await readFile(path.join(result.context.reviewDir, "pr-context.md"), "utf8");
+    expect(reviewContext).toContain("Shared contract");
+    expect(reviewContext).toContain("Pinned workspace");
+    expect(reviewContext).not.toContain("Unrelated external issue");
     expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
     expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });

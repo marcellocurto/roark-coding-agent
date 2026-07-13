@@ -1,24 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 
-const validReview = `# Review B
-
-## Verdict
-approve
-
-## Findings
-None.
-
-## Required Fixes
-None.
-
-## Suggested Improvements
-None.
-
-## Validation Reviewed
-Tests.
-`;
-
 const validPlan = `# Implementation Plan
 
 ## Ready For Implementation
@@ -32,14 +14,9 @@ describe("validateAgentArtifact", () => {
     if (!result.ok) expect(result.reason).toContain("empty");
   });
 
-  test("accepts a review artifact with an allowed verdict", () => {
-    expect(validateAgentArtifact("reviewB", validReview)).toEqual({ ok: true });
-  });
-
-  test("rejects a review artifact without a verdict", () => {
-    const result = validateAgentArtifact("reviewA", "# Review A\n\n## Findings\nLooks fine.\n");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain("missing");
+  test("accepts any non-empty review artifact", () => {
+    expect(validateAgentArtifact("reviewA", "Looks fine.")).toEqual({ ok: true });
+    expect(validateAgentArtifact({ name: "reviewB", pass: 2 }, "Unconventional but usable review output.")).toEqual({ ok: true });
   });
 
   test("requires explicit plan readiness", () => {
@@ -49,7 +26,4 @@ describe("validateAgentArtifact", () => {
     if (!result.ok) expect(result.reason).toContain("Ready For Implementation");
   });
 
-  test("allows restart-required for numbered review cycles", () => {
-    expect(validateAgentArtifact({ name: "reviewA", pass: 0 }, "# Review A Pass 0\n\n## Verdict\nrestart-required\n")).toEqual({ ok: true });
-  });
 });

@@ -1,4 +1,3 @@
-import { runProcess } from "../cli/process.ts";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
@@ -15,13 +14,12 @@ import {
   runLifecycleHook,
   type PreparedPrReviewWorkspace,
 } from "../autorun/workspace.ts";
-import { fetchPullRequestFeedback, type PullRequestFeedback } from "../github/pr.ts";
+import { fetchPullRequestFeedback, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { correctnessReviewLens, maintainabilityReviewLens, validateReviewOutput, type ReviewLensDefinition } from "../review/contract.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
-import { inferIssueFromPrBody } from "../pr-revision/artifacts.ts";
 import {
   createPrReviewContext,
   removeAgentPrReviewArtifacts,
@@ -52,7 +50,6 @@ export interface RunPrReviewDependencies {
   agentRunner?: AgentRunner | undefined;
   verificationRunner?: VerificationRunner | undefined;
   publishComment?: typeof publishPrReviewComment | undefined;
-  fetchLinkedIssue?: ((input: { cwd: string; repo: string; issueNumber: number }) => Promise<unknown>) | undefined;
   assertWorkspace?: typeof assertPinnedPrReviewWorkspace | undefined;
 }
 
@@ -83,12 +80,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     await hookRunner("beforeRun", hooks, context.agentCwd);
     await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
-    const linkedIssueNumber = inferIssueFromPrBody(initial.pr.body);
-    const linkedIssue = linkedIssueNumber === undefined
-      ? undefined
-      : await fetchOptionalLinkedIssue({ cwd: options.cwd, repo: initial.repo, issueNumber: linkedIssueNumber }, deps.fetchLinkedIssue);
-    await writePrReviewInputJson(context, "pr-context.json", { ...initial, linkedIssue });
-    await writePrReviewInputArtifact(context, "pr-context.md", formatPrContext(initial, linkedIssue));
+    const closingIssues = sameRepositoryClosingIssues(initial);
+    await writePrReviewInputJson(context, "pr-context.json", { ...initial, closingIssues });
+    await writePrReviewInputArtifact(context, "pr-context.md", formatPrContext(initial, closingIssues));
     await writePrReviewInputJson(context, "comparison.json", prepared.comparison);
 
     const resolvedVerification = await resolvePrReviewVerification({
@@ -257,24 +251,18 @@ async function runReviewer(
   });
 }
 
-async function fetchOptionalLinkedIssue(
-  input: { cwd: string; repo: string; issueNumber: number },
-  fetcher?: RunPrReviewDependencies["fetchLinkedIssue"],
-): Promise<unknown> {
-  if (fetcher) return fetcher(input);
-  const result = await runProcess(["gh", "issue", "view", String(input.issueNumber), "--repo", input.repo, "--json", "number,title,body,state,url"], { cwd: input.cwd });
-  if (result.exitCode !== 0) return undefined;
-  try { return JSON.parse(result.stdout) as unknown; } catch { return undefined; }
+export function sameRepositoryClosingIssues(feedback: PullRequestFeedback): PullRequestClosingIssue[] {
+  return (feedback.closingIssues ?? []).filter((issue) => issue.repository?.toLowerCase() === feedback.repo.toLowerCase());
 }
 
-function formatPrContext(feedback: PullRequestFeedback, linkedIssue: unknown): string {
+function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullRequestClosingIssue[]): string {
   const lines = [
     `# PR #${feedback.pr.number}: ${feedback.pr.title}`,
     "",
     "## Authoritative Requirements",
-    linkedIssue === undefined
-      ? "No linked same-repository issue was available. Use the PR title and description below as the best available requirements."
-      : `Linked same-repository issue:\n\n\`\`\`json\n${JSON.stringify(linkedIssue, null, 2)}\n\`\`\``,
+    closingIssues.length === 0
+      ? "No closing issue in this repository was available. Use the PR title and description below as the best available requirements."
+      : `Closing issues in this repository:\n\n\`\`\`json\n${JSON.stringify(closingIssues, null, 2)}\n\`\`\``,
     "",
     "## PR Description",
     feedback.pr.body || "None.",

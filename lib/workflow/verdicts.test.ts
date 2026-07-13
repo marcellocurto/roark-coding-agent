@@ -57,12 +57,12 @@ describe("classification-aware verdict decisions", () => {
     expect(decision.externalBlockers).toHaveLength(1);
   });
 
-  test("unknown classifications are surfaced and prevent readiness", () => {
+  test("unknown classifications are surfaced while readiness falls back to the reviewer verdict", () => {
     const reviewA = review("approve", entry("X1", "mystery"));
     const decision = decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger });
 
     expect(needsFix(reviewA, approveNoLedger)).toBe(false);
-    expect(decision.status).toBe("not-ready");
+    expect(decision.status).toBe("ready-for-pr");
     expect(decision.rejectedFindings).toHaveLength(1);
     expect(decision.parserWarnings[0]).toContain("Unknown finding classification");
   });

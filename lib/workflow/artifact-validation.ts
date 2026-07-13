@@ -21,6 +21,8 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const trimmed = content.trim();
   if (!trimmed) return invalid("artifact is empty");
 
+  if (isReviewArtifact(artifact)) return ok();
+
   const priorError = parseDiagnosticArtifactError(trimmed);
   if (priorError) return invalid(priorError);
 
@@ -39,6 +41,11 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   if (contract.allowedVerdicts) return requireVerdict(artifact, content, contract.allowedVerdicts);
 
   return ok();
+}
+
+function isReviewArtifact(artifact: ArtifactRef): boolean {
+  const name = typeof artifact === "string" ? artifact : artifact.name;
+  return name === "reviewA" || name === "reviewB";
 }
 
 function requiredHeadingRegex(heading: string): RegExp {

@@ -89,13 +89,18 @@ export interface ValidatedReviewOutput {
 }
 
 export function validateReviewOutput(markdown: string, source: ReviewFindingSource): ValidatedReviewOutput {
-  const verdict = parseVerdict(markdown);
-  if (verdict !== "approve" && verdict !== "fixes-required" && verdict !== "blocked") {
-    throw new Error(`${source} output is missing a valid approve, fixes-required, or blocked verdict.`);
-  }
+  if (!markdown.trim()) throw new Error(`${source} output is empty.`);
   const findings = parseReviewFindings(markdown, source);
-  if (!findings.hasLedger) throw new Error(`${source} output is missing the Findings Ledger.`);
-  if (findings.rejected.length > 0) throw new Error(`${source} output contains invalid Findings Ledger entries.`);
-  if (findings.warnings.length > 0) throw new Error(`${source} output contains incomplete or ambiguous Findings Ledger entries: ${findings.warnings.join("; ")}`);
+  const parsedVerdict = parseVerdict(markdown);
+  const verdict = parsedVerdict === "approve" || parsedVerdict === "fixes-required" || parsedVerdict === "blocked"
+    ? parsedVerdict
+    : inferVerdict(findings);
   return { verdict, findings };
+}
+
+function inferVerdict(findings: ParsedReviewFindings): ValidatedReviewOutput["verdict"] {
+  if (findings.findings.some((finding) => finding.classification === "external-blocker")) return "blocked";
+  if (findings.findings.some((finding) => finding.classification === "must-fix-current")) return "fixes-required";
+  if (findings.findings.length > 0 && findings.rejected.length === 0) return "approve";
+  return "fixes-required";
 }

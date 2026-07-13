@@ -25,6 +25,15 @@ describe("decidePrReview", () => {
     }).outcome).toBe("changes-requested");
     expect(decidePrReview({ reviewA: cleanA, reviewB: cleanB, verificationUnavailable: "command not found" }).outcome).toBe("blocked");
   });
+
+  test("preserves a usable verdict when finding normalization is incomplete", () => {
+    const reviewA = validateReviewOutput("# Review\n\n## Verdict\nfixes-required\n\n## Findings Ledger\nA required fix described in prose.\n", "review-a");
+    const reviewB = validateReviewOutput(cleanReview(), "review-b");
+    const decision = decidePrReview({ reviewA, reviewB });
+
+    expect(decision.outcome).toBe("changes-requested");
+    expect(decision.reasons).toEqual([]);
+  });
 });
 
 function cleanReview(): string {

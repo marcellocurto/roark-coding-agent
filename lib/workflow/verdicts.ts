@@ -80,15 +80,15 @@ export function shouldImplementPlan(plan: string): boolean {
 
 export function needsFix(...reviews: string[]): boolean {
   return parseDecisionReviews(reviews).some(({ markdown, parsed }) => {
-    if (!parsed.hasLedger) return parseVerdict(markdown) === "fixes-required";
-    return parsed.findings.some((finding) => finding.classification === "must-fix-current");
+    const parsedFix = parsed.findings.some((finding) => finding.classification === "must-fix-current");
+    return parsedFix || ((!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "fixes-required");
   });
 }
 
 export function hasBlockedReview(...reviews: string[]): boolean {
   return parseDecisionReviews(reviews).some(({ markdown, parsed }) => {
-    if (!parsed.hasLedger) return parseVerdict(markdown) === "blocked";
-    return parsed.findings.some((finding) => finding.classification === "external-blocker");
+    const parsedBlocker = parsed.findings.some((finding) => finding.classification === "external-blocker");
+    return parsedBlocker || ((!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "blocked");
   });
 }
 
@@ -120,21 +120,18 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
     ...parsedReviews.flatMap(({ parsed, verdict }) => verdictLedgerConflictWarnings(parsed, verdict)),
   ];
 
-  const fallbackFixNeeded = parsedReviews.some(({ markdown, parsed }) => !parsed.hasLedger && parseVerdict(markdown) === "fixes-required");
-  const fallbackBlocked = parsedReviews.some(({ markdown, parsed }) => !parsed.hasLedger && parseVerdict(markdown) === "blocked");
+  const fallbackFixNeeded = parsedReviews.some(({ markdown, parsed }) => (!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "fixes-required");
+  const fallbackBlocked = parsedReviews.some(({ markdown, parsed }) => (!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "blocked");
   const restartRequired = parsedReviews.some(({ markdown }) => parseVerdict(markdown) === "restart-required");
   const fixesWereNeeded = currentIssueBlockingFindings.length > 0 || fallbackFixNeeded;
   const blockedByReview = externalBlockers.length > 0 || fallbackBlocked;
-  const hasRejectedFindings = rejectedFindings.length > 0;
-
   const readyFromLatestReviews =
     triageVerdict === "proceed" &&
     planReady &&
     reviewsApproveCurrentIssue(parsedReviews) &&
     !fixesWereNeeded &&
     !restartRequired &&
-    !blockedByReview &&
-    !hasRejectedFindings;
+    !blockedByReview;
 
   return {
     status: readyFromLatestReviews ? "ready-for-pr" : "not-ready",
@@ -170,8 +167,9 @@ function reviewsApproveCurrentIssue(
 ): boolean {
   return reviews.every(({ parsed, verdict }) => {
     if (!parsed.hasLedger) return verdict === "approve";
-    return parsed.rejected.length === 0 &&
-      !parsed.findings.some((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker");
+    const parsedBlocker = parsed.findings.some((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker");
+    if (parsedBlocker) return false;
+    return parsed.rejected.length === 0 || verdict === "approve";
   });
 }
 

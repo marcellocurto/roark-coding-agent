@@ -17,6 +17,10 @@ describe("pull request feedback parsing", () => {
             headRefOid: "head123",
             baseRepository: { nameWithOwner: "owner/repo" },
             headRepository: { nameWithOwner: "owner/repo" },
+            closingIssuesReferences: { nodes: [
+              { number: 46, title: "Primary requirement", body: "Build it", state: "OPEN", repository: { nameWithOwner: "owner/repo" } },
+              { number: 7, title: "External issue", body: "Not authoritative here", state: "OPEN", repository: { nameWithOwner: "other/repo" } },
+            ] },
             comments: { nodes: [
               { id: "C1", databaseId: 101, body: "please fix", author: { login: "reviewer" } },
               { id: "C2", databaseId: 102, body: "<!-- roark:pr=12 revision=1 phase=revision-summary -->\nsummary" },
@@ -37,6 +41,7 @@ describe("pull request feedback parsing", () => {
     expect(feedback.pr.headRefOid).toBe("head123");
     expect(feedback.reviewThreads[0]?.isResolved).toBe(false);
     expect(feedback.reviewThreadsTruncated).toBe(true);
+    expect(feedback.closingIssues?.map((issue) => [issue.repository, issue.number])).toEqual([["owner/repo", 46], ["other/repo", 7]]);
     expect(feedback.comments).toHaveLength(3);
     expect(feedback.plannerComments).toHaveLength(2);
     expect(feedback.plannerComments[0]?.body).toBe("please fix");

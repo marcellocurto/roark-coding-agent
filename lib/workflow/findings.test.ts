@@ -45,6 +45,44 @@ describe("parseReviewFindings", () => {
     });
   });
 
+  test("normalizes fields whose Markdown emphasis includes the colon", () => {
+    const emphasized = `${ledgerEntry().replaceAll(/- ([^:\n]+):/g, "- **$1:**")}\n### F2\n\n${ledgerEntry().replace("F1", "F2").replaceAll(/- ([^:\n]+):/g, "- **$1:**")}`;
+    const parsed = parseReviewFindings(`# Review A\n\n## Verdict\nfixes-required\n\n## Findings Ledger\n${emphasized}`, "review-a");
+
+    expect(parsed.rejected).toEqual([]);
+    expect(parsed.findings[0]).toMatchObject({
+      sourceLocalId: "F1",
+      classification: "must-fix-current",
+      title: "Broken behavior",
+      recommendedHandling: "Fix it now.",
+    });
+    expect(parsed.findings[0]?.recommendedHandling).not.toContain("F2");
+    expect(parsed.findings[1]?.sourceLocalId).toBe("F2");
+  });
+
+  test("normalizes common field aliases and vertical table rows", () => {
+    const ledger = `| Finding ID | F1 |
+| Type | must-fix-current |
+| Summary | Broken behavior |
+| Priority | high |
+| Certainty | high |
+| Proof | lib/example.ts:1 |
+| Impact | The current issue is not complete. |
+| Remediation | Fix it now. |`;
+    const parsed = parseReviewFindings(`# Review A\n\n## Verdict\nfixes-required\n\n## Findings Ledger\n${ledger}`, "review-a");
+
+    expect(parsed.rejected).toEqual([]);
+    expect(parsed.findings[0]).toMatchObject({
+      sourceLocalId: "F1",
+      classification: "must-fix-current",
+      title: "Broken behavior",
+      severity: "high",
+      evidence: "lib/example.ts:1",
+      currentIssueImpact: "The current issue is not complete.",
+      recommendedHandling: "Fix it now.",
+    });
+  });
+
   test("rejects a malformed finding entry without crashing", () => {
     const parsed = parseReviewFindings("# Review A\n\n## Verdict\napprove\n\n## Findings Ledger\nThis is not a fielded finding.\n", "review-a");
 
@@ -65,7 +103,7 @@ describe("parseReviewFindings", () => {
     const parsed = parseReviewFindings(`# Review A\n\n## Verdict\nfixes-required\n\n## Findings Ledger\n${ledgerEntry()}\n${ledgerEntry("- Suggested issue title (optional): Later\n")}`, "review-a");
 
     expect(parsed.findings.map((finding) => finding.workflowId)).toEqual(["review-a:F1", "review-a:F1#2"]);
-    expect(parsed.warnings.some((warning) => warning.includes("duplicate Identifier 'F1'"))).toBe(true);
+    expect(parsed.warnings).toEqual([]);
   });
 
   test("does not deduplicate duplicate-looking findings across reviewers", () => {
