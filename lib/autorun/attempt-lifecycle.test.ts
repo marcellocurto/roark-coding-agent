@@ -12,6 +12,7 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
 
 const tempDirs: string[] = [];
 
@@ -73,10 +74,10 @@ describe("runAutorunAttemptLifecycle", () => {
           return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n\n## Changed Files\n- lib/example.ts\n\n## Simplifications Made\nNone\n\n## Abstractions / Names Adjusted\nNone\n\n## Behavior Risk Decisions\n- Verification repair behavior in lib/example.ts was kept unchanged except for the targeted failure.\n\n## Plan / Issue Alignment\nAligned.\n\n## Validation Run\n- bun test (passed)\n\n## Remaining Concerns\nNone\n";
         }
         if (request.phase === "reviewA-1") {
-          return "# Review A Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.phase === "reviewB-1") {
-          return "# Review B Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
       },
@@ -122,10 +123,10 @@ describe("runAutorunAttemptLifecycle", () => {
           return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n";
         }
         if (request.phase === "reviewA-1") {
-          return "# Review A Pass 1\n\n## Verdict\nfixes-required\n";
+          return submitReview(request, reviewResult([reviewFinding("must-fix-current", "Numbered review requested another fix.")]));
         }
         if (request.phase === "reviewB-1") {
-          return "# Review B Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.phase === "fixLog-2") {
           return "# Fix Log Pass 2\n\n## Summary\nCompleted verification repair.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
@@ -134,10 +135,10 @@ describe("runAutorunAttemptLifecycle", () => {
           return "# Refinement Log Pass 2\n\n## Summary\nRefined.\n";
         }
         if (request.phase === "reviewA-2") {
-          return "# Review A Pass 2\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.phase === "reviewB-2") {
-          return "# Review B Pass 2\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
       },
@@ -326,8 +327,8 @@ async function writeCompletedWorkflowArtifacts(context: WorkflowContext): Promis
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
   await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
   await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-  await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
-  await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
+  await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
+  await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
 }
 
 async function createFixture(): Promise<{

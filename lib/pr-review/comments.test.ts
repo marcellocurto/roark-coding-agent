@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { githubIssueCommentMaxChars } from "../github/comments.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
+import { normalizeReviewFindings, type NormalizedReviewerFinding } from "../review/result.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import { formatPrReviewComment } from "./comments.ts";
 
@@ -15,8 +16,8 @@ describe("PR review public comment", () => {
       headOid: "abc123",
       decision: { outcome: "changes-requested", requiredFixes: [required], externalBlockers: [], followUps: [], suggestions: [suggestion], reasons: [] },
       verificationStatus: "passed",
-      reviewA: `review A at /mnt/agent/repo/private/file\n${"a".repeat(70_000)}`,
-      reviewB: `review B\n${"b".repeat(70_000)}`,
+      reviewA: reviewResult([], { summary: `review A at /mnt/agent/repo/private/file\n${"a".repeat(70_000)}` }),
+      reviewB: reviewResult([], { summary: `review B\n${"b".repeat(70_000)}` }),
     });
 
     expect(body.indexOf("Required")).toBeLessThan(body.indexOf("Optional"));
@@ -41,8 +42,8 @@ describe("PR review public comment", () => {
       headOid: "abc123",
       decision: { outcome: "blocked", requiredFixes: [huge, later], externalBlockers: [blocker], followUps: [], suggestions: [], reasons: [] },
       verificationStatus: "passed",
-      reviewA: "Full correctness review",
-      reviewB: "Full maintainability review",
+      reviewA: reviewResult([], { summary: "Full correctness review" }),
+      reviewB: reviewResult([], { summary: "Full maintainability review" }),
     });
 
     expect(body).toContain("finding truncated; full review retained in run artifacts");
@@ -70,18 +71,9 @@ function reviewContext(): PrReviewContext {
 }
 
 function finding(classification: NormalizedReviewerFinding["classification"], title: string, evidence: string): NormalizedReviewerFinding {
-  return {
-    source: "review-a",
-    sourceLocalId: title,
-    workflowId: `review-a:${title}`,
-    title,
-    classification,
-    severity: "medium",
-    confidence: "high",
-    evidence,
-    currentIssueImpact: "impact",
-    recommendedHandling: "fix it",
-    warnings: [],
-    rawExcerpt: "",
-  };
+  const [normalized] = normalizeReviewFindings(reviewResult([
+    reviewFinding(classification, title, { evidence: [evidence] }),
+  ]), "review-a");
+  if (!normalized) throw new Error("Expected one normalized finding.");
+  return normalized;
 }

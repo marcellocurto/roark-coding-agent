@@ -134,9 +134,7 @@ export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
   }
 
   const latestCycle = latestCompleteReviewCycle(context);
-  if (latestCycle === undefined) {
-    candidates.push("reviewA", "reviewB");
-  } else {
+  if (latestCycle !== undefined) {
     candidates.push(reviewARef(latestCycle), reviewBRef(latestCycle));
   }
 

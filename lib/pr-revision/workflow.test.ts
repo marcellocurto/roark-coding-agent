@@ -7,6 +7,7 @@ import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import type { PrReviewContext } from "../pr-review/artifacts.ts";
 import { formatPrReviewComment } from "../pr-review/comments.ts";
+import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
 import { noopAsync } from "../utils/async.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
@@ -127,11 +128,9 @@ function freshReviewComment(controlCwd: string, agentCwd: string): string {
         classification: "must-fix-current",
         severity: "high",
         confidence: "high",
-        evidence: "The changed handler omits the required field.",
+        evidence: ["The changed handler omits the required field."],
         currentIssueImpact: "Clients cannot parse successful responses.",
         recommendedHandling: "Restore the field before merging.",
-        warnings: [],
-        rawExcerpt: "",
       }],
       externalBlockers: [],
       followUps: [],
@@ -139,8 +138,8 @@ function freshReviewComment(controlCwd: string, agentCwd: string): string {
       reasons: [],
     },
     verificationStatus: "not configured",
-    reviewA: "## Verdict\nfixes-required\n",
-    reviewB: "## Verdict\napprove\n",
+    reviewA: reviewResult([], { summary: "Changes required." }),
+    reviewB: reviewResult([], { summary: "Approved." }),
   });
 }
 
@@ -306,7 +305,7 @@ describe("runPrRevision", () => {
         thinkingLevels.push(request.thinkingLevel);
         if (request.fileEditingToolsEnabled) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
@@ -337,7 +336,7 @@ describe("runPrRevision", () => {
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
@@ -379,7 +378,7 @@ describe("runPrRevision", () => {
           return `# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed pass ${writableArtifacts.length}.\n\n## Skipped Items\n- None.\n`;
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => {
         await noopAsync();
@@ -426,8 +425,12 @@ describe("runPrRevision", () => {
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        if (calls === 3) return "# Revision Review\n\n## Verdict\nfixes-required\n\n## Required Fixes\n- Address reviewer feedback.\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        if (calls === 3) {
+          return submitReview(request, reviewResult([
+            reviewFinding("must-fix-current", "Address reviewer feedback."),
+          ]));
+        }
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => {
         await noopAsync();
@@ -494,7 +497,7 @@ describe("runPrRevision", () => {
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command, cwd }) => {
         await noopAsync();
@@ -540,7 +543,7 @@ describe("runPrRevision", () => {
           return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
         }
         if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
-        return "# Revision Review\n\n## Verdict\napprove\n";
+        return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       postSummaryComment: async () => {

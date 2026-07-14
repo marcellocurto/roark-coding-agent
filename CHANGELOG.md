@@ -9,6 +9,12 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 ### Added
 
 - Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
+- Added a schema-validated `submit_review` tool contract for issue, PR, and PR-revision reviewers, with structured JSON source artifacts and deterministic Markdown presentation.
+
+### Changed
+
+- Review outcomes and finding identifiers are now derived from typed findings instead of parsed from agent-authored Markdown, so arbitrary reviewer formatting cannot hide required fixes.
+- Issue-workflow readiness, curation, publishing, and ledger comments now use only validated numbered review cycles; unnumbered review files are ignored.
 
 ### Removed
 

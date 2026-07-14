@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "../cli/args.ts";
 import type { RunObserver } from "../observability/observer.ts";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export interface AgentRunRequest {
   cwd: string;
@@ -11,6 +12,7 @@ export interface AgentRunRequest {
   skillPaths?: string[] | undefined;
   observer?: RunObserver | undefined;
   phase?: string | undefined;
+  customTools?: ToolDefinition[] | undefined;
 }
 
 export type AgentRunner = (request: AgentRunRequest) => Promise<string>;

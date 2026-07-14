@@ -46,7 +46,7 @@ const artifactFilenames: Record<PrRevisionArtifactName, string> = {
   prFeedbackMarkdown: "pr-feedback.md",
   revisionPlan: "revision-plan.md",
   revisionLog: "revision-log.md",
-  revisionReview: "revision-review.md",
+  revisionReview: "revision-review.json",
   verification: "verification.md",
 };
 

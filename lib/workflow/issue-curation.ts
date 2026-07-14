@@ -14,12 +14,12 @@ import {
   writeJsonArtifact,
 } from "./artifacts.ts";
 import {
-  parseReviewPairFindings,
   type FindingClassification,
+  normalizeReviewFindings,
   type NormalizedReviewerFinding,
-  type RejectedReviewerFinding,
+  parseReviewResultJson,
   type ReviewFindingSource,
-} from "./findings.ts";
+} from "../review/result.ts";
 
 export type IssuePlanClassification = ReviewerIssueClassificationLabel;
 
@@ -77,7 +77,7 @@ export interface RejectedCandidate {
   sourceClassifications: string[];
   title?: string | undefined;
   reason: string;
-  evidence?: string | undefined;
+  evidence?: string[] | undefined;
   impact?: string | undefined;
   rawExcerpt?: string | undefined;
 }
@@ -117,20 +117,13 @@ export async function buildIssueCurationPlan(
   const sourceIssue = await loadSourceIssueContext(context, warnings);
   const artifactPaths = collectAvailableArtifactPaths(context);
   const reviewArtifacts = latestReviewArtifacts(context);
-  const reviewA = await readOptionalArtifact(context, reviewArtifacts.reviewA, warnings);
-  const reviewB = await readOptionalArtifact(context, reviewArtifacts.reviewB, warnings);
-  const parsed = parseReviewPairFindings({ reviewA: reviewA ?? "", reviewB: reviewB ?? "" });
-
-  warnings.push(...parsed.reviewA.warnings, ...parsed.reviewB.warnings);
-  if (!parsed.reviewA.hasLedger && reviewA !== undefined) warnings.push(`${artifactDisplayPath(context, reviewArtifacts.reviewA)} does not contain a Findings Ledger.`);
-  if (!parsed.reviewB.hasLedger && reviewB !== undefined) warnings.push(`${artifactDisplayPath(context, reviewArtifacts.reviewB)} does not contain a Findings Ledger.`);
-
-  const rejectedCandidates: RejectedCandidate[] = [
-    ...parsed.reviewA.rejected.map(rejectedParserFindingToCandidate),
-    ...parsed.reviewB.rejected.map(rejectedParserFindingToCandidate),
+  const reviewA = reviewArtifacts === undefined ? undefined : await readOptionalArtifact(context, reviewArtifacts.reviewA, warnings);
+  const reviewB = reviewArtifacts === undefined ? undefined : await readOptionalArtifact(context, reviewArtifacts.reviewB, warnings);
+  const findings = [
+    ...(reviewA === undefined ? [] : normalizeReviewFindings(parseReviewResultJson(reviewA, { allowRestart: true }), "review-a")),
+    ...(reviewB === undefined ? [] : normalizeReviewFindings(parseReviewResultJson(reviewB, { allowRestart: true }), "review-b")),
   ];
-
-  const findings = [...parsed.reviewA.findings, ...parsed.reviewB.findings];
+  const rejectedCandidates: RejectedCandidate[] = [];
   const accepted: NormalizedReviewerFinding[] = [];
 
   for (const finding of findings) {
@@ -172,7 +165,7 @@ export async function buildIssueCurationPlan(
 
 function issueCandidateRejectionReason(finding: NormalizedReviewerFinding): string | undefined {
   if (finding.classification === "must-fix-current") return "must-fix-current findings belong to the current issue/fix pass and are not promoted by default";
-  if (!hasConcreteContent(finding.evidence)) return "missing concrete evidence";
+  if (!finding.evidence.some(hasConcreteContent)) return "missing concrete evidence";
   if (!hasConcreteContent(finding.currentIssueImpact)) return "missing current-issue or future-user impact";
   if (!hasConcreteContent(finding.title) || !hasConcreteContent(finding.recommendedHandling)) return "missing actionable title or recommended handling";
   if (hasVagueOrSpeculativeLanguage(finding)) return "vague or speculative candidate";
@@ -187,7 +180,7 @@ function hasConcreteContent(value: string): boolean {
 }
 
 function hasVagueOrSpeculativeLanguage(finding: NormalizedReviewerFinding): boolean {
-  const value = [finding.title, finding.evidence, finding.currentIssueImpact, finding.recommendedHandling]
+  const value = [finding.title, ...finding.evidence, finding.currentIssueImpact, finding.recommendedHandling]
     .join("\n")
     .toLowerCase();
   return /\b(maybe|perhaps|possibly|speculative|unclear|unknown|not sure|might|seems like|appears to)\b/.test(value);
@@ -240,7 +233,7 @@ function buildIssuePlanItems(input: {
     const sourceFindingIds = unique(group.map((finding) => finding.workflowId));
     const reviewerSources = unique(group.map((finding) => finding.source));
     const sourceClassifications = unique(group.map((finding) => finding.classification));
-    const evidence = unique(group.map((finding) => finding.evidence));
+    const evidence = unique(group.flatMap((finding) => finding.evidence));
     const impacts = unique(group.map((finding) => finding.currentIssueImpact));
     const handling = unique(group.map((finding) => finding.recommendedHandling));
     const proposedTitle = representative.suggestedIssueTitle ?? representative.title;
@@ -352,16 +345,14 @@ async function readOptionalArtifact(
   }
 }
 
-function latestReviewArtifacts(context: WorkflowContext): { reviewA: ArtifactRef; reviewB: ArtifactRef } {
+function latestReviewArtifacts(context: WorkflowContext): { reviewA: ArtifactRef; reviewB: ArtifactRef } | undefined {
   const latestReviewCycle = latestCompleteReviewCycle(context);
-  if (latestReviewCycle !== undefined) {
-    return { reviewA: reviewARef(latestReviewCycle), reviewB: reviewBRef(latestReviewCycle) };
-  }
-  return { reviewA: "reviewA", reviewB: "reviewB" };
+  if (latestReviewCycle === undefined) return undefined;
+  return { reviewA: reviewARef(latestReviewCycle), reviewB: reviewBRef(latestReviewCycle) };
 }
 
 function isReviewArtifact(artifact: ArtifactRef, name: "reviewA" | "reviewB"): boolean {
-  return artifact === name || (typeof artifact !== "string" && artifact.name === name);
+  return typeof artifact !== "string" && artifact.name === name;
 }
 
 function artifactDisplayPath(context: WorkflowContext, artifact: ArtifactRef): string {
@@ -438,16 +429,6 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
   return unique(artifacts);
 }
 
-function rejectedParserFindingToCandidate(finding: RejectedReviewerFinding): RejectedCandidate {
-  return {
-    sourceFindingIds: [finding.workflowId ?? finding.sourceLocalId ?? `${finding.source}:unparseable`],
-    reviewerSources: [finding.source],
-    sourceClassifications: finding.classification ? [finding.classification] : [],
-    reason: finding.reason,
-    rawExcerpt: finding.rawExcerpt,
-  };
-}
-
 function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding, reason: string): RejectedCandidate {
   return {
     sourceFindingIds: [finding.workflowId],
@@ -457,7 +438,6 @@ function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding
     reason,
     evidence: finding.evidence,
     impact: finding.currentIssueImpact,
-    rawExcerpt: finding.rawExcerpt,
   };
 }
 
@@ -474,8 +454,8 @@ function normalizeText(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-function evidenceReferences(value: string): string[] {
-  const matches = value.match(/[\w./-]+\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/g) ?? [];
+function evidenceReferences(values: readonly string[]): string[] {
+  const matches = values.flatMap((value) => value.match(/[\w./-]+\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/g) ?? []);
   return unique(matches.map((match) => match.toLowerCase()));
 }
 

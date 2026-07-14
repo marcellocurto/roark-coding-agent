@@ -8,11 +8,13 @@ import {
   buildPushArgv,
   buildStageAllArgv,
   buildSuccessLabelArgv,
+  collectPrBodyArtifactPaths,
   formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
 } from "./publish.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
+import { createWorkflowContext, writeArtifact } from "../workflow/artifacts.ts";
 
 const tempDirs: string[] = [];
 
@@ -74,6 +76,31 @@ describe("autorun publish argv builders", () => {
 describe("formatCommitMessage", () => {
   test("includes the issue number", () => {
     expect(formatCommitMessage({ issueNumber: 9 })).toBe("roark: implement issue #9");
+  });
+});
+
+describe("collectPrBodyArtifactPaths", () => {
+  test("excludes unnumbered review JSON files", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-artifacts-"));
+    tempDirs.push(cwd);
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "9",
+      cwd,
+      outDir: ".roark/runs",
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+      attempt: 1,
+    });
+    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await Bun.write(path.join(context.runDir, "review-a.json"), "{}\n");
+    await Bun.write(path.join(context.runDir, "review-b.json"), "{}\n");
+
+    const paths = collectPrBodyArtifactPaths(context);
+
+    expect(paths).not.toContain(path.join(context.runDirRelative, "review-a.json"));
+    expect(paths).not.toContain(path.join(context.runDirRelative, "review-b.json"));
   });
 });
 

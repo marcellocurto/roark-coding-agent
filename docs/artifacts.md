@@ -2,7 +2,7 @@
 title: Artifacts
 summary: Layout, purpose, and inspection path for Roark run, attempt, phase, curation, PR review, and PR revision artifacts.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-14T00:00:00Z
 ---
 
 Artifacts are useful for:
@@ -26,8 +26,8 @@ Artifacts are useful for:
                 ├── triage.md
                 ├── implementation-plan.md
                 ├── implementation-log.md
-                ├── review-a.md
-                ├── review-b.md
+                ├── review-a-0.json
+                ├── review-b-0.json
                 ├── fix-log-1.md
                 ├── readiness.md
                 ├── verification.md
@@ -49,7 +49,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | Why did publishing stop? | `readiness.md`, then `verification.md` |
 | What command failed? | `verification.md` |
 | What did the agent change? | `implementation-log.md`, then Git diff in the managed workspace |
-| What did reviewers find? | `review-a.md`, `review-b.md`, and numbered `review-a-<n>.md`, `review-b-<n>.md` cycles |
+| What did reviewers find? | `review-a-<n>.json` and `review-b-<n>.json`; public comments and readiness render these structured findings as Markdown |
 | Can this be continued? | `attempt.json`, `attempts.json`, managed workspace state |
 | What follow-up issues were planned? | `issue-curation-plan.json` |
 | What follow-up issues were created? | `issue-creation-results.json` |
@@ -62,7 +62,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `triage.md` | Proceed, block, reject, or needs-human decision. |
 | `implementation-plan.md` | Plan for the implementation phase. |
 | `implementation-log.md` | Implementation result. |
-| `review-a.md`, `review-b.md` | Independent reviews. |
+| `review-a-<n>.json`, `review-b-<n>.json` | Independent, schema-validated reviews. Outcomes and finding identifiers are derived from these artifacts. |
 | `fix-log-<n>.md` | Fix pass output. |
 | `readiness.md` | Final readiness gate artifact. |
 | `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
@@ -89,9 +89,11 @@ This records attempts for an issue and is used by `roark continue` when no expli
         └── revision-<n>/
 ```
 
-PR review generations include pinned comparison metadata, PR and optional linked-issue context, verification, independent Review A/B outputs, a deterministic summary, and metadata. Every rerun is preserved under `review-<n>` even though the public marked comment is updated in place.
+PR review generations include pinned comparison metadata, PR and optional linked-issue context, verification, independent `review-a.json` and `review-b.json` source artifacts, deterministic Markdown renderings, a deterministic summary, and metadata. Every rerun is preserved under `review-<n>` even though the public marked comment is updated in place.
 
-PR revision artifacts include fetched feedback, revision plan, revision log, review, verification, and metadata when applicable.
+PR revision artifacts include fetched feedback, revision plan, revision log, a schema-validated `revision-review*.json` source artifact with a deterministic Markdown companion, verification, and metadata when applicable.
+
+Review agents complete through the schema-validated `submit_review` tool. Roark assigns finding identifiers, derives approve/fixes-required/blocked outcomes, and renders Markdown from the accepted JSON. Free-form reviewer prose is not parsed as workflow state.
 
 ## Git Behavior
 

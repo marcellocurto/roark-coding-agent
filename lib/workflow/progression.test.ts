@@ -14,6 +14,7 @@ import {
   type WorkflowContext,
 } from "./artifacts.ts";
 import { planWorkflowProgression } from "./progression.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 
 const tempDirs: string[] = [];
 
@@ -128,8 +129,8 @@ describe("planWorkflowProgression", () => {
     await writeHappyPathThroughReviews(context, "fixes-required", "approve");
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
     await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
-    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewARef(1), structuredReview("approve"));
+    await writeArtifact(context, reviewBRef(1), structuredReview("approve"));
 
     const progression = await planWorkflowProgression(context, { includePublishGate: true });
 
@@ -167,8 +168,8 @@ describe("planWorkflowProgression", () => {
     await writeHappyPathThroughReviews(context, "restart-required", "approve");
     await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
     await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
-    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewARef(1), structuredReview("approve"));
+    await writeArtifact(context, reviewBRef(1), structuredReview("approve"));
 
     const progression = await planWorkflowProgression(context);
 
@@ -201,6 +202,13 @@ async function writeHappyPathThroughReviews(
 ) {
   await writeReadyThroughImplementation(context);
   await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-  await writeArtifact(context, reviewARef(0), `# Review A Pass 0\n\n## Verdict\n${reviewAVerdict}\n`);
-  await writeArtifact(context, reviewBRef(0), `# Review B Pass 0\n\n## Verdict\n${reviewBVerdict}\n`);
+  await writeArtifact(context, reviewARef(0), structuredReview(reviewAVerdict));
+  await writeArtifact(context, reviewBRef(0), structuredReview(reviewBVerdict));
+}
+
+function structuredReview(disposition: string): string {
+  if (disposition === "approve") return JSON.stringify(reviewResult());
+  const result = reviewResult([reviewFinding("must-fix-current", "Required fix")]);
+  if (disposition === "restart-required") result.restartRationale = "The implementation baseline is no longer safe to repair incrementally.";
+  return JSON.stringify(result);
 }

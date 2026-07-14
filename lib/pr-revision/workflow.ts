@@ -40,6 +40,8 @@ import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
 import { postPrRevisionSummaryComment } from "./comments.ts";
 import { revisionImplementationPrompt, revisionPlanPrompt, revisionReviewPrompt } from "./prompts.ts";
+import { formatReviewResultMarkdown, normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
+import { runReviewAgent } from "../review/runner.ts";
 
 export type PrRevisionOutcome =
   | "no-action-needed"
@@ -154,15 +156,13 @@ export async function runPrRevision(
     });
     artifactFilenames.push("revision-log.md");
 
-    let review = await runRevisionAgent(context, runner, {
+    let review = await runRevisionReviewAgent(context, runner, {
       label: "Revision review",
-      artifact: "revision-review.md",
-      fileEditingToolsEnabled: false,
-      thinkingStage: "revisionReview",
+      artifact: "revision-review.json",
       prompt: revisionReviewPrompt(context, 0),
     });
-    artifactFilenames.push("revision-review.md");
-    let reviewVerdict = parseReviewVerdict(review);
+    artifactFilenames.push("revision-review.json", "revision-review.md");
+    let reviewVerdict = revisionReviewVerdict(review);
     let fixPassesUsed = 0;
     let verification: VerificationResult | undefined;
 
@@ -177,7 +177,7 @@ export async function runPrRevision(
             planStatus,
             reviewVerdict,
             feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-            skipped: extractSectionBullets(review, "Required Fixes"),
+            skipped: revisionReviewBlockingFindings(review),
             artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
           });
           return { outcome: "review-blocked", context, planStatus, reviewVerdict };
@@ -194,16 +194,14 @@ export async function runPrRevision(
         });
         artifactFilenames.push(logArtifact);
 
-        const reviewArtifact = `revision-review-pass-${pass}.md`;
-        review = await runRevisionAgent(context, runner, {
+        const reviewArtifact = `revision-review-pass-${pass}.json`;
+        review = await runRevisionReviewAgent(context, runner, {
           label: `Revision review pass ${pass}`,
           artifact: reviewArtifact,
-          fileEditingToolsEnabled: false,
-          thinkingStage: "revisionReview",
           prompt: revisionReviewPrompt(context, pass),
         });
-        artifactFilenames.push(reviewArtifact);
-        reviewVerdict = parseReviewVerdict(review);
+        artifactFilenames.push(reviewArtifact, reviewArtifact.replace(/\.json$/, ".md"));
+        reviewVerdict = revisionReviewVerdict(review);
         continue;
       }
 
@@ -216,7 +214,7 @@ export async function runPrRevision(
           planStatus,
           reviewVerdict,
           feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-          skipped: extractSectionBullets(review, "Required Fixes"),
+          skipped: revisionReviewBlockingFindings(review),
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
         });
         return { outcome: "review-blocked", context, planStatus, reviewVerdict };
@@ -276,16 +274,14 @@ export async function runPrRevision(
       });
       artifactFilenames.push(logArtifact);
 
-      const reviewArtifact = `revision-review-pass-${pass}.md`;
-      review = await runRevisionAgent(context, runner, {
+      const reviewArtifact = `revision-review-pass-${pass}.json`;
+      review = await runRevisionReviewAgent(context, runner, {
         label: `Revision review pass ${pass}`,
         artifact: reviewArtifact,
-        fileEditingToolsEnabled: false,
-        thinkingStage: "revisionReview",
         prompt: revisionReviewPrompt(context, pass),
       });
-      artifactFilenames.push(reviewArtifact);
-      reviewVerdict = parseReviewVerdict(review);
+      artifactFilenames.push(reviewArtifact, reviewArtifact.replace(/\.json$/, ".md"));
+      reviewVerdict = revisionReviewVerdict(review);
     }
 
     if ((await dirtyLinesOutsideRoark(context.agentCwd)).length === 0) {
@@ -388,6 +384,30 @@ async function runRevisionAgent(
   return content;
 }
 
+async function runRevisionReviewAgent(
+  context: PrRevisionContext,
+  runner: AgentRunner,
+  input: { label: string; artifact: string; prompt: string },
+): Promise<ReviewResult> {
+  console.log(`\n=== ${input.label} ===`);
+  const result = await runReviewAgent({
+    cwd: context.agentCwd,
+    model: effectiveModelForStage(context.model, "revisionReview"),
+    thinkingLevel: context.thinkingConfig.revisionReview,
+    systemPrompt: sharedSystemPrompt,
+    prompt: input.prompt,
+    fileEditingToolsEnabled: false,
+  }, runner, { allowRestart: false });
+  await writePrRevisionJsonArtifact(context, input.artifact, result);
+  const markdownArtifact = input.artifact.replace(/\.json$/, ".md");
+  await writePrRevisionArtifact(context, markdownArtifact, formatReviewResultMarkdown(result, {
+    title: input.label,
+    source: "revision-review",
+  }));
+  console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);
+  return result;
+}
+
 async function writeInitialArtifacts(context: PrRevisionContext, feedback: PullRequestFeedback): Promise<void> {
   await writePrRevisionJsonArtifact(context, "pr-feedback.json", plannerFacingFeedback(feedback));
   await writePrRevisionArtifact(context, "pr-feedback.md", formatPrFeedbackMarkdown(feedback));
@@ -459,10 +479,16 @@ function parsePlanStatus(markdown: string): RevisionPlanStatus {
   return status;
 }
 
-function parseReviewVerdict(markdown: string): RevisionReviewVerdict {
-  const verdict = extractToken(markdown, "Verdict", ["approve", "fixes-required", "blocked"] as const);
-  if (!verdict) throw new Error("Revision review did not include ## Verdict with approve, fixes-required, or blocked.");
-  return verdict;
+function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
+  const disposition = reviewDisposition(review);
+  if (disposition === "restart-required") throw new Error("Revision reviews cannot request an implementation restart.");
+  return disposition;
+}
+
+function revisionReviewBlockingFindings(review: ReviewResult): string[] {
+  return normalizeReviewFindings(review, "revision-review")
+    .filter((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker")
+    .map((finding) => `${finding.sourceLocalId}: ${finding.title} — ${finding.recommendedHandling}`);
 }
 
 function extractToken<const T extends readonly string[]>(markdown: string, section: string, allowed: T): T[number] | undefined {

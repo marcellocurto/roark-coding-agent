@@ -1,6 +1,6 @@
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment } from "../github/comments.ts";
-import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
+import { formatReviewResultMarkdown, type NormalizedReviewerFinding, type ReviewResult } from "../review/result.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewDecision } from "./outcome.ts";
 
@@ -17,8 +17,8 @@ export function formatPrReviewComment(input: {
   headOid: string;
   decision: PrReviewDecision;
   verificationStatus: string;
-  reviewA: string;
-  reviewB: string;
+  reviewA: ReviewResult;
+  reviewB: ReviewResult;
 }): string {
   const localRoots = [input.context.controlCwd, input.context.agentCwd, input.context.outDir, input.context.reviewDir];
   const sanitize = (value: string) => sanitizePublicMarkdown(value, { localRoots });
@@ -46,9 +46,15 @@ export function formatPrReviewComment(input: {
     "### Suggestions",
     ...renderFindings(input.decision.suggestions, sanitize, nonBlockingFindingSectionMaxChars),
     "",
-    formatBoundedMarkdownDetails("Correctness review details", sanitize(input.reviewA)),
+    formatBoundedMarkdownDetails("Correctness review details", sanitize(formatReviewResultMarkdown(input.reviewA, {
+      title: "Review A: Spec and Correctness",
+      source: "review-a",
+    }))),
     "",
-    formatBoundedMarkdownDetails("Maintainability review details", sanitize(input.reviewB)),
+    formatBoundedMarkdownDetails("Maintainability review details", sanitize(formatReviewResultMarkdown(input.reviewB, {
+      title: "Review B: Standards and Maintainability",
+      source: "review-b",
+    }))),
   ];
   return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
@@ -69,7 +75,7 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize
   if (findings.length === 0) return ["- None."];
   const maxChars = Math.min(findingMaxChars, Math.max(1, Math.floor(sectionMaxChars / findings.length)));
   return findings.map((finding) => {
-    const evidence = sanitize(finding.evidence);
+    const evidence = finding.evidence.map(sanitize).join(" ");
     const handling = sanitize(finding.recommendedHandling);
     const rendered = `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
     return truncateFinding(rendered, maxChars);

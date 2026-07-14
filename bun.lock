@@ -7,6 +7,7 @@
       "dependencies": {
         "@earendil-works/pi-ai": "0.80.6",
         "@earendil-works/pi-coding-agent": "0.80.6",
+        "typebox": "1.1.38",
       },
       "devDependencies": {
         "@types/bun": "latest",

@@ -20,6 +20,7 @@ import {
   shouldImplementPlan,
   shouldProceedAfterTriage,
 } from "./verdicts.ts";
+import { parseReviewResultJson } from "../review/result.ts";
 
 export type WorkflowProgressionAction =
   | { type: "run"; phase: WorkflowRunPhase; pass?: number | undefined; reason: string }
@@ -189,9 +190,9 @@ async function reviewCycleProgression(
       ]);
     }
 
-    const reviewAMarkdown = reviewA.content ?? "";
-    const reviewBMarkdown = reviewB.content ?? "";
-    if (hasBlockedReview(reviewAMarkdown, reviewBMarkdown)) {
+    const reviewAResult = parseReviewResultJson(reviewA.content ?? "", { allowRestart: true });
+    const reviewBResult = parseReviewResultJson(reviewB.content ?? "", { allowRestart: true });
+    if (hasBlockedReview(reviewAResult, reviewBResult)) {
       return terminal(
         [
           readiness("a review is blocked; readiness records the stop"),
@@ -202,7 +203,7 @@ async function reviewCycleProgression(
     }
 
     const nextPass = pass + 1;
-    if (needsRestart(reviewAMarkdown, reviewBMarkdown)) {
+    if (needsRestart(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
       const reset = await inspect(context, baselineResetLogRef(nextPass), options);
       if (!reset.valid) {
@@ -231,7 +232,7 @@ async function reviewCycleProgression(
       continue;
     }
 
-    if (needsFix(reviewAMarkdown, reviewBMarkdown)) {
+    if (needsFix(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
       const fix = await inspect(context, fixLogRef(nextPass), options);
       if (!fix.valid) {
@@ -286,8 +287,6 @@ function forceActionForArtifact(artifact: ArtifactRef): WorkflowProgressionActio
     if (artifact === "implementationPlan") return run("plan", "forced rerun requested");
     if (artifact === "preImplementationBaseline") return run("capture-baseline", "forced rerun requested");
     if (artifact === "implementationLog") return run("implement", "forced rerun requested");
-    if (artifact === "reviewA") return run("review-a", "forced rerun requested");
-    if (artifact === "reviewB") return run("review-b", "forced rerun requested");
     return undefined;
   }
   if (artifact.name === "fixLog") return run("fix", "forced rerun requested", artifact.pass);

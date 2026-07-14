@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { createWorkflowContext, fixLogRef, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "../workflow/artifacts.ts";
 import { planContinuation } from "./continue-plan.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import type { FindingClassification, ReviewFinding } from "../review/result.ts";
 
 const tempDirs: string[] = [];
 
@@ -27,6 +29,23 @@ afterEach(async () => {
 });
 
 describe("planContinuation", () => {
+  test("ignores review Markdown artifacts from earlier runs", async () => {
+    const context = await tempContext();
+    await writeReadyThroughPlan(context, "yes");
+    await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
+    await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+    await Bun.write(path.join(context.runDir, "review-a-0.md"), "# Historical Review A\n\n## Verdict\napprove\n");
+    await Bun.write(path.join(context.runDir, "review-b-0.md"), "# Historical Review B\n\n## Verdict\napprove\n");
+
+    const steps = await planContinuation(context);
+
+    expect(steps.slice(0, 2)).toEqual([
+      { type: "run", phase: "review-a", pass: 0, reason: "artifact is missing" },
+      { type: "run", phase: "review-b", pass: 0, reason: "artifact is missing" },
+    ]);
+  });
+
   test("reruns only invalid latest Review B before readiness and publish gate", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context);
@@ -86,8 +105,8 @@ describe("planContinuation", () => {
     await writeHappyPathThroughReviews(context, "fixes-required");
     await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
     await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
-    await writeArtifact(context, reviewARef(1), "# Review A Pass 1\n\n## Verdict\napprove\n");
-    await writeArtifact(context, reviewBRef(1), "# Review B Pass 1\n\n## Verdict\napprove\n");
+    await writeArtifact(context, reviewARef(1), JSON.stringify(reviewResult()));
+    await writeArtifact(context, reviewBRef(1), JSON.stringify(reviewResult()));
 
     const steps = await planContinuation(context);
 
@@ -97,9 +116,9 @@ describe("planContinuation", () => {
     ]);
   });
 
-  test("does not plan a fix for follow-up-only review ledgers", async () => {
+  test("does not plan a fix for follow-up-only structured reviews", async () => {
     const context = await tempContext();
-    await writeHappyPathThroughReviews(context, "approve", reviewWithLedger("approve", finding("FU1", "follow-up")));
+    await writeHappyPathThroughReviews(context, "approve", reviewResultJson([finding("FU1", "follow-up")]));
 
     const steps = await planContinuation(context);
 
@@ -109,9 +128,9 @@ describe("planContinuation", () => {
     ]);
   });
 
-  test("plans readiness without fix work for external-blocker review ledgers", async () => {
+  test("plans readiness without fix work for external-blocker structured reviews", async () => {
     const context = await tempContext();
-    await writeHappyPathThroughReviews(context, "approve", reviewWithLedger("blocked", finding("B1", "external-blocker")));
+    await writeHappyPathThroughReviews(context, "approve", reviewResultJson([finding("B1", "external-blocker")]));
 
     const steps = await planContinuation(context);
 
@@ -173,18 +192,19 @@ async function writeHappyPathThroughReviews(
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
   await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
   await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-  await writeArtifact(context, reviewARef(0), reviewAContent ?? `# Review A Pass 0\n\n## Verdict\n${reviewVerdict}\n`);
-  await writeArtifact(context, reviewBRef(0), `# Review B Pass 0\n\n## Verdict\n${reviewVerdict}\n`);
+  const findings = reviewVerdict === "fixes-required" ? [finding("Required fix", "must-fix-current")] : [];
+  await writeArtifact(context, reviewARef(0), reviewAContent ?? reviewResultJson(findings));
+  await writeArtifact(context, reviewBRef(0), reviewResultJson(findings));
 }
 
 function issueArtifact(): string {
   return "# GitHub Issue #11\n\n<github_issue_relationships source=\"gh\">\n  <blocking_status active_blockers=\"0\" total_blockers=\"0\" />\n</github_issue_relationships>\n";
 }
 
-function reviewWithLedger(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {
-  return `# Review A Pass 0\n\n## Verdict\n${verdict}\n\n## Findings Ledger\n${entries}\n`;
+function reviewResultJson(findings: ReviewFinding[]): string {
+  return JSON.stringify(reviewResult(findings));
 }
 
-function finding(id: string, classification: string): string {
-  return `- Identifier: ${id}\n- Classification: ${classification}\n- Title: ${id}\n- Severity: medium\n- Confidence: high\n- Evidence: file.ts:1\n- Current-issue impact: Impact.\n- Recommended handling: Handle.\n`;
+function finding(title: string, classification: FindingClassification): ReviewFinding {
+  return reviewFinding(classification, title);
 }

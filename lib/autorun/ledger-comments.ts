@@ -4,6 +4,7 @@ import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, 
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
+import { formatReviewResultMarkdown, parseReviewResultJson, type ReviewFindingSource } from "../review/result.ts";
 
 export type LedgerCommentPhase = string;
 
@@ -90,19 +91,20 @@ export async function publishReviewLedgerComments(input: {
 }, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}): Promise<void> {
   const publishLedgerComment = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   const latestCycle = latestCompleteReviewCycle(input.workflowContext);
+  if (latestCycle === undefined) return;
   await publishReviewLedgerComment({
     ...input,
-    artifact: latestCycle === undefined ? "reviewA" : reviewARef(latestCycle),
-    phase: latestCycle === undefined ? "review-a" : `review-a-${latestCycle}`,
-    title: latestCycle === undefined ? "Review A" : `Review A pass ${latestCycle}`,
+    artifact: reviewARef(latestCycle),
+    phase: `review-a-${latestCycle}`,
+    title: `Review A pass ${latestCycle}`,
     markerPhase: "review-a",
     publishLedgerComment,
   });
   await publishReviewLedgerComment({
     ...input,
-    artifact: latestCycle === undefined ? "reviewB" : reviewBRef(latestCycle),
-    phase: latestCycle === undefined ? "review-b" : `review-b-${latestCycle}`,
-    title: latestCycle === undefined ? "Review B" : `Review B pass ${latestCycle}`,
+    artifact: reviewBRef(latestCycle),
+    phase: `review-b-${latestCycle}`,
+    title: `Review B pass ${latestCycle}`,
     markerPhase: "review-b",
     publishLedgerComment,
   });
@@ -200,7 +202,9 @@ export function formatReviewLedgerComment(input: {
   artifactContent: string;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: input.markerPhase ?? input.phase });
-  const content = sanitizePublicMarkdown(input.artifactContent);
+  const source: ReviewFindingSource = (input.markerPhase ?? input.phase).startsWith("review-a") ? "review-a" : "review-b";
+  const review = parseReviewResultJson(input.artifactContent, { allowRestart: true });
+  const content = sanitizePublicMarkdown(formatReviewResultMarkdown(review, { title: input.title, source }));
   return [
     marker,
     "",
@@ -267,6 +271,8 @@ async function publishReviewLedgerComment(input: {
 }): Promise<void> {
   if (!artifactExists(input.workflowContext, input.artifact)) return;
   const artifactContent = await readArtifact(input.workflowContext, input.artifact);
+  const validation = validateAgentArtifact(input.artifact, artifactContent);
+  if (!validation.ok) return;
   const body = formatReviewLedgerComment({
     issueNumber: input.issue.number,
     attempt: input.attemptMetadata.attempt,

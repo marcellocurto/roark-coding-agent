@@ -13,8 +13,7 @@ import {
 import {
   correctnessReviewLens,
   maintainabilityReviewLens,
-  renderFindingsLedgerContract,
-  renderReviewVerdictSemantics,
+  renderStructuredReviewContract,
   type ReviewLensDefinition,
 } from "../review/contract.ts";
 
@@ -58,15 +57,12 @@ export const sharedSystemPrompt = `<system_prompt>
   ${ambiguityPolicy}
   <untrusted_issue_content_policy>${untrustedIssueContentPolicy}</untrusted_issue_content_policy>
   <artifact_style>Keep artifacts concise but decision-useful. Prefer bullets. Empty sections should say None, Not applicable, or Not run rather than adding filler.</artifact_style>
-  <output_contract>Return only the requested Markdown for workflow phases. Treat listed sections as the preferred shape for downstream agents, not as a reason to add filler. Keep required verdict/status/ready tokens exact.</output_contract>
+  <output_contract>Return only the requested Markdown for ordinary workflow phases. When a phase requires a terminating structured-output tool, call that tool instead and do not return Markdown.</output_contract>
 </system_prompt>`;
-
-const findingsLedgerContract = renderFindingsLedgerContract("the current issue");
 
 const doNotBroadenScopeInstruction = "Do not broaden scope.";
 const doNotEditWorkflowArtifactsInstruction = "Do not edit .roark workflow artifacts.";
 const inspectionOnlyConstraint = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
-const reviewVerdictSemantics = renderReviewVerdictSemantics("the current issue", true);
 const changedCodeValidationInstruction = "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
 const bugFeedbackLoopPolicy = `  <bug_feedback_loop_policy>
     <instruction>Apply this policy only when the requested work is a bug, regression, failing test, error, broken behavior, flaky behavior, or performance regression.</instruction>
@@ -125,7 +121,6 @@ const triageEvidencePolicy = `  <triage_evidence_policy>
 
 const workClassificationValues = "frontend, backend, full-stack, docs-config, test-only, unknown";
 const workClassificationLine = `One of: ${workClassificationValues}`;
-const reviewVerdictLine = "One of: approve, fixes-required, restart-required, blocked";
 const testsAndValidationGuidance = "For every proposed new test, name the realistic regression it would catch. If no realistic regression remains, state that existing coverage is sufficient or that no new test is warranted.";
 
 interface WorkflowArtifactInput {
@@ -141,6 +136,7 @@ interface WorkflowPhasePrompt {
   inputs: readonly string[];
   blocks: readonly string[];
   outputContract: string;
+  outputFormat?: "markdown" | "structured-tool" | undefined;
 }
 
 interface XmlBlockOptions {
@@ -164,7 +160,7 @@ function renderWorkflowPhase(config: WorkflowPhasePrompt): string {
 ${config.inputs.join("\n")}
   </inputs>
 ${config.blocks.join("\n")}
-  <output_contract format="markdown" section_guidance="preferred">
+  <output_contract format="${config.outputFormat ?? "markdown"}" section_guidance="preferred">
 ${config.outputContract}
   </output_contract>
 </workflow_phase>`;
@@ -408,13 +404,13 @@ function renderReviewPrompt(context: WorkflowContext, pass: number, config: Revi
       ...(config.smellLens ? [codeSmellPolicy, config.smellLens] : []),
       renderXmlBlock("required_fixes_policy", [
         config.requiredFixesPolicy,
-        "Non-blocking concerns belong in the Findings Ledger as <value>follow-up</value> or <value>suggestion</value>, not Required Fixes.",
-        reviewVerdictSemantics,
+        "Non-blocking concerns must be classified as <value>follow-up</value> or <value>suggestion</value>.",
       ].join("\n")),
-      findingsLedgerContract,
+      renderStructuredReviewContract("the current issue", true),
       renderConstraints([...config.extraConstraints, inspectionOnlyConstraint]),
     ],
-    outputContract: reviewOutputContract(config.reviewerLabel, pass),
+    outputContract: "Call submit_review with the final structured result. Do not return Markdown.",
+    outputFormat: "structured-tool",
   });
 }
 
@@ -526,38 +522,6 @@ function formatMarkdownSection(section: MarkdownSection): string {
   if (typeof section === "string") return `## ${section}`;
   if (section.body === undefined) return `## ${section.heading}`;
   return `## ${section.heading}\n${section.body}`;
-}
-
-function reviewOutputContract(reviewerLabel: string, pass: number): string {
-  return `# Review ${reviewerLabel} Pass ${pass}
-
-## Verdict
-${reviewVerdictLine}
-
-## Findings Ledger
-For each finding, include:
-- Identifier:
-- Classification: one of must-fix-current, external-blocker, follow-up, suggestion
-- Title:
-- Severity:
-- Confidence:
-- Evidence:
-- Current-issue impact:
-- Recommended handling:
-- Suggested issue title (optional):
-
-Use None if there are no findings.
-
-## Restart Rationale
-Required only for restart-required; otherwise use Not applicable.
-
-## Required Fixes
-List only unresolved must-fix-current findings that require a current-issue fix.
-
-## Suggested Improvements
-List only non-blocking suggestion findings.
-
-## Validation Reviewed`;
 }
 
 function codeRefinementSourceInputLines(context: WorkflowContext, pass: number, source: "initial" | "fix" | "restart"): string[] {

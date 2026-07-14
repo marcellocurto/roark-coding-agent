@@ -436,7 +436,7 @@ function basePlan(): IssueCurationPlan {
       runDirRelative: ".roark/runs/issue/12/attempts/2",
       attempt: 2,
       generatedAt: "2026-05-07T00:00:00.000Z",
-      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a.md"],
+      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a-0.json"],
     },
     issuesToCreate: [
       planItem("external-blocker-1", "Blocking tracker", ["needs-triage", "needs-human", "external-blocker"], "external-blocker"),
@@ -454,7 +454,7 @@ function basePlan(): IssueCurationPlan {
       reviewerSources: ["review-a", "review-b"],
       reason: "same title",
     }],
-    warnings: ["parser warning"],
+    warnings: ["source artifact was unavailable"],
   };
 }
 
@@ -477,7 +477,7 @@ function planItem(id: string, title: string, labels: string[], classification: "
     runContext: {
       runDirRelative: ".roark/runs/issue/12/attempts/2",
       attempt: 2,
-      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a.md"],
+      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a-0.json"],
     },
     proposedLabels: labels,
   };

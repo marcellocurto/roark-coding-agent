@@ -7,16 +7,18 @@ import {
   type WorkflowContext,
 } from "./artifacts.ts";
 import { decideReadiness } from "./verdicts.ts";
-import type { NormalizedReviewerFinding, RejectedReviewerFinding } from "./findings.ts";
+import { parseReviewResultJson, type NormalizedReviewerFinding } from "../review/result.ts";
 
 export async function buildReadinessMarkdown(context: WorkflowContext): Promise<string> {
   const triage = artifactExists(context, "triage") ? await readArtifact(context, "triage") : "";
   const plan = artifactExists(context, "implementationPlan") ? await readArtifact(context, "implementationPlan") : "";
   const latestReviewCycle = latestCompleteReviewCycle(context);
-  const reviewAArtifact = latestReviewCycle === undefined ? "reviewA" : reviewARef(latestReviewCycle);
-  const reviewBArtifact = latestReviewCycle === undefined ? "reviewB" : reviewBRef(latestReviewCycle);
-  const reviewA = artifactExists(context, reviewAArtifact) ? await readArtifact(context, reviewAArtifact) : "";
-  const reviewB = artifactExists(context, reviewBArtifact) ? await readArtifact(context, reviewBArtifact) : "";
+  const reviewA = latestReviewCycle === undefined
+    ? undefined
+    : parseReviewResultJson(await readArtifact(context, reviewARef(latestReviewCycle)), { allowRestart: true });
+  const reviewB = latestReviewCycle === undefined
+    ? undefined
+    : parseReviewResultJson(await readArtifact(context, reviewBRef(latestReviewCycle)), { allowRestart: true });
   const decision = decideReadiness({ triage, plan, reviewA, reviewB });
 
   return `# PR Readiness
@@ -33,7 +35,7 @@ ${context.runDirRelative}
 ## Decision Inputs
 - Triage verdict: ${decision.triageVerdict}
 - Plan ready for implementation: ${decision.planReady ? "yes" : "no"}
-- Latest review cycle: ${latestReviewCycle ?? "unnumbered"}
+- Latest review cycle: ${latestReviewCycle ?? "none"}
 - Spec and Correctness verdict: ${decision.reviewAVerdict}
 - Standards and Maintainability verdict: ${decision.reviewBVerdict}
 - Fixes were needed in latest cycle: ${decision.fixesWereNeeded ? "yes" : "no"}
@@ -52,9 +54,6 @@ ${renderFindings(decision.followUpFindings)}
 
 ## Suggestions
 ${renderFindings(decision.suggestions)}
-
-## Parser And Contract Warnings
-${renderWarnings(decision.parserWarnings, decision.rejectedFindings)}
 
 ## Summary
 ${decision.status === "ready-for-pr" ? "The workflow considers the latest post-refinement Review A/B cycle ready for a pull request." : "The workflow does not consider this work ready for a pull request yet."}
@@ -80,21 +79,9 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[]): string 
     const suffixes = [
       finding.currentIssueImpact ? `Impact: ${finding.currentIssueImpact}` : undefined,
       finding.recommendedHandling ? `Handling: ${finding.recommendedHandling}` : undefined,
-      finding.evidence ? `Evidence: ${finding.evidence}` : undefined,
+      finding.evidence.length > 0 ? `Evidence: ${finding.evidence.join("; ")}` : undefined,
       finding.suggestedIssueTitle ? `Suggested issue: ${finding.suggestedIssueTitle}` : undefined,
     ].filter((value): value is string => value !== undefined);
     return `- ${finding.workflowId} — ${finding.title} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
   }).join("\n");
-}
-
-function renderWarnings(warnings: readonly string[], rejected: readonly RejectedReviewerFinding[]): string {
-  const lines = [
-    ...warnings.map((warning) => `- ${warning}`),
-    ...rejected.map((entry) => {
-      const id = entry.workflowId ?? `${entry.source}:unknown`;
-      const classification = entry.classification ? ` Classification: ${entry.classification}.` : "";
-      return `- ${id}: rejected finding entry. ${entry.reason}${classification}`;
-    }),
-  ];
-  return lines.length === 0 ? "None" : lines.join("\n");
 }

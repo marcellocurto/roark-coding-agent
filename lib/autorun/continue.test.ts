@@ -9,6 +9,7 @@ import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from
 import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
@@ -157,8 +158,10 @@ describe("runAutoContinue", () => {
     await writeArtifact(workflowContext, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
     await writeArtifact(workflowContext, "implementationLog", "# Implementation Log\n\nDone.\n");
     await writeArtifact(workflowContext, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-    await writeArtifact(workflowContext, reviewARef(0), "# Review A Pass 0\n\n## Verdict\nfixes-required\n");
-    await writeArtifact(workflowContext, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
+    await writeArtifact(workflowContext, reviewARef(0), JSON.stringify(reviewResult([
+      reviewFinding("must-fix-current", "Fix failed after reviews"),
+    ])));
+    await writeArtifact(workflowContext, reviewBRef(0), JSON.stringify(reviewResult()));
     await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,

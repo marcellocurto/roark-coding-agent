@@ -6,8 +6,6 @@ export type StaticArtifactName =
   | "preImplementationBaseline"
   | "implementationLog"
   | "prNarrative"
-  | "reviewA"
-  | "reviewB"
   | "readiness"
   | "verification"
   | "metadata"
@@ -35,6 +33,7 @@ export interface NumberedArtifactDefinition {
   readonly name: NumberedArtifactName;
   readonly filenamePrefix: string;
   readonly displayName: string;
+  readonly extension?: "md" | "json" | undefined;
 }
 
 export interface ArtifactIdentity {
@@ -59,8 +58,6 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "preImplementationBaseline", filename: "pre-implementation-baseline.json", displayName: "Pre-implementation Baseline" },
   { name: "implementationLog", filename: "implementation-log.md", displayName: "Implementation Log" },
   { name: "prNarrative", filename: "pr-narrative.md", displayName: "PR Narrative" },
-  { name: "reviewA", filename: "review-a.md", displayName: "Review A" },
-  { name: "reviewB", filename: "review-b.md", displayName: "Review B" },
   { name: "readiness", filename: "readiness.md", displayName: "Readiness" },
   { name: "verification", filename: "verification.md", displayName: "Verification" },
   { name: "metadata", filename: "metadata.json", displayName: "Metadata" },
@@ -73,8 +70,8 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   { name: "verificationBeforeFix", filenamePrefix: "verification-before-fix", displayName: "Verification Before Fix" },
   { name: "implementationRestartLog", filenamePrefix: "implementation-restart-log", displayName: "Implementation Restart Log" },
   { name: "refinementLog", filenamePrefix: "refinement-log", displayName: "Refinement Log" },
-  { name: "reviewA", filenamePrefix: "review-a", displayName: "Review A" },
-  { name: "reviewB", filenamePrefix: "review-b", displayName: "Review B" },
+  { name: "reviewA", filenamePrefix: "review-a", displayName: "Review A", extension: "json" },
+  { name: "reviewB", filenamePrefix: "review-b", displayName: "Review B", extension: "json" },
   { name: "baselineResetLog", filenamePrefix: "baseline-reset", displayName: "Baseline Reset" },
 ] as const;
 
@@ -85,8 +82,6 @@ export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] 
   "implementationPlanDraft",
   "implementationPlan",
   "implementationLog",
-  "reviewA",
-  "reviewB",
   "readiness",
   "verification",
 ] as const;
@@ -152,7 +147,8 @@ export function baselineResetLogRef(pass: number): ArtifactRef {
 
 export function artifactFilename(artifact: ArtifactRef): string {
   if (typeof artifact === "string") return staticArtifactByName[artifact].filename;
-  return `${numberedArtifactByName[artifact.name].filenamePrefix}-${artifact.pass}.md`;
+  const definition = numberedArtifactByName[artifact.name];
+  return `${definition.filenamePrefix}-${artifact.pass}.${definition.extension ?? "md"}`;
 }
 
 export function formatArtifactRef(artifact: ArtifactRef): string {

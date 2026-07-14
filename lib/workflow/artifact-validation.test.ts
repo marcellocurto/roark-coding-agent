@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { validateAgentArtifact } from "./artifact-validation.ts";
+import { reviewResult } from "../testing/reviews.ts";
+import { reviewARef, reviewBRef } from "./artifacts.ts";
 
 const validPlan = `# Implementation Plan
 
@@ -9,14 +11,14 @@ yes
 
 describe("validateAgentArtifact", () => {
   test("rejects an empty review artifact", () => {
-    const result = validateAgentArtifact("reviewB", "");
+    const result = validateAgentArtifact(reviewBRef(0), "");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toContain("empty");
   });
 
-  test("accepts any non-empty review artifact", () => {
-    expect(validateAgentArtifact("reviewA", "Looks fine.")).toEqual({ ok: true });
-    expect(validateAgentArtifact({ name: "reviewB", pass: 2 }, "Unconventional but usable review output.")).toEqual({ ok: true });
+  test("accepts only structured review artifacts", () => {
+    expect(validateAgentArtifact(reviewARef(0), JSON.stringify(reviewResult()))).toEqual({ ok: true });
+    expect(validateAgentArtifact(reviewBRef(2), "Looks fine.").ok).toBe(false);
   });
 
   test("requires explicit plan readiness", () => {

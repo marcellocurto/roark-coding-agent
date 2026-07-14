@@ -4,9 +4,10 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { artifactExists, baselineResetLogRef, createWorkflowContext, implementationRestartLogRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, codeRefinementTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, triageTask } from "./tasks.ts";
+import { AgentTaskRunError, codeRefinementTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, runReviewTask, triageTask } from "./tasks.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewResult, submitReview } from "../testing/reviews.ts";
 
 const tempDirs: string[] = [];
 
@@ -89,16 +90,17 @@ describe("runAgentTask thinking profiles", () => {
       await noopAsync();
       requests.push(`${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`);
       if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
-      if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
-      if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
+      if (request.phase === "reviewA-0" || request.phase === "reviewB-0") {
+        return submitReview(request, reviewResult());
+      }
       if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
       return "# Implementation Log\n";
     };
 
     await runAgentTask(context, runner, implementationTask);
     await runAgentTask(context, runner, codeRefinementTask(0));
-    await runAgentTask(context, runner, reviewATask);
-    await runAgentTask(context, runner, reviewBTask);
+    await runReviewTask(context, runner, reviewATask);
+    await runReviewTask(context, runner, reviewBTask);
     await runAgentTask(context, runner, fixTask(1));
 
     expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low"]);
@@ -168,6 +170,50 @@ describe("runAgentTask error diagnostics", () => {
   });
 });
 
+describe("runReviewTask failures", () => {
+  test("preserves provider failures without creating a review artifact", async () => {
+    const context = await createContext();
+    await writeReadyThroughPlan(context);
+    await writeArtifact(context, "implementationLog", "# Implementation Log\n");
+    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+
+    let thrown: unknown;
+    try {
+      await runReviewTask(context, async () => {
+        await noopAsync();
+        throw new Error("provider quota exhausted");
+      }, reviewATask);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AgentTaskRunError);
+    expect((thrown as AgentTaskRunError).phase).toBe("agent-error");
+    expect(artifactExists(context, reviewARef(0))).toBe(false);
+  });
+
+  test("classifies a missing structured submission without creating a review artifact", async () => {
+    const context = await createContext();
+    await writeReadyThroughPlan(context);
+    await writeArtifact(context, "implementationLog", "# Implementation Log\n");
+    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+
+    let thrown: unknown;
+    try {
+      await runReviewTask(context, async () => {
+        await noopAsync();
+        return "Looks good.";
+      }, reviewATask);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AgentTaskRunError);
+    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(artifactExists(context, reviewARef(0))).toBe(false);
+  });
+});
+
 async function writeReadyThroughPlan(context: Awaited<ReturnType<typeof createContext>>) {
   await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
   await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
@@ -179,8 +225,8 @@ async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof creat
   await writeReadyThroughPlan(context);
   await writeArtifact(context, "implementationLog", "# Implementation Log\n");
   await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
-  await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
-  await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
+  await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
+  await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
 }
 
 describe("runAgentTask transient agent retry", () => {

@@ -90,7 +90,8 @@ describe("workflow prompt safety policy", () => {
     expect(ambiguityPolicy).toContain("non-ready outcome");
     expect(triagePrompt(context)).toContain("needs-human-decision");
     expect(planDraftPrompt(context)).toContain("## Ready For Implementation\nyes/no");
-    expect(reviewAPrompt(context)).toContain("blocked");
+    expect(reviewAPrompt(context)).toContain("external-blocker");
+    expect(reviewAPrompt(context)).toContain("human decision");
   });
 
   test("draft planning does not override the shared ambiguity policy", () => {
@@ -169,46 +170,9 @@ describe("workflow prompt safety policy", () => {
   });
 });
 
-describe("review findings ledger contract", () => {
-  const reviewPrompts = [reviewAPrompt(context), reviewBPrompt(context)];
-
-  test("review prompts require a structured findings ledger", () => {
-    for (const prompt of reviewPrompts) {
-      expect(prompt).toContain("Findings Ledger");
-      expect(prompt).toContain("structured Findings Ledger");
-      expect(prompt).toContain("canonical list of review findings");
-    }
-  });
-
-  test("review prompts define the classification vocabulary", () => {
-    for (const prompt of reviewPrompts) {
-      for (const classification of ["must-fix-current", "external-blocker", "follow-up", "suggestion"]) {
-        expect(prompt).toContain(classification);
-      }
-    }
-  });
-
-  test("review prompts require the finding fields", () => {
-    for (const prompt of reviewPrompts) {
-      for (const field of [
-        "identifier",
-        "classification",
-        "title",
-        "severity",
-        "confidence",
-        "evidence",
-        "current-issue impact",
-        "recommended handling",
-        "suggested issue title",
-      ]) {
-        expect(prompt.toLowerCase()).toContain(field);
-      }
-    }
-  });
-
-  test("review agent B remains independent from review agent A", () => {
+describe("structured review contract", () => {
+  test("review agent B does not receive review agent A's artifact", () => {
     const prompt = reviewBPrompt(context);
-    expect(prompt).toContain("Do not read Review Agent A's output");
     expect(prompt).not.toContain('artifact kind="review_a"');
   });
 });

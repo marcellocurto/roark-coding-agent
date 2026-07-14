@@ -28,7 +28,7 @@ export function issuePublishingPrompt(input: {
   return `<workflow_phase name="create_reviewer_generated_issues">
   <role>You are the approved issue-authoring and issue-publishing agent for Roark.</role>
   <approval_boundary>${escapePromptXmlText(input.approvalReason ?? "The user passed --yes")}. This approves publishing only the accepted plan items listed below.</approval_boundary>
-  <source_of_truth>The curation plan at \`${escapedSourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, parser warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
+  <source_of_truth>The curation plan at \`${escapedSourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, plan warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
   <target_repo>${escapePromptXmlText(input.context.repo ?? "Use gh's current default repository after preflight.")}</target_repo>
   <allowed_plan_items_json>
 ${allowedItemsJson}

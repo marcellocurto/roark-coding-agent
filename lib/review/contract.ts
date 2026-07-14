@@ -1,23 +1,19 @@
-import { parseReviewFindings, type ParsedReviewFindings, type ReviewFindingSource } from "../workflow/findings.ts";
-import { parseVerdict } from "../workflow/verdicts.ts";
-
 export type ReviewLensName = "correctness" | "maintainability";
 
-export function renderFindingsLedgerContract(subject: string): string {
-  return `  <findings_ledger_contract>
-    <instruction>Output a structured Findings Ledger as the canonical list of review findings.</instruction>
+export function renderStructuredReviewContract(subject: string, allowRestart: boolean): string {
+  return `  <structured_review_contract>
+    <instruction>Complete the review only by calling <tool>submit_review</tool>. Do not return a Markdown review.</instruction>
     <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
-    <instruction>Each finding must include: identifier, classification, title, severity, confidence, evidence, current-issue impact, recommended handling, and optional suggested issue title.</instruction>
+    <instruction>Each finding must include its classification, title, severity, confidence, concrete evidence, current-issue impact, and recommended handling; it may include a suggested issue title for separate tracking. Roark assigns finding identifiers.</instruction>
     <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed.</instruction>
     <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
     <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval.</instruction>
     <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
-  </findings_ledger_contract>`;
-}
-
-export function renderReviewVerdictSemantics(subject: string, allowRestart: boolean): string {
-  const restart = allowRestart ? ", <value>restart-required</value> when the implementation direction is fundamentally wrong and resetting is safer than incremental fixes" : "";
-  return `Verdict semantics: use <value>approve</value> when ${subject} has no current required fixes, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding blocks ${subject}${restart}, and <value>blocked</value> when outside information, access, dependency resolution, or a human decision prevents a safe verdict.`;
+    <instruction>Roark derives the outcome from the submitted findings; do not provide a separate verdict.</instruction>
+    ${allowRestart
+      ? "<instruction>Set restartRationale only when at least one must-fix-current finding shows that resetting to the pre-implementation baseline is safer than an incremental fix.</instruction>"
+      : "<instruction>Do not set restartRationale in this workflow.</instruction>"}
+  </structured_review_contract>`;
 }
 
 export interface ReviewLensDefinition {
@@ -82,25 +78,3 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
   requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
   extraConstraints: ["Do not read Review Agent A's output."],
 };
-
-export interface ValidatedReviewOutput {
-  verdict: "approve" | "fixes-required" | "blocked";
-  findings: ParsedReviewFindings;
-}
-
-export function validateReviewOutput(markdown: string, source: ReviewFindingSource): ValidatedReviewOutput {
-  if (!markdown.trim()) throw new Error(`${source} output is empty.`);
-  const findings = parseReviewFindings(markdown, source);
-  const parsedVerdict = parseVerdict(markdown);
-  const verdict = parsedVerdict === "approve" || parsedVerdict === "fixes-required" || parsedVerdict === "blocked"
-    ? parsedVerdict
-    : inferVerdict(findings);
-  return { verdict, findings };
-}
-
-function inferVerdict(findings: ParsedReviewFindings): ValidatedReviewOutput["verdict"] {
-  if (findings.findings.some((finding) => finding.classification === "external-blocker")) return "blocked";
-  if (findings.findings.some((finding) => finding.classification === "must-fix-current")) return "fixes-required";
-  if (findings.findings.length > 0 && findings.rejected.length === 0) return "approve";
-  return "fixes-required";
-}

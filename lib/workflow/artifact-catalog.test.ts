@@ -18,8 +18,6 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   preImplementationBaseline: "pre-implementation-baseline.json",
   implementationLog: "implementation-log.md",
   prNarrative: "pr-narrative.md",
-  reviewA: "review-a.md",
-  reviewB: "review-b.md",
   readiness: "readiness.md",
   verification: "verification.md",
   metadata: "metadata.json",
@@ -39,7 +37,7 @@ describe("artifact catalog", () => {
     expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
     expect(artifactFilename(implementationRestartLogRef(1))).toBe("implementation-restart-log-1.md");
     expect(artifactFilename(refinementLogRef(0))).toBe("refinement-log-0.md");
-    expect(artifactFilename(reviewARef(2))).toBe("review-a-2.md");
+    expect(artifactFilename(reviewARef(2))).toBe("review-a-2.json");
     expect(formatArtifactRef(fixLogRef(2))).toBe("fixLog-2");
   });
 });

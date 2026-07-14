@@ -1,5 +1,6 @@
 import { parseReadyForImplementationValue, parseVerdict } from "./verdicts.ts";
 import { artifactContract, formatArtifactRef, type ArtifactRef } from "./artifact-catalog.ts";
+import { parseReviewResultJson } from "../review/result.ts";
 
 export type ArtifactValidationResult =
   | { ok: true }
@@ -21,7 +22,14 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const trimmed = content.trim();
   if (!trimmed) return invalid("artifact is empty");
 
-  if (isReviewArtifact(artifact)) return ok();
+  if (isReviewArtifact(artifact)) {
+    try {
+      parseReviewResultJson(trimmed, { allowRestart: true });
+      return ok();
+    } catch (error) {
+      return invalid(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   const priorError = parseDiagnosticArtifactError(trimmed);
   if (priorError) return invalid(priorError);
@@ -44,8 +52,7 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
 }
 
 function isReviewArtifact(artifact: ArtifactRef): boolean {
-  const name = typeof artifact === "string" ? artifact : artifact.name;
-  return name === "reviewA" || name === "reviewB";
+  return typeof artifact !== "string" && (artifact.name === "reviewA" || artifact.name === "reviewB");
 }
 
 function requiredHeadingRegex(heading: string): RegExp {

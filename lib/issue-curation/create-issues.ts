@@ -632,13 +632,13 @@ function printApprovedSummary(context: WorkflowContext, result: IssueCreationRes
 }
 
 function printSkippedCounts(result: IssueCreationResults): void {
-  console.log(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; parser warnings: ${result.counts.skippedParserWarnings}.`);
+  console.log(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`);
 }
 
 function zeroCreatedExplanation(result: IssueCreationResults): string {
   if (result.counts.acceptedPlanItems === 0) {
-    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review parser warnings and missing artifacts in the curation plan.";
-    if (result.counts.skippedRejectedCandidates > 0) return "All parsed candidates were rejected by curation policy; inspect rejectedCandidates for reasons.";
+    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review warnings and missing artifacts in the curation plan.";
+    if (result.counts.skippedRejectedCandidates > 0) return "All reviewer findings were rejected by curation policy; inspect rejectedCandidates for reasons.";
     return "The curation plan contains no accepted reviewer findings.";
   }
   if (result.counts.skippedAlreadyCreated >= result.counts.acceptedPlanItems) return "All accepted plan items were already recorded as created; use --force only if you intentionally want duplicates.";

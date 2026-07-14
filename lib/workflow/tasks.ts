@@ -30,6 +30,8 @@ import {
   triagePrompt,
 } from "../prompts/workflow-prompts.ts";
 import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
+import { parseReviewResultJson, type ReviewResult } from "../review/result.ts";
+import { ReviewOutputContractError, runReviewAgent } from "../review/runner.ts";
 
 export interface AgentTask {
   artifact: ArtifactRef;
@@ -175,68 +177,165 @@ export async function runAgentTask(
   task: AgentTask,
   retryOptions: AgentTaskRetryOptions = {},
 ): Promise<string> {
-  requireArtifacts(context, ...task.prerequisites);
+  const prepared = prepareTaskRun(context, task);
+  const existing = await reuseTaskArtifact(context, task, prepared, (content) => {
+    const validation = validateAgentArtifact(task.artifact, content);
+    if (!validation.ok) throw new Error(validation.reason);
+    return content;
+  });
+  if (existing.reused) return existing.value;
 
+  return executeTaskLifecycle(context, task, prepared, {
+    run: async () => {
+      const content = await runTaskWithOutputContract(runner, task, prepared.createRequest(), retryOptions);
+      await writeArtifact(context, task.artifact, content);
+      return content;
+    },
+    failurePhase: (error) => error instanceof ArtifactValidationError ? "output-contract" : "agent-error",
+    persistFailure: async (phase, error) => {
+      const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase, error });
+      await writeArtifact(context, task.artifact, diagnostic);
+    },
+  });
+}
+
+export async function runReviewTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: AgentTask,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<ReviewResult> {
+  const prepared = prepareTaskRun(context, task);
+  const existing = await reuseTaskArtifact(
+    context,
+    task,
+    prepared,
+    (content) => parseReviewResultJson(content, { allowRestart: true }),
+  );
+  if (existing.reused) return existing.value;
+
+  return executeTaskLifecycle(context, task, prepared, {
+    run: async () => {
+      const review = await runReviewAgent(
+        prepared.createRequest(),
+        (agentRequest) => runAgentRequestWithTransientRetries(runner, agentRequest, task, retryOptions),
+        { allowRestart: true },
+      );
+      await writeArtifact(context, task.artifact, JSON.stringify(review, null, 2));
+      return review;
+    },
+    failurePhase: (error) => error instanceof ReviewOutputContractError ? "output-contract" : "agent-error",
+  });
+}
+
+function prepareTaskRun(context: WorkflowContext, task: AgentTask) {
+  requireArtifacts(context, ...task.prerequisites);
   const phase = phaseNameForArtifact(task.artifact);
   const thinkingLevel = thinkingLevelForTask(context, task);
   const model = effectiveModelForStage(context.model, task.thinkingStage);
+  const createRequest = (): AgentRunRequest => ({
+    cwd: context.agentCwd,
+    model,
+    thinkingLevel,
+    systemPrompt: sharedSystemPrompt,
+    prompt: task.prompt(context),
+    fileEditingToolsEnabled: task.fileEditingToolsEnabled,
+    observer: context.observer,
+    phase,
+  });
+  return { phase, thinkingLevel, model, createRequest };
+}
 
-  if (!context.force && artifactExists(context, task.artifact)) {
-    const existing = await readArtifact(context, task.artifact);
-    const validation = validateAgentArtifact(task.artifact, existing);
-    if (validation.ok) {
-      console.log(`✓ ${task.label}: using existing ${artifactRelativePath(context, task.artifact)}`);
-      await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, reused: true });
-      return existing;
-    }
-    console.log(
-      `! ${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${validation.reason}); regenerating.`,
-    );
-  }
+type PreparedTaskRun = ReturnType<typeof prepareTaskRun>;
+type ReusedTaskArtifact<T> = { reused: true; value: T } | { reused: false };
 
-  console.log(`\n=== ${task.label} ===`);
-  await context.observer?.phaseStarted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
+async function reuseTaskArtifact<T>(
+  context: WorkflowContext,
+  task: AgentTask,
+  prepared: PreparedTaskRun,
+  parse: (content: string) => T,
+): Promise<ReusedTaskArtifact<T>> {
+  if (context.force || !artifactExists(context, task.artifact)) return { reused: false };
+  const content = await readArtifact(context, task.artifact);
   try {
-    const content = await runTaskWithOutputContract(context, runner, task, retryOptions);
-    await writeArtifact(context, task.artifact, content);
-    await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
-    console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
-    return content;
+    const value = parse(content);
+    console.log(`✓ ${task.label}: using existing ${artifactRelativePath(context, task.artifact)}`);
+    await context.observer?.phaseCompleted({
+      phase: prepared.phase,
+      label: task.label,
+      artifact: task.artifact,
+      model: prepared.model,
+      thinkingLevel: prepared.thinkingLevel,
+      reused: true,
+    });
+    return { reused: true, value };
   } catch (error) {
-    const failurePhase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
-    const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase: failurePhase, error });
-    await writeArtifact(context, task.artifact, diagnostic);
-    await context.observer?.phaseFailed({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, error });
-    console.log(`\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`);
+    console.log(`! ${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(error)}); regenerating.`);
+    return { reused: false };
+  }
+}
+
+async function executeTaskLifecycle<T>(
+  context: WorkflowContext,
+  task: AgentTask,
+  prepared: PreparedTaskRun,
+  options: {
+    run: () => Promise<T>;
+    failurePhase: (error: unknown) => AgentTaskFailurePhase;
+    persistFailure?: ((phase: AgentTaskFailurePhase, error: unknown) => Promise<void>) | undefined;
+  },
+): Promise<T> {
+  console.log(`\n=== ${task.label} ===`);
+  await context.observer?.phaseStarted({
+    phase: prepared.phase,
+    label: task.label,
+    artifact: task.artifact,
+    model: prepared.model,
+    thinkingLevel: prepared.thinkingLevel,
+  });
+  try {
+    const result = await options.run();
+    await context.observer?.phaseCompleted({
+      phase: prepared.phase,
+      label: task.label,
+      artifact: task.artifact,
+      model: prepared.model,
+      thinkingLevel: prepared.thinkingLevel,
+    });
+    console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
+    return result;
+  } catch (error) {
+    const failurePhase = options.failurePhase(error);
+    await options.persistFailure?.(failurePhase, error);
+    await context.observer?.phaseFailed({
+      phase: prepared.phase,
+      label: task.label,
+      artifact: task.artifact,
+      model: prepared.model,
+      thinkingLevel: prepared.thinkingLevel,
+      error,
+    });
+    console.log(options.persistFailure
+      ? `\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`
+      : `\n✗ ${task.label}: ${formatError(error)}`);
     throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
   }
 }
 
 async function runTaskWithOutputContract(
-  context: WorkflowContext,
   runner: AgentRunner,
   task: AgentTask,
+  request: AgentRunRequest,
   retryOptions: AgentTaskRetryOptions,
 ): Promise<string> {
-  const request = {
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, task.thinkingStage),
-    thinkingLevel: thinkingLevelForTask(context, task),
-    systemPrompt: sharedSystemPrompt,
-    fileEditingToolsEnabled: task.fileEditingToolsEnabled,
-    observer: context.observer,
-    phase: phaseNameForArtifact(task.artifact),
-  };
-  const prompt = task.prompt(context);
-
-  const first = await runAgentRequestWithTransientRetries(runner, { ...request, prompt }, task, retryOptions);
+  const first = await runAgentRequestWithTransientRetries(runner, request, task, retryOptions);
   const firstValidation = validateAgentArtifact(task.artifact, first);
   if (firstValidation.ok) return first;
 
   console.log(`! ${task.label}: output invalid (${firstValidation.reason}); retrying once.`);
   const second = await runAgentRequestWithTransientRetries(runner, {
     ...request,
-    prompt: repairPrompt(prompt, task, firstValidation.reason, first),
+    prompt: repairPrompt(request.prompt, task, firstValidation.reason, first),
   }, task, retryOptions);
   const secondValidation = validateAgentArtifact(task.artifact, second);
   if (secondValidation.ok) return second;

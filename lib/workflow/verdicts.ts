@@ -1,17 +1,16 @@
 import {
   findingsByClassification,
-  parseReviewFindings,
+  normalizeReviewFindings,
+  reviewDisposition,
   type NormalizedReviewerFinding,
-  type ParsedReviewFindings,
-  type RejectedReviewerFinding,
-  type ReviewFindingSource,
-} from "./findings.ts";
+  type ReviewResult,
+} from "../review/result.ts";
 
 export interface ReadinessDecisionInput {
   triage: string;
   plan: string;
-  reviewA: string;
-  reviewB: string;
+  reviewA?: ReviewResult | undefined;
+  reviewB?: ReviewResult | undefined;
 }
 
 export interface ReadinessDecision {
@@ -27,8 +26,6 @@ export interface ReadinessDecision {
   externalBlockers: NormalizedReviewerFinding[];
   followUpFindings: NormalizedReviewerFinding[];
   suggestions: NormalizedReviewerFinding[];
-  parserWarnings: string[];
-  rejectedFindings: RejectedReviewerFinding[];
 }
 
 export function parseVerdict(markdown: string): string | undefined {
@@ -78,60 +75,39 @@ export function shouldImplementPlan(plan: string): boolean {
   return parseReadyForImplementation(plan);
 }
 
-export function needsFix(...reviews: string[]): boolean {
-  return parseDecisionReviews(reviews).some(({ markdown, parsed }) => {
-    const parsedFix = parsed.findings.some((finding) => finding.classification === "must-fix-current");
-    return parsedFix || ((!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "fixes-required");
-  });
+export function needsFix(...reviews: ReviewResult[]): boolean {
+  return reviews.some((review) => review.findings.some((finding) => finding.classification === "must-fix-current"));
 }
 
-export function hasBlockedReview(...reviews: string[]): boolean {
-  return parseDecisionReviews(reviews).some(({ markdown, parsed }) => {
-    const parsedBlocker = parsed.findings.some((finding) => finding.classification === "external-blocker");
-    return parsedBlocker || ((!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "blocked");
-  });
+export function hasBlockedReview(...reviews: ReviewResult[]): boolean {
+  return reviews.some((review) => review.findings.some((finding) => finding.classification === "external-blocker"));
 }
 
-export function needsRestart(...reviews: string[]): boolean {
-  return reviews.some((markdown) => parseVerdict(markdown) === "restart-required");
+export function needsRestart(...reviews: ReviewResult[]): boolean {
+  return reviews.some((review) => review.restartRationale !== undefined);
 }
 
 export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecision {
   const triageVerdict = parseVerdict(input.triage) ?? "missing";
-  const reviewAVerdict = parseVerdict(input.reviewA) ?? "missing";
-  const reviewBVerdict = parseVerdict(input.reviewB) ?? "missing";
+  const reviewAVerdict = input.reviewA ? reviewDisposition(input.reviewA) : "missing";
+  const reviewBVerdict = input.reviewB ? reviewDisposition(input.reviewB) : "missing";
   const planReady = input.plan ? parseReadyForImplementation(input.plan) : false;
-
-  const reviewAFindings = parseReviewFindings(input.reviewA, "review-a");
-  const reviewBFindings = parseReviewFindings(input.reviewB, "review-b");
-  const parsedReviews = [
-    { markdown: input.reviewA, parsed: reviewAFindings, verdict: reviewAVerdict },
-    { markdown: input.reviewB, parsed: reviewBFindings, verdict: reviewBVerdict },
+  const allFindings = [
+    ...(input.reviewA ? normalizeReviewFindings(input.reviewA, "review-a") : []),
+    ...(input.reviewB ? normalizeReviewFindings(input.reviewB, "review-b") : []),
   ];
-
-  const allFindings = parsedReviews.flatMap(({ parsed }) => parsed.findings);
   const currentIssueBlockingFindings = findingsByClassification(allFindings, "must-fix-current");
   const externalBlockers = findingsByClassification(allFindings, "external-blocker");
   const followUpFindings = findingsByClassification(allFindings, "follow-up");
   const suggestions = findingsByClassification(allFindings, "suggestion");
-  const rejectedFindings = parsedReviews.flatMap(({ parsed }) => parsed.rejected);
-  const parserWarnings = [
-    ...parsedReviews.flatMap(({ parsed }) => parsed.warnings),
-    ...parsedReviews.flatMap(({ parsed, verdict }) => verdictLedgerConflictWarnings(parsed, verdict)),
-  ];
-
-  const fallbackFixNeeded = parsedReviews.some(({ markdown, parsed }) => (!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "fixes-required");
-  const fallbackBlocked = parsedReviews.some(({ markdown, parsed }) => (!parsed.hasLedger || parsed.rejected.length > 0) && parseVerdict(markdown) === "blocked");
-  const restartRequired = parsedReviews.some(({ markdown }) => parseVerdict(markdown) === "restart-required");
-  const fixesWereNeeded = currentIssueBlockingFindings.length > 0 || fallbackFixNeeded;
-  const blockedByReview = externalBlockers.length > 0 || fallbackBlocked;
+  const restartRequired = [input.reviewA, input.reviewB].some((review) => review?.restartRationale !== undefined);
+  const fixesWereNeeded = currentIssueBlockingFindings.length > 0;
+  const blockedByReview = externalBlockers.length > 0;
   const readyFromLatestReviews =
     triageVerdict === "proceed" &&
     planReady &&
-    reviewsApproveCurrentIssue(parsedReviews) &&
-    !fixesWereNeeded &&
-    !restartRequired &&
-    !blockedByReview;
+    reviewAVerdict === "approve" &&
+    reviewBVerdict === "approve";
 
   return {
     status: readyFromLatestReviews ? "ready-for-pr" : "not-ready",
@@ -146,52 +122,5 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
     externalBlockers,
     followUpFindings,
     suggestions,
-    parserWarnings,
-    rejectedFindings,
   };
-}
-
-function parseDecisionReviews(reviews: readonly string[]): { markdown: string; parsed: ParsedReviewFindings }[] {
-  return reviews.map((markdown, index) => ({
-    markdown,
-    parsed: parseReviewFindings(markdown, sourceForReviewIndex(index)),
-  }));
-}
-
-function sourceForReviewIndex(index: number): ReviewFindingSource {
-  return index === 1 ? "review-b" : "review-a";
-}
-
-function reviewsApproveCurrentIssue(
-  reviews: readonly { markdown: string; parsed: ParsedReviewFindings; verdict: string }[],
-): boolean {
-  return reviews.every(({ parsed, verdict }) => {
-    if (!parsed.hasLedger) return verdict === "approve";
-    const parsedBlocker = parsed.findings.some((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker");
-    if (parsedBlocker) return false;
-    return parsed.rejected.length === 0 || verdict === "approve";
-  });
-}
-
-function verdictLedgerConflictWarnings(parsed: ParsedReviewFindings, verdict: string): string[] {
-  if (!parsed.hasLedger) return [];
-
-  const hasCurrentFix = parsed.findings.some((finding) => finding.classification === "must-fix-current");
-  const hasExternalBlocker = parsed.findings.some((finding) => finding.classification === "external-blocker");
-  const warnings: string[] = [];
-
-  if (verdict === "fixes-required" && !hasCurrentFix) {
-    warnings.push(`${parsed.source}: verdict is fixes-required but parsed ledger has no must-fix-current findings; ledger classifications were preferred.`);
-  }
-  if (verdict !== "fixes-required" && hasCurrentFix) {
-    warnings.push(`${parsed.source}: verdict is ${verdict} but parsed ledger has must-fix-current findings; ledger classifications were preferred.`);
-  }
-  if (verdict === "blocked" && !hasExternalBlocker) {
-    warnings.push(`${parsed.source}: verdict is blocked but parsed ledger has no external-blocker findings; ledger classifications were preferred.`);
-  }
-  if (verdict !== "blocked" && hasExternalBlocker) {
-    warnings.push(`${parsed.source}: verdict is ${verdict} but parsed ledger has external-blocker findings; ledger classifications were preferred.`);
-  }
-
-  return warnings;
 }

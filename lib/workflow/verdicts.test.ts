@@ -1,78 +1,38 @@
 import { describe, expect, test } from "bun:test";
-import { decideReadiness, hasBlockedReview, needsFix } from "./verdicts.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import { decideReadiness, hasBlockedReview, needsFix, needsRestart } from "./verdicts.ts";
 
 const triage = "# Triage\n\n## Verdict\nproceed\n";
 const plan = "# Implementation Plan\n\n## Ready For Implementation\nyes\n";
-const approveNoLedger = "# Review A\n\n## Verdict\napprove\n";
-
-function review(verdict: "approve" | "fixes-required" | "blocked", entries: string): string {
-  return `# Review A\n\n## Verdict\n${verdict}\n\n## Findings Ledger\n${entries}\n`;
-}
-
-function entry(id: string, classification: string, title = "Finding"): string {
-  return `- Identifier: ${id}\n- Classification: ${classification}\n- Title: ${title}\n- Severity: medium\n- Confidence: high\n- Evidence: file.ts:1\n- Current-issue impact: Impact.\n- Recommended handling: Handle.\n`;
-}
 
 describe("classification-aware verdict decisions", () => {
-  test("keeps broad verdict fallback for old approve reviews", () => {
-    const decision = decideReadiness({ triage, plan, reviewA: approveNoLedger, reviewB: approveNoLedger });
+  test("follow-ups and suggestions do not block readiness", () => {
+    const reviewA = reviewResult([reviewFinding("follow-up")]);
+    const reviewB = reviewResult([reviewFinding("suggestion")]);
+    const decision = decideReadiness({ triage, plan, reviewA, reviewB });
 
-    expect(needsFix(approveNoLedger, approveNoLedger)).toBe(false);
-    expect(decision.status).toBe("ready-for-pr");
-  });
-
-  test("keeps broad verdict fallback for old fixes-required reviews", () => {
-    const oldFix = "# Review A\n\n## Verdict\nfixes-required\n";
-
-    expect(needsFix(oldFix, approveNoLedger)).toBe(true);
-    expect(decideReadiness({ triage, plan, reviewA: oldFix, reviewB: approveNoLedger }).status).toBe("not-ready");
-  });
-
-  test("follow-up and suggestion findings do not trigger fixes or block readiness", () => {
-    const reviewA = review("approve", `${entry("F1", "follow-up", "Track separately")}\n${entry("S1", "suggestion", "Optional polish")}`);
-
-    expect(needsFix(reviewA, approveNoLedger)).toBe(false);
-    expect(hasBlockedReview(reviewA, approveNoLedger)).toBe(false);
-    const decision = decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger });
+    expect(needsFix(reviewA, reviewB)).toBe(false);
     expect(decision.status).toBe("ready-for-pr");
     expect(decision.followUpFindings).toHaveLength(1);
     expect(decision.suggestions).toHaveLength(1);
   });
 
-  test("must-fix-current findings trigger fix behavior and block readiness", () => {
-    const reviewA = review("fixes-required", entry("F1", "must-fix-current"));
-
-    expect(needsFix(reviewA, approveNoLedger)).toBe(true);
-    expect(hasBlockedReview(reviewA, approveNoLedger)).toBe(false);
-    expect(decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger }).status).toBe("not-ready");
+  test("must-fix findings trigger fixes and block readiness", () => {
+    const reviewA = reviewResult([reviewFinding("must-fix-current")]);
+    const reviewB = reviewResult();
+    expect(needsFix(reviewA, reviewB)).toBe(true);
+    expect(decideReadiness({ triage, plan, reviewA, reviewB }).status).toBe("not-ready");
   });
 
-  test("external-blocker findings block workflow without invoking fix work", () => {
-    const reviewA = review("blocked", entry("B1", "external-blocker"));
-
-    expect(needsFix(reviewA, approveNoLedger)).toBe(false);
-    expect(hasBlockedReview(reviewA, approveNoLedger)).toBe(true);
-    const decision = decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger });
-    expect(decision.status).toBe("not-ready");
-    expect(decision.externalBlockers).toHaveLength(1);
+  test("external blockers stop the workflow without invoking fixes", () => {
+    const reviewA = reviewResult([reviewFinding("external-blocker")]);
+    const reviewB = reviewResult();
+    expect(hasBlockedReview(reviewA, reviewB)).toBe(true);
+    expect(needsFix(reviewA, reviewB)).toBe(false);
   });
 
-  test("unknown classifications are surfaced while readiness falls back to the reviewer verdict", () => {
-    const reviewA = review("approve", entry("X1", "mystery"));
-    const decision = decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger });
-
-    expect(needsFix(reviewA, approveNoLedger)).toBe(false);
-    expect(decision.status).toBe("ready-for-pr");
-    expect(decision.rejectedFindings).toHaveLength(1);
-    expect(decision.parserWarnings[0]).toContain("Unknown finding classification");
-  });
-
-  test("prefers ledger classifications and warns when verdict conflicts", () => {
-    const reviewA = review("fixes-required", entry("F1", "follow-up"));
-    const decision = decideReadiness({ triage, plan, reviewA, reviewB: approveNoLedger });
-
-    expect(needsFix(reviewA, approveNoLedger)).toBe(false);
-    expect(decision.status).toBe("ready-for-pr");
-    expect(decision.parserWarnings.some((warning) => warning.includes("verdict is fixes-required"))).toBe(true);
+  test("restart rationale drives restart independently of Markdown", () => {
+    const reviewA = reviewResult([reviewFinding("must-fix-current")], { restartRationale: "The implementation direction is unsafe." });
+    expect(needsRestart(reviewA)).toBe(true);
   });
 });

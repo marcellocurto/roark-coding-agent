@@ -12,9 +12,8 @@ import {
   implementationRestartLogRef,
   inferNextFixPass,
   inferNextRefinementPass,
+  latestCompleteReviewCycle,
   readArtifact,
-  reviewARef,
-  reviewBRef,
   type ArtifactRef,
   type WorkflowContext,
   writeArtifact,
@@ -41,8 +40,10 @@ import {
   reviewATaskForPass,
   reviewBTaskForPass,
   runAgentTask,
+  runReviewTask,
   triageTask,
 } from "./tasks.ts";
+import type { ReviewResult } from "../review/result.ts";
 
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
@@ -142,10 +143,14 @@ export async function reviewPhase(
   context: WorkflowContext,
   pass = inferNextReviewPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<{ reviewA: string; reviewB: string }> {
-  const reviewA = await runAgentTask(context, runner, reviewATaskForPass(pass));
-  const reviewB = await runAgentTask(context, runner, reviewBTaskForPass(pass));
-  return { reviewA, reviewB };
+): Promise<{ reviewA: ReviewResult; reviewB: ReviewResult }> {
+  const [reviewA, reviewB] = await Promise.allSettled([
+    runReviewTask(context, runner, reviewATaskForPass(pass)),
+    runReviewTask(context, runner, reviewBTaskForPass(pass)),
+  ]);
+  if (reviewA.status === "rejected") throw reviewA.reason;
+  if (reviewB.status === "rejected") throw reviewB.reason;
+  return { reviewA: reviewA.value, reviewB: reviewB.value };
 }
 
 export async function fixPhase(
@@ -218,6 +223,17 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
     }
 
     if (next.type === "run") {
+      const following = progression.actions[1];
+      if (
+        next.phase === "review-a" &&
+        following?.type === "run" &&
+        following.phase === "review-b" &&
+        following.pass === next.pass
+      ) {
+        await reviewPhase(context, next.pass ?? 0, runner);
+        completedActions.push(next, following);
+        continue;
+      }
       await runWorkflowPhase(context, runner, next.phase, next.pass);
       completedActions.push(next);
       continue;
@@ -253,8 +269,8 @@ async function runWorkflowPhase(
     case "capture-baseline": await captureBaselinePhase(context); return;
     case "implement": await implementationPhase(context, runner, pass ?? 0); return;
     case "refine-code": await codeRefinementPhase(context, pass, runner); return;
-    case "review-a": await runAgentTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
-    case "review-b": await runAgentTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
+    case "review-a": await runReviewTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
+    case "review-b": await runReviewTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
     case "fix": await fixPhase(context, pass, runner); return;
     case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
     default: return assertNever(phase);
@@ -273,9 +289,7 @@ function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
 }
 
 function inferNextReviewPass(context: WorkflowContext): number {
-  for (let pass = 0; ; pass++) {
-    if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) return pass;
-  }
+  return (latestCompleteReviewCycle(context) ?? -1) + 1;
 }
 
 async function runAgentTaskWithForceOverride(

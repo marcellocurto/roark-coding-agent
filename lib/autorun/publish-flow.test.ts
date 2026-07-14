@@ -7,6 +7,8 @@ import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import type { VerificationResult } from "./verification.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import type { ReviewFinding } from "../review/result.ts";
 
 const tempDirs: string[] = [];
 
@@ -149,8 +151,14 @@ describe("verification repair planning", () => {
   test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
     const context = await tempContext(1);
     await writeArtifact(context, "issue", `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`);
-    await writeArtifact(context, reviewARef(0), reviewWithLedger(finding("N1", "follow-up")));
-    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
+    await writeArtifact(context, reviewARef(0), structuredReview([reviewFinding("follow-up", "Document numbered review curation", {
+      severity: "low",
+      evidence: ["lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact."],
+      currentIssueImpact: "Reviewer findings from normal autorun attempts are promoted after PR publication.",
+      recommendedHandling: "Use numbered review artifacts when curating reviewer-generated issues.",
+      suggestedIssueTitle: "Document numbered review curation",
+    })]));
+    await writeArtifact(context, reviewBRef(0), structuredReview());
     await writeArtifact(context, "issueCreationResults", JSON.stringify({
       created: [{ planItemId: "follow-up-1", kind: "follow-up", title: "Document numbered review curation", url: "https://github.com/owner/repo/issues/100" }],
     }));
@@ -161,9 +169,9 @@ describe("verification repair planning", () => {
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.planItemId).toBe("follow-up-1");
-    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:N1"]);
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:A-001"]);
     expect(plan.issuesToCreate[0]?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/10");
-    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.md");
+    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.json");
   });
 
   test("terminal command-unavailable failures include setup guidance", async () => {
@@ -272,19 +280,6 @@ function failedVerification(exitCode: number, stderr = "lint failed"): Verificat
   };
 }
 
-function reviewWithLedger(entries: string): string {
-  return `# Review A Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\n${entries}\n\n## Validation Reviewed\nTests.\n`;
-}
-
-function finding(id: string, classification: string): string {
-  return `- Identifier: ${id}
-- Classification: ${classification}
-- Title: Document numbered review curation
-- Severity: low
-- Confidence: high
-- Evidence: lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact.
-- Current-issue impact: Reviewer findings from normal autorun attempts are promoted after PR publication.
-- Recommended handling: Use numbered review artifacts when curating reviewer-generated issues.
-- Suggested issue title (optional): Document numbered review curation
-`;
+function structuredReview(findings: ReviewFinding[] = []): string {
+  return JSON.stringify(reviewResult(findings));
 }

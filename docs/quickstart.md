@@ -140,7 +140,7 @@ Open these files first:
 - `verification.md` for the verification command result
 - `readiness.md` for the publish gate decision
 - `implementation-log.md` for implementation details
-- `review-a.md` and `review-b.md` for reviewer findings
+- `review-a-<n>.json` and `review-b-<n>.json` for schema-validated reviewer findings
 
 See [Artifacts](artifacts.md) for the complete layout.
 
