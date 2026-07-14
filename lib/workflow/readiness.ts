@@ -10,7 +10,10 @@ import {
 } from "./artifacts.ts";
 import { decideReadiness } from "./verdicts.ts";
 import {
+  escapeReviewMarkdownText,
+  normalizedReviewBlockerSchema,
   normalizedReviewerFindingSchema,
+  type NormalizedReviewBlocker,
   parseReviewResultJson,
   type NormalizedReviewerFinding,
 } from "../review/result.ts";
@@ -45,13 +48,13 @@ const readinessDecisionSchema = Type.Object({
   restartRequired: Type.Boolean(),
   blockedByReview: Type.Boolean(),
   currentIssueBlockingFindings: Type.Array(normalizedReviewerFindingSchema),
-  externalBlockers: Type.Array(normalizedReviewerFindingSchema),
+  externalBlockers: Type.Array(normalizedReviewBlockerSchema),
   followUpFindings: Type.Array(normalizedReviewerFindingSchema),
   suggestions: Type.Array(normalizedReviewerFindingSchema),
 }, { additionalProperties: false });
 
 export const readinessResultSchema = Type.Object({
-  version: Type.Literal(1),
+  version: Type.Literal(2),
   issueNumber: Type.String({ minLength: 1 }),
   runDirectory: Type.String({ minLength: 1 }),
   latestReviewCycle: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
@@ -108,7 +111,7 @@ export async function buildReadinessArtifacts(context: WorkflowContext): Promise
     : parseReviewResultJson(await readArtifact(context, reviewBRef(latestReviewCycle)), { allowRestart: true });
   const decision = decideReadiness({ triage, plan, reviewA, reviewB });
   const result: ReadinessResult = {
-    version: 1,
+    version: 2,
     issueNumber: context.issueNumber,
     runDirectory: context.runDirRelative,
     latestReviewCycle: latestReviewCycle ?? null,
@@ -167,20 +170,18 @@ See workflow artifacts in ${result.runDirectory}.
 `;
 }
 
-function renderFindings(findings: readonly NormalizedReviewerFinding[]): string {
+function renderFindings(findings: readonly (NormalizedReviewerFinding | NormalizedReviewBlocker)[]): string {
   if (findings.length === 0) return "None";
   return findings.map((finding) => {
-    const details = [
-      `classification: ${finding.classification}`,
-      `severity: ${finding.severity}`,
-      `confidence: ${finding.confidence}`,
-    ].join("; ");
+    const details = "severity" in finding
+      ? `classification: ${finding.classification}; severity: ${finding.severity}; confidence: ${finding.confidence}`
+      : `classification: ${finding.classification}`;
     const suffixes = [
-      finding.currentIssueImpact ? `Impact: ${finding.currentIssueImpact}` : undefined,
-      finding.recommendedHandling ? `Handling: ${finding.recommendedHandling}` : undefined,
-      finding.evidence.length > 0 ? `Evidence: ${finding.evidence.join("; ")}` : undefined,
-      finding.suggestedIssueTitle ? `Suggested issue: ${finding.suggestedIssueTitle}` : undefined,
+      finding.currentIssueImpact ? `Impact: ${escapeReviewMarkdownText(finding.currentIssueImpact)}` : undefined,
+      finding.recommendedHandling ? `Handling: ${escapeReviewMarkdownText(finding.recommendedHandling)}` : undefined,
+      finding.evidence.length > 0 ? `Evidence: ${finding.evidence.map(escapeReviewMarkdownText).join("; ")}` : undefined,
+      finding.suggestedIssueTitle ? `Suggested issue: ${escapeReviewMarkdownText(finding.suggestedIssueTitle)}` : undefined,
     ].filter((value): value is string => value !== undefined);
-    return `- ${finding.workflowId} — ${finding.title} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
+    return `- ${finding.workflowId} — ${escapeReviewMarkdownText(finding.title)} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
   }).join("\n");
 }

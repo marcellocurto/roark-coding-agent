@@ -60,12 +60,15 @@ function priorRevisionReviewArtifact(fixPass: number): string {
 
 export function revisionReviewPrompt(context: PrRevisionContext, pass: number): string {
   const executionArtifact = pass === 0 ? "revision-log.json" : `revision-log-fix-pass-${pass}.json`;
+  const priorReviewArtifact = pass === 0 ? undefined : priorRevisionReviewArtifact(pass);
   return `<pr_revision_review>
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
 Use ${context.agentRevisionDirRelative}/${executionArtifact} as the canonical execution report; do not infer state from its Markdown companion.
+${priorReviewArtifact ? `Use ${context.agentRevisionDirRelative}/${priorReviewArtifact} to reuse stable finding ids for concerns that remain unresolved.` : ""}
 Primary responsibility: verify that every planner-classified must-fix-current feedback item was correctly addressed and every skipped item has a sound rationale.
 Then inspect the touched files and relevant callers and tests for regressions introduced by this revision. Check correctness, original PR requirement coverage, maintainability, validation evidence, and scope control.
+Consider cross-cutting risks implicated by the revision, including security, privacy, accessibility, data migration, performance, licensing, and operational behavior. Report unavailable relevant coverage as a structured limitation.
 Evaluate tests by realistic bug-finding value. Do not require tests by default, and reject tests that merely duplicate stronger coverage or restate configuration, prompt wording, fixtures, static content, or private structure.
 Do not reopen unrelated pre-existing concerns in untouched code. Do not require changes for non-blocking feedback, optional suggestions, or follow-up work unless the revision made them current blockers.
 Support every finding with concrete repository evidence such as a file, symbol, behavior, test, or command result. Stop once the findings are adequately supported; do not perform an unbounded repository audit.

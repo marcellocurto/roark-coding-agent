@@ -193,16 +193,6 @@ async function reviewCycleProgression(
 
     const reviewAResult = parseReviewResultJson(reviewA.content ?? "", { allowRestart: true });
     const reviewBResult = parseReviewResultJson(reviewB.content ?? "", { allowRestart: true });
-    if (hasBlockedReview(reviewAResult, reviewBResult)) {
-      return terminal(
-        [
-          readiness("a review is blocked; readiness records the stop"),
-          ...publishGate(options, "publish gate records non-publish"),
-        ],
-        { status: "review-blocked" },
-      );
-    }
-
     const nextPass = pass + 1;
     if (needsRestart(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
@@ -247,6 +237,16 @@ async function reviewCycleProgression(
         ]);
       }
       continue;
+    }
+
+    if (hasBlockedReview(reviewAResult, reviewBResult)) {
+      return terminal(
+        [
+          readiness("a review remains externally blocked after all available local fixes; readiness records the stop"),
+          ...publishGate(options, "publish gate records non-publish"),
+        ],
+        { status: "review-blocked" },
+      );
     }
 
     return terminal(

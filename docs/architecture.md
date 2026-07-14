@@ -87,6 +87,8 @@ Agent-produced JSON/Markdown pairs pass through one structured-artifact runner: 
 
 Numbered artifacts include fix logs, refinements, and Review A/B cycles.
 
+The review domain model keeps work routing (`must-fix-current`, `follow-up`, or `suggestion`) separate from external constraints and review-wide limitations. Validation trims strings, rejects empty inspection evidence, bounds artifact size/cardinality, requires stable semantic IDs, and ties restart recommendations to specific unblocked findings. Renderers treat submitted strings as plain Markdown content.
+
 ## Pi Integration
 
 Roark uses the Pi coding-agent SDK for agent-backed phases.

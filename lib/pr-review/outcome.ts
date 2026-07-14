@@ -2,6 +2,8 @@ import type { VerificationResult } from "../autorun/verification.ts";
 import {
   findingsByClassification,
   normalizeReviewPair,
+  normalizeReviewPairBlockers,
+  type NormalizedReviewBlocker,
   type NormalizedReviewerFinding,
   type ReviewResult,
 } from "../review/result.ts";
@@ -11,7 +13,7 @@ export type PrReviewOutcome = "no-blocking-findings" | "changes-requested" | "bl
 export interface PrReviewDecision {
   outcome: PrReviewOutcome;
   requiredFixes: NormalizedReviewerFinding[];
-  externalBlockers: NormalizedReviewerFinding[];
+  externalBlockers: NormalizedReviewBlocker[];
   followUps: NormalizedReviewerFinding[];
   suggestions: NormalizedReviewerFinding[];
   reasons: string[];
@@ -24,8 +26,9 @@ export function decidePrReview(input: {
   verificationUnavailable?: string | undefined;
 }): PrReviewDecision {
   const all = normalizeReviewPair(input);
+  const blockers = normalizeReviewPairBlockers(input);
   const requiredFixes = findingsByClassification(all, "must-fix-current");
-  const externalBlockers = findingsByClassification(all, "external-blocker");
+  const externalBlockers = findingsByClassification(blockers, "external-blocker");
   const followUps = findingsByClassification(all, "follow-up");
   const suggestions = findingsByClassification(all, "suggestion");
   const reasons: string[] = [];

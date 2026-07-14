@@ -227,7 +227,7 @@ describe("runFullWorkflow", () => {
         fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(({ title }) => title);
         return submitChangeReport(request, changeReport({
           summary: "Fixed all required findings.",
-          addressedFindingIds: ["review-a:A-001", "review-a:A-002", "review-b:B-001"],
+          addressedFindingIds: ["review-a:reject-malformed-identifiers", "review-a:seed-authorization-state", "review-b:isolate-the-integration-fixture"],
         }));
       }
       if (phase === "refinementLog-1") return submitChangeReport(request, changeReport({ summary: "Refined." }));
@@ -254,8 +254,8 @@ describe("runFullWorkflow", () => {
 
     expect(persistedReviewA.findings.map(({ title }) => title)).toEqual(reviewAFindings.map(({ title }) => title));
     expect(persistedReviewB.findings.map(({ title }) => title)).toEqual(reviewBFindings.map(({ title }) => title));
-    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("A-002: Seed authorization state");
-    expect(await readArtifact(context, reviewBMarkdownRef(0))).toContain("B-001: Isolate the integration fixture");
+    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("seed-authorization-state: Seed authorization state");
+    expect(await readArtifact(context, reviewBMarkdownRef(0))).toContain("isolate-the-integration-fixture: Isolate the integration fixture");
     expect(reviewsStartedTogether).toBe(true);
     expect(fixRequest).toContain("review-a-0.json");
     expect(fixRequest).toContain("review-b-0.json");
@@ -264,8 +264,8 @@ describe("runFullWorkflow", () => {
       "Seed authorization state",
       "Isolate the integration fixture",
     ]);
-    expect(persistedFix.addressedFindingIds).toEqual(["review-a:A-001", "review-a:A-002", "review-b:B-001"]);
-    expect(await readArtifact(context, fixLogMarkdownRef(1))).toContain("- review-b:B-001");
+    expect(persistedFix.addressedFindingIds).toEqual(["review-a:reject-malformed-identifiers", "review-a:seed-authorization-state", "review-b:isolate-the-integration-fixture"]);
+    expect(await readArtifact(context, fixLogMarkdownRef(1))).toContain("- review-b:isolate-the-integration-fixture");
     expect(phases).toContain("fixLog-1");
     expect(artifactExists(context, reviewARef(1))).toBe(true);
     expect(artifactExists(context, reviewBRef(1))).toBe(true);
@@ -327,9 +327,49 @@ describe("runFullWorkflow", () => {
       throw new Error("unexpected prompt");
     };
 
-    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "review-blocked" });
+    const result = await runFullWorkflow(context, runner);
+    expect(result).toEqual({ status: "review-blocked" });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
-    expect(await readArtifact(context, "readinessMarkdown")).toContain("## External Blockers\n- review-a:A-001");
+    expect(await readArtifact(context, "readinessMarkdown")).toContain("## External Blockers\n- review-a:blocker:b1");
+  });
+
+  test("fixes local findings before stopping on an independent external blocker", async () => {
+    const context = await tempContext();
+    await runProcessOrThrow(["git", "init", "-b", "main"], { cwd: context.agentCwd });
+    await seedBaselineAndImplementation(context);
+    const phases: string[] = [];
+
+    const runner: AgentRunner = async (request) => {
+      await noopAsync();
+      const phase = request.phase ?? "";
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
+      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
+      if (phase === "reviewA-0") {
+        phases.push("review-a-0");
+        return submitReview(request, reviewResult([
+          finding("LOCAL-FIX", "must-fix-current"),
+          finding("ACCESS", "external-blocker"),
+        ]));
+      }
+      if (phase === "reviewA-1") {
+        phases.push("review-a-1");
+        return submitReview(request, reviewResult([finding("ACCESS", "external-blocker")]));
+      }
+      if (phase === "reviewB-0" || phase === "reviewB-1") return submitReview(request, approveReview());
+      if (phase === "fixLog-1") {
+        phases.push("fix");
+        return submitChangeReport(request, changeReport({ addressedFindingIds: ["review-a:local-fix"] }));
+      }
+      throw new Error(`unexpected phase: ${phase}`);
+    };
+
+    const result = await runFullWorkflow(context, runner);
+    expect(result).toEqual({ status: "review-blocked" });
+    expect(phases).toEqual(["review-a-0", "fix", "review-a-1"]);
+    expect(parseChangeReportJson(await readArtifact(context, fixLogRef(1))).addressedFindingIds)
+      .toEqual(["review-a:local-fix"]);
   });
 });
 
@@ -362,6 +402,6 @@ function approveReview(): ReviewResult {
   return reviewResult();
 }
 
-function finding(id: string, classification: "external-blocker" | "follow-up" | "suggestion") {
+function finding(id: string, classification: "must-fix-current" | "external-blocker" | "follow-up" | "suggestion") {
   return reviewFinding(classification, id);
 }

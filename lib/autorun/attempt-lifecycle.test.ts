@@ -138,7 +138,7 @@ describe("runAutorunAttemptLifecycle", () => {
         if (request.phase === "fixLog-2") {
           return submitChangeReport(request, changeReport({
             summary: "Completed verification repair.",
-            addressedFindingIds: ["review-a:A-001"],
+            addressedFindingIds: ["review-a:numbered-review-requested-another-fix"],
           }));
         }
         if (request.phase === "refinementLog-2") {

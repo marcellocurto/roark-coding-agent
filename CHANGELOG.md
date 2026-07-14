@@ -6,6 +6,8 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ## Unreleased
 
+## [0.2.0] - 2026-07-14
+
 ### Added
 
 - Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
@@ -19,6 +21,8 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 - PR revision execution logs now persist canonical JSON. Revision review prompts and public revision summaries consume the structured execution result; Markdown companions are presentation only.
 - PR and reviewer-generated issue agents now submit structured drafts. Roark validates them, renders GitHub Markdown, checks exact-title issue duplicates, and invokes `gh`; publishing agents no longer author opaque Markdown, invoke GitHub, or return raw JSON status text.
 - All structured agent phases now use one runner for terminating tool submission, validation, canonical JSON serialization, deterministic Markdown rendering, and paired persistence. Issue-workflow reviews now persist matching Markdown companions without using them as workflow state.
+- Review findings now use stable semantic IDs and separate handling from external constraints. Reviews require substantive inspected evidence, bounded content, explicit completeness/limitations, finding-linked restart recommendations, and escaped Markdown rendering; workflows complete available local fixes before stopping on remaining blockers.
+- Readiness artifacts now use schema version 2 to represent the revised review finding and blocker model without misreading version 1 data.
 
 ### Removed
 

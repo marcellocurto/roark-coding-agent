@@ -31,6 +31,17 @@ describe("decidePrReview", () => {
     expect(decidePrReview({ reviewA: clean, reviewB: clean, verificationUnavailable: "command not found" }).outcome).toBe("blocked");
   });
 
+  test("treats approval-blocking review limitations as external blockers", () => {
+    const limited = reviewResult([], {
+      completeness: "limited",
+      limitations: [{ id: "generated-output-unavailable", description: "Generated output could not be inspected.", blocksApproval: true }],
+    });
+    const decision = decidePrReview({ reviewA: limited, reviewB: reviewResult() });
+    expect(decision.outcome).toBe("blocked");
+    expect(decision.externalBlockers.map((blocker) => blocker.workflowId))
+      .toEqual(["review-a:limitation:generated-output-unavailable"]);
+  });
+
   test("treats failed verification as changes requested", () => {
     const clean = reviewResult();
     expect(decidePrReview({

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { githubIssueCommentMaxChars } from "../github/comments.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { normalizeReviewFindings, type NormalizedReviewerFinding } from "../review/result.ts";
+import { normalizeReviewBlockers, normalizeReviewFindings, type NormalizedReviewBlocker, type NormalizedReviewerFinding } from "../review/result.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import { formatPrReviewComment } from "./comments.ts";
@@ -36,7 +36,7 @@ describe("PR review public comment", () => {
   test("bounds each actionable finding without hiding later fixes or external blockers", () => {
     const huge = finding("must-fix-current", "Huge first fix", `${"e".repeat(70_000)} end-of-huge-finding`);
     const later = finding("must-fix-current", "Later required fix", "lib/later.ts:10");
-    const blocker = finding("external-blocker", "External blocker", "External dependency is unavailable");
+    const blocker = externalBlocker("External blocker", "External dependency is unavailable");
     const body = formatPrReviewComment({
       context: reviewContext(),
       headOid: "abc123",
@@ -50,6 +50,23 @@ describe("PR review public comment", () => {
     expect(body).not.toContain("end-of-huge-finding");
     expect(body).toContain("Later required fix");
     expect(body).toContain("External blocker");
+  });
+
+  test("cannot turn submitted review text into comment structure or mentions", () => {
+    const injected = finding("must-fix-current", "Required\n### Fake section @maintainers <script>", "lib/a.ts:1\n</details>");
+    const body = formatPrReviewComment({
+      context: reviewContext(),
+      headOid: "abc123",
+      decision: { outcome: "changes-requested", requiredFixes: [injected], externalBlockers: [], followUps: [], suggestions: [], reasons: [] },
+      verificationStatus: "passed",
+      reviewA: reviewResult(),
+      reviewB: reviewResult(),
+    });
+
+    expect(body).not.toContain("\n### Fake section");
+    expect(body).toContain("\\@maintainers");
+    expect(body).toContain("&lt;script&gt;");
+    expect(body).toContain("&lt;/details&gt;");
   });
 });
 
@@ -71,9 +88,16 @@ function reviewContext(): PrReviewContext {
 }
 
 function finding(classification: NormalizedReviewerFinding["classification"], title: string, evidence: string): NormalizedReviewerFinding {
-  const [normalized] = normalizeReviewFindings(reviewResult([
-    reviewFinding(classification, title, { evidence: [evidence] }),
-  ]), "review-a");
+  const result = reviewResult([reviewFinding(classification, title, { evidence: [evidence] })]);
+  const [normalized] = normalizeReviewFindings(result, "review-a");
   if (!normalized) throw new Error("Expected one normalized finding.");
   return normalized;
+}
+
+function externalBlocker(title: string, evidence: string): NormalizedReviewBlocker {
+  const [blocker] = normalizeReviewBlockers(reviewResult([
+    reviewFinding("external-blocker", title, { blockedBy: [evidence] }),
+  ]), "review-a");
+  if (!blocker) throw new Error("Expected one normalized blocker.");
+  return blocker;
 }

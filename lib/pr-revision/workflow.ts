@@ -40,7 +40,7 @@ import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
 import { postPrRevisionSummaryComment } from "./comments.ts";
 import { revisionImplementationPrompt, revisionPlanPrompt, revisionReviewPrompt } from "./prompts.ts";
-import { normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
+import { isUnblockedCurrentFix, normalizeReviewBlockers, normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
 import { reviewArtifactDefinition } from "../review/artifact.ts";
 import {
   revisionPlanArtifactDefinition,
@@ -498,14 +498,21 @@ async function inferIssueFromAttemptMetadata(context: PrRevisionContext, headRef
 }
 
 function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
+  if (review.restartRecommendation !== undefined) {
+    throw new Error("Revision reviews cannot request an implementation restart.");
+  }
+  if (review.findings.some(isUnblockedCurrentFix)) return "fixes-required";
   const disposition = reviewDisposition(review);
   if (disposition === "restart-required") throw new Error("Revision reviews cannot request an implementation restart.");
   return disposition;
 }
 
 function revisionReviewBlockingFindings(review: ReviewResult): string[] {
-  return normalizeReviewFindings(review, "revision-review")
-    .filter((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker")
+  return [
+    ...normalizeReviewFindings(review, "revision-review")
+      .filter((finding) => finding.classification === "must-fix-current"),
+    ...normalizeReviewBlockers(review, "revision-review"),
+  ]
     .map((finding) => `${finding.sourceLocalId}: ${finding.title} — ${finding.recommendedHandling}`);
 }
 

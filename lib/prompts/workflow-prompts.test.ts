@@ -89,7 +89,7 @@ describe("workflow prompt safety policy", () => {
     expect(ambiguityPolicy).toContain("<value>blocked</value>");
     expect(ambiguityPolicy).toContain("non-ready outcome");
     expect(triagePrompt(context)).toContain("needs-human-decision");
-    expect(reviewAPrompt(context)).toContain("external-blocker");
+    expect(reviewAPrompt(context)).toContain("blockedBy independently");
     expect(reviewAPrompt(context)).toContain("human decision");
   });
 
@@ -174,15 +174,24 @@ describe("structured review contract", () => {
     const prompt = reviewBPrompt(context);
     expect(prompt).not.toContain('artifact kind="review_a"');
   });
+
+  test("later review passes receive only their own prior stable finding IDs", () => {
+    const reviewA = reviewAPrompt(context, 1);
+    const reviewB = reviewBPrompt(context, 1);
+    expect(reviewA).toContain('<artifact kind="prior_review_a">.roark/runs/issue/123/review-a-0.json</artifact>');
+    expect(reviewA).not.toContain('kind="prior_review_b"');
+    expect(reviewB).toContain('<artifact kind="prior_review_b">.roark/runs/issue/123/review-b-0.json</artifact>');
+    expect(reviewB).not.toContain('kind="prior_review_a"');
+  });
 });
 
 describe("fix-oriented prompt finding handling", () => {
   test("fix prompt applies only current-issue blocking findings", () => {
     const prompt = fixPrompt(context, 1);
-    expect(prompt).toContain("Apply only unresolved review findings classified as <value>must-fix-current</value>");
+    expect(prompt).toContain("handling is <value>must-fix-current</value> and whose blockedBy list is empty");
     expect(prompt).toContain("Do not fix non-blocking <value>follow-up</value> or <value>suggestion</value> findings");
-    expect(prompt).toContain("review-a:A-001");
-    expect(prompt).toContain("addressedFindingIds must contain every and only must-fix-current workflow ID");
+    expect(prompt).toContain("prefix its submitted id with review-a: or review-b:");
+    expect(prompt).toContain("addressedFindingIds must contain every and only unblocked must-fix-current workflow ID");
   });
 
   test("code refinement prompt changes code only for concrete behavior-preserving improvements", () => {

@@ -172,7 +172,7 @@ describe("verification repair planning", () => {
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.planItemId).toBe("follow-up-1");
-    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:A-001"]);
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:document-numbered-review-curation"]);
     expect(plan.issuesToCreate[0]?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/10");
     expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.json");
   });

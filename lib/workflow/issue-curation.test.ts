@@ -7,7 +7,7 @@ import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import type { FindingClassification, FindingConfidence, FindingSeverity, ReviewFinding } from "../review/result.ts";
+import type { FindingConfidence, FindingSeverity, ReviewConcernClassification, ReviewFinding } from "../review/result.ts";
 import { triageResult } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
 
@@ -82,7 +82,7 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.classification).toBe("follow-up");
     expect(item?.proposedTitle).toBe("Document retry edge case for users");
     expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "follow-up"]);
-    expect(item?.sourceFindingIds).toEqual(["review-a:A-001"]);
+    expect(item?.sourceFindingIds).toEqual(["review-a:f1"]);
     expect(item?.proposedBody.startsWith("## Summary\n\nDocument retry edge case for users.")).toBe(true);
     expect(item?.proposedBody).toContain("## Why this issue exists");
     expect(item?.proposedBody).toContain("## What the reviewer observed");
@@ -109,7 +109,7 @@ describe("buildIssueCurationPlan", () => {
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
     expect(plan.issuesToCreate).toHaveLength(1);
-    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:A-001"]);
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:n1"]);
     expect(plan.run.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/review-a-0.json");
     expect(plan.run.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/review-b-0.json");
     expect(plan.warnings).not.toContain("review-a-0.json is missing; treating Review Agent A findings as empty.");
@@ -147,6 +147,26 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.whyBlockingOrNonBlocking).toContain("prerequisite or external work");
   });
 
+  test("approval-blocking review limitations produce external-blocker issue items", async () => {
+    const context = await tempContext();
+    await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult([], {
+      completeness: "limited",
+      limitations: [{
+        id: "generated-migration-unavailable",
+        description: "Generated migration output could not be inspected.",
+        blocksApproval: true,
+      }],
+    })));
+    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
+
+    const plan = await buildIssueCurationPlan(context, fixedClock);
+
+    expect(plan.issuesToCreate).toHaveLength(1);
+    expect(plan.issuesToCreate[0]?.classification).toBe("external-blocker");
+    expect(plan.issuesToCreate[0]?.sourceFindingIds)
+      .toEqual(["review-a:limitation:generated-migration-unavailable"]);
+  });
+
   test("suggestion findings become issues while must-fix-current findings are rejected", async () => {
     const context = await tempContext();
     await writeArtifact(context, reviewARef(0), reviewWithLedger([
@@ -161,7 +181,7 @@ describe("buildIssueCurationPlan", () => {
 
     expect(plan.issuesToCreate.map((item) => item.planItemId)).toEqual(["suggestion-1"]);
     expect(plan.issuesToCreate[0]?.proposedLabels).toEqual(["needs-triage", "needs-human", "suggestion"]);
-    expect(plan.rejectedCandidates.map((candidate) => candidate.sourceFindingIds[0])).toEqual(["review-a:A-002"]);
+    expect(plan.rejectedCandidates.map((candidate) => candidate.sourceFindingIds[0])).toEqual(["review-a:m1"]);
     expect(plan.rejectedCandidates[0]?.reason).toContain("current issue/fix pass");
     expect(plan.rejectedCandidates[0]?.evidence).toEqual([
       "src/first.ts:1 shows the first problem.",
@@ -219,7 +239,7 @@ describe("buildIssueCurationPlan", () => {
 
     expect(plan.issuesToCreate).toHaveLength(1);
     const item = plan.issuesToCreate[0];
-    expect(item?.sourceFindingIds).toEqual(["review-a:A-001", "review-b:B-001"]);
+    expect(item?.sourceFindingIds).toEqual(["review-a:f1", "review-b:g1"]);
     expect(item?.reviewerSources).toEqual(["review-a", "review-b"]);
     expect(item?.evidence).toEqual([
       "src/cache.ts:12 does not describe invalidation behavior.",
@@ -229,7 +249,7 @@ describe("buildIssueCurationPlan", () => {
     expect(plan.duplicatesMerged).toEqual([
       {
         winningPlanItemId: "follow-up-1",
-        mergedSourceFindingIds: ["review-a:A-001", "review-b:B-001"],
+        mergedSourceFindingIds: ["review-a:f1", "review-b:g1"],
         reviewerSources: ["review-a", "review-b"],
         reason: "Merged findings with the same classification and matching normalized title or evidence reference.",
       },
@@ -255,8 +275,8 @@ describe("buildIssueCurationPlan", () => {
 
     expect(plan.issuesToCreate).toHaveLength(2);
     expect(plan.issuesToCreate.map((item) => item.sourceFindingIds)).toEqual([
-      ["review-b:B-001"],
-      ["review-a:A-001"],
+      ["review-b:g1"],
+      ["review-a:f1"],
     ]);
     expect(plan.duplicatesMerged).toEqual([]);
   });
@@ -364,7 +384,7 @@ function reviewWithLedger(entries: ReviewFinding | ReviewFinding[] | "None"): st
 
 function finding(
   _id: string,
-  classification: FindingClassification,
+  classification: ReviewConcernClassification,
   overrides: Partial<{
     title: string;
     severity: FindingSeverity;
@@ -376,6 +396,7 @@ function finding(
   }> = {},
 ): ReviewFinding {
   return reviewFinding(classification, overrides.title ?? `Finding ${_id}`, {
+    id: _id.toLowerCase(),
     severity: overrides.severity ?? "medium",
     confidence: overrides.confidence ?? "high",
     evidence: typeof overrides.evidence === "string"

@@ -342,6 +342,10 @@ function renderReviewPrompt(context: WorkflowContext, pass: number, config: Revi
         { kind: "implementation_log", artifact: "implementationLog" },
         { kind: "refinement_log", artifact: refinementLogRef(pass) },
       ]),
+      ...(pass === 0 ? [] : renderInputArtifacts(context, [{
+        kind: config.name === "correctness" ? "prior_review_a" : "prior_review_b",
+        artifact: config.name === "correctness" ? reviewARef(pass - 1) : reviewBRef(pass - 1),
+      }])),
       ...failedVerificationInputLines(context, pass),
     ],
     blocks: [
@@ -444,16 +448,16 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
     blocks: [
       bugFeedbackLoopPolicy,
       renderInstructions([
-        "Apply only unresolved review findings classified as <value>must-fix-current</value>, plus any failed verification artifact listed in inputs.",
+        "Apply only unresolved review findings whose handling is <value>must-fix-current</value> and whose blockedBy list is empty, plus any failed verification artifact listed in inputs.",
         "If this pass is driven by failed verification, fix only the local deterministic verification failure; do not broaden scope or revisit unrelated reviewer suggestions.",
         "Do not fix non-blocking <value>follow-up</value> or <value>suggestion</value> findings in this pass; leave them for separate work unless they directly block the current issue.",
-        "If reviews identify only <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value> findings, do not broaden scope to make unrelated changes.",
+        "If all must-fix-current findings are externally blocked, or reviews contain only follow-up or suggestion findings, do not broaden scope to make unrelated changes.",
         `For pass ${pass}, prioritize issues still open after prior fix passes.`,
         "Do not refactor unrelated code.",
         doNotEditWorkflowArtifactsInstruction,
         "After fixes, run the most relevant affordable validation again: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.",
-        "Use the deterministic workflow IDs for every must-fix-current finding you addressed: review A findings are review-a:A-001, review-a:A-002, and so on in JSON array order; review B uses review-b:B-001, review-b:B-002, and so on.",
-        "Call submit_change_report with the completed fix report. addressedFindingIds must contain every and only must-fix-current workflow ID from the two input reviews; Roark validates the set before accepting the report.",
+        "Use each finding's stable workflow ID in addressedFindingIds: prefix its submitted id with review-a: or review-b: according to the input artifact that contains it.",
+        "Call submit_change_report with the completed fix report. addressedFindingIds must contain every and only unblocked must-fix-current workflow ID from the two input reviews; Roark validates the set before accepting the report.",
       ]),
     ],
     outputFormat: "structured-tool",

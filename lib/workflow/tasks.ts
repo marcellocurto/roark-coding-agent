@@ -363,7 +363,7 @@ async function requiredFixFindingIds(context: WorkflowContext, artifact: Artifac
     reviewA: parseReviewResultJson(reviewA, { allowRestart: true }),
     reviewB: parseReviewResultJson(reviewB, { allowRestart: true }),
   })
-    .filter((finding) => finding.classification === "must-fix-current")
+    .filter((finding) => finding.classification === "must-fix-current" && finding.blockedBy.length === 0)
     .map((finding) => finding.workflowId);
 }
 

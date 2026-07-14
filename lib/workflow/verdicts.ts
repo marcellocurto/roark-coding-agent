@@ -1,8 +1,12 @@
 import {
   findingsByClassification,
+  isUnblockedCurrentFix,
+  normalizeReviewBlockers,
   normalizeReviewFindings,
   reviewDisposition,
+  reviewHasBlockingConstraint,
   type NormalizedReviewerFinding,
+  type NormalizedReviewBlocker,
   type ReviewDisposition,
   type ReviewResult,
 } from "../review/result.ts";
@@ -26,7 +30,7 @@ export interface ReadinessDecision {
   restartRequired: boolean;
   blockedByReview: boolean;
   currentIssueBlockingFindings: NormalizedReviewerFinding[];
-  externalBlockers: NormalizedReviewerFinding[];
+  externalBlockers: NormalizedReviewBlocker[];
   followUpFindings: NormalizedReviewerFinding[];
   suggestions: NormalizedReviewerFinding[];
 }
@@ -40,15 +44,15 @@ export function shouldImplementPlan(plan: ImplementationPlanResult): boolean {
 }
 
 export function needsFix(...reviews: ReviewResult[]): boolean {
-  return reviews.some((review) => review.findings.some((finding) => finding.classification === "must-fix-current"));
+  return reviews.some((review) => review.findings.some(isUnblockedCurrentFix));
 }
 
 export function hasBlockedReview(...reviews: ReviewResult[]): boolean {
-  return reviews.some((review) => review.findings.some((finding) => finding.classification === "external-blocker"));
+  return reviews.some(reviewHasBlockingConstraint);
 }
 
 export function needsRestart(...reviews: ReviewResult[]): boolean {
-  return reviews.some((review) => review.restartRationale !== undefined);
+  return reviews.some((review) => review.restartRecommendation !== undefined);
 }
 
 export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecision {
@@ -60,11 +64,15 @@ export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecisio
     ...(input.reviewA ? normalizeReviewFindings(input.reviewA, "review-a") : []),
     ...(input.reviewB ? normalizeReviewFindings(input.reviewB, "review-b") : []),
   ];
+  const allBlockers = [
+    ...(input.reviewA ? normalizeReviewBlockers(input.reviewA, "review-a") : []),
+    ...(input.reviewB ? normalizeReviewBlockers(input.reviewB, "review-b") : []),
+  ];
   const currentIssueBlockingFindings = findingsByClassification(allFindings, "must-fix-current");
-  const externalBlockers = findingsByClassification(allFindings, "external-blocker");
+  const externalBlockers = findingsByClassification(allBlockers, "external-blocker");
   const followUpFindings = findingsByClassification(allFindings, "follow-up");
   const suggestions = findingsByClassification(allFindings, "suggestion");
-  const restartRequired = [input.reviewA, input.reviewB].some((review) => review?.restartRationale !== undefined);
+  const restartRequired = [input.reviewA, input.reviewB].some((review) => review?.restartRecommendation !== undefined);
   const fixesWereNeeded = currentIssueBlockingFindings.length > 0;
   const blockedByReview = externalBlockers.length > 0;
   const readyFromLatestReviews =

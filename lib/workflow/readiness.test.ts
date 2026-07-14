@@ -41,10 +41,10 @@ describe("buildReadinessMarkdown", () => {
     const { markdown } = await buildReadinessArtifacts(context);
 
     expect(markdown).toContain("## Status\nnot-ready");
-    expect(markdown).toContain("## Current-Issue Blocking Findings\n- review-a:A-001");
-    expect(markdown).toContain("## External Blockers\n- review-b:B-001");
-    expect(markdown).toContain("## Follow-Up Findings\n- review-b:B-002");
-    expect(markdown).toContain("## Suggestions\n- review-b:B-003");
+    expect(markdown).toContain("## Current-Issue Blocking Findings\n- review-a:current-bug");
+    expect(markdown).toContain("## External Blockers\n- review-b:blocker:needs-access");
+    expect(markdown).toContain("## Follow-Up Findings\n- review-b:track-later");
+    expect(markdown).toContain("## Suggestions\n- review-b:polish");
     expect(markdown).not.toContain("Parser And Contract Warnings");
   });
 
@@ -106,6 +106,11 @@ describe("buildReadinessMarkdown", () => {
 });
 
 describe("parseReadinessResultJson", () => {
+  test("rejects readiness version 1 instead of misreading the old review model", () => {
+    const priorVersion = { ...readinessResult("ready-for-pr"), version: 1 };
+    expect(() => parseReadinessResultJson(JSON.stringify(priorVersion))).toThrow("structured contract");
+  });
+
   test("rejects a ready status that conflicts with its structured inputs", () => {
     const corrupted = readinessResult("ready-for-pr");
     corrupted.decision.reviewBVerdict = "missing";

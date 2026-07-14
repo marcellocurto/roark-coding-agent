@@ -32,8 +32,9 @@ describe("classification-aware verdict decisions", () => {
     expect(needsFix(reviewA, reviewB)).toBe(false);
   });
 
-  test("restart rationale drives restart independently of Markdown", () => {
-    const reviewA = reviewResult([reviewFinding("must-fix-current")], { restartRationale: "The implementation direction is unsafe." });
+  test("restart recommendation drives restart independently of Markdown", () => {
+    const finding = reviewFinding("must-fix-current");
+    const reviewA = reviewResult([finding], { restartRecommendation: { findingIds: [finding.id], rationale: "The implementation direction is unsafe." } });
     expect(needsRestart(reviewA)).toBe(true);
   });
 });

@@ -1,13 +1,15 @@
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import type { FindingClassification, ReviewFinding, ReviewResult } from "../review/result.ts";
+import type { ReviewConcernClassification, ReviewFinding, ReviewResult } from "../review/result.ts";
 
 export function reviewFinding(
-  classification: FindingClassification,
+  classification: ReviewConcernClassification,
   title = "Finding",
   overrides: Partial<ReviewFinding> = {},
 ): ReviewFinding {
   return {
-    classification,
+    id: title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "finding",
+    handling: classification === "external-blocker" ? "must-fix-current" : classification,
+    blockedBy: classification === "external-blocker" ? ["External prerequisite is unavailable."] : [],
     title,
     severity: "medium",
     confidence: "high",
@@ -25,6 +27,8 @@ export function reviewResult(
   return {
     summary: findings.length === 0 ? "No findings." : "The review found actionable concerns.",
     evidenceReviewed: ["Pinned diff and relevant tests."],
+    completeness: "complete",
+    limitations: [],
     findings,
     ...overrides,
   };

@@ -3,16 +3,19 @@ export type ReviewLensName = "correctness" | "maintainability";
 export function renderStructuredReviewContract(subject: string, allowRestart: boolean): string {
   return `  <structured_review_contract>
     <instruction>Complete the review only by calling <tool>submit_review</tool>. Do not return a Markdown review.</instruction>
-    <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
-    <instruction>Each finding must include its classification, title, severity, confidence, concrete evidence, current-issue impact, and recommended handling; it may include a suggested issue title for separate tracking. Roark assigns finding identifiers.</instruction>
-    <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed.</instruction>
-    <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
-    <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval.</instruction>
-    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
+    <instruction>Record at least one concrete item in evidenceReviewed. Do not claim a complete review without inspecting the relevant diff and requirements or repository guidance.</instruction>
+    <instruction>Give every finding a stable semantic kebab-case id and reuse that id in later passes while the same concern persists.</instruction>
+    <instruction>Set each finding's handling to exactly one of: <value>must-fix-current</value>, <value>follow-up</value>, or <value>suggestion</value>. Handling controls routing; severity describes impact and confidence describes certainty.</instruction>
+    <instruction>Each finding must include id, handling, blockedBy, title, severity, confidence, concrete evidence, current-issue impact, and recommended handling; it may include a suggested issue title for separate tracking.</instruction>
+    <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed, and only with medium or high confidence.</instruction>
+    <instruction>Use blockedBy independently of handling when outside information, access, dependency resolution, or a human decision prevents the finding from being handled. Leave blockedBy empty when local work can proceed.</instruction>
+    <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval unless blockedBy independently records an external constraint.</instruction>
+    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements. A critical concern cannot be a suggestion.</instruction>
+    <instruction>Set completeness to <value>limited</value> and report structured limitations whenever relevant review coverage was unavailable. Mark blocksApproval only when the missing coverage makes approval unsafe. Use <value>complete</value> with no limitations otherwise.</instruction>
     <instruction>Roark derives the outcome from the submitted findings; do not provide a separate verdict.</instruction>
     ${allowRestart
-      ? "<instruction>Set restartRationale only when at least one must-fix-current finding shows that resetting to the pre-implementation baseline is safer than an incremental fix.</instruction>"
-      : "<instruction>Do not set restartRationale in this workflow.</instruction>"}
+      ? "<instruction>Set restartRecommendation only when resetting to the pre-implementation baseline is safer than incremental fixes. Reference every relevant unblocked must-fix finding by id.</instruction>"
+      : "<instruction>Do not set restartRecommendation in this workflow.</instruction>"}
   </structured_review_contract>`;
 }
 
@@ -42,6 +45,7 @@ export const correctnessReviewLens: ReviewLensDefinition = {
     "Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.",
     "Missing or incorrect error handling, race conditions, and ordering issues.",
     "Regressions or broken contracts in unrelated callers touched by the diff.",
+    "Cross-cutting risks implicated by the change, including security, privacy, accessibility, data migration, performance, licensing, and operational behavior. Record a limitation instead of claiming coverage that was unavailable.",
     "Missing behavior-oriented regression coverage only where a realistic defect could escape existing tests. Coverage should exercise a stable behavior seam and survive internal refactoring. Do not require tests by default.",
     "Gaps or unsubstantiated claims in available validation evidence.",
   ],

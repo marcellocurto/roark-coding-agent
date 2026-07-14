@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { createWorkflowContext, fixLogRef, refinementLogRef, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
 import { planContinuation } from "./continue-plan.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import type { FindingClassification, ReviewFinding } from "../review/result.ts";
+import type { ReviewConcernClassification, ReviewFinding } from "../review/result.ts";
 import { implementationPlanResult, readinessResult, triageResult } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
 
@@ -137,7 +137,7 @@ describe("planContinuation", () => {
     const steps = await planContinuation(context);
 
     expect(steps).toEqual([
-      { type: "write-readiness", reason: "a review is blocked; readiness records the stop" },
+      { type: "write-readiness", reason: "a review remains externally blocked after all available local fixes; readiness records the stop" },
       { type: "publish-gate", reason: "publish gate records non-publish" },
     ]);
   });
@@ -207,6 +207,6 @@ function reviewResultJson(findings: ReviewFinding[]): string {
   return JSON.stringify(reviewResult(findings));
 }
 
-function finding(title: string, classification: FindingClassification): ReviewFinding {
+function finding(title: string, classification: ReviewConcernClassification): ReviewFinding {
   return reviewFinding(classification, title);
 }

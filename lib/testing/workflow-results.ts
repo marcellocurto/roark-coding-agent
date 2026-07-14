@@ -51,7 +51,7 @@ export async function submitImplementationPlan(request: AgentRunRequest, result:
 
 export function readinessResult(status: ReadinessStatus): ReadinessResult {
   return {
-    version: 1,
+    version: 2,
     issueNumber: "12",
     runDirectory: ".roark/runs/issue/12",
     latestReviewCycle: status === "ready-for-pr" ? 0 : null,

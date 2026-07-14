@@ -134,6 +134,7 @@ function freshReviewComment(controlCwd: string, agentCwd: string): string {
         evidence: ["The changed handler omits the required field."],
         currentIssueImpact: "Clients cannot parse successful responses.",
         recommendedHandling: "Restore the field before merging.",
+        blockedBy: [],
       }],
       externalBlockers: [],
       followUps: [],

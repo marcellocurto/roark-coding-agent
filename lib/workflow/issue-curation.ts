@@ -14,14 +14,18 @@ import {
   writeJsonArtifact,
 } from "./artifacts.ts";
 import {
-  type FindingClassification,
+  escapeReviewMarkdownText,
+  type ReviewConcernClassification,
+  normalizeReviewBlockers,
   normalizeReviewFindings,
+  type NormalizedReviewBlocker,
   type NormalizedReviewerFinding,
   parseReviewResultJson,
   type ReviewFindingSource,
 } from "../review/result.ts";
 
 export type IssuePlanClassification = ReviewerIssueClassificationLabel;
+type CuratableReviewConcern = NormalizedReviewerFinding | NormalizedReviewBlocker;
 
 export interface IssueCurationPlan {
   version: 2;
@@ -54,7 +58,7 @@ export interface IssuePlanItem {
   proposedBody: string;
   sourceFindingIds: string[];
   reviewerSources: ReviewFindingSource[];
-  sourceClassifications: FindingClassification[];
+  sourceClassifications: ReviewConcernClassification[];
   severitySummary: string;
   confidenceSummary: string;
   evidence: string[];
@@ -119,12 +123,20 @@ export async function buildIssueCurationPlan(
   const reviewArtifacts = latestReviewArtifacts(context);
   const reviewA = reviewArtifacts === undefined ? undefined : await readOptionalArtifact(context, reviewArtifacts.reviewA, warnings);
   const reviewB = reviewArtifacts === undefined ? undefined : await readOptionalArtifact(context, reviewArtifacts.reviewB, warnings);
+  const reviewAResult = reviewA === undefined ? undefined : parseReviewResultJson(reviewA, { allowRestart: true });
+  const reviewBResult = reviewB === undefined ? undefined : parseReviewResultJson(reviewB, { allowRestart: true });
   const findings = [
-    ...(reviewA === undefined ? [] : normalizeReviewFindings(parseReviewResultJson(reviewA, { allowRestart: true }), "review-a")),
-    ...(reviewB === undefined ? [] : normalizeReviewFindings(parseReviewResultJson(reviewB, { allowRestart: true }), "review-b")),
+    ...(reviewAResult === undefined ? [] : [
+      ...normalizeReviewFindings(reviewAResult, "review-a"),
+      ...normalizeReviewBlockers(reviewAResult, "review-a"),
+    ]),
+    ...(reviewBResult === undefined ? [] : [
+      ...normalizeReviewFindings(reviewBResult, "review-b"),
+      ...normalizeReviewBlockers(reviewBResult, "review-b"),
+    ]),
   ];
   const rejectedCandidates: RejectedCandidate[] = [];
-  const accepted: NormalizedReviewerFinding[] = [];
+  const accepted: CuratableReviewConcern[] = [];
 
   for (const finding of findings) {
     const rejectionReason = issueCandidateRejectionReason(finding);
@@ -163,7 +175,7 @@ export async function buildIssueCurationPlan(
   };
 }
 
-function issueCandidateRejectionReason(finding: NormalizedReviewerFinding): string | undefined {
+function issueCandidateRejectionReason(finding: CuratableReviewConcern): string | undefined {
   if (finding.classification === "must-fix-current") return "must-fix-current findings belong to the current issue/fix pass and are not promoted by default";
   if (!finding.evidence.some(hasConcreteContent)) return "missing concrete evidence";
   if (!hasConcreteContent(finding.currentIssueImpact)) return "missing current-issue or future-user impact";
@@ -179,16 +191,16 @@ function hasConcreteContent(value: string): boolean {
   return true;
 }
 
-function hasVagueOrSpeculativeLanguage(finding: NormalizedReviewerFinding): boolean {
+function hasVagueOrSpeculativeLanguage(finding: CuratableReviewConcern): boolean {
   const value = [finding.title, ...finding.evidence, finding.currentIssueImpact, finding.recommendedHandling]
     .join("\n")
     .toLowerCase();
   return /\b(maybe|perhaps|possibly|speculative|unclear|unknown|not sure|might|seems like|appears to)\b/.test(value);
 }
 
-function groupDuplicateFindings(findings: NormalizedReviewerFinding[]): NormalizedReviewerFinding[][] {
+function groupDuplicateFindings(findings: CuratableReviewConcern[]): CuratableReviewConcern[][] {
   const sorted = [...findings].sort(compareFindingsForGrouping);
-  const groups: NormalizedReviewerFinding[][] = [];
+  const groups: CuratableReviewConcern[][] = [];
 
   for (const finding of sorted) {
     const existing = groups.find((group) => group.some((candidate) => areDuplicateFindings(candidate, finding)));
@@ -199,7 +211,7 @@ function groupDuplicateFindings(findings: NormalizedReviewerFinding[]): Normaliz
   return groups;
 }
 
-function compareFindingsForGrouping(left: NormalizedReviewerFinding, right: NormalizedReviewerFinding): number {
+function compareFindingsForGrouping(left: CuratableReviewConcern, right: CuratableReviewConcern): number {
   const titleComparison = normalizeTitle(left).localeCompare(normalizeTitle(right));
   if (titleComparison !== 0) return titleComparison;
   const sourceComparison = left.source.localeCompare(right.source);
@@ -207,7 +219,7 @@ function compareFindingsForGrouping(left: NormalizedReviewerFinding, right: Norm
   return left.workflowId.localeCompare(right.workflowId);
 }
 
-function areDuplicateFindings(left: NormalizedReviewerFinding, right: NormalizedReviewerFinding): boolean {
+function areDuplicateFindings(left: CuratableReviewConcern, right: CuratableReviewConcern): boolean {
   if (left.classification !== right.classification) return false;
   if (normalizeTitle(left) === normalizeTitle(right)) return true;
 
@@ -217,7 +229,7 @@ function areDuplicateFindings(left: NormalizedReviewerFinding, right: Normalized
 }
 
 function buildIssuePlanItems(input: {
-  groups: NormalizedReviewerFinding[][];
+  groups: CuratableReviewConcern[][];
   classification: IssuePlanClassification;
   sourceIssue: IssueCurationPlan["sourceIssue"];
   context: WorkflowContext;
@@ -247,8 +259,8 @@ function buildIssuePlanItems(input: {
       sourceFindingIds,
       reviewerSources,
       sourceClassifications,
-      severitySummary: summarizeField("severity", group.map((finding) => finding.severity)),
-      confidenceSummary: summarizeField("confidence", group.map((finding) => finding.confidence)),
+      severitySummary: summarizeField("severity", group.map((finding) => "severity" in finding ? finding.severity : "not applicable")),
+      confidenceSummary: summarizeField("confidence", group.map((finding) => "confidence" in finding ? finding.confidence : "not applicable")),
       evidence,
       impact: impacts.join("\n\n"),
       recommendedHandling: handling,
@@ -292,8 +304,12 @@ function buildProposedIssueBody(input: { item: IssuePlanItem }): string {
   const nonGoals = input.item.classification === "follow-up" || input.item.classification === "suggestion"
     ? "\n## Non-goals\n\n- Do not rework the already-completed source issue beyond this issue's scope.\n- Do not broaden this into an unrelated repository audit.\n"
     : "";
+  const title = escapeReviewMarkdownText(input.item.proposedTitle);
+  const evidence = input.item.evidence.map((value) => `- ${escapeReviewMarkdownText(value)}`).join("\n");
+  const impact = escapeReviewMarkdownText(input.item.impact);
+  const handling = input.item.recommendedHandling.map((value) => `- ${escapeReviewMarkdownText(value)}`).join("\n");
 
-  return `## Summary\n\n${summarySentence(input.item.proposedTitle)}\n\n## Why this issue exists\n\n${input.item.whyBlockingOrNonBlocking}\n\n## What the reviewer observed\n\n${input.item.evidence.map((evidence) => `- ${evidence}`).join("\n")}\n\n## Impact\n\n${input.item.impact}\n\n## Suggested fix\n\n${input.item.recommendedHandling.map((handling) => `- ${handling}`).join("\n")}\n\n## Acceptance criteria\n\n- The behavior described in “What the reviewer observed” is addressed for the cited code paths.\n- The suggested fix above is completed, or the issue is closed with a clear explanation of why no change is needed.\n- Relevant validation is updated or documented so this gap is less likely to recur.\n- Existing relevant checks continue to pass.\n\n## Triage recommendation\n\nPriority: ${triage.priority}  \nType: ${triage.type}  \nRecommended action: ${triage.recommendedAction}\n\n## Context\n\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Reviewer finding(s): ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n\n<details>\n<summary>Run artifacts</summary>\n\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n\n</details>\n${nonGoals}`;
+  return `## Summary\n\n${summarySentence(title)}\n\n## Why this issue exists\n\n${input.item.whyBlockingOrNonBlocking}\n\n## What the reviewer observed\n\n${evidence}\n\n## Impact\n\n${impact}\n\n## Suggested fix\n\n${handling}\n\n## Acceptance criteria\n\n- The behavior described in “What the reviewer observed” is addressed for the cited code paths.\n- The suggested fix above is completed, or the issue is closed with a clear explanation of why no change is needed.\n- Relevant validation is updated or documented so this gap is less likely to recur.\n- Existing relevant checks continue to pass.\n\n## Triage recommendation\n\nPriority: ${triage.priority}  \nType: ${triage.type}  \nRecommended action: ${triage.recommendedAction}\n\n## Context\n\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Reviewer finding(s): ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n- Run directory: ${input.item.runContext.runDirRelative}\n- Attempt: ${attempt}\n\n<details>\n<summary>Run artifacts</summary>\n\n${input.item.runContext.artifactPaths.map((artifactPath) => `- ${artifactPath}`).join("\n") || "- None recorded"}\n\n</details>\n${nonGoals}`;
 }
 
 function summarySentence(title: string): string {
@@ -429,7 +445,7 @@ function collectAvailableArtifactPaths(context: WorkflowContext): string[] {
   return unique(artifacts);
 }
 
-function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding, reason: string): RejectedCandidate {
+function normalizedFindingToRejectedCandidate(finding: CuratableReviewConcern, reason: string): RejectedCandidate {
   return {
     sourceFindingIds: [finding.workflowId],
     reviewerSources: [finding.source],
@@ -441,7 +457,7 @@ function normalizedFindingToRejectedCandidate(finding: NormalizedReviewerFinding
   };
 }
 
-function normalizeTitle(finding: NormalizedReviewerFinding): string {
+function normalizeTitle(finding: CuratableReviewConcern): string {
   return normalizeText(finding.suggestedIssueTitle ?? finding.title);
 }
 

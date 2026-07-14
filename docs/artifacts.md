@@ -81,7 +81,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `implementation-plan.json`, `implementation-plan.md` | Schema-validated final plan and its deterministic human rendering. |
 | `implementation-log.json`, `implementation-log.md` | Schema-validated implementation report and its deterministic human rendering. |
 | `refinement-log-<n>.json`, `refinement-log-<n>.md` | Schema-validated code-refinement report and its deterministic human rendering. |
-| `review-a-<n>.json`, `review-b-<n>.json` and matching `.md` files | Independent, schema-validated reviews and their deterministic human renderings. Outcomes and finding identifiers are derived only from JSON. |
+| `review-a-<n>.json`, `review-b-<n>.json` and matching `.md` files | Independent, bounded, schema-validated reviews and their escaped deterministic human renderings. JSON records inspected evidence, completeness/limitations, semantic finding IDs, handling, and external constraints. |
 | `fix-log-<n>.json`, `fix-log-<n>.md` | Schema-validated fix report and its deterministic human rendering. Fix reports identify addressed review findings by workflow ID. |
 | `readiness.json`, `readiness.md` | Validated readiness decision used by the publish gate and its deterministic human rendering. |
 | `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
