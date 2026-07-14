@@ -2,9 +2,10 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createWorkflowContext, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
-import { buildReadinessMarkdown } from "./readiness.ts";
+import { createWorkflowContext, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
+import { buildReadinessArtifacts, parseReadinessResultJson } from "./readiness.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import { implementationPlanResult, readinessResult, triageResult } from "../testing/workflow-results.ts";
 
 const tempDirs: string[] = [];
 
@@ -26,8 +27,8 @@ describe("buildReadinessMarkdown", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeJsonArtifact(context, "triage", triageResult());
+    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
     await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult([
       reviewFinding("must-fix-current", "Current bug"),
     ]), null, 2));
@@ -37,7 +38,7 @@ describe("buildReadinessMarkdown", () => {
       reviewFinding("suggestion", "Polish"),
     ]), null, 2));
 
-    const markdown = await buildReadinessMarkdown(context);
+    const { markdown } = await buildReadinessArtifacts(context);
 
     expect(markdown).toContain("## Status\nnot-ready");
     expect(markdown).toContain("## Current-Issue Blocking Findings\n- review-a:A-001");
@@ -60,8 +61,8 @@ describe("buildReadinessMarkdown", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeJsonArtifact(context, "triage", triageResult());
+    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
     await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
     await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
     await writeArtifact(context, reviewARef(1), JSON.stringify(reviewResult([
@@ -69,7 +70,7 @@ describe("buildReadinessMarkdown", () => {
     ])));
     await writeArtifact(context, reviewBRef(1), JSON.stringify({ error: { message: "provider unavailable" } }));
 
-    const markdown = await buildReadinessMarkdown(context);
+    const { markdown } = await buildReadinessArtifacts(context);
 
     expect(markdown).toContain("- Latest review cycle: 0");
     expect(markdown).toContain("## Status\nready-for-pr");
@@ -89,17 +90,28 @@ describe("buildReadinessMarkdown", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeJsonArtifact(context, "triage", triageResult());
+    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
     await Bun.write(path.join(context.runDir, "review-a.json"), JSON.stringify(reviewResult([
       reviewFinding("must-fix-current", "Stale unnumbered finding"),
     ])));
     await Bun.write(path.join(context.runDir, "review-b.json"), JSON.stringify(reviewResult()));
 
-    const markdown = await buildReadinessMarkdown(context);
+    const { markdown } = await buildReadinessArtifacts(context);
 
     expect(markdown).toContain("- Latest review cycle: none");
     expect(markdown).toContain("## Status\nnot-ready");
     expect(markdown).not.toContain("Stale unnumbered finding");
+  });
+});
+
+describe("parseReadinessResultJson", () => {
+  test("rejects a ready status that conflicts with its structured inputs", () => {
+    const corrupted = readinessResult("ready-for-pr");
+    corrupted.decision.reviewBVerdict = "missing";
+
+    expect(() => parseReadinessResultJson(JSON.stringify(corrupted))).toThrow(
+      "conflicts with its decision inputs",
+    );
   });
 });

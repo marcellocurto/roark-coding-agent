@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import { decideReadiness, hasBlockedReview, needsFix, needsRestart } from "./verdicts.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
 
-const triage = "# Triage\n\n## Verdict\nproceed\n";
-const plan = "# Implementation Plan\n\n## Ready For Implementation\nyes\n";
+const triage = triageResult();
+const plan = implementationPlanResult();
 
 describe("classification-aware verdict decisions", () => {
   test("follow-ups and suggestions do not block readiness", () => {

@@ -20,11 +20,15 @@ export {
   artifactFilename,
   baselineResetLogRef,
   fixLogRef,
+  fixLogMarkdownRef,
   formatArtifactRef,
   implementationRestartLogRef,
   refinementLogRef,
+  refinementLogMarkdownRef,
   reviewARef,
+  reviewAMarkdownRef,
   reviewBRef,
+  reviewBMarkdownRef,
   verificationBeforeFixRef,
 } from "./artifact-catalog.ts";
 

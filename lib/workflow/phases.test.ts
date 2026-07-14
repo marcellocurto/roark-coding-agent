@@ -4,11 +4,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { runProcessOrThrow } from "../cli/process.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { artifactExists, createWorkflowContext, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, fixLogMarkdownRef, fixLogRef, readArtifact, refinementLogRef, reviewAMarkdownRef, reviewARef, reviewBMarkdownRef, reviewBRef, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
 import { issueArtifactHasRelationshipSnapshot, reviewPhase, runFullWorkflow, runSinglePhase } from "./phases.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
 import { parseReviewResultJson, type ReviewResult } from "../review/result.ts";
+import { implementationPlanResult, submitImplementationPlan, submitTriage, triageResult } from "../testing/workflow-results.ts";
+import { parseReadinessResultJson } from "./readiness.ts";
+import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
+import { parseChangeReportJson } from "../change-report/result.ts";
 
 const tempDirs: string[] = [];
 
@@ -51,8 +55,8 @@ describe("issueArtifactHasRelationshipSnapshot", () => {
 describe("review pass selection", () => {
   test("reruns the first invalid review pair instead of advancing to a later pass", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "triage", proceedTriage());
-    await writeArtifact(context, "implementationPlan", readyPlan());
+    await writeJsonArtifact(context, "triage", proceedTriage());
+    await writeJsonArtifact(context, "implementationPlan", readyPlan());
     await seedBaselineAndImplementation(context);
     await writeArtifact(context, refinementLogRef(0), refinementLog());
     await writeArtifact(context, reviewARef(0), "not valid review JSON");
@@ -73,8 +77,8 @@ describe("review pass selection", () => {
 
   test("starts both reviewers together and retains Review B when Review A fails", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "triage", proceedTriage());
-    await writeArtifact(context, "implementationPlan", readyPlan());
+    await writeJsonArtifact(context, "triage", proceedTriage());
+    await writeJsonArtifact(context, "implementationPlan", readyPlan());
     await seedBaselineAndImplementation(context);
     await writeArtifact(context, refinementLogRef(0), refinementLog());
     let rejectReviewA: (error: Error) => void = () => undefined;
@@ -112,7 +116,7 @@ describe("runFullWorkflow", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       prompts.push(request.prompt);
-      return "# Triage\n\n## Verdict\nblocked\n\n## Reasoning\nWaiting.\n\n## Evidence\n#7 is open.\n\n## Blocking Questions\nNone.\n\n## Recommended Next Step\nWait.\n";
+      return submitTriage(request, triageResult("blocked"));
     };
 
     const result = await runFullWorkflow(context, runner);
@@ -123,7 +127,7 @@ describe("runFullWorkflow", () => {
     expect(artifactExists(context, "readiness")).toBe(true);
     expect(artifactExists(context, "implementationPlan")).toBe(false);
     expect(artifactExists(context, "implementationLog")).toBe(false);
-    expect(await readArtifact(context, "readiness")).toContain("- Triage verdict: blocked");
+    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.triageVerdict).toBe("blocked");
   });
 
   test("returns planning-stopped and does not implement when plan is not ready", async () => {
@@ -133,15 +137,15 @@ describe("runFullWorkflow", () => {
       await noopAsync();
       if (request.prompt.includes('name="triage"')) {
         phases.push("triage");
-        return proceedTriage();
+        return submitTriage(request, proceedTriage());
       }
       if (request.prompt.includes('name="implementation_plan_draft"')) {
         phases.push("plan-draft");
-        return readyPlanDraft();
+        return submitImplementationPlan(request, readyPlanDraft());
       }
       if (request.prompt.includes('name="implementation_plan_refinement"')) {
         phases.push("plan");
-        return notReadyPlan();
+        return submitImplementationPlan(request, notReadyPlan());
       }
       phases.push("unexpected");
       throw new Error("unexpected prompt");
@@ -159,10 +163,10 @@ describe("runFullWorkflow", () => {
 
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
-      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
+      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (request.prompt.includes('name="review_a"') || request.prompt.includes('name="review_b"')) {
         return submitReview(request, approveReview());
       }
@@ -200,10 +204,10 @@ describe("runFullWorkflow", () => {
       await noopAsync();
       const phase = request.phase ?? "unknown";
       phases.push(phase);
-      if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
-      if (phase === "refinementLog-0") return refinementLog(0);
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
+      if (phase === "refinementLog-0") return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (phase === "reviewA-0") {
         passZeroReviewsStarted.add(phase);
         announcePassZeroReviewStarted();
@@ -221,9 +225,12 @@ describe("runFullWorkflow", () => {
         const reviewA = parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true });
         const reviewB = parseReviewResultJson(await readArtifact(context, reviewBRef(0)), { allowRestart: true });
         fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(({ title }) => title);
-        return "# Fix Log Pass 1\n\n## Summary\nFixed all required findings.\n";
+        return submitChangeReport(request, changeReport({
+          summary: "Fixed all required findings.",
+          addressedFindingIds: ["review-a:A-001", "review-a:A-002", "review-b:B-001"],
+        }));
       }
-      if (phase === "refinementLog-1") return refinementLog(1);
+      if (phase === "refinementLog-1") return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (phase === "reviewA-1" || phase === "reviewB-1") return submitReview(request, approveReview());
       throw new Error(`unexpected phase: ${phase}`);
     };
@@ -243,9 +250,12 @@ describe("runFullWorkflow", () => {
     const result = await workflow;
     const persistedReviewA = parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true });
     const persistedReviewB = parseReviewResultJson(await readArtifact(context, reviewBRef(0)), { allowRestart: true });
+    const persistedFix = parseChangeReportJson(await readArtifact(context, fixLogRef(1)));
 
     expect(persistedReviewA.findings.map(({ title }) => title)).toEqual(reviewAFindings.map(({ title }) => title));
     expect(persistedReviewB.findings.map(({ title }) => title)).toEqual(reviewBFindings.map(({ title }) => title));
+    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("A-002: Seed authorization state");
+    expect(await readArtifact(context, reviewBMarkdownRef(0))).toContain("B-001: Isolate the integration fixture");
     expect(reviewsStartedTogether).toBe(true);
     expect(fixRequest).toContain("review-a-0.json");
     expect(fixRequest).toContain("review-b-0.json");
@@ -254,11 +264,13 @@ describe("runFullWorkflow", () => {
       "Seed authorization state",
       "Isolate the integration fixture",
     ]);
+    expect(persistedFix.addressedFindingIds).toEqual(["review-a:A-001", "review-a:A-002", "review-b:B-001"]);
+    expect(await readArtifact(context, fixLogMarkdownRef(1))).toContain("- review-b:B-001");
     expect(phases).toContain("fixLog-1");
     expect(artifactExists(context, reviewARef(1))).toBe(true);
     expect(artifactExists(context, reviewBRef(1))).toBe(true);
     expect(result).toEqual({ status: "completed" });
-    expect(await readArtifact(context, "readiness")).toContain("## Status\nready-for-pr");
+    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
   });
 
   test("does not run fix for follow-up and suggestion-only ledgers", async () => {
@@ -268,10 +280,10 @@ describe("runFullWorkflow", () => {
 
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
-      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
+      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
         return submitReview(request, reviewResult([
@@ -289,7 +301,7 @@ describe("runFullWorkflow", () => {
 
     expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
-    expect(await readArtifact(context, "readiness")).toContain("## Status\nready-for-pr");
+    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
   });
 
   test("external-blocker ledgers stop after review without running fix", async () => {
@@ -299,10 +311,10 @@ describe("runFullWorkflow", () => {
 
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      if (request.prompt.includes('name="triage"')) return proceedTriage();
-      if (request.prompt.includes('name="implementation_plan_draft"')) return readyPlanDraft();
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return readyPlan();
-      if (request.prompt.includes('name="code_refinement"')) return refinementLog();
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
+      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
         return submitReview(request, reviewResult([finding("B1", "external-blocker")]));
@@ -317,33 +329,33 @@ describe("runFullWorkflow", () => {
 
     expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "review-blocked" });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
-    expect(await readArtifact(context, "readiness")).toContain("## External Blockers\n- review-a:A-001");
+    expect(await readArtifact(context, "readinessMarkdown")).toContain("## External Blockers\n- review-a:A-001");
   });
 });
 
 async function seedBaselineAndImplementation(context: Awaited<ReturnType<typeof tempContext>>) {
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+  await writeArtifact(context, "implementationLog", JSON.stringify(changeReport({ summary: "Done." })));
 }
 
-function proceedTriage(): string {
-  return "# Triage\n\n## Verdict\nproceed\n\n## Reasoning\nOK.\n\n## Evidence\nRepo inspected.\n\n## Blocking Questions\nNone.\n\n## Recommended Next Step\nPlan.\n";
+function proceedTriage() {
+  return triageResult();
 }
 
-function readyPlanDraft(): string {
-  return readyPlan().replace("# Implementation Plan", "# Implementation Plan Draft");
+function readyPlanDraft() {
+  return implementationPlanResult();
 }
 
-function readyPlan(): string {
-  return "# Implementation Plan\n\n## Issue\n#12\n\n## Work Classification\nbackend\n\n## Goal\nTest.\n\n## Non-Goals\nNone.\n\n## Current Code Findings\nFound.\n\n## Proposed Changes\nChange.\n\n## Files Likely To Change\nFiles.\n\n## Detailed Steps\nSteps.\n\n## Tests And Validation\nTests.\n\n## Risks\nLow.\n\n## Rollback Plan\nRevert.\n\n## Ready For Implementation\nyes\n";
+function readyPlan() {
+  return implementationPlanResult();
 }
 
-function notReadyPlan(): string {
-  return readyPlan().replace("## Ready For Implementation\nyes", "## Ready For Implementation\nno");
+function notReadyPlan() {
+  return implementationPlanResult(false);
 }
 
 function refinementLog(pass = 0): string {
-  return `# Refinement Log Pass ${pass}\n\n## Summary\nRefined.\n`;
+  return JSON.stringify(changeReport({ summary: `Refined pass ${pass}.` }));
 }
 
 function approveReview(): ReviewResult {

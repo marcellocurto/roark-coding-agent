@@ -11,10 +11,13 @@ import {
   reviewARef,
   reviewBRef,
   writeArtifact,
+  writeJsonArtifact,
   type WorkflowContext,
 } from "./artifacts.ts";
 import { planWorkflowProgression } from "./progression.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 
 const tempDirs: string[] = [];
 
@@ -127,8 +130,8 @@ describe("planWorkflowProgression", () => {
   test("readiness is based on the latest review cycle after a fix", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required", "approve");
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nFixed.\n");
-    await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
+    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport({ summary: "Fixed." })));
+    await writeArtifact(context, refinementLogRef(1), JSON.stringify(changeReport({ summary: "Refined." })));
     await writeArtifact(context, reviewARef(1), structuredReview("approve"));
     await writeArtifact(context, reviewBRef(1), structuredReview("approve"));
 
@@ -167,7 +170,7 @@ describe("planWorkflowProgression", () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "restart-required", "approve");
     await writeArtifact(context, baselineResetLogRef(1), "# Baseline Reset Pass 1\n\n## Summary\nReset.\n");
-    await writeArtifact(context, refinementLogRef(1), "# Refinement Log Pass 1\n\n## Summary\nRefined.\n");
+    await writeArtifact(context, refinementLogRef(1), JSON.stringify(changeReport({ summary: "Refined." })));
     await writeArtifact(context, reviewARef(1), structuredReview("approve"));
     await writeArtifact(context, reviewBRef(1), structuredReview("approve"));
 
@@ -180,15 +183,15 @@ describe("planWorkflowProgression", () => {
 
 async function writeReadyThroughPlan(context: WorkflowContext, ready: "yes" | "no") {
   await writeArtifact(context, "issue", issueArtifact());
-  await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
-  await writeArtifact(context, "implementationPlan", `# Implementation Plan\n\n## Ready For Implementation\n${ready}\n`);
+  await writeJsonArtifact(context, "triage", triageResult());
+  await writeJsonArtifact(context, "implementationPlanDraft", implementationPlanResult());
+  await writeJsonArtifact(context, "implementationPlan", implementationPlanResult(ready === "yes"));
 }
 
 async function writeReadyThroughImplementation(context: WorkflowContext) {
   await writeReadyThroughPlan(context, "yes");
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
+  await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
 }
 
 function issueArtifact(): string {
@@ -201,7 +204,7 @@ async function writeHappyPathThroughReviews(
   reviewBVerdict = "approve",
 ) {
   await writeReadyThroughImplementation(context);
-  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+  await writeArtifact(context, refinementLogRef(0), JSON.stringify(changeReport({ summary: "Refined." })));
   await writeArtifact(context, reviewARef(0), structuredReview(reviewAVerdict));
   await writeArtifact(context, reviewBRef(0), structuredReview(reviewBVerdict));
 }

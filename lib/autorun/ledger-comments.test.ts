@@ -2,13 +2,16 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { recordAttemptIssueComment, formatAttemptMetadata } from "./attempts.ts";
 
 import { formatReadinessLedgerComment, publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import { formatTriageMarkdown } from "../triage/result.ts";
+import { formatImplementationPlanMarkdown } from "../implementation-plan/result.ts";
 
 const tempDirs: string[] = [];
 
@@ -54,8 +57,12 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n\nUnique triage evidence at /Users/alice/private.\n");
-    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n\nUnique plan action with TOKEN=secret.\n");
+    const triage = triageResult("proceed", { evidence: ["Unique triage evidence at /Users/alice/private."] });
+    const plan = implementationPlanResult(true, { proposedChanges: ["Unique plan action with TOKEN=secret."] });
+    await writeJsonArtifact(workflowContext, "triage", triage);
+    await writeArtifact(workflowContext, "triageMarkdown", formatTriageMarkdown(triage));
+    await writeJsonArtifact(workflowContext, "implementationPlan", plan);
+    await writeArtifact(workflowContext, "implementationPlanMarkdown", formatImplementationPlanMarkdown(plan, "final"));
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
       issueNumber: 24,
@@ -167,7 +174,7 @@ describe("autorun ledger comment publishing", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await writeJsonArtifact(workflowContext, "triage", triageResult());
     await Bun.write(path.join(workflowContext.runDir, "review-a.json"), JSON.stringify(reviewResult([
       reviewFinding("must-fix-current", "Stale unnumbered finding"),
     ])));

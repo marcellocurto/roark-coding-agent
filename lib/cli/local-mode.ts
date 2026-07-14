@@ -1,5 +1,5 @@
-import { parseReadinessStatus } from "../autorun/publish-gate.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { parseReadinessResultJson } from "../workflow/readiness.ts";
 
 export function formatDoLocalModeStartMessage(issue: string): string {
   return [
@@ -18,8 +18,8 @@ export async function printDoLocalModeReadyMessageIfReady(
   log: (message: string) => void = console.log,
 ): Promise<void> {
   try {
-    const readiness = await readArtifact(context, "readiness");
-    if (parseReadinessStatus(readiness) === "ready-for-pr") {
+    const readiness = parseReadinessResultJson(await readArtifact(context, "readiness"));
+    if (readiness.decision.status === "ready-for-pr") {
       log(`\n${formatDoLocalModeReadyMessage(context.issueInput)}`);
     }
   } catch {

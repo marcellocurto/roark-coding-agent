@@ -2,12 +2,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { artifactExists, baselineResetLogRef, createWorkflowContext, implementationRestartLogRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact } from "./artifacts.ts";
+import { artifactExists, baselineResetLogRef, createWorkflowContext, implementationRestartLogRef, readArtifact, refinementLogRef, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
 import type { AgentRunner } from "./agent-runner.ts";
-import { AgentTaskRunError, codeRefinementTask, fixTask, implementationTask, reviewATask, reviewBTask, runAgentTask, runReviewTask, triageTask } from "./tasks.ts";
-import { validateAgentArtifact } from "./artifact-validation.ts";
+import { AgentTaskRunError, codeRefinementTask, fixTask, implementationTask, reviewATask, reviewBTask, runChangeReportTask, runReviewTask, runTriageTask } from "./tasks.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewResult, submitReview } from "../testing/reviews.ts";
+import { implementationPlanResult, submitTriage, triageResult } from "../testing/workflow-results.ts";
+import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
+import { parseChangeReportJson } from "../change-report/result.ts";
 
 const tempDirs: string[] = [];
 
@@ -41,10 +43,10 @@ describe("runAgentTask skill loading", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(request.cwd);
-      return "# Triage\n\n## Verdict\nproceed\n";
+      return submitTriage(request, triageResult());
     };
 
-    await runAgentTask(context, runner, triageTask);
+    await runTriageTask(context, runner);
     expect(requests).toEqual([agentCwd]);
   });
 
@@ -54,10 +56,10 @@ describe("runAgentTask skill loading", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(request.skillPaths);
-      return "# Triage\n\n## Verdict\nproceed\n";
+      return submitTriage(request, triageResult());
     };
 
-    expect(runAgentTask(context, runner, triageTask)).resolves.toContain("## Verdict\nproceed");
+    expect(runTriageTask(context, runner)).resolves.toMatchObject({ verdict: "proceed" });
     expect(requests).toEqual([undefined]);
   });
 
@@ -66,11 +68,11 @@ describe("runAgentTask skill loading", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(request.model ?? "missing");
-      return "# Triage\n\n## Verdict\nproceed\n";
+      return submitTriage(request, triageResult());
     };
 
-    await runAgentTask(await createContext(), runner, triageTask);
-    await runAgentTask(await createContext({ model: "anthropic/claude-opus-4-7" }), runner, triageTask);
+    await runTriageTask(await createContext(), runner);
+    await runTriageTask(await createContext({ model: "anthropic/claude-opus-4-7" }), runner);
 
     expect(requests).toEqual(["openai-codex/gpt-5.6-sol", "anthropic/claude-opus-4-7"]);
   });
@@ -89,19 +91,18 @@ describe("runAgentTask thinking profiles", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(`${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`);
-      if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
+      if (request.phase === "refinementLog-0") return submitChangeReport(request, changeReport({ summary: "Refined." }));
       if (request.phase === "reviewA-0" || request.phase === "reviewB-0") {
         return submitReview(request, reviewResult());
       }
-      if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
-      return "# Implementation Log\n";
+      return submitChangeReport(request, changeReport());
     };
 
-    await runAgentTask(context, runner, implementationTask);
-    await runAgentTask(context, runner, codeRefinementTask(0));
+    await runChangeReportTask(context, runner, implementationTask);
+    await runChangeReportTask(context, runner, codeRefinementTask(0));
     await runReviewTask(context, runner, reviewATask);
     await runReviewTask(context, runner, reviewBTask);
-    await runAgentTask(context, runner, fixTask(1));
+    await runChangeReportTask(context, runner, fixTask(1));
 
     expect(requests).toEqual(["write:minimal", "write:medium", "read:medium", "read:high", "write:low"]);
   });
@@ -113,13 +114,13 @@ describe("runAgentTask thinking profiles", () => {
     await writeArtifact(context, implementationRestartLogRef(1), "# Implementation Restart Log Pass 1\n\n## Summary\nRestarted.\n");
     const prompts: string[] = [];
 
-    await runAgentTask(context, async (request) => {
+    await runChangeReportTask(context, async (request) => {
       await noopAsync();
       prompts.push(request.prompt);
-      return "# Refinement Log Pass 1\n\n## Summary\nRefined restart.\n";
+      return submitChangeReport(request, changeReport({ summary: "Refined restart." }));
     }, codeRefinementTask(1, "restart"));
 
-    expect(await readArtifact(context, refinementLogRef(1))).toContain("Refined restart");
+    expect(parseChangeReportJson(await readArtifact(context, refinementLogRef(1))).summary).toBe("Refined restart.");
     expect(prompts[0]).toContain('<artifact kind="implementation_log">');
     expect(prompts[0]).toContain('<artifact kind="baseline_reset">');
     expect(prompts[0]).toContain('<artifact kind="implementation_restart_log">');
@@ -128,8 +129,8 @@ describe("runAgentTask thinking profiles", () => {
 
 });
 
-describe("runAgentTask error diagnostics", () => {
-  test("writes provider errors into the target phase artifact before throwing", async () => {
+describe("structured task failures", () => {
+  test("preserves provider failures without creating a triage artifact", async () => {
     const context = await createContext();
     let calls = 0;
     const runner: AgentRunner = async () => {
@@ -138,20 +139,19 @@ describe("runAgentTask error diagnostics", () => {
       throw new Error("openai-codex/gpt-5.5 failed: provider unavailable");
     };
 
-    expect(runAgentTask(context, runner, triageTask)).rejects.toThrow(AgentTaskRunError);
+    let thrown: unknown;
+    try {
+      await runTriageTask(context, runner);
+    } catch (error) {
+      thrown = error;
+    }
     expect(calls).toBe(1);
-
-    const artifact = await readArtifact(context, "triage");
-    expect(artifact).toContain("# Triage Error");
-    expect(artifact).toContain("## Status\nerrored");
-    expect(artifact).toContain("openai-codex/gpt-5.5 failed: provider unavailable");
-    expect(validateAgentArtifact("triage", artifact)).toEqual({
-      ok: false,
-      reason: "previous Triage Error diagnostic: agent-error: openai-codex/gpt-5.5 failed: provider unavailable",
-    });
+    expect(thrown).toBeInstanceOf(AgentTaskRunError);
+    expect((thrown as AgentTaskRunError).phase).toBe("agent-error");
+    expect(artifactExists(context, "triage")).toBe(false);
   });
 
-  test("writes output-contract failures into the target phase artifact", async () => {
+  test("classifies missing structured triage submission without creating an artifact", async () => {
     const context = await createContext();
     let calls = 0;
     const runner: AgentRunner = async () => {
@@ -160,13 +160,36 @@ describe("runAgentTask error diagnostics", () => {
       return "";
     };
 
-    expect(runAgentTask(context, runner, triageTask)).rejects.toThrow(AgentTaskRunError);
-    expect(calls).toBe(2);
+    let thrown: unknown;
+    try {
+      await runTriageTask(context, runner);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(calls).toBe(1);
+    expect(thrown).toBeInstanceOf(AgentTaskRunError);
+    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(artifactExists(context, "triage")).toBe(false);
+  });
 
-    const artifact = await readArtifact(context, "triage");
-    expect(artifact).toContain("# Triage Error");
-    expect(artifact).toContain("## Phase\noutput-contract");
-    expect(artifact).toContain("triage failed output contract: artifact is empty");
+  test("rejects implementation prose without creating a canonical report", async () => {
+    const context = await createContext();
+    await writeReadyThroughPlan(context);
+
+    let thrown: unknown;
+    try {
+      await runChangeReportTask(context, async () => {
+        await noopAsync();
+        return "# Implementation Log\n\nLooks good.\n";
+      }, implementationTask);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AgentTaskRunError);
+    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(artifactExists(context, "implementationLog")).toBe(false);
+    expect(artifactExists(context, "implementationLogMarkdown")).toBe(false);
   });
 });
 
@@ -174,8 +197,8 @@ describe("runReviewTask failures", () => {
   test("preserves provider failures without creating a review artifact", async () => {
     const context = await createContext();
     await writeReadyThroughPlan(context);
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n");
-    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+    await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
+    await writeArtifact(context, refinementLogRef(0), JSON.stringify(changeReport()));
 
     let thrown: unknown;
     try {
@@ -195,8 +218,8 @@ describe("runReviewTask failures", () => {
   test("classifies a missing structured submission without creating a review artifact", async () => {
     const context = await createContext();
     await writeReadyThroughPlan(context);
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n");
-    await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+    await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
+    await writeArtifact(context, refinementLogRef(0), JSON.stringify(changeReport()));
 
     let thrown: unknown;
     try {
@@ -215,16 +238,16 @@ describe("runReviewTask failures", () => {
 });
 
 async function writeReadyThroughPlan(context: Awaited<ReturnType<typeof createContext>>) {
-  await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
-  await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+  await writeJsonArtifact(context, "triage", triageResult());
+  await writeJsonArtifact(context, "implementationPlanDraft", implementationPlanResult());
+  await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc123", capturedAt: "now", excludes: [".roark"] }));
 }
 
 async function writeReadyThroughReviews(context: Awaited<ReturnType<typeof createContext>>) {
   await writeReadyThroughPlan(context);
-  await writeArtifact(context, "implementationLog", "# Implementation Log\n");
-  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n");
+  await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
+  await writeArtifact(context, refinementLogRef(0), JSON.stringify(changeReport()));
   await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
   await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
 }
@@ -233,17 +256,17 @@ describe("runAgentTask transient agent retry", () => {
   test("retries transient connection errors before writing the phase artifact", async () => {
         await noopAsync();
     const context = await createContext();
-    const validTriage = "# Triage\n\n## Verdict\nproceed\n";
+    const validTriage = triageResult();
     let calls = 0;
     const sleeps: number[] = [];
-    const runner: AgentRunner = async () => {
+    const runner: AgentRunner = async (request) => {
       await noopAsync();
       calls++;
       if (calls === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
-      return validTriage;
+      return submitTriage(request, validTriage);
     };
 
-    const result = await runAgentTask(context, runner, triageTask, {
+    const result = await runTriageTask(context, runner, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async (ms) => {
         await noopAsync();
@@ -251,33 +274,29 @@ describe("runAgentTask transient agent retry", () => {
       },
     });
 
-    expect(result).toBe(validTriage);
+    expect(result).toEqual(validTriage);
     expect(calls).toBe(2);
     expect(sleeps).toEqual([]);
-    expect(await readArtifact(context, "triage")).toBe(validTriage);
+    expect(JSON.parse(await readArtifact(context, "triage"))).toEqual(validTriage);
   });
 
   test("adds partial-edit guidance when file-editing tools are enabled", async () => {
     const context = await createContext();
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(
-      context,
-      "implementationPlan",
-      "# Implementation Plan\n\n## Ready For Implementation\nyes\n",
-    );
+    await writeJsonArtifact(context, "triage", triageResult());
+    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
     const prompts: string[] = [];
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       prompts.push(request.prompt);
       if (prompts.length === 1) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
-      return "# Implementation Log\n";
+      return submitChangeReport(request, changeReport());
     };
 
-    expect(runAgentTask(context, runner, implementationTask, {
+    expect(runChangeReportTask(context, runner, implementationTask, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async () => {
         await noopAsync();},
-    })).resolves.toBe("# Implementation Log\n");
+    })).resolves.toEqual(changeReport());
 
     expect(prompts).toHaveLength(2);
     expect(prompts[0]).not.toContain("<transient_connection_retry>");
@@ -288,24 +307,24 @@ describe("runAgentTask transient agent retry", () => {
 
   test("does not write diagnostic artifacts while transient retries remain", async () => {
     const context = await createContext();
-    const validTriage = "# Triage\n\n## Verdict\nproceed\n";
+    const validTriage = triageResult();
     let calls = 0;
-    const runner: AgentRunner = async () => {
+    const runner: AgentRunner = async (request) => {
       await noopAsync();
       calls++;
       expect(artifactExists(context, "triage")).toBe(false);
       if (calls < 4) throw new Error("openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended");
-      return validTriage;
+      return submitTriage(request, validTriage);
     };
 
-    expect(runAgentTask(context, runner, triageTask, {
+    expect(runTriageTask(context, runner, {
       delaysMs: [0, 1, 2],
       sleep: async () => {
         await noopAsync();},
-    })).resolves.toBe(validTriage);
+    })).resolves.toEqual(validTriage);
 
     expect(calls).toBe(4);
-    expect(await readArtifact(context, "triage")).toBe(validTriage);
+    expect(JSON.parse(await readArtifact(context, "triage"))).toEqual(validTriage);
   });
 
   test("exhausts immediate, one minute, and three minute retries before failing", async () => {
@@ -319,7 +338,7 @@ describe("runAgentTask transient agent retry", () => {
       throw new Error("openai-codex/gpt-5.5 failed: fetch failed");
     };
 
-    expect(runAgentTask(context, runner, triageTask, {
+    expect(runTriageTask(context, runner, {
       delaysMs: [0, 60_000, 180_000],
       sleep: async (ms) => {
         await noopAsync();
@@ -329,8 +348,6 @@ describe("runAgentTask transient agent retry", () => {
 
     expect(calls).toBe(4);
     expect(sleeps).toEqual([60_000, 180_000]);
-    const artifact = await readArtifact(context, "triage");
-    expect(artifact).toContain("# Triage Error");
-    expect(artifact).toContain("openai-codex/gpt-5.5 failed: fetch failed");
+    expect(artifactExists(context, "triage")).toBe(false);
   });
 });

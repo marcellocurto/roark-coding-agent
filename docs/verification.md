@@ -38,13 +38,13 @@ For `auto` and `continue`, Roark requires a verification command. It uses CLI fl
 
 ## Readiness Gate
 
-The workflow's `readiness.md` must declare status exactly:
+The workflow's validated `readiness.json` decision must have status exactly:
 
 ```text
 ready-for-pr
 ```
 
-Anything else fails the readiness gate.
+Anything else—or invalid/missing JSON—fails the readiness gate. `readiness.md` is the human-readable rendering and is not gate input.
 
 Readiness answers whether the workflow believes the change is ready to publish.
 

@@ -16,11 +16,12 @@ import {
   hasBlockedReview,
   needsFix,
   needsRestart,
-  parseVerdict,
   shouldImplementPlan,
   shouldProceedAfterTriage,
 } from "./verdicts.ts";
 import { parseReviewResultJson } from "../review/result.ts";
+import { parseTriageResultJson } from "../triage/result.ts";
+import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
 
 export type WorkflowProgressionAction =
   | { type: "run"; phase: WorkflowRunPhase; pass?: number | undefined; reason: string }
@@ -82,9 +83,9 @@ export async function planWorkflowProgression(
     ]);
   }
 
-  const triageMarkdown = triage.content ?? "";
-  if (!shouldProceedAfterTriage(triageMarkdown)) {
-    const verdict = parseVerdict(triageMarkdown) ?? "unknown";
+  const triageResult = parseTriageResultJson(triage.content ?? "");
+  if (!shouldProceedAfterTriage(triageResult)) {
+    const verdict = triageResult.verdict;
     return terminal(
       [
         readiness(`triage verdict is "${verdict}"; readiness records the stop`),
@@ -123,7 +124,7 @@ export async function planWorkflowProgression(
     ]);
   }
 
-  if (!shouldImplementPlan(plan.content ?? "")) {
+  if (!shouldImplementPlan(parseImplementationPlanResultJson(plan.content ?? ""))) {
     return terminal(
       [
         readiness("implementation plan is not ready; readiness records the stop"),

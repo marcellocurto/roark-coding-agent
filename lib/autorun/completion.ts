@@ -47,7 +47,7 @@ export async function completeAutorunWorkflow(
       issueUrl: input.issue.url,
       triageVerdict: input.workflowResult.triageVerdict,
       triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
-      triageArtifactContent: await readArtifactIfExists(input.workflowContext, "triage"),
+      triageArtifactContent: await readArtifactIfExists(input.workflowContext, "triageMarkdown"),
       attemptMetadataPath: input.attemptMetadataPath,
       removeLabels: [input.options.inProgressLabel, input.options.failureLabel],
       marker,
@@ -88,7 +88,7 @@ export async function completeAutorunWorkflow(
   });
 }
 
-async function readArtifactIfExists(context: WorkflowContext, artifact: "triage"): Promise<string | undefined> {
+async function readArtifactIfExists(context: WorkflowContext, artifact: "triageMarkdown"): Promise<string | undefined> {
   try {
     return await readArtifact(context, artifact);
   } catch {

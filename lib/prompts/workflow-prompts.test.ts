@@ -89,7 +89,6 @@ describe("workflow prompt safety policy", () => {
     expect(ambiguityPolicy).toContain("<value>blocked</value>");
     expect(ambiguityPolicy).toContain("non-ready outcome");
     expect(triagePrompt(context)).toContain("needs-human-decision");
-    expect(planDraftPrompt(context)).toContain("## Ready For Implementation\nyes/no");
     expect(reviewAPrompt(context)).toContain("external-blocker");
     expect(reviewAPrompt(context)).toContain("human decision");
   });
@@ -165,7 +164,7 @@ describe("workflow prompt safety policy", () => {
   test("phase input artifact paths are reachable from split agent cwd", () => {
     const prompt = implementationPrompt(splitContext);
     expect(prompt).toContain('<artifact kind="issue">../../runs/issue/123/issue.md</artifact>');
-    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.md</artifact>');
+    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.json</artifact>');
     expect(prompt).not.toContain('<artifact kind="issue">.roark/runs/issue/123/issue.md</artifact>');
   });
 });
@@ -182,6 +181,8 @@ describe("fix-oriented prompt finding handling", () => {
     const prompt = fixPrompt(context, 1);
     expect(prompt).toContain("Apply only unresolved review findings classified as <value>must-fix-current</value>");
     expect(prompt).toContain("Do not fix non-blocking <value>follow-up</value> or <value>suggestion</value> findings");
+    expect(prompt).toContain("review-a:A-001");
+    expect(prompt).toContain("addressedFindingIds must contain every and only must-fix-current workflow ID");
   });
 
   test("code refinement prompt changes code only for concrete behavior-preserving improvements", () => {
@@ -194,7 +195,8 @@ describe("fix-oriented prompt finding handling", () => {
     expect(prompt).toContain("Do not broaden scope");
     expect(prompt).toContain("identify the affected file or behavior");
     expect(prompt).toContain("If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason");
-    expect(prompt).toContain("## Behavior Risk Decisions");
+    expect(prompt).toContain("Call submit_change_report exactly once");
+    expect(prompt).toContain("material simplification, naming, behavior-risk, and plan-alignment decisions in deviations");
   });
 
   test("restart code refinement prompt reads restarted implementation context instead of a fix log", () => {

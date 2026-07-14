@@ -7,21 +7,21 @@ export type FindingSeverity = "low" | "medium" | "high" | "critical";
 export type FindingConfidence = "low" | "medium" | "high";
 export type ReviewDisposition = "approve" | "fixes-required" | "restart-required" | "blocked";
 
-const classificationSchema = Type.Union([
+export const findingClassificationSchema = Type.Union([
   Type.Literal("must-fix-current"),
   Type.Literal("external-blocker"),
   Type.Literal("follow-up"),
   Type.Literal("suggestion"),
 ]);
 
-const severitySchema = Type.Union([
+export const findingSeveritySchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
   Type.Literal("critical"),
 ]);
 
-const confidenceSchema = Type.Union([
+export const findingConfidenceSchema = Type.Union([
   Type.Literal("low"),
   Type.Literal("medium"),
   Type.Literal("high"),
@@ -33,10 +33,10 @@ export const reviewResultSchema = Type.Object({
   summary: nonEmptyString("Concise overall assessment for this review axis."),
   evidenceReviewed: Type.Array(nonEmptyString("Repository-relative file, requirement, diff, test, or verification evidence reviewed.")),
   findings: Type.Array(Type.Object({
-    classification: classificationSchema,
+    classification: findingClassificationSchema,
     title: nonEmptyString("Short actionable finding title."),
-    severity: severitySchema,
-    confidence: confidenceSchema,
+    severity: findingSeveritySchema,
+    confidence: findingConfidenceSchema,
     evidence: Type.Array(nonEmptyString("Concrete repository-relative evidence supporting this finding."), { minItems: 1 }),
     currentIssueImpact: nonEmptyString("Why this matters to the current issue or PR."),
     recommendedHandling: nonEmptyString("Smallest credible handling for this finding."),
@@ -47,6 +47,20 @@ export const reviewResultSchema = Type.Object({
 
 export type ReviewResult = Static<typeof reviewResultSchema>;
 export type ReviewFinding = ReviewResult["findings"][number];
+
+export const normalizedReviewerFindingSchema = Type.Object({
+  source: Type.Union([Type.Literal("review-a"), Type.Literal("review-b"), Type.Literal("revision-review")]),
+  sourceLocalId: nonEmptyString("Finding identifier local to its source review."),
+  workflowId: nonEmptyString("Stable workflow identifier for the finding."),
+  title: nonEmptyString("Short actionable finding title."),
+  classification: findingClassificationSchema,
+  severity: findingSeveritySchema,
+  confidence: findingConfidenceSchema,
+  evidence: Type.Array(nonEmptyString("Concrete evidence supporting the finding."), { minItems: 1 }),
+  currentIssueImpact: nonEmptyString("Why this matters to the current issue."),
+  recommendedHandling: nonEmptyString("Smallest credible handling for this finding."),
+  suggestedIssueTitle: Type.Optional(nonEmptyString("Suggested follow-up issue title.")),
+}, { additionalProperties: false });
 
 export interface NormalizedReviewerFinding {
   source: ReviewFindingSource;
@@ -59,7 +73,7 @@ export interface NormalizedReviewerFinding {
   evidence: string[];
   currentIssueImpact: string;
   recommendedHandling: string;
-  suggestedIssueTitle?: string | undefined;
+  suggestedIssueTitle?: string;
 }
 
 export function parseReviewResultJson(content: string, options: { allowRestart: boolean }): ReviewResult {

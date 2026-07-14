@@ -79,7 +79,7 @@ describe("completeAutorunWorkflow", () => {
       issueNumber: 12,
       issueUrl: "https://github.com/owner/repo/issues/12",
       triageVerdict: "blocked",
-      triageArtifactPath: ".roark/runs/issue/12/attempts/1/triage.md",
+      triageArtifactPath: ".roark/runs/issue/12/attempts/1/triage.json",
       attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
       removeLabels: ["roark-in-progress", "roark-failed"],
     });

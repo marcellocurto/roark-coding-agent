@@ -9,52 +9,38 @@ export interface IssuePublishingPromptItem {
 }
 
 export function issuePublishingSystemPrompt(): string {
-  return "You are the Roark issue-authoring and issue-publishing agent. Turn approved reviewer findings into human-readable GitHub issues, create them with gh, and report machine-readable results.";
+  return "You are the Roark issue-authoring agent. Turn approved reviewer findings into structured, maintainer-friendly issue drafts. Roark owns Markdown rendering and GitHub publishing.";
 }
 
 export function issuePublishingPrompt(input: {
   context: WorkflowContext;
   sourcePlanPath?: string | undefined;
-  resultPath?: string | undefined;
   approvalReason?: string | undefined;
   allowedItems: IssuePublishingPromptItem[];
 }): string {
   const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");
-  const resultPath = input.resultPath ?? artifactRelativePath(input.context, "issueCreationResults");
   const escapedSourcePlanPath = escapePromptXmlText(sourcePlanPath);
-  const escapedResultPath = escapePromptXmlText(resultPath);
   const allowedItemsJson = escapePromptXmlText(JSON.stringify(input.allowedItems, null, 2));
 
-  return `<workflow_phase name="create_reviewer_generated_issues">
-  <role>You are the approved issue-authoring and issue-publishing agent for Roark.</role>
+  return `<workflow_phase name="author_reviewer_generated_issues">
+  <role>You are the approved issue-authoring agent for Roark.</role>
   <approval_boundary>${escapePromptXmlText(input.approvalReason ?? "The user passed --yes")}. This approves publishing only the accepted plan items listed below.</approval_boundary>
-  <source_of_truth>The curation plan at \`${escapedSourcePlanPath}\` is the source of truth for what may be created and for the facts you may use. Do not create issues for rejected candidates, duplicate groups, plan warnings, reviewer suggestions outside the accepted plan items, or any newly discovered idea.</source_of_truth>
-  <target_repo>${escapePromptXmlText(input.context.repo ?? "Use gh's current default repository after preflight.")}</target_repo>
+  <source_of_truth>The curation plan at \`${escapedSourcePlanPath}\` is the source of truth for what may be drafted and for the facts you may use. Do not draft issues for rejected candidates, duplicate groups, plan warnings, reviewer suggestions outside the accepted plan items, or newly discovered ideas.</source_of_truth>
+  <target_repo>${escapePromptXmlText(input.context.repo ?? "GitHub's current default repository")}</target_repo>
   <allowed_plan_items_json>
 ${allowedItemsJson}
   </allowed_plan_items_json>
-  <issue_authoring_instructions>
-    <instruction>Read \`${escapedSourcePlanPath}\` and create issues only for the allowed planItemId values above.</instruction>
-    <instruction>For each allowed item, write the final GitHub issue title and body yourself from the structured context in the curation plan: source issue, related PR, reviewer finding IDs, classification, evidence, impact, recommended handling, non-goals, and run artifacts.</instruction>
-    <instruction>Before the regular issue body sections, add a top-level \`## Simple summary\` section for a busy maintainer. Use simple technical language and explain what the issue is, why it matters, what should change, and what the human should do next if anything.</instruction>
-    <instruction>Do not copy the plan's proposedBody as the final body. Treat proposedBody, if present, only as legacy fallback context. The created GitHub issue should read like a maintainer-authored issue, not a stitched artifact dump.</instruction>
-    <instruction>Do not invent facts, severity, requirements, labels, relationships, acceptance criteria, or implementation details. If the evidence is limited, say so plainly and keep the scope narrow.</instruction>
-    <instruction>Use a concise, action-oriented title. The allowed item suggestedTitle is a starting point; improve it if a clearer title is obvious from the plan context.</instruction>
-    <instruction>Use this body structure unless the finding clearly needs a small adjustment: Summary, Why this issue exists, Impact, Suggested fix, Acceptance criteria, Risks / non-goals, Context. Put source issue, related PR, reviewer finding IDs, classification, and run artifacts in Context near the bottom.</instruction>
-    <instruction>Prefer one small vertical slice with a complete, independently verifiable outcome. Do not split one outcome into separate implementation-layer tasks.</instruction>
-    <instruction>State blockers explicitly. Do not invent blockers or relationships that the curation plan does not support.</instruction>
-    <instruction>For a genuinely wide migration that cannot safely land as one vertical slice, describe expand, migrate, and contract stages in that order.</instruction>
-    <instruction>Write outcome-focused acceptance criteria. Avoid prescribed file paths, code snippets, or generic criteria like “address the behavior” unless the plan requires them.</instruction>
-    <instruction>Keep run artifacts collapsed in a details block when included. They are provenance, not the main issue.</instruction>
-  </issue_authoring_instructions>
-  <publishing_instructions>
-    <instruction>Preflight gh, authentication, and target repository before creating issues.</instruction>
-    <instruction>Before creating each issue, search likely duplicates using 2-4 distinctive nouns from the final title. If a likely duplicate exists, do not create a duplicate; report that plan item as failed with the duplicate URL in the message.</instruction>
-    <instruction>Create each issue with the final title, the authored body, and the allowed labels for that plan item. Preserve the human-review labels (\`needs-triage\`, \`needs-human\`) and classification labels (\`external-blocker\`, \`follow-up\`, \`suggestion\`).</instruction>
-    <instruction>Use body files or safe shell quoting for long issue bodies.</instruction>
-    <instruction>Create native GitHub parent/sub-issue or blocked-by relationships only if the curation plan explicitly approves them. Body links are not a substitute for native relationships.</instruction>
-    <instruction>Do not edit files outside temporary body files needed for publishing, and do not edit workflow artifacts. Roark will write \`${escapedResultPath}\` from your response.</instruction>
-  </publishing_instructions>
-  <response_contract>Return only JSON with keys: created, failed, relationshipOutcomes. Every allowed planItemId must appear exactly once across created and failed. Each created entry must include planItemId and may include title, url, number, stdout. Each failed entry must include planItemId and message. Each relationshipOutcomes entry must include planItemId, status, and message, and may include relationship, targetPlanItemId, sourceIssueNumber, targetIssueNumber, or url. Do not wrap in Markdown fences.</response_contract>
+  <instructions>
+    <instruction>Read \`${escapedSourcePlanPath}\` and submit exactly one structured draft for every allowed planItemId above.</instruction>
+    <instruction>Write the final issue title and content from the structured context in the curation plan: source issue, related PR, reviewer finding IDs, classification, evidence, impact, recommended handling, non-goals, and run artifacts.</instruction>
+    <instruction>Use simple technical language in simpleSummary. Explain what the issue is, why it matters, and what should happen next.</instruction>
+    <instruction>Do not copy proposedBody as final content. It is legacy display text, not machine authority.</instruction>
+    <instruction>Do not invent facts, severity, requirements, labels, relationships, acceptance criteria, blockers, or implementation details. Empty arrays are valid when there is nothing truthful to add.</instruction>
+    <instruction>Prefer one small vertical slice with a complete, independently verifiable outcome. For a genuinely wide migration, describe expand, migrate, and contract stages in that order.</instruction>
+    <instruction>Use outcome-focused acceptance criteria. Avoid prescribed file paths, code snippets, or generic restatements.</instruction>
+    <instruction>Use additionalSections only when important maintainer information does not fit the standard fields.</instruction>
+    <instruction>Finish by calling submit_issue_drafts. Do not write Markdown headings, return JSON text, invoke gh, search GitHub, create relationships, or publish anything yourself.</instruction>
+  </instructions>
+  <completion_contract>Call submit_issue_drafts exactly once as the final action. Roark validates complete plan-item coverage, renders Markdown, checks exact-title duplicates, applies approved labels, and invokes GitHub.</completion_contract>
 </workflow_phase>`;
 }

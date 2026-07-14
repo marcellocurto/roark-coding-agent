@@ -1,7 +1,7 @@
 import { runProcessOrThrow } from "../cli/process.ts";
 import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
-import { parseVerdict } from "../workflow/verdicts.ts";
+import { parseTriageResultJson } from "../triage/result.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 
 export type TriageStoppedVerdict = string;
@@ -24,11 +24,7 @@ export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
 };
 
 export async function readTriageStoppedVerdict(context: WorkflowContext): Promise<TriageStoppedVerdict> {
-  return parseTriageStoppedVerdict(await readArtifact(context, "triage"));
-}
-
-export function parseTriageStoppedVerdict(markdown: string): TriageStoppedVerdict {
-  return parseVerdict(markdown) ?? "unknown";
+  return parseTriageResultJson(await readArtifact(context, "triage")).verdict;
 }
 
 export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" {

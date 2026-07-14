@@ -4,7 +4,6 @@ import {
   buildTriageStopRemoveLabelArgv,
   formatTriageStoppedComment,
   mapTriageVerdictToLabel,
-  parseTriageStoppedVerdict,
 } from "./triage-stop.ts";
 import { githubIssueCommentMaxChars } from "../github/comments.ts";
 
@@ -14,10 +13,6 @@ describe("triage stop handling", () => {
     expect(mapTriageVerdictToLabel("needs-human-decision")).toBe("needs-human");
     expect(mapTriageVerdictToLabel("reject")).toBe("needs-human");
     expect(mapTriageVerdictToLabel("unexpected-terminal-verdict")).toBe("needs-human");
-  });
-
-  test("parses triage verdict markdown", () => {
-    expect(parseTriageStoppedVerdict("# Triage\n\n## Verdict\nneeds-human-decision\n")).toBe("needs-human-decision");
   });
 
   test("builds gh argv for labels", () => {

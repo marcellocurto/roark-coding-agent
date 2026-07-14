@@ -120,8 +120,6 @@ const triageEvidencePolicy = `  <triage_evidence_policy>
   </triage_evidence_policy>`;
 
 const workClassificationValues = "frontend, backend, full-stack, docs-config, test-only, unknown";
-const workClassificationLine = `One of: ${workClassificationValues}`;
-const testsAndValidationGuidance = "For every proposed new test, name the realistic regression it would catch. If no realistic regression remains, state that existing coverage is sufficient or that no new test is warranted.";
 
 interface WorkflowArtifactInput {
   kind: string;
@@ -142,11 +140,6 @@ interface WorkflowPhasePrompt {
 interface XmlBlockOptions {
   blockIndent?: string | undefined;
 }
-
-type MarkdownSection = string | {
-  heading: string;
-  body?: string | undefined;
-};
 
 function renderWorkflowPhase(config: WorkflowPhasePrompt): string {
   const passAttribute = config.pass === undefined ? "" : ` pass="${config.pass}"`;
@@ -228,23 +221,8 @@ export function triagePrompt(context: WorkflowContext): string {
       ]),
       renderConstraints([inspectionOnlyConstraint]),
     ],
-    outputContract: `# Triage
-
-## Verdict
-One of: proceed, blocked, reject, needs-human-decision
-
-## Reasoning
-
-## Claim Verification
-One of: confirmed, not reproduced, insufficient detail, not applicable
-
-## Evidence
-
-## Established Facts
-
-## Blocking Questions
-
-## Recommended Next Step`,
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_triage exactly once with the final triage result. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -266,20 +244,8 @@ export function planDraftPrompt(context: WorkflowContext): string {
       ]),
       renderConstraints([inspectionOnlyConstraint]),
     ],
-    outputContract: markdownSections("Implementation Plan Draft", [
-      "Issue",
-      { heading: "Work Classification", body: workClassificationLine },
-      "Goal",
-      "Non-Goals",
-      "Current Code Findings",
-      "Proposed Changes",
-      "Files Likely To Change",
-      "Detailed Steps",
-      { heading: "Tests And Validation", body: testsAndValidationGuidance },
-      "Risks",
-      "Rollback Plan",
-      { heading: "Ready For Implementation", body: "yes/no" },
-    ]),
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_implementation_plan exactly once with the final draft plan. The tool schema is authoritative. Use an empty simplificationsFromDraft array for the draft. Do not return Markdown.",
   });
 }
 
@@ -304,25 +270,12 @@ export function planPrompt(context: WorkflowContext): string {
         "Preserve the issue's real requirements; do not weaken acceptance criteria to make implementation easier.",
         "Prefer boring, maintainable sequencing and clear validation over cleverness.",
         "If intentional complexity remains, cite the issue, plan, or codebase reason it is necessary.",
-        "Return the final refined plan as the complete implementation-plan.md artifact.",
+        "Submit the final refined plan through the required structured-output tool.",
       ]),
       renderConstraints([inspectionOnlyConstraint]),
     ],
-    outputContract: markdownSections("Implementation Plan", [
-      "Issue",
-      { heading: "Work Classification", body: workClassificationLine },
-      "Goal",
-      "Non-Goals",
-      "Current Code Findings",
-      "Simplifications From Draft",
-      "Proposed Changes",
-      "Files Likely To Change",
-      "Detailed Steps",
-      { heading: "Tests And Validation", body: testsAndValidationGuidance },
-      "Risks",
-      "Rollback Plan",
-      { heading: "Ready For Implementation", body: "yes/no" },
-    ]),
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_implementation_plan exactly once with the final refined plan. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -351,9 +304,11 @@ export function implementationPrompt(context: WorkflowContext, restartPass = 0):
         "Do not perform unrelated refactors.",
         doNotEditWorkflowArtifactsInstruction,
         changedCodeValidationInstruction,
+        "Call submit_change_report with the completed implementation report. Use repository-relative paths in changedFiles, exact commands and outcomes in validation, plan departures in deviations, an empty addressedFindingIds array, and only concrete unresolved risks in remainingConcerns.",
       ]),
     ],
-    outputContract: markdownSections("Implementation Log", ["Summary", "Changed Files", "Validation Run", "Deviations From Plan", "Remaining Concerns"]),
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_change_report exactly once with the final implementation report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -460,18 +415,11 @@ export function codeRefinementPrompt(context: WorkflowContext, pass: number, sou
         "Do not broaden scope, address unrelated suggestions, or edit .roark workflow artifacts.",
         "In Behavior Risk Decisions, identify the affected file or behavior and explain the concrete improvement or reason for leaving complexity in place; do not make generic \"behavior preserved\" claims.",
         "Run validation proportionate to any changes. If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason. If validation cannot run, record why.",
+        "Call submit_change_report with the completed refinement report. Put material simplification, naming, behavior-risk, and plan-alignment decisions in deviations; use an empty addressedFindingIds array because review findings belong to the fix phase.",
       ]),
     ],
-    outputContract: markdownSections(`Refinement Log Pass ${pass}`, [
-      "Summary",
-      "Changed Files",
-      "Simplifications Made",
-      "Abstractions / Names Adjusted",
-      "Behavior Risk Decisions",
-      "Plan / Issue Alignment",
-      "Validation Run",
-      "Remaining Concerns",
-    ]),
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_change_report exactly once with the final refinement report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -504,24 +452,17 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
         "Do not refactor unrelated code.",
         doNotEditWorkflowArtifactsInstruction,
         "After fixes, run the most relevant affordable validation again: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.",
+        "Use the deterministic workflow IDs for every must-fix-current finding you addressed: review A findings are review-a:A-001, review-a:A-002, and so on in JSON array order; review B uses review-b:B-001, review-b:B-002, and so on.",
+        "Call submit_change_report with the completed fix report. addressedFindingIds must contain every and only must-fix-current workflow ID from the two input reviews; Roark validates the set before accepting the report.",
       ]),
     ],
-    outputContract: markdownSections(`Fix Log Pass ${pass}`, ["Summary", "Changed Files", "Validation Run", "Review Findings Addressed", "Remaining Concerns"]),
+    outputFormat: "structured-tool",
+    outputContract: "Call submit_change_report exactly once with the final fix report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
 function renderInstructionsBlock(blockTag: string, instructions: readonly string[]): string {
   return renderListBlock(blockTag, "instruction", instructions);
-}
-
-function markdownSections(title: string, sections: readonly MarkdownSection[]): string {
-  return [`# ${title}`, ...sections.map(formatMarkdownSection)].join("\n\n");
-}
-
-function formatMarkdownSection(section: MarkdownSection): string {
-  if (typeof section === "string") return `## ${section}`;
-  if (section.body === undefined) return `## ${section.heading}`;
-  return `## ${section.heading}\n${section.body}`;
 }
 
 function codeRefinementSourceInputLines(context: WorkflowContext, pass: number, source: "initial" | "fix" | "restart"): string[] {

@@ -20,8 +20,9 @@ import { fetchPullRequestFeedback, isRoarkGeneratedPrSummaryComment, type PullRe
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { correctnessReviewLens, maintainabilityReviewLens, type ReviewLensDefinition } from "../review/contract.ts";
-import { formatReviewResultMarkdown, type ReviewResult } from "../review/result.ts";
-import { runReviewAgent } from "../review/runner.ts";
+import type { ReviewResult } from "../review/result.ts";
+import { reviewArtifactDefinition } from "../review/artifact.ts";
+import { runStructuredArtifact } from "../structured-output/runner.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
@@ -141,20 +142,6 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
       runReviewer(context, prepared, runner, correctnessReviewLens, "reviewA"),
       runReviewer(context, prepared, runner, maintainabilityReviewLens, "reviewB"),
     ]);
-    if (reviewAResult.status === "fulfilled") {
-      await writePrReviewJson(context, "review-a.json", reviewAResult.value);
-      await writePrReviewArtifact(context, "review-a.md", formatReviewResultMarkdown(reviewAResult.value, {
-        title: "Review A: Spec and Correctness",
-        source: "review-a",
-      }));
-    }
-    if (reviewBResult.status === "fulfilled") {
-      await writePrReviewJson(context, "review-b.json", reviewBResult.value);
-      await writePrReviewArtifact(context, "review-b.md", formatReviewResultMarkdown(reviewBResult.value, {
-        title: "Review B: Standards and Maintainability",
-        source: "review-b",
-      }));
-    }
     if (reviewAResult.status === "rejected" || reviewBResult.status === "rejected") {
       const failures = [reviewAResult, reviewBResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -251,7 +238,8 @@ async function runReviewer(
   stage: "reviewA" | "reviewB",
 ): Promise<ReviewResult> {
   console.log(`\n=== PR Review ${lens.reviewerLabel} ===`);
-  return runReviewAgent({
+  const artifactName = stage === "reviewA" ? "review-a" : "review-b";
+  const artifact = await runStructuredArtifact({
     cwd: context.agentCwd,
     model: effectiveModelForStage(context.model, stage),
     thinkingLevel: context.thinkingConfig[stage],
@@ -259,7 +247,15 @@ async function runReviewer(
     prompt: prReviewPrompt({ context, comparison: prepared.comparison, lens }),
     fileEditingToolsEnabled: false,
     phase: `pr-review-${lens.reviewerLabel.toLowerCase()}`,
-  }, runner, { allowRestart: false });
+  }, runner, reviewArtifactDefinition({
+    allowRestart: false,
+    title: stage === "reviewA" ? "Review A: Spec and Correctness" : "Review B: Standards and Maintainability",
+    source: stage === "reviewA" ? "review-a" : "review-b",
+  }), {
+    writeJson: (content) => writePrReviewArtifact(context, `${artifactName}.json`, content),
+    writeMarkdown: (content) => writePrReviewArtifact(context, `${artifactName}.md`, content),
+  });
+  return artifact.value;
 }
 
 export function sameRepositoryClosingIssues(feedback: PullRequestFeedback): PullRequestClosingIssue[] {

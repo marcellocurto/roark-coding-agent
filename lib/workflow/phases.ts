@@ -23,7 +23,7 @@ import { validateAgentArtifact } from "./artifact-validation.ts";
 import { assertCleanGit, capturePreImplementationBaseline, resetWorktreeToPreImplementationBaseline, type PreImplementationBaseline } from "./git.ts";
 import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
-import { buildReadinessMarkdown } from "./readiness.ts";
+import { buildReadinessArtifacts } from "./readiness.ts";
 import {
   issueArtifactHasRelationshipSnapshot,
   planWorkflowProgression,
@@ -35,15 +35,18 @@ import {
   type CodeRefinementSource,
   fixTask,
   implementationTaskForPass,
-  planDraftTask,
-  planTask,
   reviewATaskForPass,
   reviewBTaskForPass,
-  runAgentTask,
+  runChangeReportTask,
+  runPlanDraftTask,
+  runPlanTask,
   runReviewTask,
-  triageTask,
+  runTriageTask,
 } from "./tasks.ts";
 import type { ReviewResult } from "../review/result.ts";
+import type { TriageResult } from "../triage/result.ts";
+import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
+import type { ChangeReport } from "../change-report/result.ts";
 
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
@@ -81,16 +84,16 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
   }
 }
 
-export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, triageTask);
+export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<TriageResult> {
+  return runTriageTask(context, runner);
 }
 
-export async function planDraftPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, planDraftTask);
+export async function planDraftPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<ImplementationPlanResult> {
+  return runPlanDraftTask(context, runner);
 }
 
-export async function planPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, planTask);
+export async function planPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<ImplementationPlanResult> {
+  return runPlanTask(context, runner);
 }
 
 export async function captureBaselinePhase(context: WorkflowContext): Promise<string> {
@@ -108,17 +111,17 @@ export async function captureBaselinePhase(context: WorkflowContext): Promise<st
   return content;
 }
 
-export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<string> {
+export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<ChangeReport> {
   const task = implementationTaskForPass(restartPass);
   if (await shouldRegenerateArtifact(context, task.artifact) || restartPass > 0) {
     await assertCleanGit({ cwd: context.agentCwd, yes: context.yes || restartPass > 0 });
   }
-  const content = await runAgentTaskWithForceOverride(context, runner, task, restartPass > 0);
+  const content = await runChangeReportTaskWithForceOverride(context, runner, task, restartPass > 0);
   if (restartPass > 0) {
     await writeArtifact(
       context,
       implementationRestartLogRef(restartPass),
-      `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.md for the implementation log.\n`,
+      `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.json for the authoritative report and implementation-log.md for its human-readable view.\n`,
     );
   }
   return content;
@@ -128,8 +131,8 @@ export async function codeRefinementPhase(
   context: WorkflowContext,
   pass = inferNextRefinementPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<string> {
-  return runAgentTask(context, runner, codeRefinementTask(pass, codeRefinementSourceForPass(context, pass)));
+): Promise<ChangeReport> {
+  return runChangeReportTask(context, runner, codeRefinementTask(pass, codeRefinementSourceForPass(context, pass)));
 }
 
 function codeRefinementSourceForPass(context: WorkflowContext, pass: number): CodeRefinementSource {
@@ -157,12 +160,12 @@ export async function fixPhase(
   context: WorkflowContext,
   pass = inferNextFixPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<string> {
+): Promise<ChangeReport> {
   const task = fixTask(pass);
   if (await shouldRegenerateArtifact(context, task.artifact)) {
     await assertCleanGit({ cwd: context.agentCwd, yes: true });
   }
-  return runAgentTask(context, runner, task);
+  return runChangeReportTask(context, runner, task);
 }
 
 export async function resetBaselinePhase(context: WorkflowContext, pass: number): Promise<string> {
@@ -177,11 +180,12 @@ export async function resetBaselinePhase(context: WorkflowContext, pass: number)
 export async function readinessPhase(context: WorkflowContext): Promise<string> {
   await context.observer?.phaseStarted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
   try {
-    const readiness = await buildReadinessMarkdown(context);
-    await writeArtifact(context, "readiness", readiness);
+    const readiness = await buildReadinessArtifacts(context);
+    await writeJsonArtifact(context, "readiness", readiness.result);
+    await writeArtifact(context, "readinessMarkdown", readiness.markdown);
     await context.observer?.phaseCompleted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
-    console.log(`✓ Readiness: wrote readiness.md`);
-    return readiness;
+    console.log(`✓ Readiness: wrote readiness.json and readiness.md`);
+    return readiness.markdown;
   } catch (error) {
     await context.observer?.phaseFailed({ phase: "readiness", label: "Readiness", artifact: "readiness", error });
     throw error;
@@ -292,17 +296,17 @@ function inferNextReviewPass(context: WorkflowContext): number {
   return (latestCompleteReviewCycle(context) ?? -1) + 1;
 }
 
-async function runAgentTaskWithForceOverride(
+async function runChangeReportTaskWithForceOverride(
   context: WorkflowContext,
   runner: AgentRunner,
-  task: Parameters<typeof runAgentTask>[2],
+  task: Parameters<typeof runChangeReportTask>[2],
   force: boolean,
-): Promise<string> {
-  if (!force) return runAgentTask(context, runner, task);
+): Promise<ChangeReport> {
+  if (!force) return runChangeReportTask(context, runner, task);
   const previous = context.force;
   context.force = true;
   try {
-    return await runAgentTask(context, runner, task);
+    return await runChangeReportTask(context, runner, task);
   } finally {
     context.force = previous;
   }

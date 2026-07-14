@@ -142,7 +142,7 @@ If the branch belongs to a previous attempt, prefer `roark continue`. If it is u
 
 Symptoms:
 
-- `readiness.md` does not contain `ready-for-pr`
+- `readiness.json` is missing, invalid, or has a decision status other than `ready-for-pr`
 - no PR is opened
 
 Open:
@@ -151,7 +151,7 @@ Open:
 .roark/runs/issue/<n>/attempts/<k>/readiness.md
 ```
 
-Then inspect the latest review and fix logs. Use `continue` after addressing local setup issues.
+Use that Markdown for the explanation, and inspect `readiness.json` for the exact machine decision. Then inspect the latest review and fix logs. Use `continue` after addressing local setup issues.
 
 ## PR Not Opened
 
@@ -219,6 +219,7 @@ For issue attempts:
 ```text
 .roark/runs/issue/<n>/attempts/<k>/summary.json
 .roark/runs/issue/<n>/attempts/<k>/verification.md
+.roark/runs/issue/<n>/attempts/<k>/readiness.json
 .roark/runs/issue/<n>/attempts/<k>/readiness.md
 .roark/runs/issue/<n>/attempts/<k>/events.jsonl
 ```

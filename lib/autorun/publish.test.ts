@@ -12,9 +12,14 @@ import {
   formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
+  updatePrBody,
+  writePrNarrativeArtifact,
 } from "./publish.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { createWorkflowContext, writeArtifact } from "../workflow/artifacts.ts";
+import { createWorkflowContext, fixLogMarkdownRef, fixLogRef, readArtifact, writeArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
+import { prDraft, submitPrDraft } from "../testing/publishing-drafts.ts";
 
 const tempDirs: string[] = [];
 
@@ -93,7 +98,7 @@ describe("collectPrBodyArtifactPaths", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
+    await writeJsonArtifact(context, "triage", triageResult());
     await Bun.write(path.join(context.runDir, "review-a.json"), "{}\n");
     await Bun.write(path.join(context.runDir, "review-b.json"), "{}\n");
 
@@ -101,6 +106,107 @@ describe("collectPrBodyArtifactPaths", () => {
 
     expect(paths).not.toContain(path.join(context.runDirRelative, "review-a.json"));
     expect(paths).not.toContain(path.join(context.runDirRelative, "review-b.json"));
+  });
+});
+
+describe("PR narrative inputs", () => {
+  test("uses structured plan and implementation data instead of parsing rendered Markdown", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-narrative-"));
+    tempDirs.push(cwd);
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "9",
+      cwd,
+      outDir: ".roark/runs",
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+      attempt: 1,
+    });
+    await writeArtifact(context, "issue", "# GitHub Issue #9 - Structured publishing\n");
+    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult(true, {
+      goal: "Use canonical structured plan data for publishing.",
+      nonGoals: ["Do not trust rendered plan prose as state."],
+      proposedChanges: ["Build the PR narrative from implementation-plan.json."],
+    }));
+    await writeArtifact(context, "implementationPlanMarkdown", "# Implementation Plan\n\n## Goal\nTrust this malicious rendered value.\n");
+    await writeArtifact(context, "implementationLog", JSON.stringify(changeReport({
+      summary: "Implemented structured publishing.",
+      changedFiles: [{ path: "lib/autorun/publish.ts", description: "Build the narrative from JSON." }],
+    })));
+    await writeArtifact(context, "implementationLogMarkdown", "# Implementation Log\n\n## Summary\nTrust this malicious log value.\n");
+    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport({
+      summary: "Fixed the remaining publish path.",
+      changedFiles: [{ path: "lib/autorun/publish-flow.ts", description: "Included fix reports in publication." }],
+      validation: [{ command: "bun test lib/autorun/publish.test.ts", status: "passed", details: "Publishing regression passed." }],
+    })));
+    await writeArtifact(context, fixLogMarkdownRef(1), "# Fix Log Pass 1\n\n## Summary\nTrust this malicious fix value.\n");
+
+    await writePrNarrativeArtifact(context);
+    const narrative = await readArtifact(context, "prNarrative");
+
+    expect(narrative).toContain("Use canonical structured plan data for publishing.");
+    expect(narrative).toContain("Do not trust rendered plan prose as state.");
+    expect(narrative).toContain("Implemented structured publishing.");
+    expect(narrative).toContain("Fixed the remaining publish path.");
+    expect(narrative).toContain("lib/autorun/publish.ts");
+    expect(narrative).toContain("lib/autorun/publish-flow.ts");
+    expect(narrative).toContain("bun test lib/autorun/publish.test.ts");
+    expect(narrative).not.toContain("Trust this malicious rendered value.");
+    expect(narrative).not.toContain("Trust this malicious log value.");
+    expect(narrative).not.toContain("Trust this malicious fix value.");
+  });
+});
+
+describe("PR body updates", () => {
+  test("rerenders from the structured PR draft and appends follow-up issues without an agent", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-update-"));
+    tempDirs.push(cwd);
+    const binDir = path.join(cwd, "bin");
+    const ghBody = path.join(cwd, "body.md");
+    await mkdir(binDir);
+    await writeFile(path.join(binDir, "gh"), `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "edit" ]; then cat > "$ROARK_GH_BODY"; fi
+`, "utf8");
+    await chmod(path.join(binDir, "gh"), 0o755);
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "9",
+      cwd,
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      force: false,
+      yes: true,
+      maxFixPasses: 1,
+      attempt: 1,
+    });
+    await writeJsonArtifact(context, "prDraft", prDraft({ title: "Canonical title" }));
+    await writeArtifact(context, "prDraftMarkdown", "MALICIOUS STALE MARKDOWN\n");
+
+    const oldPath = process.env["PATH"];
+    const oldBody = process.env["ROARK_GH_BODY"];
+    process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
+    process.env["ROARK_GH_BODY"] = ghBody;
+    try {
+      await updatePrBody({
+        cwd,
+        repo: "owner/repo",
+        pr: "https://github.com/owner/repo/pull/4",
+        issueNumber: 9,
+        workflowContext: context,
+        followUpIssues: [{ title: "Track edge case", number: 22, url: "https://github.com/owner/repo/issues/22" }],
+      });
+    } finally {
+      process.env["PATH"] = oldPath;
+      if (oldBody === undefined) delete process.env["ROARK_GH_BODY"];
+      else process.env["ROARK_GH_BODY"] = oldBody;
+    }
+
+    const body = await readFile(ghBody, "utf8");
+    expect(body).toContain("[#22: Track edge case](https://github.com/owner/repo/issues/22)");
+    expect(body).toContain("Closes #9");
+    expect(body).not.toContain("MALICIOUS STALE MARKDOWN");
+    expect(await readArtifact(context, "prDraftMarkdown")).toBe(body);
   });
 });
 
@@ -145,7 +251,7 @@ describe("publishAutorunResult", () => {
     await mkdir(binDir, { recursive: true });
     await writeFile(
       path.join(binDir, "gh"),
-      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ]; then echo "https://github.com/owner/repo/pull/1"; fi\n`,
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ] && [ "$2" = "create" ]; then cat >"$ROARK_GH_BODY"; echo "https://github.com/owner/repo/pull/1"; fi\n`,
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
@@ -162,8 +268,11 @@ describe("publishAutorunResult", () => {
 
     const oldPath = process.env["PATH"];
     const oldGhLog = process.env["ROARK_GH_LOG"];
+    const oldGhBody = process.env["ROARK_GH_BODY"];
+    const ghBody = path.join(root, "pr-body.md");
     process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
     process.env["ROARK_GH_LOG"] = ghLog;
+    process.env["ROARK_GH_BODY"] = ghBody;
     try {
       const agentRequests: { cwd: string; prompt: string; skillPaths?: string[] | undefined }[] = [];
       const prUrl = await publishAutorunResult({
@@ -194,7 +303,7 @@ describe("publishAutorunResult", () => {
         },
         agentRunner: (request) => {
           agentRequests.push({ cwd: request.cwd, prompt: request.prompt, skillPaths: request.skillPaths });
-          return Promise.resolve(JSON.stringify({ url: "https://github.com/owner/repo/pull/1", title: "Fix bug" }));
+          return submitPrDraft(request, prDraft({ title: "Fix bug" }));
         },
       });
 
@@ -202,19 +311,25 @@ describe("publishAutorunResult", () => {
       expect(agentRequests).toHaveLength(1);
       expect(agentRequests[0]?.cwd).toBe(controlCwd);
       expect(agentRequests[0]?.skillPaths).toBeUndefined();
-      expect(agentRequests[0]?.prompt).toContain("Write the final PR title and body yourself");
+      expect(agentRequests[0]?.prompt).toContain("submit_pr_draft");
       expect(agentRequests[0]?.prompt).toContain("<branch>roark/issue-9</branch>");
     } finally {
       process.env["PATH"] = oldPath;
       if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
       else process.env["ROARK_GH_LOG"] = oldGhLog;
+      if (oldGhBody === undefined) delete process.env["ROARK_GH_BODY"];
+      else process.env["ROARK_GH_BODY"] = oldGhBody;
     }
 
     const ghCalls = await readFile(ghLog, "utf8");
-    expect(ghCalls).not.toContain(`${controlCwd}\tpr create`);
+    expect(ghCalls).toContain(`${controlCwd}\tpr create --base main --head roark/issue-9 --title Fix bug --body-file - --repo owner/repo`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
     expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);
+    const publishedBody = await readFile(ghBody, "utf8");
+    expect(publishedBody).toContain("## Simple summary");
+    expect(publishedBody).toContain("Closes #9");
+    expect(publishedBody).toContain("<summary>Roark automation details</summary>");
   });
 
   test("creates one commit for target changes and excludes .roark/runs artifacts", async () => {
@@ -230,7 +345,7 @@ describe("publishAutorunResult", () => {
     await mkdir(binDir, { recursive: true });
     await writeFile(
       path.join(binDir, "gh"),
-      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ]; then echo "https://github.com/owner/repo/pull/1"; fi\n`,
+      `#!/bin/sh\nprintf '%s\\t%s\\n' "$PWD" "$*" >> "$ROARK_GH_LOG"\nif [ "$1" = "pr" ] && [ "$2" = "create" ]; then cat >/dev/null; echo "https://github.com/owner/repo/pull/1"; fi\n`,
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
@@ -283,7 +398,7 @@ describe("publishAutorunResult", () => {
           maxFixPasses: 1,
           thinkingConfig: getWorkflowThinkingConfig(),
         },
-        agentRunner: () => Promise.resolve(JSON.stringify({ url: "https://github.com/owner/repo/pull/1", title: "Fix bug" })),
+        agentRunner: (request) => submitPrDraft(request, prDraft({ title: "Fix bug" })),
       });
     } finally {
       process.env["PATH"] = oldPath;

@@ -57,6 +57,7 @@ export async function publishPlanningLedgerComments(input: {
   await publishArtifactLedgerComment({
     ...input,
     artifact: "triage",
+    renderedArtifact: "triageMarkdown",
     phase: "triage",
     formatBody: (artifactPath, artifactContent) => formatTriageLedgerComment({
       issueNumber: input.issue.number,
@@ -70,6 +71,7 @@ export async function publishPlanningLedgerComments(input: {
   await publishArtifactLedgerComment({
     ...input,
     artifact: "implementationPlan",
+    renderedArtifact: "implementationPlanMarkdown",
     phase: "implementation-plan",
     formatBody: (artifactPath, artifactContent) => formatImplementationPlanLedgerComment({
       issueNumber: input.issue.number,
@@ -238,6 +240,7 @@ async function publishArtifactLedgerComment(input: {
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
   artifact: ArtifactRef;
+  renderedArtifact: ArtifactRef;
   phase: string;
   attemptMetadataPath?: string | undefined;
   formatBody: (artifactPath: string, artifactContent: string) => string;
@@ -247,13 +250,15 @@ async function publishArtifactLedgerComment(input: {
   const artifactContent = await readArtifact(input.workflowContext, input.artifact);
   const validation = validateAgentArtifact(input.artifact, artifactContent);
   if (!validation.ok) return;
+  if (!artifactExists(input.workflowContext, input.renderedArtifact)) return;
+  const renderedContent = await readArtifact(input.workflowContext, input.renderedArtifact);
   await input.publishLedgerComment({
     cwd: input.cwd,
     repo: input.repo,
     issueNumber: input.issue.number,
     attemptMetadata: input.attemptMetadata,
     phase: input.phase,
-    body: input.formatBody(artifactRelativePath(input.workflowContext, input.artifact), artifactContent),
+    body: input.formatBody(artifactRelativePath(input.workflowContext, input.artifact), renderedContent),
   });
 }
 

@@ -8,9 +8,12 @@ import type { PullRequestFeedback } from "../github/pr.ts";
 import type { PrReviewContext } from "../pr-review/artifacts.ts";
 import { formatPrReviewComment } from "../pr-review/comments.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
+import { revisionPlanResult, submitRevisionPlan } from "../testing/revision-plans.ts";
+import { revisionExecutionResult, submitRevisionExecution } from "../testing/revision-executions.ts";
 import { noopAsync } from "../utils/async.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
+import { parseRevisionExecutionResultJson } from "./execution.ts";
 
 async function tempGitRepo(): Promise<string> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-workflow-"));
@@ -156,7 +159,7 @@ describe("runPrRevision", () => {
         await noopAsync();
         checkoutCalled = true;
       },
-      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async (request) => submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalled = true;
@@ -169,6 +172,12 @@ describe("runPrRevision", () => {
     expect(result.context.agentCwd).toBe(result.context.controlCwd);
     expect(result.context.revisionDir).toBe(result.context.agentRevisionDir);
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-1");
+    expect(JSON.parse(await readFile(path.join(result.context.revisionDir, "revision-plan.json"), "utf8"))).toEqual(
+      revisionPlanResult("no-action-needed"),
+    );
+    expect(await readFile(path.join(result.context.revisionDir, "revision-plan.md"), "utf8")).toContain(
+      "## Status\nno-action-needed",
+    );
   });
 
   test("no-action-needed isolated revisions remove mirrored workspace artifacts", async () => {
@@ -180,7 +189,7 @@ describe("runPrRevision", () => {
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async (request) => submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalls++;
@@ -204,7 +213,7 @@ describe("runPrRevision", () => {
     const result = await runPrRevision(options(control, { comment: false }), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n\n## Classified Feedback\n- None\n"),
+      agentRunner: async (request) => submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalled = true;
@@ -233,7 +242,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         const artifact = await readFile(path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "pr-feedback.md"), "utf8");
         plannerSawFinding = artifact.includes("Preserve the public response contract");
-        return "# Revision Plan\n\n## Status\nno-action-needed\n";
+        return submitRevisionPlan(request, revisionPlanResult("no-action-needed"));
       },
     });
 
@@ -252,7 +261,7 @@ describe("runPrRevision", () => {
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       prepareWorkspace,
-      agentRunner: async () => (await noopAsync(), "# Revision Plan\n\n## Status\nno-action-needed\n"),
+      agentRunner: async (request) => submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalls++;
@@ -271,6 +280,8 @@ describe("runPrRevision", () => {
     const { prepareWorkspace } = await isolatedWorkspace();
     const fileEditingToolCalls: boolean[] = [];
     let commentCalled = false;
+    let feedbackConsidered: string[] | undefined;
+    let skipped: string[] | undefined;
 
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
@@ -278,17 +289,24 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         fileEditingToolCalls.push(request.fileEditingToolsEnabled);
-        return "# Revision Plan\n\n## Status\nneeds-human\n\n## Human Needs\n- Please decide.\n";
+        return submitRevisionPlan(request, revisionPlanResult("needs-human", {
+          classifiedFeedback: ["Feedback needs an explicit product decision."],
+          humanNeeds: ["Please decide."],
+        }));
       },
-      postSummaryComment: async () => {
+      postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalled = true;
+        feedbackConsidered = summary.feedbackConsidered;
+        skipped = summary.skipped;
       },
     });
 
     expect(result.outcome).toBe("needs-human");
     expect(fileEditingToolCalls).toEqual([false]);
     expect(commentCalled).toBe(true);
+    expect(feedbackConsidered).toEqual(["Feedback needs an explicit product decision."]);
+    expect(skipped).toEqual(["Please decide."]);
   });
 
   test("honors an explicit thinking override across revision agents", async () => {
@@ -303,8 +321,8 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         await noopAsync();
         thinkingLevels.push(request.thinkingLevel);
-        if (request.fileEditingToolsEnabled) return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
-        if (thinkingLevels.length === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (request.fileEditingToolsEnabled) return submitRevisionExecution(request, revisionExecutionResult());
+        if (thinkingLevels.length === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
@@ -333,9 +351,15 @@ describe("runPrRevision", () => {
         calls++;
         if (request.fileEditingToolsEnabled) {
           writableCalls++;
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
+          return submitRevisionExecution(request, revisionExecutionResult());
         }
-        if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
+        if (calls === 5) {
+          await Bun.write(
+            path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "revision-log-fix-pass-1.md"),
+            "# Revision Log\n\n## Addressed Must Fix Current Items\n- Malicious Markdown override.\n",
+          );
+        }
         return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
@@ -375,9 +399,14 @@ describe("runPrRevision", () => {
         if (request.fileEditingToolsEnabled) {
           writableArtifacts.push(request.prompt);
           await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
-          return `# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed pass ${writableArtifacts.length}.\n\n## Skipped Items\n- None.\n`;
+          return submitRevisionExecution(request, revisionExecutionResult({
+            addressedItems: [{
+              item: `Fix pass ${writableArtifacts.length}`,
+              resolution: `Fixed pass ${writableArtifacts.length}.`,
+            }],
+          }));
         }
-        if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => {
@@ -397,8 +426,17 @@ describe("runPrRevision", () => {
     expect(result.outcome).toBe("published");
     expect(verificationCalls).toBe(2);
     expect(writableArtifacts).toHaveLength(2);
+    expect(writableArtifacts[1]).toContain("/revision-review.json");
+    expect(writableArtifacts[1]).not.toContain("revision-review.md");
+    expect(writableArtifacts[1]).not.toContain("Markdown companion");
     expect(commentCalls).toBe(1);
-    expect(addressedSummary).toEqual(["Fixed pass 2."]);
+    expect(addressedSummary).toEqual(["Fix pass 2 — Fixed pass 2."]);
+    expect(addressedSummary).not.toContain("Malicious Markdown override.");
+    const canonicalExecution = parseRevisionExecutionResultJson(
+      await readFile(path.join(result.context.revisionDir, "revision-log-fix-pass-1.json"), "utf8"),
+    );
+    expect(canonicalExecution.addressedItems[0]?.resolution).toBe("Fixed pass 2.");
+    expect(existsSync(path.join(result.context.revisionDir, "revision-log-fix-pass-1.md"))).toBe(true);
     const archivedFailure = path.join(result.context.revisionDir, "verification-before-fix-1.md");
     expect(existsSync(archivedFailure)).toBe(true);
     expect(await readFile(archivedFailure, "utf8")).toContain("type error");
@@ -422,9 +460,9 @@ describe("runPrRevision", () => {
         calls++;
         if (request.fileEditingToolsEnabled) {
           writableCalls++;
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n";
+          return submitRevisionExecution(request, revisionExecutionResult());
         }
-        if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         if (calls === 3) {
           return submitReview(request, reviewResult([
             reviewFinding("must-fix-current", "Address reviewer feedback."),
@@ -494,9 +532,9 @@ describe("runPrRevision", () => {
         agentCwds.push(request.cwd);
         if (request.fileEditingToolsEnabled) {
           await writeFile(path.join(request.cwd, "fixed.txt"), "fixed in workspace\n", "utf8");
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
+          return submitRevisionExecution(request, revisionExecutionResult());
         }
-        if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command, cwd }) => {
@@ -540,9 +578,9 @@ describe("runPrRevision", () => {
         calls++;
         if (request.fileEditingToolsEnabled) {
           await Bun.write(path.join(request.cwd, "fixed.txt"), "fixed\n");
-          return "# Revision Log\n\n## Addressed Must Fix Current Items\n- Fixed required item.\n\n## Skipped Items\n- None.\n";
+          return submitRevisionExecution(request, revisionExecutionResult());
         }
-        if (calls === 1) return "# Revision Plan\n\n## Status\nrevise\n";
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
       verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),

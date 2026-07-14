@@ -3,21 +3,24 @@ import {
   normalizeReviewFindings,
   reviewDisposition,
   type NormalizedReviewerFinding,
+  type ReviewDisposition,
   type ReviewResult,
 } from "../review/result.ts";
+import type { TriageResult, TriageVerdict } from "../triage/result.ts";
+import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
 
 export interface ReadinessDecisionInput {
-  triage: string;
-  plan: string;
+  triage?: TriageResult | undefined;
+  plan?: ImplementationPlanResult | undefined;
   reviewA?: ReviewResult | undefined;
   reviewB?: ReviewResult | undefined;
 }
 
 export interface ReadinessDecision {
   status: "ready-for-pr" | "not-ready";
-  triageVerdict: string;
-  reviewAVerdict: string;
-  reviewBVerdict: string;
+  triageVerdict: TriageVerdict | "missing";
+  reviewAVerdict: ReviewDisposition | "missing";
+  reviewBVerdict: ReviewDisposition | "missing";
   planReady: boolean;
   fixesWereNeeded: boolean;
   restartRequired: boolean;
@@ -28,51 +31,12 @@ export interface ReadinessDecision {
   suggestions: NormalizedReviewerFinding[];
 }
 
-export function parseVerdict(markdown: string): string | undefined {
-  const sectionMatch = /##\s*(?:Verdict|Status)\s*\n+([^\n]+)/i.exec(markdown);
-  const candidate = sectionMatch?.[1] ?? (/(?:Verdict|Status):\s*([^\n]+)/i.exec(markdown))?.[1];
-  if (!candidate) return undefined;
-
-  const normalized = candidate
-    .toLowerCase()
-    .replace(/^[\s*\-:]+/, "")
-    .replace(/[`*_]/g, "")
-    .trim();
-
-  const known = [
-    "proceed",
-    "blocked",
-    "reject",
-    "needs-human-decision",
-    "approve",
-    "fixes-required",
-    "ready-for-pr",
-    "restart-required",
-    "not-ready",
-  ];
-
-  return known.find((verdict) => normalized.startsWith(verdict));
+export function shouldProceedAfterTriage(triage: TriageResult): boolean {
+  return triage.verdict === "proceed";
 }
 
-export function parseReadyForImplementationValue(markdown: string): "yes" | "no" | undefined {
-  const match = /##\s*Ready For Implementation\s*\n+([^\n]+)/i.exec(markdown);
-  const answer = match?.[1]?.replace(/[`*_]/g, "").trim().toLowerCase();
-  if (!answer) return undefined;
-  if (answer.startsWith("yes")) return "yes";
-  if (answer.startsWith("no")) return "no";
-  return undefined;
-}
-
-export function parseReadyForImplementation(markdown: string): boolean {
-  return parseReadyForImplementationValue(markdown) === "yes";
-}
-
-export function shouldProceedAfterTriage(triage: string): boolean {
-  return parseVerdict(triage) === "proceed";
-}
-
-export function shouldImplementPlan(plan: string): boolean {
-  return parseReadyForImplementation(plan);
+export function shouldImplementPlan(plan: ImplementationPlanResult): boolean {
+  return plan.readyForImplementation;
 }
 
 export function needsFix(...reviews: ReviewResult[]): boolean {
@@ -88,10 +52,10 @@ export function needsRestart(...reviews: ReviewResult[]): boolean {
 }
 
 export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecision {
-  const triageVerdict = parseVerdict(input.triage) ?? "missing";
+  const triageVerdict = input.triage?.verdict ?? "missing";
   const reviewAVerdict = input.reviewA ? reviewDisposition(input.reviewA) : "missing";
   const reviewBVerdict = input.reviewB ? reviewDisposition(input.reviewB) : "missing";
-  const planReady = input.plan ? parseReadyForImplementation(input.plan) : false;
+  const planReady = input.plan?.readyForImplementation ?? false;
   const allFindings = [
     ...(input.reviewA ? normalizeReviewFindings(input.reviewA, "review-a") : []),
     ...(input.reviewB ? normalizeReviewFindings(input.reviewB, "review-b") : []),

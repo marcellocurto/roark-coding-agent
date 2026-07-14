@@ -81,7 +81,9 @@ Relevant files live under:
 lib/workflow/
 ```
 
-Static artifacts include issue, triage, implementation plan, implementation log, reviews, readiness, verification, metadata, issue curation plan, and issue creation results.
+Static artifacts include issue context; canonical triage, implementation-plan, review, readiness, and PR-draft JSON; deterministic Markdown views; implementation and verification logs; metadata; issue curation plans; and issue creation results. Workflow decisions and PR-body updates consume the canonical JSON, never the rendered views.
+
+Agent-produced JSON/Markdown pairs pass through one structured-artifact runner: a phase supplies its schema-bound terminating tool, validator, and Markdown formatter, while the caller supplies the artifact destinations. The runner accepts exactly one tool submission, renders the human view, and writes canonical JSON last so an incomplete pair is never treated as completed workflow state.
 
 Numbered artifacts include fix logs, refinements, and Review A/B cycles.
 

@@ -11,6 +11,7 @@ export type PrRevisionArtifactName =
   | "prFeedbackMarkdown"
   | "revisionPlan"
   | "revisionLog"
+  | "revisionLogMarkdown"
   | "revisionReview"
   | "verification";
 
@@ -45,7 +46,8 @@ const artifactFilenames: Record<PrRevisionArtifactName, string> = {
   prFeedbackJson: "pr-feedback.json",
   prFeedbackMarkdown: "pr-feedback.md",
   revisionPlan: "revision-plan.md",
-  revisionLog: "revision-log.md",
+  revisionLog: "revision-log.json",
+  revisionLogMarkdown: "revision-log.md",
   revisionReview: "revision-review.json",
   verification: "verification.md",
 };

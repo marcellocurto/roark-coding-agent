@@ -164,7 +164,7 @@ describe("Roark effective system prompt", () => {
     const sessionCases = [
       { systemPrompt: sharedSystemPrompt, fileEditingToolsEnabled: false, expectedRole: workflowRole },
       { systemPrompt: sharedSystemPrompt, fileEditingToolsEnabled: true, expectedRole: workflowRole },
-      { systemPrompt: prPublishingSystemPrompt(), fileEditingToolsEnabled: false, expectedRole: "You are the Roark PR authoring and publishing agent." },
+      { systemPrompt: prPublishingSystemPrompt(), fileEditingToolsEnabled: false, expectedRole: "You are the Roark PR authoring agent." },
     ];
 
     try {

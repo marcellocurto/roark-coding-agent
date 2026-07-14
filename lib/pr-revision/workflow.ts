@@ -40,8 +40,20 @@ import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
 import { postPrRevisionSummaryComment } from "./comments.ts";
 import { revisionImplementationPrompt, revisionPlanPrompt, revisionReviewPrompt } from "./prompts.ts";
-import { formatReviewResultMarkdown, normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
-import { runReviewAgent } from "../review/runner.ts";
+import { normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
+import { reviewArtifactDefinition } from "../review/artifact.ts";
+import {
+  revisionPlanArtifactDefinition,
+  type RevisionPlanResult,
+  type RevisionPlanStatus,
+} from "./plan.ts";
+import {
+  addressedRevisionItems,
+  revisionExecutionArtifactDefinition,
+  skippedRevisionItems,
+  type RevisionExecutionResult,
+} from "./execution.ts";
+import { runStructuredArtifact } from "../structured-output/runner.ts";
 
 export type PrRevisionOutcome =
   | "no-action-needed"
@@ -59,7 +71,6 @@ export interface PrRevisionResult {
   verification?: VerificationResult | undefined;
 }
 
-type RevisionPlanStatus = "revise" | "needs-human" | "no-action-needed";
 type RevisionReviewVerdict = "approve" | "fixes-required" | "blocked";
 
 export interface RunPrRevisionDependencies {
@@ -102,14 +113,8 @@ export async function runPrRevision(
     const runner = deps.agentRunner ?? runPiAgent;
     const postSummary = deps.postSummaryComment ?? postPrRevisionSummaryComment;
 
-    const plan = await runRevisionAgent(context, runner, {
-      label: "Revision plan",
-      artifact: "revision-plan.md",
-      fileEditingToolsEnabled: false,
-      thinkingStage: "revisionPlan",
-      prompt: revisionPlanPrompt(context),
-    });
-    const planStatus = parsePlanStatus(plan);
+    const plan = await runRevisionPlanPhase(context, runner);
+    const planStatus = plan.status;
     await updateMetadata(context, feedback, { outcome: "planned", planStatus });
 
     if (planStatus === "no-action-needed") {
@@ -122,9 +127,9 @@ export async function runPrRevision(
           context,
           outcome: "no-action-needed",
           planStatus,
-          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
+          feedbackConsidered: plan.classifiedFeedback,
           skipped: ["Planner reported no revision was needed for the current feedback."],
-          artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "metadata.json"]),
+          artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.json", "revision-plan.md", "metadata.json"]),
         });
       }
       await removeAgentPrRevisionArtifacts(context);
@@ -138,23 +143,23 @@ export async function runPrRevision(
         context,
         outcome: "needs-human",
         planStatus,
-        feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-        skipped: extractSectionBullets(plan, "Human Needs"),
-        artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.md", "metadata.json"]),
+        feedbackConsidered: plan.classifiedFeedback,
+        skipped: plan.humanNeeds,
+        artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.json", "revision-plan.md", "metadata.json"]),
       });
       return { outcome: "needs-human", context, planStatus };
     }
 
-    const artifactFilenames = ["pr-feedback.md", "revision-plan.md"];
+    const artifactFilenames = ["pr-feedback.md", "revision-plan.json", "revision-plan.md"];
 
-    await runRevisionAgent(context, runner, {
+    let execution = await runRevisionExecutionPhase(context, runner, {
       label: "Revision implementation",
-      artifact: "revision-log.md",
-      fileEditingToolsEnabled: true,
+      artifact: "revision-log.json",
+      title: "Revision Log",
       thinkingStage: "revisionImplementation",
       prompt: revisionImplementationPrompt(context, 0),
     });
-    artifactFilenames.push("revision-log.md");
+    artifactFilenames.push("revision-log.json", "revision-log.md");
 
     let review = await runRevisionReviewAgent(context, runner, {
       label: "Revision review",
@@ -176,7 +181,7 @@ export async function runPrRevision(
             outcome: "review-blocked",
             planStatus,
             reviewVerdict,
-            feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
+            feedbackConsidered: plan.classifiedFeedback,
             skipped: revisionReviewBlockingFindings(review),
             artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
           });
@@ -184,15 +189,15 @@ export async function runPrRevision(
         }
 
         const pass = ++fixPassesUsed;
-        const logArtifact = `revision-log-fix-pass-${pass}.md`;
-        await runRevisionAgent(context, runner, {
+        const logArtifact = `revision-log-fix-pass-${pass}.json`;
+        execution = await runRevisionExecutionPhase(context, runner, {
           label: `Revision fix pass ${pass}`,
           artifact: logArtifact,
-          fileEditingToolsEnabled: true,
+          title: `Revision Log Fix Pass ${pass}`,
           thinkingStage: "revisionFix",
           prompt: revisionImplementationPrompt(context, pass),
         });
-        artifactFilenames.push(logArtifact);
+        artifactFilenames.push(logArtifact, logArtifact.replace(/\.json$/, ".md"));
 
         const reviewArtifact = `revision-review-pass-${pass}.json`;
         review = await runRevisionReviewAgent(context, runner, {
@@ -213,7 +218,7 @@ export async function runPrRevision(
           outcome: "review-blocked",
           planStatus,
           reviewVerdict,
-          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
+          feedbackConsidered: plan.classifiedFeedback,
           skipped: revisionReviewBlockingFindings(review),
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
         });
@@ -243,16 +248,15 @@ export async function runPrRevision(
           endedAt: new Date().toISOString(),
         });
         await removeAgentPrRevisionArtifacts(context);
-        const revisionLog = await safeReadLog(context, latestRevisionLogArtifact(artifactFilenames));
         await postSummary({
           context,
           outcome: "verification-failed",
           planStatus,
           reviewVerdict,
           verification,
-          feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-          addressed: extractSectionBullets(revisionLog, "Addressed Must Fix Current Items"),
-          skipped: [failedReason, ...extractSectionBullets(revisionLog, "Skipped Items")],
+          feedbackConsidered: plan.classifiedFeedback,
+          addressed: addressedRevisionItems(execution),
+          skipped: [failedReason, ...skippedRevisionItems(execution)],
           artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
         });
         return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
@@ -264,15 +268,15 @@ export async function runPrRevision(
       artifactFilenames.push(verificationBeforeFixArtifact);
       console.log(`Archived verification failure: ${prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact)}`);
 
-      const logArtifact = `revision-log-fix-pass-${pass}.md`;
-      await runRevisionAgent(context, runner, {
+      const logArtifact = `revision-log-fix-pass-${pass}.json`;
+      execution = await runRevisionExecutionPhase(context, runner, {
         label: `Revision fix pass ${pass}`,
         artifact: logArtifact,
-        fileEditingToolsEnabled: true,
+        title: `Revision Log Fix Pass ${pass}`,
         thinkingStage: "revisionFix",
         prompt: revisionImplementationPrompt(context, pass),
       });
-      artifactFilenames.push(logArtifact);
+      artifactFilenames.push(logArtifact, logArtifact.replace(/\.json$/, ".md"));
 
       const reviewArtifact = `revision-review-pass-${pass}.json`;
       review = await runRevisionReviewAgent(context, runner, {
@@ -293,7 +297,7 @@ export async function runPrRevision(
         planStatus,
         reviewVerdict,
         verification,
-        feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
+        feedbackConsidered: plan.classifiedFeedback,
         skipped: ["Planner requested a revision, but no non-.roark code changes were present after implementation."],
         artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
       });
@@ -303,16 +307,15 @@ export async function runPrRevision(
     const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
     await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
     const commitSha = await commitAndPushRevision(context, feedback.pr.headRefName);
-    const revisionLog = await safeReadLog(context, latestRevisionLogArtifact(artifactFilenames));
     await postSummary({
       context,
       outcome: "published",
       planStatus,
       reviewVerdict,
       verification,
-      feedbackConsidered: extractSectionBullets(plan, "Classified Feedback"),
-      addressed: extractSectionBullets(revisionLog, "Addressed Must Fix Current Items"),
-      skipped: extractSectionBullets(revisionLog, "Skipped Items"),
+      feedbackConsidered: plan.classifiedFeedback,
+      addressed: addressedRevisionItems(execution),
+      skipped: skippedRevisionItems(execution),
       changedFiles,
       commitSha,
       artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
@@ -365,23 +368,43 @@ async function prepareRevisionWorkspace(input: {
   });
 }
 
-async function runRevisionAgent(
+async function runRevisionExecutionPhase(
   context: PrRevisionContext,
   runner: AgentRunner,
-  input: { label: string; artifact: string; fileEditingToolsEnabled: boolean; thinkingStage: WorkflowThinkingStage; prompt: string },
-): Promise<string> {
+  input: { label: string; artifact: string; title: string; thinkingStage: WorkflowThinkingStage; prompt: string },
+): Promise<RevisionExecutionResult> {
   console.log(`\n=== ${input.label} ===`);
-  const content = await runner({
+  const artifact = await runStructuredArtifact({
     cwd: context.agentCwd,
     model: effectiveModelForStage(context.model, input.thinkingStage),
     thinkingLevel: context.thinkingConfig[input.thinkingStage],
     systemPrompt: sharedSystemPrompt,
     prompt: input.prompt,
-    fileEditingToolsEnabled: input.fileEditingToolsEnabled,
+    fileEditingToolsEnabled: true,
+  }, runner, revisionExecutionArtifactDefinition(input.title), {
+    writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
+    writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
   });
-  await writePrRevisionArtifact(context, input.artifact, content);
   console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);
-  return content;
+  return artifact.value;
+}
+
+async function runRevisionPlanPhase(context: PrRevisionContext, runner: AgentRunner): Promise<RevisionPlanResult> {
+  const label = "Revision plan";
+  console.log(`\n=== ${label} ===`);
+  const artifact = await runStructuredArtifact({
+    cwd: context.agentCwd,
+    model: effectiveModelForStage(context.model, "revisionPlan"),
+    thinkingLevel: context.thinkingConfig.revisionPlan,
+    systemPrompt: sharedSystemPrompt,
+    prompt: revisionPlanPrompt(context),
+    fileEditingToolsEnabled: false,
+  }, runner, revisionPlanArtifactDefinition, {
+    writeJson: (content) => writePrRevisionArtifact(context, "revision-plan.json", content),
+    writeMarkdown: (content) => writePrRevisionArtifact(context, "revision-plan.md", content),
+  });
+  console.log(`✓ ${label}: wrote ${prRevisionArtifactRelativePath(context, "revision-plan.json")}`);
+  return artifact.value;
 }
 
 async function runRevisionReviewAgent(
@@ -390,22 +413,23 @@ async function runRevisionReviewAgent(
   input: { label: string; artifact: string; prompt: string },
 ): Promise<ReviewResult> {
   console.log(`\n=== ${input.label} ===`);
-  const result = await runReviewAgent({
+  const artifact = await runStructuredArtifact({
     cwd: context.agentCwd,
     model: effectiveModelForStage(context.model, "revisionReview"),
     thinkingLevel: context.thinkingConfig.revisionReview,
     systemPrompt: sharedSystemPrompt,
     prompt: input.prompt,
     fileEditingToolsEnabled: false,
-  }, runner, { allowRestart: false });
-  await writePrRevisionJsonArtifact(context, input.artifact, result);
-  const markdownArtifact = input.artifact.replace(/\.json$/, ".md");
-  await writePrRevisionArtifact(context, markdownArtifact, formatReviewResultMarkdown(result, {
+  }, runner, reviewArtifactDefinition({
+    allowRestart: false,
     title: input.label,
     source: "revision-review",
-  }));
+  }), {
+    writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
+    writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
+  });
   console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);
-  return result;
+  return artifact.value;
 }
 
 async function writeInitialArtifacts(context: PrRevisionContext, feedback: PullRequestFeedback): Promise<void> {
@@ -473,12 +497,6 @@ async function inferIssueFromAttemptMetadata(context: PrRevisionContext, headRef
   return undefined;
 }
 
-function parsePlanStatus(markdown: string): RevisionPlanStatus {
-  const status = extractToken(markdown, "Status", ["revise", "needs-human", "no-action-needed"] as const);
-  if (!status) throw new Error("Revision plan did not include ## Status with revise, needs-human, or no-action-needed.");
-  return status;
-}
-
 function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
   const disposition = reviewDisposition(review);
   if (disposition === "restart-required") throw new Error("Revision reviews cannot request an implementation restart.");
@@ -489,32 +507,6 @@ function revisionReviewBlockingFindings(review: ReviewResult): string[] {
   return normalizeReviewFindings(review, "revision-review")
     .filter((finding) => finding.classification === "must-fix-current" || finding.classification === "external-blocker")
     .map((finding) => `${finding.sourceLocalId}: ${finding.title} — ${finding.recommendedHandling}`);
-}
-
-function extractToken<const T extends readonly string[]>(markdown: string, section: string, allowed: T): T[number] | undefined {
-  const match = new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n\\s*([^\\s]+)`, "i").exec(markdown);
-  const token = match?.[1]?.toLowerCase();
-  return allowed.find((value) => value === token);
-}
-
-function extractSectionBullets(markdown: string, section: string): string[] {
-  const match = new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "i").exec(markdown);
-  if (!match?.[1]) return [];
-  return match[1]
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("- "))
-    .map((line) => line.slice(2).trim())
-    .filter((line) => line !== "" && !/^none\.?$/i.test(line));
-}
-
-async function safeReadLog(context: PrRevisionContext, artifact: string): Promise<string> {
-  try {
-    const { readPrRevisionArtifact } = await import("./artifacts.ts");
-    return await readPrRevisionArtifact(context, artifact);
-  } catch {
-    return "";
-  }
 }
 
 async function dirtyLinesOutsideRoark(cwd: string): Promise<string[]> {
@@ -585,20 +577,4 @@ function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): 
 
 function addArtifactFilename(filenames: string[], filename: string): void {
   if (!filenames.includes(filename)) filenames.push(filename);
-}
-
-function latestRevisionLogArtifact(filenames: string[]): string {
-  let latest: { pass: number; filename: string } | undefined;
-  for (const filename of filenames) {
-    const match = /^revision-log-fix-pass-(\d+)\.md$/.exec(filename);
-    if (!match?.[1]) continue;
-    const pass = Number(match[1]);
-    if (!Number.isInteger(pass)) continue;
-    if (!latest || pass > latest.pass) latest = { pass, filename };
-  }
-  return latest?.filename ?? "revision-log.md";
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

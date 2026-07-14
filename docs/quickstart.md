@@ -138,8 +138,8 @@ Open these files first:
 
 - `summary.json` for the artifact index and final status
 - `verification.md` for the verification command result
-- `readiness.md` for the publish gate decision
-- `implementation-log.md` for implementation details
+- `readiness.json` for the publish gate decision and `readiness.md` for its human-readable rendering
+- `implementation-log.json` for the authoritative implementation report and `implementation-log.md` for its human-readable rendering
 - `review-a-<n>.json` and `review-b-<n>.json` for schema-validated reviewer findings
 
 See [Artifacts](artifacts.md) for the complete layout.

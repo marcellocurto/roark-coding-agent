@@ -21,50 +21,49 @@ If any item needs human clarification/decision before code changes, set status n
 If there are no must-fix-current items and no needs-human items, set status no-action-needed.
 Otherwise set status revise.
 
-Return only this Markdown artifact:
-# Revision Plan
+Complete planning only by calling submit_revision_plan with:
+- status: revise, needs-human, or no-action-needed
+- classifiedFeedback: every relevant feedback item with its classification, source, and rationale
+- mustFixCurrent: concrete fixes required in this revision
+- humanNeeds: decisions, information, or access required from a human
 
-## Status
-revise|needs-human|no-action-needed
-
-## Classified Feedback
-- [classification] concise item id/source and rationale
-
-## Must Fix Current Items
-- concrete required fix, or None
-
-## Human Needs
-- questions/blockers, or None
+The status and arrays must agree: humanNeeds implies needs-human; otherwise non-empty mustFixCurrent implies revise; otherwise use no-action-needed.
+Do not return Markdown or prose after calling submit_revision_plan.
 </pr_revision_planning>`;
 }
 
 export function revisionImplementationPrompt(context: PrRevisionContext, pass: number): string {
+  const priorReviewInput = pass > 0
+    ? `For fix pass ${pass}, inspect ${context.agentRevisionDirRelative}/${priorRevisionReviewArtifact(pass)} as the canonical review input, and ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.`
+    : "";
   return `<pr_revision_implementation>
 You are implementing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` fix pass ${pass}` : ""}.
-Use ${context.agentRevisionDirRelative}/revision-plan.md and the latest revision review artifact if present.
-For fix passes, inspect the latest revision-review*.json source artifact (or its deterministic Markdown companion) if it contains required fixes, and ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.
+Use ${context.agentRevisionDirRelative}/revision-plan.json as the canonical revision plan.
+${priorReviewInput}
 Apply only planner-classified must-fix-current items and repair any verification failure captured for this fix pass. Do not implement non-blocking, invalid/stale, already-addressed, or needs-human items.
 Keep scope minimal and inspect the current diff before editing.
 
-Return only this Markdown artifact:
-# Revision Log
+Complete this phase only by calling submit_revision_execution with:
+- summary: a concise account of the completed work
+- addressedItems: each must-fix plan item or review finding addressed, paired with its concrete resolution
+- skippedItems: each item intentionally not changed, paired with its concrete reason
+- changedFiles: repository-relative paths paired with what changed
+- validation: exact commands with passed, failed, or not-run status and observed details
 
-## Summary
-
-## Addressed Must Fix Current Items
-
-## Skipped Items
-
-## Changed Files
-
-## Validation Performed
+The tool schema is authoritative. Do not return Markdown or prose after calling submit_revision_execution.
 </pr_revision_implementation>`;
 }
 
+function priorRevisionReviewArtifact(fixPass: number): string {
+  return fixPass === 1 ? "revision-review.json" : `revision-review-pass-${fixPass - 1}.json`;
+}
+
 export function revisionReviewPrompt(context: PrRevisionContext, pass: number): string {
+  const executionArtifact = pass === 0 ? "revision-log.json" : `revision-log-fix-pass-${pass}.json`;
   return `<pr_revision_review>
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.
+Use ${context.agentRevisionDirRelative}/${executionArtifact} as the canonical execution report; do not infer state from its Markdown companion.
 Primary responsibility: verify that every planner-classified must-fix-current feedback item was correctly addressed and every skipped item has a sound rationale.
 Then inspect the touched files and relevant callers and tests for regressions introduced by this revision. Check correctness, original PR requirement coverage, maintainability, validation evidence, and scope control.
 Evaluate tests by realistic bug-finding value. Do not require tests by default, and reject tests that merely duplicate stronger coverage or restate configuration, prompt wording, fixtures, static content, or private structure.

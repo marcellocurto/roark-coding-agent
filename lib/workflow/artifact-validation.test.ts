@@ -1,13 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import { reviewResult } from "../testing/reviews.ts";
-import { reviewARef, reviewBRef } from "./artifacts.ts";
-
-const validPlan = `# Implementation Plan
-
-## Ready For Implementation
-yes
-`;
+import { fixLogRef, refinementLogRef, reviewARef, reviewBRef } from "./artifacts.ts";
+import { implementationPlanResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 
 describe("validateAgentArtifact", () => {
   test("rejects an empty review artifact", () => {
@@ -21,11 +17,19 @@ describe("validateAgentArtifact", () => {
     expect(validateAgentArtifact(reviewBRef(2), "Looks fine.").ok).toBe(false);
   });
 
-  test("requires explicit plan readiness", () => {
-    expect(validateAgentArtifact("implementationPlan", validPlan)).toEqual({ ok: true });
-    const result = validateAgentArtifact("implementationPlan", "# Implementation Plan\n\n## Goal\nDo it.\n");
+  test("accepts only structured implementation plans", () => {
+    expect(validateAgentArtifact("implementationPlan", JSON.stringify(implementationPlanResult()))).toEqual({ ok: true });
+    const result = validateAgentArtifact("implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toContain("Ready For Implementation");
+    if (!result.ok) expect(result.reason).toContain("not valid JSON");
+  });
+
+  test("accepts only structured implementation, refinement, and fix reports", () => {
+    const content = JSON.stringify(changeReport());
+    expect(validateAgentArtifact("implementationLog", content)).toEqual({ ok: true });
+    expect(validateAgentArtifact(refinementLogRef(0), content)).toEqual({ ok: true });
+    expect(validateAgentArtifact(fixLogRef(1), content)).toEqual({ ok: true });
+    expect(validateAgentArtifact("implementationLog", "# Implementation Log\n").ok).toBe(false);
   });
 
 });

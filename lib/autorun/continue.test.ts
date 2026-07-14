@@ -10,6 +10,8 @@ import { autorunWorktreePath } from "./branch.ts";
 import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
@@ -152,12 +154,12 @@ describe("runAutoContinue", () => {
     await writeJsonArtifact(workflowContext, "metadata", {
       issue: { number: 24, title: "Ledger comments", url: "https://github.com/owner/repo/issues/24", labels: [] },
     });
-    await writeArtifact(workflowContext, "triage", "# Triage\n\n## Verdict\nproceed\n");
-    await writeArtifact(workflowContext, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
-    await writeArtifact(workflowContext, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+    await writeJsonArtifact(workflowContext, "triage", triageResult());
+    await writeJsonArtifact(workflowContext, "implementationPlanDraft", implementationPlanResult());
+    await writeJsonArtifact(workflowContext, "implementationPlan", implementationPlanResult());
     await writeArtifact(workflowContext, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-    await writeArtifact(workflowContext, "implementationLog", "# Implementation Log\n\nDone.\n");
-    await writeArtifact(workflowContext, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
+    await writeArtifact(workflowContext, "implementationLog", JSON.stringify(changeReport()));
+    await writeArtifact(workflowContext, refinementLogRef(0), JSON.stringify(changeReport({ summary: "Refined." })));
     await writeArtifact(workflowContext, reviewARef(0), JSON.stringify(reviewResult([
       reviewFinding("must-fix-current", "Fix failed after reviews"),
     ])));

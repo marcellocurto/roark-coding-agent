@@ -9,12 +9,16 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 ### Added
 
 - Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
-- Added a schema-validated `submit_review` tool contract for issue, PR, and PR-revision reviewers, with structured JSON source artifacts and deterministic Markdown presentation.
+- Added schema-validated `submit_triage`, `submit_implementation_plan`, `submit_change_report`, `submit_review`, `submit_revision_plan`, `submit_revision_execution`, `submit_pr_draft`, and `submit_issue_drafts` tool contracts, with structured JSON source artifacts and deterministic Markdown presentation.
 
 ### Changed
 
 - Review outcomes and finding identifiers are now derived from typed findings instead of parsed from agent-authored Markdown, so arbitrary reviewer formatting cannot hide required fixes.
 - Issue-workflow readiness, curation, publishing, and ledger comments now use only validated numbered review cycles; unnumbered review files are ignored.
+- Triage, draft/final implementation plans, implementation/refinement/fix reports, and readiness now persist canonical JSON. Workflow routing, PR narrative construction, local-mode reporting, and the publish gate consume validated JSON; Markdown companions are deterministic presentation only.
+- PR revision execution logs now persist canonical JSON. Revision review prompts and public revision summaries consume the structured execution result; Markdown companions are presentation only.
+- PR and reviewer-generated issue agents now submit structured drafts. Roark validates them, renders GitHub Markdown, checks exact-title issue duplicates, and invokes `gh`; publishing agents no longer author opaque Markdown, invoke GitHub, or return raw JSON status text.
+- All structured agent phases now use one runner for terminating tool submission, validation, canonical JSON serialization, deterministic Markdown rendering, and paired persistence. Issue-workflow reviews now persist matching Markdown companions without using them as workflow state.
 
 ### Removed
 

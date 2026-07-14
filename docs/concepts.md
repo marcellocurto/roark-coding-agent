@@ -79,13 +79,13 @@ A change must pass both. Success on one axis never compensates for failure on th
 
 ## Readiness Gate
 
-The readiness gate checks Roark's final readiness artifact. The run can publish only when `readiness.md` declares:
+The readiness gate validates Roark's final `readiness.json` artifact. The run can publish only when its structured decision status is:
 
 ```text
 ready-for-pr
 ```
 
-This gate prevents publishing when the agent workflow itself reports unresolved blockers.
+`readiness.md` is a deterministic human rendering of the same decision; it is never parsed to decide whether to publish.
 
 ## Verification Gate
 

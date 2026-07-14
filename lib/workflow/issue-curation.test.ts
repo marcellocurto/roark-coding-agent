@@ -2,12 +2,14 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { artifactExists, createWorkflowContext, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "./artifacts.ts";
+import { artifactExists, createWorkflowContext, fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "./artifacts.ts";
 import { buildIssueCurationPlan } from "./issue-curation.ts";
 import { runSinglePhase } from "./phases.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type { FindingClassification, FindingConfidence, FindingSeverity, ReviewFinding } from "../review/result.ts";
+import { triageResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 
 const tempDirs: string[] = [];
 const fixedClock = { now: () => new Date("2026-05-06T12:00:00.000Z") };
@@ -266,7 +268,7 @@ describe("buildIssueCurationPlan", () => {
       repo: "owner/repo",
       issue: { number: 42, title: "Metadata issue title", html_url: "https://github.com/owner/repo/issues/42" },
     }));
-    await writeArtifact(context, "implementationLog", "# Implementation Log\n");
+    await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
     await writeArtifact(context, reviewARef(0), reviewWithLedger(finding("F1", "follow-up")));
     await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
 
@@ -276,7 +278,7 @@ describe("buildIssueCurationPlan", () => {
     expect(plan.sourceIssue.title).toBe("Metadata issue title");
     expect(plan.run.generatedAt).toBe("2026-05-06T12:00:00.000Z");
     expect(item?.sourceIssueContext).toEqual(plan.sourceIssue);
-    expect(item?.runContext.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/implementation-log.md");
+    expect(item?.runContext.artifactPaths).toContain(".roark/runs/issue/42/attempts/2/implementation-log.json");
   });
 
   test("PR context is preserved in plan and generated issue bodies", async () => {
@@ -296,20 +298,20 @@ describe("buildIssueCurationPlan", () => {
   test("available artifact paths include catalog static refs and numbered review refs", async () => {
     const context = await tempContext();
     await writeArtifact(context, "metadata", "{}\n");
-    await writeArtifact(context, "triage", "# Triage\n");
+    await writeJsonArtifact(context, "triage", triageResult());
     await writeArtifact(context, reviewARef(0), reviewWithLedger("None"));
     await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n");
+    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
 
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
     expect(plan.run.artifactPaths).toEqual([
       ".roark/runs/issue/42/attempts/2/issue.md",
       ".roark/runs/issue/42/attempts/2/metadata.json",
-      ".roark/runs/issue/42/attempts/2/triage.md",
+      ".roark/runs/issue/42/attempts/2/triage.json",
       ".roark/runs/issue/42/attempts/2/review-a-0.json",
       ".roark/runs/issue/42/attempts/2/review-b-0.json",
-      ".roark/runs/issue/42/attempts/2/fix-log-1.md",
+      ".roark/runs/issue/42/attempts/2/fix-log-1.json",
     ]);
   });
 });
