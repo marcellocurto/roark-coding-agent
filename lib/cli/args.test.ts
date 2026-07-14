@@ -89,6 +89,23 @@ describe("parseArgs", () => {
     expect(parsed.yes).toBe(true);
   });
 
+  test("parses presentation flags for long-running commands and keeps -v reserved", () => {
+    for (const argv of [
+      ["do", "123", "--verbose", "--no-title"],
+      ["auto", "123", "--verbose", "--no-title"],
+      ["continue", "123", "--verbose", "--no-title"],
+      ["review-pr", "42", "--verbose", "--no-title"],
+      ["revise-pr", "42", "--verbose", "--no-title"],
+    ]) {
+      const parsed = parseArgs(argv);
+      if ("help" in parsed) throw new Error("expected options");
+      expect("verbose" in parsed && parsed.verbose).toBe(true);
+      expect("noTitle" in parsed && parsed.noTitle).toBe(true);
+    }
+    expect(() => parseArgs(["status", "123", "--verbose"])).toThrow("Unknown option '--verbose'");
+    expect(() => parseArgs(["do", "123", "-v"])).toThrow("Unknown option '-v'");
+  });
+
   test("parses targeted auto issue refs", () => {
     for (const issue of ["123", "#123", "https://github.com/owner/repo/issues/123", "owner/repo#123"]) {
       const parsed = parseArgs(["auto", issue]);

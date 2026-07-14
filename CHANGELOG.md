@@ -9,6 +9,12 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 ### Added
 
 - Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
+- Added `--verbose` completed-agent output and `--no-title` terminal-title opt-out for long-running commands.
+- Added complete `verification-full.md` companion artifacts while retaining bounded verification artifacts for routine inspection.
+
+### Changed
+
+- Long-running commands now use compact phase-aware operational output, safe target-first interactive terminal titles, and concise final outcomes instead of streaming generated artifact Markdown by default.
 
 ### Removed
 

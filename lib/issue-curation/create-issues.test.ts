@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { artifactExists, createWorkflowContext, readArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
 import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 
 import { createIssuesFromCurationPlan } from "./create-issues.ts";
 import { noopAsync } from "../utils/async.ts";
@@ -122,6 +125,32 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.created.map((entry) => entry.planItemId)).toEqual(["external-blocker-1", "follow-up-1"]);
   });
 
+  test("preserves the parent workflow command in issue-publishing display context", async () => {
+    const context = await tempContext({ yes: true, displayCommand: "auto" });
+    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    let displayCommand: string | undefined;
+
+    await createIssuesFromCurationPlan({
+      context,
+      clock,
+      labelEnsurer: false,
+      agentRunner: async (request) => {
+        await noopAsync();
+        displayCommand = request.display.command;
+        return JSON.stringify({
+          created: [
+            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
+          ],
+          failed: [],
+          relationshipOutcomes: [],
+        });
+      },
+    });
+
+    expect(displayCommand).toBe("auto");
+  });
+
   test("approved run uses the issue-authoring publishing agent without loading a skill", async () => {
         await noopAsync();
     const context = await tempContext({ yes: true });
@@ -155,6 +184,47 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.created.map((entry) => entry.number)).toEqual([300, 301]);
     expect(result.created[0]?.title).toBe("Clear blocker title");
     expect(result.relationshipOutcomes).toEqual([{ planItemId: "external-blocker-1", status: "not-requested", message: "No native relationship was requested for this plan item." }]);
+  });
+
+  test("publishing context names the result artifact and completes only after it is persisted", async () => {
+    const context = await tempContext({ yes: true });
+    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    const resultPath = path.join(context.runDir, "issue-creation-results.json");
+    let persistedAtCompletion = false;
+    let expectedArtifact: string | undefined;
+    const stream: TerminalStream = {
+      isTTY: false,
+      columns: 80,
+      write(chunk) {
+        if (chunk.startsWith("DONE #12 · Author and create issues")) persistedAtCompletion = existsSync(resultPath);
+      },
+    };
+    configurePresenter({ stream });
+
+    try {
+      await createIssuesFromCurationPlan({
+        context,
+        clock,
+        labelEnsurer: false,
+        agentRunner: async (request) => {
+          await noopAsync();
+          expectedArtifact = request.display.expectedArtifact;
+          return JSON.stringify({
+            created: [
+              { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+              { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
+            ],
+            failed: [],
+            relationshipOutcomes: [],
+          });
+        },
+      });
+    } finally {
+      configurePresenter({});
+    }
+
+    expect(expectedArtifact).toBe(".roark/runs/issue/12/attempts/2/issue-creation-results.json");
+    expect(persistedAtCompletion).toBe(true);
   });
 
   test("approved publishing agent prompt uses artifact paths visible from a split agent workspace", async () => {
@@ -412,7 +482,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 });
 
-async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined}) {
+async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined; displayCommand?: string | undefined }) {
   const dir = options.reuseDir ?? await mkdtemp(path.join(tmpdir(), "roark-create-issues-"));
   if (!options.reuseDir) tempDirs.push(dir);
   return createWorkflowContext({
@@ -425,7 +495,10 @@ async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: 
     yes: options.yes,
     maxFixPasses: 1,
     attempt: 2,
-  }, options.agentCwd ? { agentCwd: options.agentCwd } : {});
+  }, {
+    ...(options.agentCwd ? { agentCwd: options.agentCwd } : {}),
+    ...(options.displayCommand ? { displayCommand: options.displayCommand } : {}),
+  });
 }
 
 function basePlan(): IssueCurationPlan {

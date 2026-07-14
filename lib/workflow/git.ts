@@ -1,4 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export interface PreImplementationBaseline {
   head: string;
@@ -11,7 +12,7 @@ export async function assertCleanGit(context: { cwd: string; yes: boolean }): Pr
 
   if (dirtyLines.length === 0) return;
   if (context.yes) {
-    console.log("! git tree has pre-existing changes; continuing because --yes was provided.");
+    presenter().warning("git tree has pre-existing changes; continuing because --yes was provided");
     return;
   }
 
@@ -34,7 +35,7 @@ export async function assertCleanGitTree(context: { cwd: string; yes: boolean })
   const dirtyLines = await gitDirtyLines(context.cwd);
   if (dirtyLines.length === 0) return;
   if (context.yes) {
-    console.log("! git tree has pre-existing changes; continuing because --yes was provided.");
+    presenter().warning("git tree has pre-existing changes; continuing because --yes was provided");
     return;
   }
 

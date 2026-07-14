@@ -88,9 +88,9 @@ describe("runAgentTask thinking profiles", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(`${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`);
-      if (request.phase === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
-      if (request.phase === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
-      if (request.phase === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
+      if (request.display.phaseId === "refinementLog-0") return "# Refinement Log Pass 0\n\n## Summary\nRefined.\n";
+      if (request.display.phaseId === "reviewA-0") return "# Review A Pass 0\n\n## Verdict\napprove\n";
+      if (request.display.phaseId === "reviewB-0") return "# Review B Pass 0\n\n## Verdict\napprove\n";
       if (request.prompt.includes("Fix")) return "# Fix Log Pass 1\n";
       return "# Implementation Log\n";
     };

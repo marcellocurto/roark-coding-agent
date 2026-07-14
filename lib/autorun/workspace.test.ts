@@ -26,6 +26,8 @@ import {
 } from "./workspace.ts";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { noopAsync } from "../utils/async.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({ stdout: "", stderr, exitCode: 1 });
@@ -569,11 +571,26 @@ describe("managed clone workspaces", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  test("non-fatal afterRun hook warns without throwing", async () => {
+  test("non-fatal afterRun hook warns through sanitized redirected output", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-hook-"));
     await writeFile(path.join(root, "file"), "ok");
-    expect(runLifecycleHook("afterRun", { timeoutMs: 1000, afterRun: "false" }, root, ()=> Promise.resolve(fail("after failed")))).resolves.toBeUndefined();
-    await rm(root, { recursive: true, force: true });
+    let output = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, errorStream: stream });
+    try {
+      const hook = runLifecycleHook(
+        "afterRun",
+        { timeoutMs: 1000, afterRun: "hostile\u001b]0;owned\rcommand" },
+        root,
+        () => Promise.resolve(fail("after\nfailed\u0007")),
+      );
+      await hook;
+      expect(output).toContain("WARNING afterRun hook failed");
+      expect(output).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+    } finally {
+      configurePresenter({});
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("pins a PR pull ref, repairs its origin, and compares merge-base to head without mutation", async () => {

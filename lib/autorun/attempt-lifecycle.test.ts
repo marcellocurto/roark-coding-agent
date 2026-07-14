@@ -64,21 +64,21 @@ describe("runAutorunAttemptLifecycle", () => {
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
         await noopAsync();
-        phases.push(request.phase ?? "unknown");
+        phases.push(request.display.phaseId);
         expect(request.prompt).toContain("failed_verification");
-        if (request.phase === "fixLog-1") {
+        if (request.display.phaseId === "fixLog-1") {
           return "# Fix Log Pass 1\n\n## Summary\nAddressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
         }
-        if (request.phase === "refinementLog-1") {
+        if (request.display.phaseId === "refinementLog-1") {
           return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n\n## Changed Files\n- lib/example.ts\n\n## Simplifications Made\nNone\n\n## Abstractions / Names Adjusted\nNone\n\n## Behavior Risk Decisions\n- Verification repair behavior in lib/example.ts was kept unchanged except for the targeted failure.\n\n## Plan / Issue Alignment\nAligned.\n\n## Validation Run\n- bun test (passed)\n\n## Remaining Concerns\nNone\n";
         }
-        if (request.phase === "reviewA-1") {
+        if (request.display.phaseId === "reviewA-1") {
           return "# Review A Pass 1\n\n## Verdict\napprove\n";
         }
-        if (request.phase === "reviewB-1") {
+        if (request.display.phaseId === "reviewB-1") {
           return "# Review B Pass 1\n\n## Verdict\napprove\n";
         }
-        throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
+        throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:30:00.000Z") },
@@ -114,32 +114,32 @@ describe("runAutorunAttemptLifecycle", () => {
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
         await noopAsync();
-        phases.push(request.phase ?? "unknown");
-        if (request.phase === "fixLog-1") {
+        phases.push(request.display.phaseId);
+        if (request.display.phaseId === "fixLog-1") {
           return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNumbered review requested another fix.\n";
         }
-        if (request.phase === "refinementLog-1") {
+        if (request.display.phaseId === "refinementLog-1") {
           return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n";
         }
-        if (request.phase === "reviewA-1") {
+        if (request.display.phaseId === "reviewA-1") {
           return "# Review A Pass 1\n\n## Verdict\nfixes-required\n";
         }
-        if (request.phase === "reviewB-1") {
+        if (request.display.phaseId === "reviewB-1") {
           return "# Review B Pass 1\n\n## Verdict\napprove\n";
         }
-        if (request.phase === "fixLog-2") {
+        if (request.display.phaseId === "fixLog-2") {
           return "# Fix Log Pass 2\n\n## Summary\nCompleted verification repair.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
         }
-        if (request.phase === "refinementLog-2") {
+        if (request.display.phaseId === "refinementLog-2") {
           return "# Refinement Log Pass 2\n\n## Summary\nRefined.\n";
         }
-        if (request.phase === "reviewA-2") {
+        if (request.display.phaseId === "reviewA-2") {
           return "# Review A Pass 2\n\n## Verdict\napprove\n";
         }
-        if (request.phase === "reviewB-2") {
+        if (request.display.phaseId === "reviewB-2") {
           return "# Review B Pass 2\n\n## Verdict\napprove\n";
         }
-        throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
+        throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:45:00.000Z") },

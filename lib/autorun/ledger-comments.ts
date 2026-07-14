@@ -4,6 +4,7 @@ import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, 
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export type LedgerCommentPhase = string;
 
@@ -132,7 +133,7 @@ export async function publishIssueLedgerComment(input: {
     });
     recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
   } catch (error) {
-    console.warn(`Failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`);
+    presenter().warning(`failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`);
   }
 }
 

@@ -12,10 +12,8 @@ export type PublishGateDecision =
   | { publish: false; phase: "readiness" | "verification"; reason: string; artifactPath: string };
 
 export function parseReadinessStatus(markdown: string): ReadinessStatus | undefined {
-  const match = /##\s*Status\s*\r?\n+\s*([^\r\n]+)/i.exec(markdown);
-  const candidate = match?.[1];
+  const candidate = /##\s*Status\s*\r?\n+\s*([^\r\n]+)/i.exec(markdown)?.[1];
   if (!candidate) return undefined;
-
   const normalized = candidate.replace(/[`*_]/g, "").trim().toLowerCase();
   if (normalized === "ready-for-pr") return "ready-for-pr";
   if (normalized === "not-ready") return "not-ready";

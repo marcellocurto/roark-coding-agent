@@ -12,7 +12,7 @@ export function createAutorunWorkflowContext(
 ): WorkflowContext {
   return createWorkflowContext(
     createAutorunWorkflowOptions(issue, branchPlan, options, attempt),
-    { agentCwd },
+    { agentCwd, displayCommand: "auto" },
   );
 }
 

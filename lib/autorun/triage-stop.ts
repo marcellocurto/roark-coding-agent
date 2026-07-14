@@ -3,6 +3,7 @@ import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, 
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export type TriageStoppedVerdict = string;
 
@@ -76,7 +77,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
       { cwd: options.cwd, label: "gh issue edit --add-label (triage stop)" },
     );
   } catch (error) {
-    console.warn(`Failed to apply triage-stop label '${label}': ${formatError(error)}`);
+    presenter().warning(`failed to apply triage-stop label '${label}': ${formatError(error)}`);
   }
 
   for (const removeLabel of uniqueLabels(options.removeLabels ?? []).filter((candidate) => candidate !== label)) {
@@ -86,7 +87,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
         { cwd: options.cwd, label: "gh issue edit --remove-label (triage stop cleanup)" },
       );
     } catch (error) {
-      console.warn(`Failed to remove label '${removeLabel}': ${formatError(error)}`);
+      presenter().warning(`failed to remove label '${removeLabel}': ${formatError(error)}`);
     }
   }
 
@@ -103,7 +104,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
     }
     await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment });
   } catch (error) {
-    console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
+    presenter().warning(`failed to post triage-stop comment: ${formatError(error)}`);
   }
   return undefined;
 }

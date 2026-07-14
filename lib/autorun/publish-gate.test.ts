@@ -41,6 +41,11 @@ describe("parseReadinessStatus", () => {
   test("returns undefined for unknown status tokens", () => {
     expect(parseReadinessStatus("## Status\nunclear\n")).toBeUndefined();
   });
+
+  test("rejects annotated readiness values instead of weakening the publication gate", () => {
+    expect(parseReadinessStatus("## Status\nready-for-pr but not actually ready\n")).toBeUndefined();
+    expect(parseReadinessStatus("## Status\nnot-ready pending maintainer approval\n")).toBeUndefined();
+  });
 });
 
 describe("decidePublish", () => {

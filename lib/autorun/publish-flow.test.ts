@@ -5,12 +5,15 @@ import path from "node:path";
 import { fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
-import type { VerificationResult } from "./verification.ts";
+import { runVerification, type VerificationResult } from "./verification.ts";
 import { noopAsync } from "../utils/async.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  configurePresenter({});
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
 });
 
@@ -146,6 +149,42 @@ describe("verification repair planning", () => {
     expect(postPrCalled).toBe(false);
   });
 
+  test("verification runner exceptions propagate through the publish gate", async () => {
+    const context = await tempContext(1);
+    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    const failure = new Error("verification runner failed");
+
+    const running = runPublishGate({
+      options: {
+        cwd: context.controlCwd,
+        repo: "owner/repo",
+        verifyCommand: "bun run typecheck",
+        failureLabel: "failed",
+        successLabel: "done",
+        inProgressLabel: "in-progress",
+        remote: "origin",
+        baseBranch: "main",
+      },
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, {
+      refreshCopyToWorktree: async () => { await noopAsync(); },
+      runLifecycleHook: async () => { await noopAsync(); },
+      runVerification: (input) => runVerification({ ...input, runner: () => Promise.reject(failure) }),
+    });
+
+    let thrown: unknown;
+    try {
+      await running;
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(failure);
+  });
+
   test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
     const context = await tempContext(1);
     await writeArtifact(context, "issue", `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`);
@@ -171,6 +210,9 @@ describe("verification repair planning", () => {
     const context = await tempContext(1);
     await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
     let failureComment = "";
+    let output = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, roots: [context.controlCwd] });
 
     const outcome = await runPublishGate({
       options: {
@@ -223,6 +265,8 @@ describe("verification repair planning", () => {
       outcomeDetail: "verification command exited 127 because a required command was not found. Install dependencies in the verification workspace or configure hooks.beforeVerify, for example: bun install --frozen-lockfile.",
     });
     expect(failureComment).toContain("hooks.beforeVerify");
+    expect(output).toContain("artifact: .roark/runs/issue/1/attempts/1/verification.md");
+    expect(output).toContain("ACTION user action required:");
   });
 });
 

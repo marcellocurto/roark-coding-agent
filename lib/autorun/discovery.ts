@@ -1,5 +1,7 @@
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
+import { presenter } from "../presentation/presenter.ts";
+import { displayIssueTarget } from "../cli/target.ts";
 import {
   claimGitHubIssue,
   fetchGitHubIssue,
@@ -27,7 +29,7 @@ import { createClaimPlan } from "./claim.ts";
 import { ensureAutorunLabelContract } from "./labels.ts";
 import { type completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
-import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
+import { runAutorunAttemptLifecycle, type AutorunAttemptResult } from "./attempt-lifecycle.ts";
 import { withAutorunIssueLock } from "./lock.ts";
 import { findMatchingSkipLabel, isEligibleIssue, rankEligibleIssues, type AutorunIssueCandidate } from "./selection.ts";
 import { createAutorunWorkflowContext } from "./workflow.ts";
@@ -51,16 +53,19 @@ interface AutoRunInjected {
   ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
 }
 
+export interface AutoDiscoveryResult {
+  kind: "attempts" | "dry-run" | "no-eligible";
+  attempts: AutorunAttemptResult[];
+}
+
 export async function runAutoDiscovery(
   options: AutoCliOptions,
   injected: AutoRunInjected = {},
-): Promise<void> {
+): Promise<AutoDiscoveryResult> {
+  presenter().transition(options.issue ? "Target lookup" : "Discovery", displayIssueTarget(options.issue, "auto"));
   await ensureRequiredLabelsBeforeIssueWork(options, injected);
-  if (options.issue) {
-    await runTargetedAuto(options, injected);
-    return;
-  }
-  await runDiscoveryAuto(options, injected);
+  if (options.issue) return runTargetedAuto(options, injected);
+  return runDiscoveryAuto(options, injected);
 }
 
 async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
@@ -76,12 +81,12 @@ async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, inje
   });
 }
 
-async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
-  console.log("\n=== Auto issue discovery ===");
-  console.log(`Ready label: ${options.readyLabel}`);
-  console.log(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
-  console.log(`Selection limit: ${options.limit}`);
-  console.log(`Mode: ${options.dryRun ? "dry run" : "claim + branch + workflow"}`);
+async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<AutoDiscoveryResult> {
+  presenter().line("Auto issue discovery");
+  presenter().line(`Ready label: ${options.readyLabel}`);
+  presenter().line(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
+  presenter().line(`Selection limit: ${options.limit}`);
+  presenter().line(`Mode: ${options.dryRun ? "dry run" : "claim + branch + workflow"}`);
 
   const listIssues = injected.listOpenGitHubIssues ?? listOpenGitHubIssues;
   const issues = await listIssues({
@@ -99,18 +104,20 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
   printSkippedBlockedIssues(skippedBlocked);
 
   if (selected.length === 0) {
-    console.log("\nNo eligible issues found.");
-    return;
+    presenter().line("No eligible issues found");
+    return { kind: "no-eligible", attempts: [] };
   }
 
   printSelectedIssues(selected);
+  const selectedTarget = selected[0];
+  if (selectedTarget) presenter().updateTarget(`#${selectedTarget.number}`);
 
   if (options.dryRun) {
-    console.log("\nDry run: no issues were claimed and no branches were changed.");
-    return;
+    presenter().line("Dry run: no issues were claimed and no branches were changed");
+    return { kind: "dry-run", attempts: [] };
   }
 
-  await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true });
+  return { kind: "attempts", attempts: await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true }) };
 }
 
 interface SkippedBlockedIssue {
@@ -205,18 +212,19 @@ function dedupeDependencies(dependencies: GitHubIssueDependency[]): GitHubIssueD
   return result;
 }
 
-async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
+async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<AutoDiscoveryResult> {
   if (!options.issue) throw new Error("Targeted auto requires an issue.");
 
-  console.log("\n=== Targeted auto issue ===");
-  console.log(`Target issue: ${options.issue}`);
-  console.log(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
-  console.log(`Mode: ${options.dryRun ? "dry run" : "claim + branch + workflow"}`);
+  presenter().line("Targeted auto issue");
+  presenter().line(`Target issue: ${options.issue}`);
+  presenter().line(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
+  presenter().line(`Mode: ${options.dryRun ? "dry run" : "claim + branch + workflow"}`);
 
   const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
   const fetched = await fetchIssue(options.issue, { cwd: options.cwd, repo: options.repo });
   const runOptions: AutoCliOptions = { ...options, repo: fetched.repo ?? options.repo };
   const issue = toAutorunIssueCandidate(fetched.issue);
+  presenter().updateTarget(`#${issue.number}`);
 
   const skipLabel = findMatchingSkipLabel(issue, runOptions.skipLabels);
   if (skipLabel) {
@@ -231,11 +239,11 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
   printSelectedIssues([issue]);
 
   if (runOptions.dryRun) {
-    console.log("\nDry run: no issues were claimed and no branches were changed.");
-    return;
+    presenter().line("Dry run: no issues were claimed and no branches were changed");
+    return { kind: "dry-run", attempts: [] };
   }
 
-  await runManagedIssueAttempts([issue], runOptions, injected, { requireReadyLabel: false });
+  return { kind: "attempts", attempts: await runManagedIssueAttempts([issue], runOptions, injected, { requireReadyLabel: false }) };
 }
 
 async function runManagedIssueAttempts(
@@ -243,20 +251,22 @@ async function runManagedIssueAttempts(
   options: AutoCliOptions,
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
-): Promise<void> {
+): Promise<AutorunAttemptResult[]> {
   const assignee = await resolveAssignee(options, injected);
-  console.log(`\nClaiming issue(s) with label: ${options.inProgressLabel}`);
-  if (assignee) console.log(`Assignee: ${assignee}`);
-  else console.log("Assignee: none");
+  const results: AutorunAttemptResult[] = [];
+  presenter().line(`Claiming issue(s) with label: ${options.inProgressLabel}`);
+  if (assignee) presenter().line(`Assignee: ${assignee}`);
+  else presenter().line("Assignee: none");
 
   const clock = injected.clock ?? defaultClock;
   for (const issue of issues) {
-    await withAutorunIssueLock({ cwd: options.cwd, issueNumber: issue.number, description: `roark auto issue #${issue.number}` }, async () => {
-      await runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
+    const result = await withAutorunIssueLock({ cwd: options.cwd, issueNumber: issue.number, description: `roark auto issue #${issue.number}` }, async () => {
+      return runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
     });
+    if (result) results.push(result);
   }
 
-  console.log("\nAuto workflow complete.");
+  return results;
 }
 
 async function runManagedIssueAttempt(
@@ -266,7 +276,9 @@ async function runManagedIssueAttempt(
   clock: Clock,
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
-): Promise<void> {
+): Promise<AutorunAttemptResult | undefined> {
+  presenter().updateTarget(`#${issue.number}`);
+  presenter().transition("Preparation", `#${issue.number}`, { operation: "edit" });
   const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
   await preflight({ cwd: options.cwd });
 
@@ -277,7 +289,7 @@ async function runManagedIssueAttempt(
     baseBranch: options.baseBranch,
   });
 
-  console.log(`- Preparing clone workspace for branch ${branchPlan.branchName}`);
+  presenter().line(`Preparing clone workspace for branch ${branchPlan.branchName}`);
   const preparedWorkspace = await (injected.prepareCloneWorkspace ?? prepareCloneWorkspace)({
     controlCwd: options.cwd,
     repo: options.repo,
@@ -291,7 +303,7 @@ async function runManagedIssueAttempt(
   const rechecked = await fetchLatestIssueForClaimRecheck(issue, options, injected);
   const skipReason = claimRecheckSkipReason(rechecked.issue, options, claimOptions);
   if (skipReason) {
-    console.log(`- Skipping #${issue.number} before claim: ${skipReason}`);
+    presenter().line(`Skipping #${issue.number} before claim: ${skipReason}`);
     return;
   }
   assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
@@ -299,12 +311,12 @@ async function runManagedIssueAttempt(
   const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
   const attempt = await allocateNextAttempt(issueDir);
 
-  console.log(`- Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
+  presenter().line(`Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
   const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
   await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
 
   const workflowIssue = rechecked.issue;
-  console.log(`- Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
+  presenter().line(`Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
   const workflowContext = createAutorunWorkflowContext(workflowIssue, branchPlan, options, attempt, preparedWorkspace.path);
   await ensureRunDir(workflowContext);
 
@@ -319,7 +331,7 @@ async function runManagedIssueAttempt(
     startedAt: clock.now(),
   });
 
-  await runAutorunAttemptLifecycle({
+  return runAutorunAttemptLifecycle({
     issueDir,
     workflowContext,
     branchPlan,
@@ -395,19 +407,19 @@ function claimRecheckSkipReason(
 function printSkippedBlockedIssues(skipped: readonly SkippedBlockedIssue[]): void {
   if (skipped.length === 0) return;
 
-  console.log("\nSkipped issue(s) with active blockers:");
+  presenter().line("Skipped issue(s) with active blockers:");
   for (const skippedIssue of skipped) {
-    console.log(`- #${skippedIssue.issue.number} ${skippedIssue.issue.title}${skippedIssue.issue.url ? ` (${skippedIssue.issue.url})` : ""}`);
+    presenter().line(`- #${skippedIssue.issue.number} ${skippedIssue.issue.title}${skippedIssue.issue.url ? ` (${skippedIssue.issue.url})` : ""}`);
     for (const blocker of skippedIssue.blockers) {
-      console.log(`  - blocked by #${blocker.number} ${blocker.title} [${blocker.state}]${blocker.url ? ` (${blocker.url})` : ""}`);
+      presenter().line(`- blocked by #${blocker.number} ${blocker.title} [${blocker.state}]${blocker.url ? ` (${blocker.url})` : ""}`);
     }
   }
 }
 
 function printSelectedIssues(issues: readonly AutorunIssueCandidate[]): void {
-  console.log("\nSelected issue(s):");
+  presenter().line("Selected issue(s):");
   for (const issue of issues) {
-    console.log(`- #${issue.number} ${issue.title}${issue.url ? ` (${issue.url})` : ""}`);
+    presenter().line(`- #${issue.number} ${issue.title}${issue.url ? ` (${issue.url})` : ""}`);
   }
 }
 
@@ -420,4 +432,3 @@ function toAutorunIssueCandidate(issue: GitHubIssue): AutorunIssueCandidate {
     labels: issue.labels,
   };
 }
-

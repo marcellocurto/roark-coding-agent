@@ -154,6 +154,12 @@ roark create-issues 123 --repo owner/repo --yes
 
 See [Issue curation](issue-curation.md).
 
+## Following long-running work
+
+Normal output is an operational view rather than a copy of generated Markdown: it identifies the target and current phase, keeps successful tool activity compact, reports phase wall time and verification status, then points to the complete artifact. Add `--verbose` to render completed agent responses and detailed tool statistics. Raw event, prompt, and tool-result debug output is not part of verbose mode.
+
+Interactive terminals receive a target-first title that follows phase and outcome transitions. Use `--no-title` to opt out. Roark emits no title or ANSI sequences when output is redirected or piped, preserves complete redirected lines, and only shortens paths and lines for interactive terminal widths. Operational warnings remain on stderr.
+
 ## Common Options
 
 | Option | Use |
@@ -167,6 +173,8 @@ See [Issue curation](issue-curation.md).
 | `--attempt n` | Select an attempt |
 | `--force` | Regenerate phase artifacts |
 | `--yes` | Approve supported prompts or mutations |
+| `--verbose` | Show completed agent responses and detailed tool statistics |
+| `--no-title` | Disable interactive terminal-title updates |
 
 See [CLI reference](cli-reference.md) for the full command and option reference.
 

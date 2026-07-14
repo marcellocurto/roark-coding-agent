@@ -7,6 +7,7 @@ import {
   refinementLogRef,
   reviewARef,
   verificationBeforeFixRef,
+  verificationBeforeFixFullRef,
   type StaticArtifactName,
 } from "./artifact-catalog.ts";
 
@@ -22,6 +23,7 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   reviewB: "review-b.md",
   readiness: "readiness.md",
   verification: "verification.md",
+  verificationFull: "verification-full.md",
   metadata: "metadata.json",
   issueCurationPlan: "issue-curation-plan.json",
   issueCreationResults: "issue-creation-results.json",
@@ -37,6 +39,7 @@ describe("artifact catalog", () => {
   test("resolves persisted numbered artifact filenames", () => {
     expect(artifactFilename(fixLogRef(2))).toBe("fix-log-2.md");
     expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
+    expect(artifactFilename(verificationBeforeFixFullRef(1))).toBe("verification-before-fix-1-full.md");
     expect(artifactFilename(implementationRestartLogRef(1))).toBe("implementation-restart-log-1.md");
     expect(artifactFilename(refinementLogRef(0))).toBe("refinement-log-0.md");
     expect(artifactFilename(reviewARef(2))).toBe("review-a-2.md");

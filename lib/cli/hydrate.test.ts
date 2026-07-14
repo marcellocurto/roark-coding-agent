@@ -167,6 +167,23 @@ describe("hydrateCliOptions", () => {
     expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
   });
 
+  test("keeps presentation flags at the entrypoint instead of duplicating hydrated state", async () => {
+    const repo = await tempGitRepo();
+    const defaultsRaw = parseArgs(["do", "12", "--cwd", repo, "--repo", "owner/repo"]);
+    if ("help" in defaultsRaw) throw new Error("expected options");
+    const defaults = await hydrateCliOptions(defaultsRaw);
+    if (defaults.command !== "do") throw new Error("expected issue options");
+    expect(defaults).not.toHaveProperty("verbose");
+    expect(defaults).not.toHaveProperty("title");
+
+    const overrideRaw = parseArgs(["review-pr", "42", "--cwd", repo, "--repo", "owner/repo", "--verbose", "--no-title"]);
+    if ("help" in overrideRaw) throw new Error("expected options");
+    const override = await hydrateCliOptions(overrideRaw);
+    if (override.command !== "review-pr") throw new Error("expected review options");
+    expect(override).not.toHaveProperty("verbose");
+    expect(override).not.toHaveProperty("title");
+  });
+
   test("preserves CLI thinking profile selection", async () => {
     const repo = await tempGitRepo();
     const raw = parseArgs(["do", "12", "--cwd", repo, "--repo", "owner/repo", "--fast"]);
