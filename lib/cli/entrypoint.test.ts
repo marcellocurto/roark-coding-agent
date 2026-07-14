@@ -95,6 +95,29 @@ describe("runCli lifecycle", () => {
     }
   });
 
+  test("preserves multiline CLI errors and reports non-Error throws", async () => {
+    const reported: string[] = [];
+    const consoleError = spyOn(console, "error").mockImplementation((value) => {
+      reported.push(String(value));
+    });
+    try {
+      expect(await runCli(["do", "95"], {
+        execute: () => Promise.reject(new Error("Invalid input\n\nUsage:\n  roark do <issue>")),
+        notify: () => Promise.resolve(),
+      })).toBe(1);
+      expect(await runCli(["do", "95"], {
+        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the CLI boundary must report arbitrary JavaScript throw values
+        execute: () => Promise.reject({ code: "E_OBJECT" }),
+        notify: () => Promise.resolve(),
+      })).toBe(1);
+
+      expect(reported[0]).toBe("Invalid input\n\nUsage:\n  roark do <issue>");
+      expect(reported[1]).toBe("[object Object]");
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   test("preserves success when notification delivery fails", async () => {
     const consoleError = spyOn(console, "error").mockImplementation(() => {
       // Suppress the expected warning in test output.
@@ -134,7 +157,7 @@ describe("roark executable", () => {
     const result = await runProcess([entrypoint, "not-a-command"], { cwd: projectRoot });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Unknown command 'not-a-command'");
+    expect(result.stderr).toContain("Unknown command 'not-a-command'.\n\nroark <command> [issue] [options]\n\nCommands:");
   });
 
   test("dispatches a hydrated status command", async () => {

@@ -63,7 +63,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
   const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber });
   validateReviewablePr(initial);
-  presenter().transition("Review preparation", `PR #${initial.pr.number}`);
+  presenter().transition("Review preparation", `PR #${initial.pr.number}`, { operation: "inspect" });
   const hooks = defaultLifecycleHooks;
   const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
   const workspace = prReviewWorkspaceConfig(options.workspace ?? defaultWorkspaceConfig);
@@ -84,7 +84,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
 
   try {
     context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path });
-    presenter().transition("Review preparation", `PR #${context.prNumber}`, context.generation);
+    presenter().transition("Review preparation", `PR #${context.prNumber}`, { pass: context.generation, operation: "inspect" });
     presenter().line(`Run directory: ${context.reviewDirRelative}`);
     presenter().line(`Review workspace: ${path.basename(context.agentCwd)}`);
     await hookRunner("beforeRun", hooks, context.agentCwd);
@@ -107,7 +107,12 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     if (resolvedVerification.command) {
       await hookRunner("beforeVerify", hooks, context.agentCwd);
       try {
-        verification = await runVerification({ command: resolvedVerification.command, cwd: context.agentCwd, runner: deps.verificationRunner });
+        verification = await runVerification({
+          command: resolvedVerification.command,
+          cwd: context.agentCwd,
+          runner: deps.verificationRunner,
+          display: { target: `PR #${context.prNumber}`, repository: context.repo, pass: context.generation },
+        });
         await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
         await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
         presenter().artifact(path.join(context.reviewDirRelative, "verification.md"));
@@ -145,7 +150,6 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     }));
 
     const runner = deps.agentRunner ?? runPiAgent;
-    presenter().transition("PR review", `PR #${context.prNumber}`, context.generation);
     const [reviewAResult, reviewBResult] = await Promise.allSettled([
       runReviewer(context, prepared, runner, correctnessReviewLens, "reviewA"),
       runReviewer(context, prepared, runner, maintainabilityReviewLens, "reviewB"),

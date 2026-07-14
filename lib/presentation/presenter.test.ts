@@ -132,6 +132,55 @@ describe("operational presentation", () => {
     expect(captured.output()).not.toContain("…");
   });
 
+  test("treats CI pseudo-TTY streams as complete non-interactive logs", () => {
+    const captured = captureTty(20);
+    const presenter = new Presenter({ stream: captured.stream, env: { CI: "true", TERM: "xterm" } });
+    const record = "123456789012345678901234567890";
+
+    presenter.run({ command: "auto", repository: "owner/repo", target: "#140" });
+    presenter.line(record);
+
+    expect(captured.output()).toContain(`${record}\n`);
+    expect(captured.output()).not.toContain("…");
+    expect(captured.output()).not.toContain("\u001b]");
+  });
+
+  test("times deterministic operations and preserves their target and revision context", () => {
+    const captured = capture();
+    const times = [0, 1_250];
+    const presenter = new Presenter({ stream: captured.stream, now: () => times.shift() ?? 1_250 });
+    presenter.run({ command: "revise-pr", repository: "owner/repo", target: "PR #12" });
+    presenter.transition("Revision preparation", "PR #12", { revision: 2, operation: "edit" });
+    presenter.outcome("SUCCESS", "PR #12", "prepared");
+
+    expect(captured.output()).toContain("PHASE PR #12 · Revision preparation · revision 2 · edit");
+    expect(captured.output()).toContain("DONE PR #12 · Revision preparation · revision 2 · completed · 1.3s");
+    expect(captured.output()).not.toContain("Revision preparation · pass 2");
+    expect(captured.output()).not.toContain("0 tools");
+  });
+
+  test("does not width-truncate TERM=dumb pseudo-TTY output", () => {
+    const captured = captureTty(20);
+    const presenter = new Presenter({ stream: captured.stream, env: { TERM: "dumb" } });
+    const record = "123456789012345678901234567890";
+
+    presenter.line(record);
+
+    expect(captured.output()).toBe(`${record}\n`);
+  });
+
+  test("preserves revision and pass context in verification titles", () => {
+    const captured = captureTty();
+    const presenter = new Presenter({ stream: captured.stream, env: { TERM: "xterm" } });
+    const verificationDisplay = { target: "PR #12", repository: "owner/repo", revision: 2, pass: 1 };
+
+    presenter.verificationStarted("bun test", verificationDisplay);
+    presenter.verification({ command: "bun test", ok: true, exitCode: 0, elapsedMs: 50, display: verificationDisplay });
+
+    expect(captured.output()).toContain("PR #12 · Verification · r2 · p1 · repo");
+    expect(captured.output()).toContain("PR #12 · Verification passed · r2 · p1 · repo");
+  });
+
   test("routes operational warnings to stderr", () => {
     const stdout = capture();
     const stderr = capture();

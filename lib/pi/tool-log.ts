@@ -1,18 +1,11 @@
 import { shortenPath } from "../presentation/terminal.ts";
 
+export { formatToolDuration } from "../presentation/duration.ts";
+
 const maxPathLength = 72;
 const maxCommandLength = 96;
 const maxPatternLength = 64;
 const maxGenericLength = 72;
-
-export function formatToolDuration(durationMs: number): string {
-  const safeDurationMs = normalizeDurationMs(durationMs);
-  if (safeDurationMs < 1000) return `${Math.round(safeDurationMs)}ms`;
-
-  const seconds = safeDurationMs / 1000;
-  const secondsText = seconds.toFixed(1).replace(/\.0$/, "");
-  return `${secondsText}s`;
-}
 
 export function summarizeToolCall(toolName: string, args: unknown, roots: readonly string[] = []): string {
   switch (toolName) {
@@ -131,8 +124,4 @@ function toPositiveInteger(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const integer = Math.trunc(value);
   return integer > 0 ? integer : undefined;
-}
-
-function normalizeDurationMs(durationMs: number): number {
-  return Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
 }

@@ -109,6 +109,8 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
   }
 
   printSelectedIssues(selected);
+  const selectedTarget = selected[0];
+  if (selectedTarget) presenter().updateTarget(`#${selectedTarget.number}`);
 
   if (options.dryRun) {
     presenter().line("Dry run: no issues were claimed and no branches were changed");
@@ -222,6 +224,7 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
   const fetched = await fetchIssue(options.issue, { cwd: options.cwd, repo: options.repo });
   const runOptions: AutoCliOptions = { ...options, repo: fetched.repo ?? options.repo };
   const issue = toAutorunIssueCandidate(fetched.issue);
+  presenter().updateTarget(`#${issue.number}`);
 
   const skipLabel = findMatchingSkipLabel(issue, runOptions.skipLabels);
   if (skipLabel) {
@@ -275,7 +278,7 @@ async function runManagedIssueAttempt(
   claimOptions: { requireReadyLabel: boolean },
 ): Promise<AutorunAttemptResult | undefined> {
   presenter().updateTarget(`#${issue.number}`);
-  presenter().transition("Preparation", `#${issue.number}`);
+  presenter().transition("Preparation", `#${issue.number}`, { operation: "edit" });
   const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
   await preflight({ cwd: options.cwd });
 

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { verificationBeforeFixFullRef, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
-import { presenter } from "../presentation/presenter.ts";
+import { presenter, type VerificationDisplayContext } from "../presentation/presenter.ts";
 
 export const defaultAutorunVerifyCommand = "bun run typecheck";
 
@@ -86,11 +86,12 @@ export async function runVerification(options: {
   runner?: VerificationRunner | undefined  ;
   timeoutMs?: number | undefined;
   now?: (() => number) | undefined;
+  display?: VerificationDisplayContext | undefined;
 }): Promise<VerificationResult> {
   const runner = options.runner ?? defaultVerificationRunner;
   const now = options.now ?? Date.now;
   const startedAt = now();
-  presenter().verificationStarted(options.command);
+  presenter().verificationStarted(options.command, options.display ?? {});
   let result: VerificationResult;
   try {
     result = await runner({ command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs });
@@ -102,6 +103,7 @@ export async function runVerification(options: {
       elapsedMs: now() - startedAt,
       reason: "verification could not be executed",
       diagnostic: error instanceof Error ? error.message : String(error),
+      display: options.display,
     });
     throw error;
   }
@@ -116,6 +118,7 @@ export async function runVerification(options: {
       reason: classification.reason,
       diagnostic: tailText(result.stderr || result.stdout).slice(-500),
     } : {}),
+    display: options.display,
   });
   return result;
 }

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { formatToolDuration } from "../pi/tool-log.ts";
-import { boundLine, normalizeTerminalText, sanitizeTerminalLine, setTerminalTitle, shortenPath, terminalWidth, type TerminalStream } from "./terminal.ts";
+import { formatToolDuration } from "./duration.ts";
+import { boundLine, normalizeTerminalText, sanitizeTerminalLine, setTerminalTitle, shortenPath, supportsInteractivePresentation, terminalWidth, type TerminalStream } from "./terminal.ts";
 
 export type AgentOperation = "inspect" | "edit" | "review" | "verify" | "publish";
 
@@ -26,10 +26,24 @@ export interface PresenterOptions {
   env?: NodeJS.ProcessEnv | undefined;
 }
 
+export interface TransitionOptions {
+  revision?: number | string | undefined;
+  pass?: number | string | undefined;
+  operation?: AgentOperation | undefined;
+}
+
+export interface VerificationDisplayContext {
+  target?: string | undefined;
+  repository?: string | undefined;
+  revision?: number | string | undefined;
+  pass?: number | string | undefined;
+}
+
 interface PhaseState {
   startedAt: number;
   toolCount: number;
   aggregateToolMs: number;
+  showToolCount: boolean;
 }
 
 export class Presenter {
@@ -39,9 +53,11 @@ export class Presenter {
   private readonly titleEnabled: boolean;
   private readonly now: () => number;
   private roots: readonly string[];
-  private readonly env: NodeJS.ProcessEnv | undefined;
+  private readonly env: NodeJS.ProcessEnv;
   private readonly phases = new Map<string, PhaseState>();
   private identity?: { command: string; repository?: string | undefined; target?: string | undefined };
+  private transitionContext: AgentDisplayContext | undefined;
+  private transitionSerial = 0;
 
   constructor(options: PresenterOptions = {}) {
     this.stream = options.stream ?? process.stdout;
@@ -50,7 +66,7 @@ export class Presenter {
     this.titleEnabled = options.titleEnabled ?? true;
     this.now = options.now ?? Date.now;
     this.roots = options.roots ?? [];
-    this.env = options.env;
+    this.env = options.env ?? process.env;
   }
 
   setRoots(roots: readonly string[]): void {
@@ -66,6 +82,7 @@ export class Presenter {
   updateTarget(target: string): void {
     if (!this.identity) return;
     this.identity = { ...this.identity, target };
+    if (this.transitionContext) this.transitionContext.target = target;
     this.title(target, this.identity.command, undefined, undefined, this.identity.repository);
   }
 
@@ -73,17 +90,41 @@ export class Presenter {
     return this.identity?.target;
   }
 
-  transition(phase: string, target = this.identity?.target ?? "Roark", pass?: string | number): void {
-    this.line(`STATE ${target} · ${phase}${pass === undefined ? "" : ` · pass ${pass}`}`);
-    this.title(target, phase, undefined, pass, this.identity?.repository);
+  transition(phase: string, target = this.identity?.target ?? "Roark", options: TransitionOptions = {}): void {
+    if (this.transitionContext?.phaseLabel === phase && this.transitionContext.target === target) {
+      this.transitionContext.revision = options.revision;
+      this.transitionContext.pass = options.pass;
+      this.transitionContext.operation = options.operation ?? this.transitionContext.operation;
+      this.title(target, phase, options.revision, options.pass, this.identity?.repository);
+      return;
+    }
+
+    this.completeTransition();
+    const context: AgentDisplayContext = {
+      command: this.identity?.command ?? "roark",
+      repository: this.identity?.repository,
+      target,
+      phaseId: `transition-${++this.transitionSerial}`,
+      phaseLabel: phase,
+      revision: options.revision,
+      pass: options.pass,
+      operation: options.operation ?? "inspect",
+    };
+    this.transitionContext = context;
+    this.startPhase(context, false, true);
   }
 
   phaseStarted(context: AgentDisplayContext, options: { manageTitle?: boolean | undefined } = {}): void {
-    this.phases.set(context.phaseId, { startedAt: this.now(), toolCount: 0, aggregateToolMs: 0 });
+    this.completeTransition();
+    this.startPhase(context, true, options.manageTitle);
+  }
+
+  private startPhase(context: AgentDisplayContext, showToolCount: boolean, manageTitle = true): void {
+    this.phases.set(context.phaseId, { startedAt: this.now(), toolCount: 0, aggregateToolMs: 0, showToolCount });
     const revision = context.revision === undefined ? "" : ` · revision ${context.revision}`;
     const pass = context.pass === undefined ? "" : ` · pass ${context.pass}`;
     this.line(`PHASE ${context.target} · ${context.phaseLabel}${revision}${pass} · ${context.operation}`);
-    if (options.manageTitle !== false) this.title(context.target, context.phaseLabel, context.revision, context.pass, context.repository);
+    if (manageTitle) this.title(context.target, context.phaseLabel, context.revision, context.pass, context.repository);
   }
 
   activity(context: AgentDisplayContext, summary: string, input: { failed: boolean; durationMs: number }): void {
@@ -96,14 +137,19 @@ export class Presenter {
   }
 
   phaseCompleted(context: AgentDisplayContext, input: { outcome?: string | undefined; artifact?: string | undefined; failed?: boolean | undefined; manageTitle?: boolean | undefined } = {}): void {
+    if (this.transitionContext?.phaseId === context.phaseId) this.transitionContext = undefined;
     const state = this.phases.get(context.phaseId);
     const elapsed = state ? this.now() - state.startedAt : 0;
     const status = input.failed === true ? "FAILED" : "DONE";
     const toolCount = state?.toolCount ?? 0;
-    const prefix = `${status} ${context.target} · ${context.phaseLabel} · `;
-    const suffix = ` · ${toolCount} ${toolCount === 1 ? "tool" : "tools"} · ${formatToolDuration(elapsed)}`;
+    const revision = context.revision === undefined ? "" : ` · revision ${context.revision}`;
+    const pass = context.pass === undefined ? "" : ` · pass ${context.pass}`;
+    const prefix = `${status} ${context.target} · ${context.phaseLabel}${revision}${pass} · `;
+    const suffix = state?.showToolCount === false
+      ? ` · ${formatToolDuration(elapsed)}`
+      : ` · ${toolCount} ${toolCount === 1 ? "tool" : "tools"} · ${formatToolDuration(elapsed)}`;
     const outcome = normalizeTerminalText(input.outcome ?? (input.failed === true ? "failed" : "completed"));
-    if (this.stream.isTTY !== true) {
+    if (!this.interactive(this.stream)) {
       this.line(`${prefix}${outcome}${suffix}`);
     } else {
       const width = terminalWidth(this.stream);
@@ -112,11 +158,13 @@ export class Presenter {
         this.line(record);
       } else {
         this.line(`${prefix}${input.outcome ?? (input.failed === true ? "failed" : "completed")}`);
-        this.subline("elapsed: ", `${formatToolDuration(elapsed)} · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}`);
+        this.subline("elapsed: ", state?.showToolCount === false
+          ? formatToolDuration(elapsed)
+          : `${formatToolDuration(elapsed)} · ${toolCount} ${toolCount === 1 ? "tool" : "tools"}`);
       }
     }
     if (input.artifact !== undefined && input.artifact !== "") this.artifact(input.artifact);
-    if (this.verbose && state !== undefined) {
+    if (this.verbose && state?.showToolCount !== false && state !== undefined) {
       this.subline("tools: ", `${state.toolCount} · aggregate tool execution ${formatToolDuration(state.aggregateToolMs)}`);
     }
     this.phases.delete(context.phaseId);
@@ -124,18 +172,19 @@ export class Presenter {
   }
 
   artifact(value: string): void {
-    const maxLength = this.stream.isTTY === true ? Math.max(24, terminalWidth(this.stream) - 12) : Number.MAX_SAFE_INTEGER;
+    const maxLength = this.interactive(this.stream) ? Math.max(24, terminalWidth(this.stream) - 12) : Number.MAX_SAFE_INTEGER;
     this.subline("artifact: ", shortenPath(value, this.roots, maxLength));
   }
 
-  verificationStarted(command: string): void {
-    this.line(this.stream.isTTY === true ? fitRecord("VERIFY RUNNING · ", command, "", terminalWidth(this.stream)) : `VERIFY RUNNING · ${command}`);
-    this.title(this.identity?.target, "Verification", undefined, undefined, this.identity?.repository);
+  verificationStarted(command: string, display: VerificationDisplayContext = {}): void {
+    this.completeTransition();
+    this.line(this.interactive(this.stream) ? fitRecord("VERIFY RUNNING · ", command, "", terminalWidth(this.stream)) : `VERIFY RUNNING · ${command}`);
+    this.title(display.target ?? this.identity?.target, "Verification", display.revision, display.pass, display.repository ?? this.identity?.repository);
   }
 
-  verification(input: { command: string; ok: boolean; exitCode: number; elapsedMs: number; timedOut?: boolean | undefined; reason?: string | undefined; diagnostic?: string | undefined }): void {
+  verification(input: { command: string; ok: boolean; exitCode: number; elapsedMs: number; timedOut?: boolean | undefined; reason?: string | undefined; diagnostic?: string | undefined; display?: VerificationDisplayContext | undefined }): void {
     const status = input.timedOut === true ? "TIMED OUT" : input.ok ? "PASSED" : "FAILED";
-    if (this.stream.isTTY !== true) {
+    if (!this.interactive(this.stream)) {
       this.line(`VERIFY ${status} · ${input.command} · exit ${input.exitCode} · ${formatToolDuration(input.elapsedMs)}`);
     } else {
       const width = terminalWidth(this.stream);
@@ -149,10 +198,12 @@ export class Presenter {
     }
     if (!input.ok && input.reason !== undefined && input.reason !== "") this.subline("reason: ", input.reason);
     if (!input.ok && input.diagnostic !== undefined && input.diagnostic !== "") this.subline("output: ", input.diagnostic, true);
-    this.title(this.identity?.target, input.ok ? "Verification passed" : "Verification failed", undefined, undefined, this.identity?.repository);
+    const display = input.display ?? {};
+    this.title(display.target ?? this.identity?.target, input.ok ? "Verification passed" : "Verification failed", display.revision, display.pass, display.repository ?? this.identity?.repository);
   }
 
   outcome(status: "SUCCESS" | "FAILED" | "BLOCKED" | "STOPPED", target?: string, detail?: string): void {
+    this.completeTransition(status === "SUCCESS" ? "completed" : status.toLowerCase(), status === "FAILED");
     const outcomeTarget = target ?? this.identity?.target ?? this.identity?.command ?? "Roark";
     this.line(`${status} ${outcomeTarget}${detail !== undefined && detail !== "" ? ` · ${detail}` : ""}`);
     this.title(outcomeTarget, status === "SUCCESS" ? "Completed" : status.toLowerCase(), undefined, undefined, this.identity?.repository);
@@ -166,7 +217,7 @@ export class Presenter {
   verboseAgentResponse(markdown: string): void {
     if (!this.verbose) return;
     for (const line of renderMarkdownLines(markdown)) {
-      if (line.preformatted || this.stream.isTTY !== true) this.stream.write(`${line.value}\n`);
+      if (line.preformatted || !this.interactive(this.stream)) this.stream.write(`${line.value}\n`);
       else this.wrappedLine(line.value);
     }
   }
@@ -183,7 +234,7 @@ export class Presenter {
   private subline(label: string, value: string, retainTail = false): void {
     const prefix = `  ${label}`;
     const clean = sanitizeTerminalLine(value);
-    if (this.stream.isTTY !== true) {
+    if (!this.interactive(this.stream)) {
       this.stream.write(`${prefix}${clean}\n`);
       return;
     }
@@ -203,7 +254,18 @@ export class Presenter {
 
   private writeLine(stream: TerminalStream, value: string): void {
     const clean = normalizeTerminalText(value);
-    stream.write(`${stream.isTTY === true ? boundLine(clean, terminalWidth(stream)) : clean}\n`);
+    stream.write(`${this.interactive(stream) ? boundLine(clean, terminalWidth(stream)) : clean}\n`);
+  }
+
+  private completeTransition(outcome = "completed", failed = false): void {
+    const context = this.transitionContext;
+    if (!context) return;
+    this.transitionContext = undefined;
+    this.phaseCompleted(context, { outcome, failed, manageTitle: false });
+  }
+
+  private interactive(stream: TerminalStream): boolean {
+    return supportsInteractivePresentation(stream, this.env);
   }
 
   private title(
@@ -215,7 +277,7 @@ export class Presenter {
   ): void {
     setTerminalTitle(this.stream, { target, phase, revision, pass, repository }, {
       enabled: this.titleEnabled,
-      ...(this.env ? { env: this.env } : {}),
+      env: this.env,
     });
   }
 }

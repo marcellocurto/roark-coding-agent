@@ -49,6 +49,30 @@ describe("runAutoDiscovery", () => {
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
   });
 
+  test("retains a discovered dry-run target in the presenter identity", async () => {
+    let output = "";
+    const presentation = configurePresenter({
+      stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } },
+      now: () => 100,
+    });
+    presentation.run({ command: "auto", repository: "owner/repo" });
+    try {
+      const result = await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpLabelContract,
+        listOpenGitHubIssues: async () => (await noopAsync(), [issue(29, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]),
+        fetchGitHubIssueRelationships: async () => (await noopAsync(), dependencyClearRelationships(29)),
+      });
+      presentation.outcome("SUCCESS", presentation.currentTarget(), "dry run complete");
+
+      expect(result.kind).toBe("dry-run");
+      expect(presentation.currentTarget()).toBe("#29");
+      expect(output).toContain("DONE #29 · Discovery");
+      expect(output).toContain("SUCCESS #29 · dry run complete");
+    } finally {
+      configurePresenter({ titleEnabled: false });
+    }
+  });
+
   test("sanitizes hostile issue metadata in ordinary discovery output", async () => {
     const logs = await captureLogs(async () => {
       await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {

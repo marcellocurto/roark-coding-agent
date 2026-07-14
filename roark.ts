@@ -14,7 +14,7 @@ import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
 import { runFullWorkflow, runSinglePhase } from "./lib/workflow/phases.ts";
 import { Presenter, presenter, runWithPresenter } from "./lib/presentation/presenter.ts";
-import { normalizeTerminalText } from "./lib/presentation/terminal.ts";
+import { sanitizeTerminalText } from "./lib/presentation/terminal.ts";
 import type { AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
 import { displayArgvTarget, displayCommandTarget } from "./lib/cli/target.ts";
 
@@ -35,7 +35,7 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   const parsed = await hydrateCliOptions(rawParsed);
 
-  if ("verbose" in parsed && "title" in parsed) {
+  if (isLongRunningCommand(parsed.command)) {
     presenter().setRoots([parsed.cwd]);
     presenter().run({ command: parsed.command, repository: parsed.repo, target: displayCommandTarget(parsed) });
   }
@@ -50,9 +50,9 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   if (parsed.command === "auto") {
     const result = await runAutoDiscovery(parsed);
-    if (result.kind === "dry-run") presenter().outcome("SUCCESS", displayCommandTarget(parsed) ?? "auto", "dry run complete");
+    if (result.kind === "dry-run") presenter().outcome("SUCCESS", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "dry run complete");
     else if (result.kind === "no-eligible") presenter().outcome("STOPPED", "auto", "no eligible issues");
-    else if (result.attempts.length === 0) presenter().outcome("STOPPED", displayCommandTarget(parsed) ?? "auto", "no attempt started");
+    else if (result.attempts.length === 0) presenter().outcome("STOPPED", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "no attempt started");
     else for (const attempt of result.attempts) presentAutorunOutcome(attempt);
     return;
   }
@@ -171,7 +171,7 @@ export async function runCli(
   const execute = dependencies.execute ?? main;
   const notify = dependencies.notify ?? sendExitNotification;
   const reportError = dependencies.reportError ?? ((error: unknown) => {
-    console.error(normalizeTerminalText(error instanceof Error ? error.message : error));
+    console.error(sanitizeTerminalText(error instanceof Error ? error.message : String(error)));
   });
 
   const longRunning = isLongRunningCommand(argv[0]);

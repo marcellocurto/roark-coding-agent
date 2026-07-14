@@ -19,6 +19,13 @@ export function sanitizeTerminalLine(value: unknown): string {
   return String(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
 }
 
+export function sanitizeTerminalText(value: unknown): string {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return "";
+  return String(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, " ");
+}
+
 export function normalizeTerminalText(value: unknown): string {
   return sanitizeTerminalLine(value).replace(/\s+/g, " ").trim();
 }
@@ -30,7 +37,11 @@ export function terminalWidth(stream: TerminalStream, fallback = 80): number {
 }
 
 export function supportsTerminalTitle(stream: TerminalStream, env: NodeJS.ProcessEnv = process.env): boolean {
-  return stream.isTTY === true && env["TERM"] !== "dumb";
+  return supportsInteractivePresentation(stream, env);
+}
+
+export function supportsInteractivePresentation(stream: TerminalStream, env: NodeJS.ProcessEnv = process.env): boolean {
+  return stream.isTTY === true && env["TERM"] !== "dumb" && !isCiEnvironment(env);
 }
 
 export function formatTerminalTitle(parts: TitleParts, maxLength = 80): string {
@@ -82,6 +93,11 @@ function shortRepository(repository: string | undefined): string {
   const clean = normalizeTerminalText(repository);
   if (!clean) return "";
   return clean.split("/").filter(Boolean).at(-1) ?? clean;
+}
+
+function isCiEnvironment(env: NodeJS.ProcessEnv): boolean {
+  const value = env["CI"]?.trim().toLowerCase();
+  return value !== undefined && value !== "" && value !== "0" && value !== "false";
 }
 
 function truncateMiddle(value: string, maxLength: number): string {

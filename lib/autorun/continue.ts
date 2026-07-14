@@ -44,7 +44,7 @@ export async function runAutoContinue(
   const attempt = options.attempt ?? await latestAttemptNumber(issueDir);
   const recoveryCommand = formatContinueCommand({ issueNumber: parsed.issueNumber, cwd, repo: parsed.repo, attempt });
 
-  presenter().transition("Continuation", `#${parsed.issueNumber}`, attempt);
+  presenter().transition("Continuation", `#${parsed.issueNumber}`, { pass: attempt });
   presenter().line("Continue autorun attempt");
   presenter().line(`Issue: #${parsed.issueNumber}`);
   presenter().line(`Attempt: ${attempt}`);

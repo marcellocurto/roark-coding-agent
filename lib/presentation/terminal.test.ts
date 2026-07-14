@@ -20,6 +20,14 @@ describe("terminal title safety", () => {
     const optedOut = stream(true);
     expect(setTerminalTitle(optedOut.stream, { target: "#140", phase: "Triage" }, { enabled: false })).toBe(false);
     expect(optedOut.output()).toBe("");
+
+    const ciTty = stream(true);
+    expect(setTerminalTitle(ciTty.stream, { target: "#140", phase: "Triage" }, { env: { CI: "true", TERM: "xterm" } })).toBe(false);
+    expect(ciTty.output()).toBe("");
+
+    const dumbTty = stream(true);
+    expect(setTerminalTitle(dumbTty.stream, { target: "#140", phase: "Triage" }, { env: { TERM: "dumb" } })).toBe(false);
+    expect(dumbTty.output()).toBe("");
   });
 
   test("removes hostile controls and bounds target-first titles", () => {

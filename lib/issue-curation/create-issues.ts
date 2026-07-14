@@ -200,7 +200,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
   }
 
   const display: AgentDisplayContext | undefined = creatable.length === 0 ? undefined : {
-    command: "create-issues",
+    command: context.displayCommand ?? "create-issues",
     repository: context.repo,
     target: `#${context.issueNumber}`,
     phaseId: "issue-publishing",

@@ -70,7 +70,11 @@ export async function runPublishGate(input: {
   if (readinessStatus === "ready-for-pr") {
     await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
     await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
-    verification = await verify({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
+    verification = await verify({
+      command: options.verifyCommand,
+      cwd: workflowContext.agentCwd,
+      display: { target: `#${workflowContext.issueNumber}`, repository: workflowContext.repo },
+    });
     await writeVerification(workflowContext, verification);
     presenter().artifact(artifactRelativePath(workflowContext, "verification"));
   }

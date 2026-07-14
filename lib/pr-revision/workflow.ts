@@ -89,14 +89,14 @@ export async function runPrRevision(
   const repo = feedback.repo;
   validatePrBranchSafety(feedback.pr, repo);
 
-  presenter().transition("Revision preparation", `PR #${feedback.pr.number}`);
+  presenter().transition("Revision preparation", `PR #${feedback.pr.number}`, { operation: "edit" });
   const preparedWorkspace = await prepareRevisionWorkspace({ options, repo, feedback, deps });
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
   const hooks = options.hooks ?? defaultLifecycleHooks;
 
   try {
     const context = await createPrRevisionContext({ ...options, repo, controlCwd, agentCwd: preparedWorkspace.path });
-    presenter().transition("Revision preparation", `PR #${context.prNumber}`, context.revision);
+    presenter().transition("Revision preparation", `PR #${context.prNumber}`, { revision: context.revision, operation: "edit" });
     presenter().line(`Run directory: ${context.revisionDirRelative}`);
     if (context.agentCwd !== context.controlCwd) presenter().line(`Revision workspace: ${path.basename(context.agentCwd)}`);
 
@@ -236,7 +236,17 @@ export async function runPrRevision(
       }
 
       await hookRunner("beforeVerify", hooks, context.agentCwd);
-      verification = await runVerification({ command: context.verifyCommand, cwd: context.agentCwd, runner: deps.verificationRunner });
+      verification = await runVerification({
+        command: context.verifyCommand,
+        cwd: context.agentCwd,
+        runner: deps.verificationRunner,
+        display: {
+          target: `PR #${context.prNumber}`,
+          repository: context.repo,
+          revision: context.revision,
+          ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
+        },
+      });
       await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
       await writePrRevisionArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
       addArtifactFilename(artifactFilenames, "verification.md");

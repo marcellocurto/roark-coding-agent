@@ -22,17 +22,12 @@ export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "rev
 export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
 
-export interface PresentationCliOptions {
-  verbose?: boolean | undefined;
-  title?: boolean | undefined;
-}
-
 export interface RawPresentationCliOptions {
   verbose?: true | undefined;
   noTitle?: true | undefined;
 }
 
-export interface IssueCliOptions extends PresentationCliOptions {
+export interface IssueCliOptions {
   command: IssueWorkflowCommand;
   issue: string;
   cwd: string;
@@ -48,7 +43,7 @@ export interface IssueCliOptions extends PresentationCliOptions {
   attempt?: number | undefined;
 }
 
-export interface AutoCliOptions extends PresentationCliOptions {
+export interface AutoCliOptions {
   command: "auto";
   issue?: string | undefined;
   cwd: string;
@@ -75,7 +70,7 @@ export interface AutoCliOptions extends PresentationCliOptions {
   hooks?: LifecycleHooksConfig | undefined  ;
 }
 
-export interface ContinueCliOptions extends PresentationCliOptions {
+export interface ContinueCliOptions {
   command: "continue";
   issue: string;
   cwd: string;
@@ -97,7 +92,7 @@ export interface ContinueCliOptions extends PresentationCliOptions {
   hooks?: LifecycleHooksConfig | undefined  ;
 }
 
-export interface RevisePrCliOptions extends PresentationCliOptions {
+export interface RevisePrCliOptions {
   command: "revise-pr";
   prNumber: number;
   cwd: string;
@@ -116,7 +111,7 @@ export interface RevisePrCliOptions extends PresentationCliOptions {
   hooks?: LifecycleHooksConfig | undefined;
 }
 
-export interface ReviewPrCliOptions extends PresentationCliOptions {
+export interface ReviewPrCliOptions {
   command: "review-pr";
   prNumber: number;
   cwd: string;

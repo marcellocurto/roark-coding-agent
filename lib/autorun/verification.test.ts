@@ -27,12 +27,19 @@ describe("autorun verification", () => {
     const runnerResult = new Promise<VerificationResult>((resolve) => { resolveRunner = resolve; });
 
     try {
-      const running = runVerification({ command: "bun test", cwd: "/tmp/wt", runner: () => runnerResult });
+      const running = runVerification({
+        command: "bun test",
+        cwd: "/tmp/wt",
+        runner: () => runnerResult,
+        display: { target: "PR #12", repository: "owner/repo", revision: 2, pass: 1 },
+      });
       expect(output).toContain("Verification");
+      expect(output).toContain("PR #12 · Verification · r2 · p1 · repo");
       expect(output).not.toContain("PASSED");
       resolveRunner?.({ ok: true, command: "bun test", exitCode: 0, stdout: "", stderr: "" });
       await running;
       expect(output).toContain("VERIFY PASSED");
+      expect(output).toContain("PR #12 · Verification passed · r2 · p1 · repo");
     } finally {
       configurePresenter({});
     }

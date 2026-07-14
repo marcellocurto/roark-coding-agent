@@ -125,6 +125,32 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.created.map((entry) => entry.planItemId)).toEqual(["external-blocker-1", "follow-up-1"]);
   });
 
+  test("preserves the parent workflow command in issue-publishing display context", async () => {
+    const context = await tempContext({ yes: true, displayCommand: "auto" });
+    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    let displayCommand: string | undefined;
+
+    await createIssuesFromCurationPlan({
+      context,
+      clock,
+      labelEnsurer: false,
+      agentRunner: async (request) => {
+        await noopAsync();
+        displayCommand = request.display.command;
+        return JSON.stringify({
+          created: [
+            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
+            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
+          ],
+          failed: [],
+          relationshipOutcomes: [],
+        });
+      },
+    });
+
+    expect(displayCommand).toBe("auto");
+  });
+
   test("approved run uses the issue-authoring publishing agent without loading a skill", async () => {
         await noopAsync();
     const context = await tempContext({ yes: true });
@@ -456,7 +482,7 @@ describe("createIssuesFromCurationPlan", () => {
   });
 });
 
-async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined}) {
+async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: string; agentCwd?: string | undefined; displayCommand?: string | undefined }) {
   const dir = options.reuseDir ?? await mkdtemp(path.join(tmpdir(), "roark-create-issues-"));
   if (!options.reuseDir) tempDirs.push(dir);
   return createWorkflowContext({
@@ -469,7 +495,10 @@ async function tempContext(options: { yes: boolean; force?: boolean; reuseDir?: 
     yes: options.yes,
     maxFixPasses: 1,
     attempt: 2,
-  }, options.agentCwd ? { agentCwd: options.agentCwd } : {});
+  }, {
+    ...(options.agentCwd ? { agentCwd: options.agentCwd } : {}),
+    ...(options.displayCommand ? { displayCommand: options.displayCommand } : {}),
+  });
 }
 
 function basePlan(): IssueCurationPlan {
