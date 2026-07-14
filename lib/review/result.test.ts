@@ -76,6 +76,10 @@ describe("structured review result", () => {
     ], {
       summary: "Summary\n# Fake outcome @maintainers <b>unsafe</b>",
       evidenceReviewed: ["diff\n</details>"],
+      additionalSections: [{
+        heading: "Architectural synthesis\n## Fake finding",
+        items: ["The diff confirms a reusable pattern without creating actionable work. @maintainers <script>"],
+      }],
     });
 
     const markdown = formatReviewResultMarkdown(result, { title: "Review", source: "review-a" });
@@ -84,6 +88,8 @@ describe("structured review result", () => {
     expect(markdown).toContain("\\@maintainers");
     expect(markdown).toContain("&lt;script&gt;");
     expect(markdown).toContain("&lt;/details&gt;");
+    expect(markdown).toContain("## Architectural synthesis ## Fake finding");
+    expect(reviewDisposition(result)).toBe("approve");
   });
 
   test("rejects restart recommendations where unsupported or unjustified", () => {

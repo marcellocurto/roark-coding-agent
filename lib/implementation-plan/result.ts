@@ -1,6 +1,11 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
+import {
+  additionalSectionsSchema,
+  normalizeAdditionalSections,
+  renderAdditionalSectionsMarkdown,
+} from "../structured-output/additional-sections.ts";
 
 const nonEmptyString = (description: string) => Type.String({ minLength: 1, description });
 
@@ -25,6 +30,7 @@ export const implementationPlanResultSchema = Type.Object({
   risks: Type.Array(nonEmptyString("Concrete implementation risk.")),
   rollbackPlan: Type.Array(nonEmptyString("Concrete rollback action.")),
   readyForImplementation: Type.Boolean(),
+  additionalSections: Type.Optional(additionalSectionsSchema),
 }, { additionalProperties: false });
 
 export type ImplementationPlanResult = Static<typeof implementationPlanResultSchema>;
@@ -43,6 +49,11 @@ export function validateImplementationPlanResult(value: unknown): Implementation
     const location = first?.instancePath ?? first?.schemaPath ?? "implementation plan";
     throw new ImplementationPlanOutputContractError(`Implementation plan does not satisfy the structured contract at ${location}.`);
   }
+  const additionalSections = normalizeAdditionalSections(value.additionalSections, {
+    artifactLabel: "Implementation plan",
+    reservedHeadings: implementationPlanHeadings,
+    createError: (message) => new ImplementationPlanOutputContractError(message),
+  });
   const result: ImplementationPlanResult = {
     ...value,
     issue: value.issue.trim(),
@@ -56,6 +67,7 @@ export function validateImplementationPlanResult(value: unknown): Implementation
     testsAndValidation: trimItems(value.testsAndValidation, "testsAndValidation"),
     risks: trimItems(value.risks, "risks"),
     rollbackPlan: trimItems(value.rollbackPlan, "rollbackPlan"),
+    ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   if (result.readyForImplementation) {
     const missing = [
@@ -128,9 +140,26 @@ export function formatImplementationPlanMarkdown(result: ImplementationPlanResul
     "## Ready For Implementation",
     result.readyForImplementation ? "yes" : "no",
     "",
+    ...renderAdditionalSectionsMarkdown(result.additionalSections),
   );
   return lines.join("\n");
 }
+
+const implementationPlanHeadings = [
+  "Issue",
+  "Work Classification",
+  "Goal",
+  "Non-Goals",
+  "Current Code Findings",
+  "Simplifications From Draft",
+  "Proposed Changes",
+  "Files Likely To Change",
+  "Detailed Steps",
+  "Tests And Validation",
+  "Risks",
+  "Rollback Plan",
+  "Ready For Implementation",
+] as const;
 
 export function implementationPlanArtifactDefinition(
   kind: ImplementationPlanKind,

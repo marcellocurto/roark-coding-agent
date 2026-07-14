@@ -6,6 +6,11 @@ import {
   validateChangeReport,
 } from "../change-report/result.ts";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
+import {
+  additionalSectionsSchema,
+  normalizeAdditionalSections,
+  renderAdditionalSectionsMarkdown,
+} from "../structured-output/additional-sections.ts";
 
 const nonEmptyString = (description: string) => Type.String({ minLength: 1, description });
 
@@ -21,6 +26,7 @@ export const revisionExecutionResultSchema = Type.Object({
   }, { additionalProperties: false })),
   changedFiles: Type.Array(changedFileSchema),
   validation: Type.Array(validationEntrySchema, { minItems: 1 }),
+  additionalSections: Type.Optional(additionalSectionsSchema),
 }, { additionalProperties: false });
 
 export type RevisionExecutionResult = Static<typeof revisionExecutionResultSchema>;
@@ -48,6 +54,17 @@ export function validateRevisionExecutionResult(value: unknown): RevisionExecuti
       addressedFindingIds: [],
       remainingConcerns: [],
     });
+    const additionalSections = normalizeAdditionalSections(value.additionalSections, {
+      artifactLabel: "Revision execution",
+      reservedHeadings: [
+        "Summary",
+        "Addressed Must Fix Current Items",
+        "Skipped Items",
+        "Changed Files",
+        "Validation Performed",
+      ],
+      createError: (message) => new RevisionExecutionOutputContractError(message),
+    });
     return {
       summary: common.summary,
       addressedItems: value.addressedItems.map((entry, index) => ({
@@ -60,6 +77,7 @@ export function validateRevisionExecutionResult(value: unknown): RevisionExecuti
       })),
       changedFiles: common.changedFiles,
       validation: common.validation,
+      ...(additionalSections === undefined ? {} : { additionalSections }),
     };
   } catch (error) {
     if (error instanceof RevisionExecutionOutputContractError) throw error;
@@ -98,6 +116,7 @@ export function formatRevisionExecutionMarkdown(result: RevisionExecutionResult,
     "## Validation Performed",
     ...result.validation.map((entry) => `- \`${entry.command}\` — ${entry.status}: ${entry.details}`),
     "",
+    ...renderAdditionalSectionsMarkdown(result.additionalSections),
   ].join("\n");
 }
 

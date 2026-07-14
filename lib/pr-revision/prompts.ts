@@ -4,9 +4,8 @@ import { renderStructuredReviewContract } from "../review/contract.ts";
 export function revisionPlanPrompt(context: PrRevisionContext): string {
   return `<pr_revision_planning>
 You are planning a manual revision for PR #${context.prNumber}, revision ${context.revision}.
-Read the PR feedback artifacts in ${context.agentRevisionDirRelative}:
-- pr-feedback.md
-- pr-feedback.json
+Read ${context.agentRevisionDirRelative}/pr-feedback.json as the canonical PR feedback artifact.
+The generated pr-feedback.md file is a human-readable companion, not machine authority.
 
 Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.
 
@@ -26,8 +25,10 @@ Complete planning only by calling submit_revision_plan with:
 - classifiedFeedback: every relevant feedback item with its classification, source, and rationale
 - mustFixCurrent: concrete fixes required in this revision
 - humanNeeds: decisions, information, or access required from a human
+- additionalSections: material problem-specific reasoning, interactions, risks, validation strategy, alternatives, or discoveries that do not fit the standard fields; choose each heading freely
 
 The status and arrays must agree: humanNeeds implies needs-human; otherwise non-empty mustFixCurrent implies revise; otherwise use no-action-needed.
+Additional sections are non-routing context. Every required fix or human need must still appear in the corresponding standard field.
 Do not return Markdown or prose after calling submit_revision_plan.
 </pr_revision_planning>`;
 }
@@ -49,7 +50,9 @@ Complete this phase only by calling submit_revision_execution with:
 - skippedItems: each item intentionally not changed, paired with its concrete reason
 - changedFiles: repository-relative paths paired with what changed
 - validation: exact commands with passed, failed, or not-run status and observed details
+- additionalSections: material problem-specific discoveries, tradeoffs, or context that do not fit the standard fields; choose each heading freely
 
+Additional sections are non-routing context. Every addressed or skipped item must still appear in the corresponding standard field.
 The tool schema is authoritative. Do not return Markdown or prose after calling submit_revision_execution.
 </pr_revision_implementation>`;
 }

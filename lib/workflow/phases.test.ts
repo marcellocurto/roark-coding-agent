@@ -10,6 +10,7 @@ import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
 import { parseReviewResultJson, type ReviewResult } from "../review/result.ts";
 import { implementationPlanResult, submitImplementationPlan, submitTriage, triageResult } from "../testing/workflow-results.ts";
+import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
 import { parseReadinessResultJson } from "./readiness.ts";
 import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
 import { parseChangeReportJson } from "../change-report/result.ts";
@@ -174,6 +175,43 @@ describe("runFullWorkflow", () => {
     };
 
     expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+  });
+
+  test("preserves novel plan and review sections without letting them change routing", async () => {
+    const context = await tempContext();
+    await seedBaselineAndImplementation(context);
+    const plan = implementationPlanResult(true, {
+      additionalSections: [{
+        heading: "Repository-specific interaction",
+        items: ["The existing adapter is shared by a command not named in the issue."],
+      }],
+    });
+    const review = reviewResult([], {
+      additionalSections: [{
+        heading: "Positive architectural signal",
+        items: ["The change reuses the established adapter seam without new indirection."],
+      }],
+    });
+
+    const runner: AgentRunner = async (request) => {
+      await noopAsync();
+      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
+      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
+      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, plan);
+      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
+      if (request.prompt.includes('name="review_a"')) return submitReview(request, review);
+      if (request.prompt.includes('name="review_b"')) return submitReview(request, approveReview());
+      throw new Error("unexpected prompt");
+    };
+
+    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+    expect(parseImplementationPlanResultJson(await readArtifact(context, "implementationPlan")).additionalSections)
+      .toEqual(plan.additionalSections);
+    expect(await readArtifact(context, "implementationPlanMarkdown")).toContain("## Repository-specific interaction");
+    expect(parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true }).additionalSections)
+      .toEqual(review.additionalSections);
+    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("## Positive architectural signal");
+    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
   });
 
   test("persists both reviewers' required findings, fixes them, and becomes ready after approval", async () => {

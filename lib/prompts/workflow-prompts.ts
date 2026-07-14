@@ -240,6 +240,7 @@ export function planDraftPrompt(context: WorkflowContext): string {
       renderInstructions([
         "Use the minimum repository inspection needed to write a correct implementation plan. Start from the issue and triage artifacts plus short targeted searches. Read specific files only when they are likely to affect the plan. Stop once you can cite enough repository evidence for the phase outcome.",
         "Write a concise, implementation-ready plan. In Detailed Steps, use ordered steps and avoid speculative alternatives unless they affect correctness.",
+        "Use additionalSections for material problem-specific reasoning, alternatives, dependencies, assumptions, or discoveries that do not fit the standard plan fields. Choose each heading freely. All executable commitments and readiness inputs must still appear in the standard fields because additional sections do not control workflow routing.",
         `Classify the work as exactly one of: ${workClassificationValues}.`,
       ]),
       renderConstraints([inspectionOnlyConstraint]),
@@ -270,6 +271,7 @@ export function planPrompt(context: WorkflowContext): string {
         "Preserve the issue's real requirements; do not weaken acceptance criteria to make implementation easier.",
         "Prefer boring, maintainable sequencing and clear validation over cleverness.",
         "If intentional complexity remains, cite the issue, plan, or codebase reason it is necessary.",
+        "Preserve useful problem-specific content from the draft and use additionalSections for material reasoning, alternatives, dependencies, assumptions, or discoveries that do not fit the standard fields. Choose each heading freely. All executable commitments and readiness inputs must still appear in the standard fields because additional sections do not control workflow routing.",
         "Submit the final refined plan through the required structured-output tool.",
       ]),
       renderConstraints([inspectionOnlyConstraint]),

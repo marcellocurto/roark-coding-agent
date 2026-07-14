@@ -154,13 +154,19 @@ describe("runPrRevision", () => {
     let checkoutCalled = false;
     let commentCalled = false;
 
+    const plan = revisionPlanResult("no-action-needed", {
+      additionalSections: [{
+        heading: "Why no revision is needed",
+        items: ["The current head already contains the behavior requested by the review."],
+      }],
+    });
     const result = await runPrRevision(options(cwd), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
       checkout: async () => {
         await noopAsync();
         checkoutCalled = true;
       },
-      agentRunner: async (request) => submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
+      agentRunner: async (request) => submitRevisionPlan(request, plan),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalled = true;
@@ -174,10 +180,13 @@ describe("runPrRevision", () => {
     expect(result.context.revisionDir).toBe(result.context.agentRevisionDir);
     expect(result.context.revisionDirRelative).toBe(".roark/runs/pr/12/revision-1");
     expect(JSON.parse(await readFile(path.join(result.context.revisionDir, "revision-plan.json"), "utf8"))).toEqual(
-      revisionPlanResult("no-action-needed"),
+      plan,
     );
     expect(await readFile(path.join(result.context.revisionDir, "revision-plan.md"), "utf8")).toContain(
       "## Status\nno-action-needed",
+    );
+    expect(await readFile(path.join(result.context.revisionDir, "revision-plan.md"), "utf8")).toContain(
+      "## Why no revision is needed",
     );
   });
 
@@ -241,8 +250,10 @@ describe("runPrRevision", () => {
       },
       prepareWorkspace,
       agentRunner: async (request) => {
-        const artifact = await readFile(path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "pr-feedback.md"), "utf8");
-        plannerSawFinding = artifact.includes("Preserve the public response contract");
+        const artifact = await readFile(path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "pr-feedback.json"), "utf8");
+        plannerSawFinding = artifact.includes("Preserve the public response contract")
+          && request.prompt.includes("pr-feedback.json as the canonical PR feedback artifact")
+          && !request.prompt.includes("- pr-feedback.md");
         return submitRevisionPlan(request, revisionPlanResult("no-action-needed"));
       },
     });

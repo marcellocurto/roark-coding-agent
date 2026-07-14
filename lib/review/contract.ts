@@ -12,6 +12,8 @@ export function renderStructuredReviewContract(subject: string, allowRestart: bo
     <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval unless blockedBy independently records an external constraint.</instruction>
     <instruction>Use <value>suggestion</value> for optional, non-blocking improvements. A critical concern cannot be a suggestion.</instruction>
     <instruction>Set completeness to <value>limited</value> and report structured limitations whenever relevant review coverage was unavailable. Mark blocksApproval only when the missing coverage makes approval unsafe. Use <value>complete</value> with no limitations otherwise.</instruction>
+    <instruction>Use additionalSections for material problem-specific synthesis, alternatives, positive observations, hypotheses, or non-blocking questions that do not fit the standard fields. Choose each heading freely.</instruction>
+    <instruction>Additional sections are non-routing context. Every concern that can affect approval or workflow routing must still be represented as a finding or limitation; do not hide actionable work in an additional section.</instruction>
     <instruction>Roark derives the outcome from the submitted findings; do not provide a separate verdict.</instruction>
     ${allowRestart
       ? "<instruction>Set restartRecommendation only when resetting to the pre-implementation baseline is safer than incremental fixes. Reference every relevant unblocked must-fix finding by id.</instruction>"

@@ -1,6 +1,11 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
+import {
+  additionalSectionsSchema,
+  normalizeAdditionalSections,
+  renderAdditionalSectionsMarkdown,
+} from "../structured-output/additional-sections.ts";
 
 export type RevisionPlanStatus = "revise" | "needs-human" | "no-action-needed";
 
@@ -15,6 +20,7 @@ export const revisionPlanResultSchema = Type.Object({
   classifiedFeedback: Type.Array(nonEmptyString("Concise feedback item with its classification, source, and rationale.")),
   mustFixCurrent: Type.Array(nonEmptyString("Concrete feedback item that must be fixed in this revision.")),
   humanNeeds: Type.Array(nonEmptyString("Decision, information, or access required from a human.")),
+  additionalSections: Type.Optional(additionalSectionsSchema),
 }, { additionalProperties: false });
 
 export type RevisionPlanResult = Static<typeof revisionPlanResultSchema>;
@@ -33,11 +39,17 @@ export function validateRevisionPlanResult(value: unknown): RevisionPlanResult {
     throw new RevisionPlanOutputContractError(`Revision plan does not satisfy the structured contract at ${location}.`);
   }
 
-  const result = {
+  const additionalSections = normalizeAdditionalSections(value.additionalSections, {
+    artifactLabel: "Revision plan",
+    reservedHeadings: ["Status", "Classified Feedback", "Must Fix Current Items", "Human Needs"],
+    createError: (message) => new RevisionPlanOutputContractError(message),
+  });
+  const result: RevisionPlanResult = {
     ...value,
     classifiedFeedback: trimItems(value.classifiedFeedback, "classifiedFeedback"),
     mustFixCurrent: trimItems(value.mustFixCurrent, "mustFixCurrent"),
     humanNeeds: trimItems(value.humanNeeds, "humanNeeds"),
+    ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   const expectedStatus: RevisionPlanStatus = result.humanNeeds.length > 0
     ? "needs-human"
@@ -68,6 +80,7 @@ export function formatRevisionPlanMarkdown(result: RevisionPlanResult): string {
     "## Human Needs",
     ...renderList(result.humanNeeds),
     "",
+    ...renderAdditionalSectionsMarkdown(result.additionalSections),
   ].join("\n");
 }
 

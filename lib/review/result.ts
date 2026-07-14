@@ -1,5 +1,11 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
+import {
+  additionalSectionsSchema,
+  escapeStructuredMarkdownText,
+  normalizeAdditionalSections,
+  renderAdditionalSectionsMarkdown,
+} from "../structured-output/additional-sections.ts";
 
 export type ReviewFindingSource = "review-a" | "review-b" | "revision-review";
 export type FindingHandling = "must-fix-current" | "follow-up" | "suggestion";
@@ -76,6 +82,7 @@ export const reviewResultSchema = Type.Object({
     findingIds: Type.Array(identifier("Must-fix finding that requires a restart."), { minItems: 1, maxItems: 20 }),
     rationale: boundedString("Why resetting to the pre-implementation baseline is safer than incremental fixes for the referenced findings.", 2_000),
   }, { additionalProperties: false })),
+  additionalSections: Type.Optional(additionalSectionsSchema),
 }, { additionalProperties: false });
 
 export type ReviewResult = Static<typeof reviewResultSchema>;
@@ -160,7 +167,15 @@ export function validateReviewResult(value: unknown, options: { allowRestart: bo
     const location = first?.instancePath ?? first?.schemaPath ?? "review result";
     throw new Error(`Review result does not satisfy the structured contract at ${location}.`);
   }
-  const result = normalized;
+  const additionalSections = normalizeAdditionalSections(normalized.additionalSections, {
+    artifactLabel: "Review result",
+    reservedHeadings: reviewResultHeadings,
+    createError: (message) => new Error(message),
+  });
+  const result: ReviewResult = {
+    ...normalized,
+    ...(additionalSections === undefined ? {} : { additionalSections }),
+  };
 
   requireUniqueIds(result.findings.map((finding) => finding.id), "finding");
   requireUniqueIds(result.limitations.map((limitation) => limitation.id), "limitation");
@@ -331,19 +346,14 @@ export function formatReviewResultMarkdown(
       `- Finding IDs: ${result.restartRecommendation.findingIds.join(", ")}`,
       `- Rationale: ${escapeReviewMarkdownText(result.restartRecommendation.rationale)}`,
     ]),
+    "",
+    ...renderAdditionalSectionsMarkdown(result.additionalSections),
   ];
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export function escapeReviewMarkdownText(value: string): string {
-  return value
-    .replace(/[\r\n]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/([\\`*_{}\[\]!|@])/g, "\\$1");
+  return escapeStructuredMarkdownText(value);
 }
 
 function renderList(values: readonly string[]): string[] {
@@ -373,3 +383,13 @@ function requireUniqueIds(ids: readonly string[], noun: string): void {
   const duplicates = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))];
   if (duplicates.length > 0) throw new Error(`Review result contains duplicate ${noun} ID(s): ${duplicates.join(", ")}.`);
 }
+
+const reviewResultHeadings = [
+  "Outcome",
+  "Summary",
+  "Evidence Reviewed",
+  "Completeness",
+  "Limitations",
+  "Findings",
+  "Restart Recommendation",
+] as const;

@@ -20,6 +20,10 @@ describe("structured PR revision execution", () => {
     const result = revisionExecutionResult({
       addressedItems: [{ item: "Required feedback", resolution: "Corrected the public behavior." }],
       skippedItems: [{ item: "Optional cleanup", reason: "Outside this PR revision." }],
+      additionalSections: [{
+        heading: "Discovery during validation",
+        items: ["The same command also exercises the compatibility path."],
+      }],
     });
 
     expect(addressedRevisionItems(result)).toEqual(["Required feedback — Corrected the public behavior."]);
@@ -27,5 +31,6 @@ describe("structured PR revision execution", () => {
     const markdown = formatRevisionExecutionMarkdown(result, "Revision Log");
     expect(markdown).toContain("- Required feedback — Corrected the public behavior.");
     expect(markdown).toContain("- Optional cleanup — Outside this PR revision.");
+    expect(markdown).toContain("## Discovery during validation");
   });
 });
