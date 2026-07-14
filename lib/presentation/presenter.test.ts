@@ -11,7 +11,8 @@ function capture(columns = 80) {
 function captureTty(columns = 80) {
   let output = "";
   const stream: TerminalStream = { isTTY: true, columns, write(chunk) { output += chunk; } };
-  return { stream, output: () => output };
+  const presenterOptions = { stream, env: { TERM: "xterm" }, titleEnabled: false };
+  return { stream, presenterOptions, output: () => output };
 }
 
 const display: AgentDisplayContext = {
@@ -20,7 +21,6 @@ const display: AgentDisplayContext = {
   target: "#140",
   phaseId: "implementation",
   phaseLabel: "Implementation",
-  pass: 1,
   expectedArtifact: ".roark/runs/issue/140/implementation-log.md",
   operation: "edit",
 };
@@ -45,7 +45,7 @@ describe("operational presentation", () => {
   test("preserves phase wall time at narrow terminal widths", () => {
     const captured = captureTty(40);
     const times = [0, 1_250];
-    const presenter = new Presenter({ stream: captured.stream, now: () => times.shift() ?? 1_250 });
+    const presenter = new Presenter({ ...captured.presenterOptions, now: () => times.shift() ?? 1_250 });
     presenter.phaseStarted(display);
     presenter.phaseCompleted(display, { outcome: "completed with an intentionally long result" });
 
@@ -68,7 +68,7 @@ describe("operational presentation", () => {
 
   test("preserves subordinate indentation and the relevant end of failure diagnostics", () => {
     const captured = captureTty(40);
-    const presenter = new Presenter({ stream: captured.stream });
+    const presenter = new Presenter(captured.presenterOptions);
     presenter.verification({
       command: "bun test",
       ok: false,
@@ -209,7 +209,7 @@ describe("operational presentation", () => {
 
   test("wraps verbose agent responses without discarding content", () => {
     const captured = captureTty(40);
-    const presenter = new Presenter({ stream: captured.stream, verbose: true });
+    const presenter = new Presenter({ ...captured.presenterOptions, verbose: true });
     const paragraph = "This paragraph contains a decisive result and must preserve TRAILING_TOKEN";
 
     presenter.verboseAgentResponse(paragraph);
@@ -223,14 +223,14 @@ describe("operational presentation", () => {
 
   test("preserves fenced code whitespace in verbose output", () => {
     const captured = captureTty(40);
-    const presenter = new Presenter({ stream: captured.stream, verbose: true });
+    const presenter = new Presenter({ ...captured.presenterOptions, verbose: true });
     presenter.verboseAgentResponse("```ts\n  const aligned =  1;\n```");
     expect(captured.output()).toBe("  const aligned =  1;\n");
   });
 
   test("bounds primary output at narrow widths and renders completed verbose Markdown coherently", () => {
     const captured = captureTty(40);
-    const presenter = new Presenter({ stream: captured.stream, verbose: true });
+    const presenter = new Presenter({ ...captured.presenterOptions, verbose: true });
     presenter.run({ command: "review-pr", repository: "owner/an-extremely-long-repository-name", target: "PR #123" });
     presenter.verboseAgentResponse("# Review\n\n## Verdict\n`approve`\n\n```text\nraw line\n```");
 
