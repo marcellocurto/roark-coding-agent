@@ -177,6 +177,7 @@ export async function runPublishGate(input: {
         issueNumber: issue.number,
         attempt: attemptMetadata.attempt,
         artifactContent: readinessMarkdown ?? "",
+        recoveryCommand,
       }),
     });
   }
@@ -258,6 +259,7 @@ export async function handleNonPublish(input: {
       issueNumber: issue.number,
       attempt: attemptMetadata.attempt,
       artifactContent: artifactContent ?? "",
+      recoveryCommand,
     })
     : formatFailureComment({
       issueNumber: issue.number,

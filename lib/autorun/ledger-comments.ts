@@ -16,7 +16,9 @@ export interface LedgerCommentArtifactInput {
   attemptMetadataPath?: string | undefined;
 }
 
-export type ReadinessLedgerCommentInput = Pick<LedgerCommentArtifactInput, "issueNumber" | "attempt" | "artifactContent">;
+export type ReadinessLedgerCommentInput = Pick<LedgerCommentArtifactInput, "issueNumber" | "attempt" | "artifactContent"> & {
+  recoveryCommand?: string | undefined;
+};
 
 export function formatAttemptStartComment(input: {
   issueNumber: number;
@@ -164,8 +166,13 @@ export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifa
 
 export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "readiness" });
+  const lines = [marker];
+  if (input.recoveryCommand) {
+    lines.push("", "## Recovery", "", formatFencedBlock(sanitizePublicMarkdown(input.recoveryCommand), "bash"));
+  }
   const readiness = sanitizePublicMarkdown(input.artifactContent).trimEnd();
-  return readiness ? `${marker}\n\n${readiness}\n` : `${marker}\n`;
+  if (readiness) lines.push("", readiness);
+  return `${lines.join("\n")}\n`;
 }
 
 export function formatReviewLedgerComment(input: {
@@ -262,6 +269,25 @@ async function publishReviewLedgerComment(input: {
     phase: input.phase,
     body,
   });
+}
+
+function formatFencedBlock(value: string, language: string): string {
+  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
+  return `${fence}${language}\n${value}\n${fence}`;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const char of value) {
+    if (char === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      current = 0;
+    }
+  }
+  return longest;
 }
 
 function formatError(error: unknown): string {

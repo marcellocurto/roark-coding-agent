@@ -22,9 +22,23 @@ describe("autorun ledger comment publishing", () => {
       issueNumber: 24,
       attempt: 2,
       artifactContent: `# PR Readiness\n\nTOKEN=secret\n/Users/alice/private\n${evidence}`,
+      recoveryCommand: "roark continue 24 --repo owner/repo --attempt 2",
     });
 
-    expect(body).toBe(`<!-- roark:issue=24 attempt=2 phase=readiness -->\n\n# PR Readiness\n\nTOKEN=[redacted]\n[local path redacted]\n${evidence}\n`);
+    expect(body).toBe(`<!-- roark:issue=24 attempt=2 phase=readiness -->
+
+## Recovery
+
+\`\`\`\`bash
+roark continue 24 --repo owner/repo --attempt 2
+\`\`\`\`
+
+# PR Readiness
+
+TOKEN=[redacted]
+[local path redacted]
+${evidence}
+`);
   });
 
   test("publishes existing triage and implementation plan artifacts through the injected ledger publisher", async () => {
