@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readArtifact, refinementLogRef, reviewARef, reviewBRef, verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { readArtifact, refinementLogRef, reviewARef, reviewBRef, verificationBeforeFixRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
@@ -12,6 +12,10 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
+import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import { parseReadinessResultJson } from "../workflow/readiness.ts";
+import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
 
 const tempDirs: string[] = [];
 
@@ -67,16 +71,16 @@ describe("runAutorunAttemptLifecycle", () => {
         phases.push(request.display.phaseId);
         expect(request.prompt).toContain("failed_verification");
         if (request.display.phaseId === "fixLog-1") {
-          return "# Fix Log Pass 1\n\n## Summary\nAddressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
+          return submitChangeReport(request, changeReport({ summary: "Addressed verification failure." }));
         }
         if (request.display.phaseId === "refinementLog-1") {
-          return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n\n## Changed Files\n- lib/example.ts\n\n## Simplifications Made\nNone\n\n## Abstractions / Names Adjusted\nNone\n\n## Behavior Risk Decisions\n- Verification repair behavior in lib/example.ts was kept unchanged except for the targeted failure.\n\n## Plan / Issue Alignment\nAligned.\n\n## Validation Run\n- bun test (passed)\n\n## Remaining Concerns\nNone\n";
+          return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
         if (request.display.phaseId === "reviewA-1") {
-          return "# Review A Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.display.phaseId === "reviewB-1") {
-          return "# Review B Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
@@ -97,7 +101,7 @@ describe("runAutorunAttemptLifecycle", () => {
 
     expect(completions).toBe(2);
     expect(phases).toEqual(["fixLog-1", "refinementLog-1", "reviewA-1", "reviewB-1"]);
-    expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
+    expect(parseReadinessResultJson(await readArtifact(fixture.workflowContext, "readiness")).decision.status).toBe("ready-for-pr");
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
     expect(terminal.outcome).toBe("published");
   });
@@ -116,28 +120,35 @@ describe("runAutorunAttemptLifecycle", () => {
         await noopAsync();
         phases.push(request.display.phaseId);
         if (request.display.phaseId === "fixLog-1") {
-          return "# Fix Log Pass 1\n\n## Summary\nPartially addressed verification failure.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (failed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNumbered review requested another fix.\n";
+          return submitChangeReport(request, changeReport({
+            summary: "Partially addressed verification failure.",
+            validation: [{ command: "bun test", status: "failed", details: "Numbered review requested another fix." }],
+            remainingConcerns: ["Numbered review requested another fix."],
+          }));
         }
         if (request.display.phaseId === "refinementLog-1") {
-          return "# Refinement Log Pass 1\n\n## Summary\nRefined.\n";
+          return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
         if (request.display.phaseId === "reviewA-1") {
-          return "# Review A Pass 1\n\n## Verdict\nfixes-required\n";
+          return submitReview(request, reviewResult([reviewFinding("must-fix-current", "Numbered review requested another fix.")]));
         }
         if (request.display.phaseId === "reviewB-1") {
-          return "# Review B Pass 1\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.display.phaseId === "fixLog-2") {
-          return "# Fix Log Pass 2\n\n## Summary\nCompleted verification repair.\n\n## Changed Files\n- lib/example.ts\n\n## Validation Run\n- bun test (passed)\n\n## Review Findings Addressed\n- Failed verification.\n\n## Remaining Concerns\nNone\n";
+          return submitChangeReport(request, changeReport({
+            summary: "Completed verification repair.",
+            addressedFindingIds: ["review-a:numbered-review-requested-another-fix"],
+          }));
         }
         if (request.display.phaseId === "refinementLog-2") {
-          return "# Refinement Log Pass 2\n\n## Summary\nRefined.\n";
+          return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
         if (request.display.phaseId === "reviewA-2") {
-          return "# Review A Pass 2\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         if (request.display.phaseId === "reviewB-2") {
-          return "# Review B Pass 2\n\n## Verdict\napprove\n";
+          return submitReview(request, reviewResult());
         }
         throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
@@ -158,7 +169,7 @@ describe("runAutorunAttemptLifecycle", () => {
 
     expect(completions).toBe(2);
     expect(phases).toEqual(["fixLog-1", "refinementLog-1", "reviewA-1", "reviewB-1", "fixLog-2", "refinementLog-2", "reviewA-2", "reviewB-2"]);
-    expect(await readArtifact(fixture.workflowContext, "readiness")).toContain("## Status\nready-for-pr");
+    expect(parseReadinessResultJson(await readArtifact(fixture.workflowContext, "readiness")).decision.status).toBe("ready-for-pr");
     const terminal = await readAttemptMetadata(fixture.issueDir, 1);
     expect(terminal.outcome).toBe("published");
   });
@@ -204,7 +215,7 @@ describe("runAutorunAttemptLifecycle", () => {
     const comment = comments[0] ?? "";
     expect(comment).toContain("phase **output-contract**");
     expect(comment).toContain("Implementation failed: missing Summary section");
-    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.md`");
+    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.json`");
     expect(comment).toContain("invalid output");
     expect(comment).toContain("Attempt: `.roark/runs/issue/44/attempts/1/attempt.json`");
     expect(comment).toContain("roark continue 44 --repo owner/repo --attempt 1");
@@ -245,7 +256,7 @@ describe("runAutorunAttemptLifecycle", () => {
 
     const comment = comments[0] ?? "";
     expect(comment).toContain("phase **output-contract**");
-    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.md`");
+    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.json`");
     expect(comment).toContain("invalid direct validation output");
   });
 
@@ -320,14 +331,14 @@ describe("runAutorunAttemptLifecycle", () => {
 
 async function writeCompletedWorkflowArtifacts(context: WorkflowContext): Promise<void> {
   await writeArtifact(context, "issue", "# GitHub Issue #44\n\n<github_issue_relationships source=\"gh\" />\n");
-  await writeArtifact(context, "triage", "# Triage\n\n## Verdict\nproceed\n");
-  await writeArtifact(context, "implementationPlanDraft", "# Implementation Plan Draft\n\n## Ready For Implementation\nyes\n");
-  await writeArtifact(context, "implementationPlan", "# Implementation Plan\n\n## Ready For Implementation\nyes\n");
+  await writeJsonArtifact(context, "triage", triageResult());
+  await writeJsonArtifact(context, "implementationPlanDraft", implementationPlanResult());
+  await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
   await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-  await writeArtifact(context, "implementationLog", "# Implementation Log\n\n## Summary\nDone.\n");
-  await writeArtifact(context, refinementLogRef(0), "# Refinement Log Pass 0\n\n## Summary\nRefined.\n");
-  await writeArtifact(context, reviewARef(0), "# Review A Pass 0\n\n## Verdict\napprove\n");
-  await writeArtifact(context, reviewBRef(0), "# Review B Pass 0\n\n## Verdict\napprove\n");
+  await writeArtifact(context, "implementationLog", JSON.stringify(changeReport()));
+  await writeArtifact(context, refinementLogRef(0), JSON.stringify(changeReport({ summary: "Refined." })));
+  await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
+  await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
 }
 
 async function createFixture(): Promise<{

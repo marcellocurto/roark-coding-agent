@@ -2,7 +2,9 @@ import type { AutoCliOptions } from "../cli/args.ts";
 import { readFileSync } from "node:fs";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
-import { prBodyUpdatePrompt, prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
+import { prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
+import { prDraftArtifactDefinition } from "../pr-publishing/artifact.ts";
+import { formatPrDraftMarkdown, parsePrDraftJson, type PrDraftRenderingContext } from "../pr-publishing/result.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
@@ -11,6 +13,7 @@ import {
   artifactExists,
   artifactPath,
   artifactRelativePath,
+  fixLogRef,
   latestCompleteReviewCycle,
   refinementLogRef,
   reviewARef,
@@ -24,6 +27,9 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
+import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
+import { parseChangeReportJson, type ChangeReport } from "../change-report/result.ts";
+import { runStructuredArtifact } from "../structured-output/runner.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export const defaultAutorunSuccessLabel = "agent-pr-opened";
@@ -135,14 +141,16 @@ export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
   ];
 
   for (let pass = 0; pass <= context.maxFixPasses; pass++) {
+    if (pass > 0) {
+      const fix = fixLogRef(pass);
+      if (artifactExists(context, fix)) candidates.push(fix);
+    }
     const refinement = refinementLogRef(pass);
     if (artifactExists(context, refinement)) candidates.push(refinement);
   }
 
   const latestCycle = latestCompleteReviewCycle(context);
-  if (latestCycle === undefined) {
-    candidates.push("reviewA", "reviewB");
-  } else {
+  if (latestCycle !== undefined) {
     candidates.push(reviewARef(latestCycle), reviewBRef(latestCycle));
   }
 
@@ -163,18 +171,18 @@ export async function writePrNarrativeArtifact(context: WorkflowContext): Promis
 
 function buildPrNarrativeFromWorkflowArtifacts(context: WorkflowContext): FormatPrBodyNarrative {
   const issueMarkdown = readArtifactTextIfExists(context, "issue");
-  const planMarkdown = readArtifactTextIfExists(context, "implementationPlan");
-  const implementationMarkdown = readArtifactTextIfExists(context, "implementationLog");
+  const plan = readImplementationPlanIfExists(context);
+  const changeReports = readWorkflowChangeReports(context);
 
   const issueTitle = issueMarkdown ? extractIssueTitle(issueMarkdown) : undefined;
-  const workClassification = firstItem(summarizeMarkdownSection(planMarkdown, "Work Classification", 1));
-  const goal = summarizeMarkdownSection(planMarkdown, "Goal", 2);
-  const currentFindings = summarizeMarkdownSection(planMarkdown, "Current Code Findings", 4);
-  const proposedChanges = summarizeMarkdownSection(planMarkdown, "Proposed Changes", 8);
-  const nonGoals = summarizeMarkdownSection(planMarkdown, "Non-Goals", 4);
-  const risks = summarizeMarkdownSection(planMarkdown, "Risks", 4);
-  const implementationSummary = summarizeMarkdownSection(implementationMarkdown, "Summary", 4);
-  const changedFiles = summarizeMarkdownSection(implementationMarkdown, "Changed Files", 20).map(extractFileReference);
+  const workClassification = plan?.workClassification;
+  const goal = plan?.goal ? [plan.goal] : [];
+  const currentFindings = plan?.currentCodeFindings.slice(0, 4) ?? [];
+  const proposedChanges = plan?.proposedChanges.slice(0, 8) ?? [];
+  const nonGoals = plan?.nonGoals.slice(0, 4) ?? [];
+  const risks = plan?.risks.slice(0, 4) ?? [];
+  const implementationSummary = compactItems(changeReports.map((report) => report.summary)).slice(0, 4);
+  const changedFiles = compactItems(changeReports.flatMap((report) => report.changedFiles.map((file) => file.path))).slice(0, 20);
 
   const summary = buildSummary({ issueTitle, currentFindings, implementationSummary, proposedChanges, goal });
   const beforeFindings = selectReviewerBeforeItems(currentFindings);
@@ -195,7 +203,7 @@ function buildPrNarrativeFromWorkflowArtifacts(context: WorkflowContext): Format
     nonGoals.length > 0 ? `Confirm scope stayed inside the important non-changes: ${nonGoals.join("; ")}.` : undefined,
     "Check the verification result and any edge cases listed below.",
   ]);
-  const verificationNotes = buildVerificationNotes(changedFiles);
+  const verificationNotes = buildVerificationNotes(changedFiles, changeReports);
 
   return {
     issueTitle,
@@ -321,10 +329,17 @@ function isFragmentDetail(item: string): boolean {
   return item.length <= 80 && !/[.!?]$/.test(item) && !/^\w+\s+(?:the|a|an|to|for|with|from|in|on)\b/i.test(item);
 }
 
-function buildVerificationNotes(changedFiles: string[]): string[] {
+function buildVerificationNotes(changedFiles: string[], reports: readonly ChangeReport[]): string[] {
+  const reportedValidation = compactItems(reports.flatMap((report) => report.validation.map((entry) =>
+    `\`${entry.command}\` — ${entry.status}: ${entry.details}`,
+  ))).slice(0, 8);
   const validationFiles = changedFiles.filter((file) => /(^scripts\/|check|test|spec)/i.test(file));
-  if (validationFiles.length === 0) return [];
-  return [`Validation updates cover ${validationFiles.map((file) => `\`${file}\``).join(", ")}.`];
+  return compactItems([
+    ...reportedValidation,
+    validationFiles.length > 0
+      ? `Validation updates cover ${validationFiles.map((file) => `\`${file}\``).join(", ")}.`
+      : undefined,
+  ]);
 }
 
 function pastTenseForSummary(value: string): string {
@@ -365,19 +380,6 @@ function markdownNumberedSection(heading: string, items: string[] | undefined): 
   return [`## ${heading}`, ...(values.length > 0 ? values.map((item, index) => `${index + 1}. ${item}`) : ["None."])];
 }
 
-function firstItem(items: string[]): string | undefined {
-  return items[0];
-}
-
-function extractFileReference(value: string): string {
-  const codePath = /`([^`]+)`/.exec(value)?.[1];
-  if (codePath) return codePath.trim();
-  return value
-    .replace(/^`(.+)`$/, "$1")
-    .split(/\s+[—–-]\s+|:\s+/)[0]
-    ?.trim() ?? value.trim();
-}
-
 function lowercaseFirst(value: string): string {
   if (value.length === 0) return value;
   return `${value.charAt(0).toLocaleLowerCase()}${value.slice(1)}`;
@@ -397,43 +399,47 @@ function readArtifactTextIfExists(context: WorkflowContext, artifact: ArtifactRe
   }
 }
 
+function readImplementationPlanIfExists(context: WorkflowContext) {
+  const content = readArtifactTextIfExists(context, "implementationPlan");
+  if (!content) return undefined;
+  try {
+    return parseImplementationPlanResultJson(content);
+  } catch {
+    return undefined;
+  }
+}
+
+function readChangeReportIfExists(context: WorkflowContext, artifact: ArtifactRef) {
+  const content = readArtifactTextIfExists(context, artifact);
+  if (!content) return undefined;
+  try {
+    return parseChangeReportJson(content);
+  } catch {
+    return undefined;
+  }
+}
+
+function readWorkflowChangeReports(context: WorkflowContext): ChangeReport[] {
+  const reports: ChangeReport[] = [];
+  const implementation = readChangeReportIfExists(context, "implementationLog");
+  if (implementation) reports.push(implementation);
+  for (let pass = 0; pass <= context.maxFixPasses; pass++) {
+    if (pass > 0) {
+      const fix = readChangeReportIfExists(context, fixLogRef(pass));
+      if (fix) reports.push(fix);
+    }
+    const refinement = readChangeReportIfExists(context, refinementLogRef(pass));
+    if (refinement) reports.push(refinement);
+  }
+  return reports;
+}
+
 function extractIssueTitle(markdown: string): string | undefined {
   const xmlTitle = /<title>([\s\S]*?)<\/title>/i.exec(markdown)?.[1];
   const title = xmlTitle !== undefined
     ? decodeXmlText(xmlTitle.trim())
     : /^#\s+GitHub Issue\s+#\d+(?:\s*[-:]\s*(.+))?\s*$/im.exec(markdown)?.[1]?.trim();
   return normalizePrItem(title);
-}
-
-function summarizeMarkdownSection(markdown: string | undefined, heading: string, maxItems: number): string[] {
-  if (!markdown) return [];
-  const section = extractMarkdownSection(markdown, heading);
-  if (!section) return [];
-  const bulletItems = section
-    .split(/\r?\n/)
-    .map((line) => stripMarkdownListMarker(line.trim()))
-    .filter((line) => line !== undefined);
-  const rawItems = bulletItems.length > 0
-    ? bulletItems
-    : section
-      .split(/\n\s*\n/)
-      .map((paragraph) => paragraph.replace(/\s*\r?\n\s*/g, " ").trim());
-  return compactItems(rawItems).slice(0, maxItems);
-}
-
-function extractMarkdownSection(markdown: string, heading: string): string | undefined {
-  const lines = markdown.split(/\r?\n/);
-  const headingPattern = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, "i");
-  const start = lines.findIndex((line) => headingPattern.test(line.trim()));
-  if (start === -1) return undefined;
-  const endOffset = lines.slice(start + 1).findIndex((line) => /^##\s+\S/.test(line.trim()));
-  const end = endOffset === -1 ? lines.length : start + 1 + endOffset;
-  return lines.slice(start + 1, end).join("\n").trim();
-}
-
-function stripMarkdownListMarker(line: string): string | undefined {
-  const match = /^(?:[-*+]\s+|\d+[.)]\s+)(.+)$/.exec(line);
-  return match?.[1]?.trim();
 }
 
 function compactItems(items: readonly (string | undefined)[]): string[] {
@@ -469,10 +475,6 @@ function decodeXmlText(value: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&");
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function hasUncommittedChanges(options: { cwd: string }): Promise<boolean> {
@@ -530,7 +532,7 @@ async function performAutorunPublication(input: PublishAutorunResultInput, displ
   await writePrNarrativeArtifact(workflowContext);
 
   presenter().line("Authoring and creating pull request");
-  const publishedPr = await publishPullRequestWithAgent({
+  const publishedPr = await authorAndPublishPullRequest({
     options,
     issue,
     branchPlan,
@@ -575,11 +577,17 @@ interface PublishedPullRequest {
   stdout?: string | undefined;
 }
 
-async function publishPullRequestWithAgent(
+async function authorAndPublishPullRequest(
   input: PublishAutorunResultInput & { agentRunner: AgentRunner },
   display: AgentDisplayContext,
 ): Promise<PublishedPullRequest> {
-  const output = await input.agentRunner({
+  const renderingContext = prDraftRenderingContext({
+    workflowContext: input.workflowContext,
+    issueNumber: input.issue.number,
+    verification: input.verification,
+    attemptMetadata: input.attemptMetadata,
+  });
+  const artifact = await runStructuredArtifact({
     cwd: input.workflowContext.controlCwd,
     model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
     thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
@@ -598,27 +606,42 @@ async function publishPullRequestWithAgent(
     fileEditingToolsEnabled: false,
     observer: input.workflowContext.observer,
     display,
+  }, input.agentRunner, prDraftArtifactDefinition({
+    renderingContext,
+    localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd],
+  }), {
+    writeJson: (content) => writeArtifact(input.workflowContext, "prDraft", content),
+    writeMarkdown: (content) => writeArtifact(input.workflowContext, "prDraftMarkdown", content),
   });
-  const parsed = parsePrPublishingAgentResponse(output);
-  if (!parsed.url) throw new Error("PR publishing agent response did not include a non-empty url.");
-  return parsed;
+  const draft = artifact.value;
+  const body = artifact.markdown;
+  const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
+
+  const stdout = await runProcessOrThrow(buildPrCreateArgv({
+    repo: input.options.repo,
+    baseBranch: input.options.baseBranch,
+    branchName: input.branchPlan.branchName,
+    title,
+  }), {
+    cwd: input.workflowContext.controlCwd,
+    label: "gh pr create",
+    input: body,
+  });
+  const url = extractPrUrl(stdout);
+  if (!url) throw new Error("gh pr create succeeded but did not return a pull request URL.");
+  return { url, title, ...(extractIssueNumber(url) !== undefined ? { number: extractIssueNumber(url) } : {}), stdout };
 }
 
-export async function updatePrBodyWithAgent(input: {
+export async function updatePrBody(input: {
   cwd: string;
   repo?: string | undefined;
   pr: string;
   issueNumber: number;
-  issueTitle: string;
-  issueUrl?: string | undefined;
   workflowContext: WorkflowContext;
   verification?: VerificationResult | undefined;
   attemptMetadata?: AttemptMetadata | undefined;
-  attemptMetadataPath?: string | undefined;
   followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
-  agentRunner?: AgentRunner | undefined;
 }): Promise<void> {
-  const agentRunner = input.agentRunner ?? runPiAgent;
   const display: AgentDisplayContext = {
     command: input.workflowContext.displayCommand ?? "auto",
     repository: input.repo,
@@ -628,75 +651,62 @@ export async function updatePrBodyWithAgent(input: {
     operation: "publish",
   };
   await runPresentedPhase(display, async () => {
-    const output = await agentRunner({
-      cwd: input.cwd,
-      model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
-      thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
-      systemPrompt: prPublishingSystemPrompt(),
-      prompt: prBodyUpdatePrompt({
-        context: input.workflowContext,
-        repo: input.repo,
-        sourceIssue: { number: input.issueNumber, title: input.issueTitle, ...(input.issueUrl ? { url: input.issueUrl } : {}) },
-        branchName: input.attemptMetadata?.branch ?? `issue-${input.issueNumber}`,
-        baseBranch: input.attemptMetadata?.baseBranch ?? "unknown",
-        prUrl: input.pr,
-        verification: input.verification,
-        attemptMetadata: input.attemptMetadata,
-        attemptMetadataPath: input.attemptMetadataPath,
-        followUpIssues: input.followUpIssues,
-        artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
-      }),
-      fileEditingToolsEnabled: false,
-      observer: input.workflowContext.observer,
-      display,
-    });
-    const result = parsePrBodyUpdateAgentResponse(output);
-    if (!result.updated) throw new Error(result.message ?? "PR body update agent did not report a successful update.");
+    const draft = parsePrDraftJson(readFileSync(artifactPath(input.workflowContext, "prDraft"), "utf8"));
+    const body = sanitizePublicMarkdown(formatPrDraftMarkdown(draft, prDraftRenderingContext({
+      workflowContext: input.workflowContext,
+      issueNumber: input.issueNumber,
+      followUpIssues: input.followUpIssues,
+      verification: input.verification,
+      attemptMetadata: input.attemptMetadata,
+    })), { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
+    const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
+    await writeArtifact(input.workflowContext, "prDraftMarkdown", body);
+    await runProcessOrThrow([
+      "gh", "pr", "edit", input.pr,
+      "--title", title,
+      "--body-file", "-",
+      ...(input.repo ? ["--repo", input.repo] : []),
+    ], { cwd: input.cwd, label: "gh pr edit", input: body });
   }, () => ({ outcome: "updated" }));
 }
 
-function parsePrPublishingAgentResponse(output: string): PublishedPullRequest {
-  const parsed = parseAgentJson(output);
-  const url = asNonEmptyString(parsed["url"]);
-  const number = asInteger(parsed["number"]);
+export function buildPrCreateArgv(input: { repo?: string | undefined; baseBranch: string; branchName: string; title: string }): string[] {
+  return [
+    "gh", "pr", "create",
+    "--base", input.baseBranch,
+    "--head", input.branchName,
+    "--title", input.title,
+    "--body-file", "-",
+    ...(input.repo ? ["--repo", input.repo] : []),
+  ];
+}
+
+function prDraftRenderingContext(input: {
+  workflowContext: WorkflowContext;
+  issueNumber: number;
+  followUpIssues?: readonly FormatPrBodyFollowUpIssue[] | undefined;
+  verification?: VerificationResult | undefined;
+  attemptMetadata?: AttemptMetadata | undefined;
+}): PrDraftRenderingContext {
   return {
-    ...(url ? { url } : { url: "" }),
-    ...(asNonEmptyString(parsed["title"]) ? { title: asNonEmptyString(parsed["title"]) } : {}),
-    ...(number !== undefined ? { number } : {}),
-    ...(asNonEmptyString(parsed["stdout"]) ? { stdout: asNonEmptyString(parsed["stdout"]) } : {}),
+    sourceIssueNumber: input.issueNumber,
+    followUpIssues: input.followUpIssues,
+    runDirectory: input.workflowContext.runDirRelative,
+    artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
+    ...(input.attemptMetadata ? {
+      attemptSummary: `${input.attemptMetadata.attempt}; branch ${input.attemptMetadata.branch}`,
+    } : {}),
+    ...(input.verification ? {
+      verificationSummary: `${input.verification.ok ? "passed" : "failed"}: ${input.verification.command} (exit ${input.verification.exitCode})`,
+    } : {}),
   };
 }
 
-function parsePrBodyUpdateAgentResponse(output: string): { updated: boolean; message?: string | undefined } {
-  const parsed = parseAgentJson(output);
-  return {
-    updated: parsed["updated"] === true,
-    ...(asNonEmptyString(parsed["message"]) ? { message: asNonEmptyString(parsed["message"]) } : {}),
-  };
+function extractPrUrl(stdout: string): string | undefined {
+  return /https?:\/\/\S+\/pull\/\d+/.exec(stdout)?.[0]?.replace(/[),.;]+$/, "");
 }
 
-function parseAgentJson(output: string): Record<string, unknown> {
-  const trimmed = output.trim();
-  const jsonText = trimmed.startsWith("```") ? extractFencedJson(trimmed) : trimmed;
-  const parsed = JSON.parse(jsonText) as unknown;
-  if (!isRecord(parsed)) throw new Error("Agent response was not a JSON object.");
-  return parsed;
-}
-
-function extractFencedJson(output: string): string {
-  const match = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(output);
-  if (!match?.[1]) throw new Error("Agent response was fenced but did not contain JSON.");
-  return match[1];
-}
-
-function asNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
-}
-
-function asInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+function extractIssueNumber(url: string): number | undefined {
+  const value = Number.parseInt(/\/pull\/(\d+)/.exec(url)?.[1] ?? "", 10);
+  return Number.isInteger(value) ? value : undefined;
 }

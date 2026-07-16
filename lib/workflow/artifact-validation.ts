@@ -1,5 +1,8 @@
-import { parseReadyForImplementationValue, parseVerdict } from "./verdicts.ts";
 import { artifactContract, formatArtifactRef, type ArtifactRef } from "./artifact-catalog.ts";
+import { parseReviewResultJson } from "../review/result.ts";
+import { parseTriageResultJson } from "../triage/result.ts";
+import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
+import { parseChangeReportJson } from "../change-report/result.ts";
 
 export type ArtifactValidationResult =
   | { ok: true }
@@ -21,7 +24,20 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const trimmed = content.trim();
   if (!trimmed) return invalid("artifact is empty");
 
-  if (isReviewArtifact(artifact)) return ok();
+  if (isReviewArtifact(artifact)) {
+    try {
+      parseReviewResultJson(trimmed, { allowRestart: true });
+      return ok();
+    } catch (error) {
+      return invalid(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (artifact === "triage") return validateStructured(() => parseTriageResultJson(trimmed));
+  if (artifact === "implementationPlanDraft" || artifact === "implementationPlan") {
+    return validateStructured(() => parseImplementationPlanResultJson(trimmed));
+  }
+  if (isChangeReportArtifact(artifact)) return validateStructured(() => parseChangeReportJson(trimmed));
 
   const priorError = parseDiagnosticArtifactError(trimmed);
   if (priorError) return invalid(priorError);
@@ -33,19 +49,25 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
     return invalid(`missing # ${contract.requiredHeading} heading`);
   }
 
-  if (contract.requiresReadyForImplementation) {
-    const ready = parseReadyForImplementationValue(content);
-    if (!ready) return invalid("missing ## Ready For Implementation value of yes or no");
-  }
-
-  if (contract.allowedVerdicts) return requireVerdict(artifact, content, contract.allowedVerdicts);
-
   return ok();
 }
 
+function validateStructured(parse: () => unknown): ArtifactValidationResult {
+  try {
+    parse();
+    return ok();
+  } catch (error) {
+    return invalid(error instanceof Error ? error.message : String(error));
+  }
+}
+
 function isReviewArtifact(artifact: ArtifactRef): boolean {
-  const name = typeof artifact === "string" ? artifact : artifact.name;
-  return name === "reviewA" || name === "reviewB";
+  return typeof artifact !== "string" && (artifact.name === "reviewA" || artifact.name === "reviewB");
+}
+
+function isChangeReportArtifact(artifact: ArtifactRef): boolean {
+  return artifact === "implementationLog"
+    || (typeof artifact !== "string" && (artifact.name === "fixLog" || artifact.name === "refinementLog"));
 }
 
 function requiredHeadingRegex(heading: string): RegExp {
@@ -55,21 +77,6 @@ function requiredHeadingRegex(heading: string): RegExp {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function requireVerdict(
-  artifact: ArtifactRef,
-  content: string,
-  allowed: readonly string[],
-): ArtifactValidationResult {
-  const verdict = parseVerdict(content);
-  if (!verdict) return invalid("missing ## Verdict/## Status value");
-  if (!allowed.includes(verdict)) {
-    return invalid(
-      `${formatArtifactRef(artifact)} verdict '${verdict}' is not one of: ${allowed.join(", ")}`,
-    );
-  }
-  return ok();
 }
 
 function parseDiagnosticArtifactError(markdown: string): string | undefined {

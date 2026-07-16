@@ -5,8 +5,9 @@ import { createIssuesFromCurationPlan, type IssueCreationResults } from "../issu
 import { issueCurationPhase } from "../workflow/issue-curation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { publishAutorunResult, updatePrBodyWithAgent, type AutorunPublishOptions, type FormatPrBodyFollowUpIssue } from "./publish.ts";
-import { decidePublish, parseReadinessStatus, type PublishGateDecision } from "./publish-gate.ts";
+import { publishAutorunResult, updatePrBody as updatePublishedPrBody, type AutorunPublishOptions, type FormatPrBodyFollowUpIssue } from "./publish.ts";
+import { decidePublish, type PublishGateDecision } from "./publish-gate.ts";
+import { parseReadinessResultJson } from "../workflow/readiness.ts";
 import {
   classifyVerificationFailure,
   runVerification,
@@ -41,7 +42,7 @@ export interface RunPublishGateInjected {
   publishAutorunResult?: typeof publishAutorunResult | undefined;
   postPrIssueCreation?: ((input: { workflowContext: WorkflowContext; prUrl: string }) => Promise<IssueCreationResults | undefined>) | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
-  updatePrBody?: typeof updatePrBodyWithAgent | undefined;
+  updatePrBody?: typeof updatePublishedPrBody | undefined;
 }
 
 export async function runPublishGate(input: {
@@ -62,10 +63,11 @@ export async function runPublishGate(input: {
   const publishResult = injected.publishAutorunResult ?? publishAutorunResult;
   const postPrIssueCreation = injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
   const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-  const editPrBody = injected.updatePrBody ?? updatePrBodyWithAgent;
+  const editPrBody = injected.updatePrBody ?? updatePublishedPrBody;
 
-  const readinessMarkdown = await readReadinessArtifact(workflowContext);
-  const readinessStatus = readinessMarkdown ? parseReadinessStatus(readinessMarkdown) : undefined;
+  const readinessResult = await readReadinessResult(workflowContext);
+  const readinessStatus = readinessResult?.decision.status;
+  const readinessMarkdown = await readReadinessMarkdown(workflowContext);
 
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
@@ -130,12 +132,9 @@ export async function runPublishGate(input: {
           repo: options.repo,
           pr: prUrl,
           issueNumber: issue.number,
-          issueTitle: issue.title,
-          ...(issue.url ? { issueUrl: issue.url } : {}),
           workflowContext,
           verification,
           attemptMetadata,
-          attemptMetadataPath,
           followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
         });
       } catch (error) {
@@ -294,9 +293,17 @@ export async function handleNonPublish(input: {
   if (ref) recordAttemptIssueComment(attemptMetadata, decision.phase, ref);
 }
 
-async function readReadinessArtifact(context: WorkflowContext): Promise<string | undefined> {
+async function readReadinessResult(context: WorkflowContext) {
   try {
-    return await readArtifact(context, "readiness");
+    return parseReadinessResultJson(await readArtifact(context, "readiness"));
+  } catch {
+    return undefined;
+  }
+}
+
+async function readReadinessMarkdown(context: WorkflowContext): Promise<string | undefined> {
+  try {
+    return await readArtifact(context, "readinessMarkdown");
   } catch {
     return undefined;
   }
@@ -307,7 +314,7 @@ async function readDecisionArtifact(
   phase: Extract<PublishGateDecision, { publish: false }>["phase"],
 ): Promise<string | undefined> {
   try {
-    return await readArtifact(context, phase === "verification" ? "verification" : "readiness");
+    return await readArtifact(context, phase === "verification" ? "verification" : "readinessMarkdown");
   } catch {
     return undefined;
   }

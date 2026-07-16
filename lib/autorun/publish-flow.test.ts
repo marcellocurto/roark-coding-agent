@@ -2,11 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
 import { runVerification, type VerificationResult } from "./verification.ts";
 import { noopAsync } from "../utils/async.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
+import type { ReviewFinding } from "../review/result.ts";
+import { readinessResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 
@@ -28,7 +32,7 @@ describe("verification repair planning", () => {
 
   test("uses the next pass after reviewer-driven fixes", async () => {
     const context = await tempContext(2);
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nDone.\n");
+    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
 
     expect(await planVerificationRepair(context, failedVerification(1))).toEqual({ pass: 2 });
     expect(await readArtifact(context, { name: "verificationBeforeFix", pass: 2 })).toContain("## Exit Code\n1");
@@ -36,7 +40,7 @@ describe("verification repair planning", () => {
 
   test("does not schedule repair when fix budget is exhausted", async () => {
     const context = await tempContext(1);
-    await writeArtifact(context, fixLogRef(1), "# Fix Log Pass 1\n\n## Summary\nDone.\n");
+    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
 
     expect(await planVerificationRepair(context, failedVerification(1))).toBeUndefined();
   });
@@ -47,9 +51,10 @@ describe("verification repair planning", () => {
     expect(await planVerificationRepair(context, failedVerification(127, "sh: missing: command not found"))).toBeUndefined();
   });
 
-  test("successful PR publication triggers post-PR reviewer issue creation", async () => {
+  test("canonical readiness JSON drives publication even when rendered Markdown disagrees", async () => {
     const context = await tempContext(1);
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
+    await writeArtifact(context, "readinessMarkdown", "# PR Readiness\n\n## Status\nnot-ready\n");
     const postPrCalls: string[] = [];
     const prBodyUpdates: { pr: string; followUpCount: number }[] = [];
 
@@ -87,7 +92,7 @@ describe("verification repair planning", () => {
 
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(1);
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nnot-ready\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("not-ready"));
     let postPrCalled = false;
 
     const outcome = await runPublishGate({
@@ -117,7 +122,7 @@ describe("verification repair planning", () => {
 
   test("failed verification does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(0);
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
     let postPrCalled = false;
 
     const outcome = await runPublishGate({
@@ -151,7 +156,8 @@ describe("verification repair planning", () => {
 
   test("verification runner exceptions propagate through the publish gate", async () => {
     const context = await tempContext(1);
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
+    await writeArtifact(context, "readinessMarkdown", "# PR Readiness\n\n## Status\nready-for-pr\n");
     const failure = new Error("verification runner failed");
 
     const running = runPublishGate({
@@ -188,8 +194,14 @@ describe("verification repair planning", () => {
   test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
     const context = await tempContext(1);
     await writeArtifact(context, "issue", `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`);
-    await writeArtifact(context, reviewARef(0), reviewWithLedger(finding("N1", "follow-up")));
-    await writeArtifact(context, reviewBRef(0), reviewWithLedger("None"));
+    await writeArtifact(context, reviewARef(0), structuredReview([reviewFinding("follow-up", "Document numbered review curation", {
+      severity: "low",
+      evidence: ["lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact."],
+      currentIssueImpact: "Reviewer findings from normal autorun attempts are promoted after PR publication.",
+      recommendedHandling: "Use numbered review artifacts when curating reviewer-generated issues.",
+      suggestedIssueTitle: "Document numbered review curation",
+    })]));
+    await writeArtifact(context, reviewBRef(0), structuredReview());
     await writeArtifact(context, "issueCreationResults", JSON.stringify({
       created: [{ planItemId: "follow-up-1", kind: "follow-up", title: "Document numbered review curation", url: "https://github.com/owner/repo/issues/100" }],
     }));
@@ -200,15 +212,15 @@ describe("verification repair planning", () => {
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.planItemId).toBe("follow-up-1");
-    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:N1"]);
+    expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:document-numbered-review-curation"]);
     expect(plan.issuesToCreate[0]?.runContext.prUrl).toBe("https://github.com/owner/repo/pull/10");
-    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.md");
+    expect(plan.run.artifactPaths).toContain(".roark/runs/issue/1/attempts/1/review-a-0.json");
   });
 
   test("terminal command-unavailable failures include setup guidance", async () => {
   await noopAsync();
     const context = await tempContext(1);
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
     let failureComment = "";
     let output = "";
     const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
@@ -316,19 +328,6 @@ function failedVerification(exitCode: number, stderr = "lint failed"): Verificat
   };
 }
 
-function reviewWithLedger(entries: string): string {
-  return `# Review A Pass 0\n\n## Verdict\napprove\n\n## Findings Ledger\n${entries}\n\n## Validation Reviewed\nTests.\n`;
-}
-
-function finding(id: string, classification: string): string {
-  return `- Identifier: ${id}
-- Classification: ${classification}
-- Title: Document numbered review curation
-- Severity: low
-- Confidence: high
-- Evidence: lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact.
-- Current-issue impact: Reviewer findings from normal autorun attempts are promoted after PR publication.
-- Recommended handling: Use numbered review artifacts when curating reviewer-generated issues.
-- Suggested issue title (optional): Document numbered review curation
-`;
+function structuredReview(findings: ReviewFinding[] = []): string {
+  return JSON.stringify(reviewResult(findings));
 }

@@ -20,7 +20,10 @@ import {
 import { fetchPullRequestFeedback, isRoarkGeneratedPrSummaryComment, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
-import { correctnessReviewLens, maintainabilityReviewLens, validateReviewOutput, type ReviewLensDefinition } from "../review/contract.ts";
+import { correctnessReviewLens, maintainabilityReviewLens, type ReviewLensDefinition } from "../review/contract.ts";
+import type { ReviewResult } from "../review/result.ts";
+import { reviewArtifactDefinition } from "../review/artifact.ts";
+import { runStructuredArtifact } from "../structured-output/runner.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
@@ -164,17 +167,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     const reviewB = reviewBResult.value;
     await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
-    let decision: PrReviewDecision;
-    try {
-      decision = decidePrReview({
-        reviewA: validateReviewOutput(reviewA, "review-a"),
-        reviewB: validateReviewOutput(reviewB, "review-b"),
-        verification,
-        verificationUnavailable,
-      });
-    } catch (error) {
-      decision = blockedPrReviewDecision(`Reviewer output was invalid: ${errorMessage(error)}`);
-    }
+    let decision: PrReviewDecision = decidePrReview({ reviewA, reviewB, verification, verificationUnavailable });
     await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus });
 
     const latest = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
@@ -265,8 +258,8 @@ async function runReviewer(
   runner: AgentRunner,
   lens: ReviewLensDefinition,
   stage: "reviewA" | "reviewB",
-): Promise<string> {
-  const artifact = stage === "reviewA" ? "review-a.md" : "review-b.md";
+): Promise<ReviewResult> {
+  const artifactName = stage === "reviewA" ? "review-a" : "review-b";
   const display: AgentDisplayContext = {
     command: "review-pr",
     repository: context.repo,
@@ -274,11 +267,11 @@ async function runReviewer(
     phaseId: `pr-review-${lens.reviewerLabel.toLowerCase()}`,
     phaseLabel: `PR review ${lens.reviewerLabel}`,
     pass: context.generation,
-    expectedArtifact: `${context.reviewDirRelative}/${artifact}`,
+    expectedArtifact: `${context.reviewDirRelative}/${artifactName}.md`,
     operation: "review",
   };
   return runPresentedPhase(display, async () => {
-    const content = await runner({
+    const artifact = await runStructuredArtifact({
       cwd: context.agentCwd,
       model: effectiveModelForStage(context.model, stage),
       thinkingLevel: context.thinkingConfig[stage],
@@ -286,10 +279,17 @@ async function runReviewer(
       prompt: prReviewPrompt({ context, comparison: prepared.comparison, lens }),
       fileEditingToolsEnabled: false,
       display,
+    }, runner, reviewArtifactDefinition({
+      allowRestart: false,
+      title: stage === "reviewA" ? "Review A: Spec and Correctness" : "Review B: Standards and Maintainability",
+      source: stage === "reviewA" ? "review-a" : "review-b",
+    }), {
+      writeJson: (content) => writePrReviewArtifact(context, `${artifactName}.json`, content),
+      writeMarkdown: (content) => writePrReviewArtifact(context, `${artifactName}.md`, content),
     });
-    await writePrReviewArtifact(context, artifact, content);
-    return content;
-  }, (content) => ({ outcome: artifactOutcome(content), artifact: display.expectedArtifact }), { manageTitle: false });
+    return artifact;
+  }, (artifact) => ({ outcome: artifactOutcome(artifact.markdown), artifact: display.expectedArtifact }), { manageTitle: false })
+    .then((artifact) => artifact.value);
 }
 
 export function sameRepositoryClosingIssues(feedback: PullRequestFeedback): PullRequestClosingIssue[] {

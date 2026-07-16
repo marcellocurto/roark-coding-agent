@@ -11,9 +11,16 @@ import type { TerminalStream } from "../presentation/terminal.ts";
 
 import { createIssuesFromCurationPlan } from "./create-issues.ts";
 import { noopAsync } from "../utils/async.ts";
+import { issueDraft, submitIssueDrafts } from "../testing/publishing-drafts.ts";
+import type { IssuePublisher } from "../issue-publishing/github.ts";
 
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
+const successfulIssuePublisher: IssuePublisher = async (request) => {
+  await noopAsync();
+  const number = request.title.includes("external-blocker") || request.title.includes("blocker") ? 300 : 301;
+  return { url: `https://github.com/owner/repo/issues/${number}`, number };
+};
 
 afterEach(async () => {
   for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
@@ -105,17 +112,10 @@ describe("createIssuesFromCurationPlan", () => {
       approvalReason: "autorun PR was opened",
       clock,
       labelEnsurer: async (options) => { await noopAsync(); ensured.push(options); },
-      agentRunner: async (request) => {
-        await noopAsync();
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => {
         expect(request.prompt).toContain("autorun PR was opened");
-        return JSON.stringify({
-          created: [
-            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-          ],
-          failed: [],
-          relationshipOutcomes: [],
-        });
+        return submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")] });
       },
     });
 
@@ -156,34 +156,40 @@ describe("createIssuesFromCurationPlan", () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const requests: AgentRunRequest[] = [];
+    const publishRequests: Parameters<IssuePublisher>[0][] = [];
 
     const result = await createIssuesFromCurationPlan({
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async (request) => {
-        await noopAsync();
+      issuePublisher: async (request) => {
+        publishRequests.push(request);
+        return successfulIssuePublisher(request);
+      },
+      agentRunner: (request) => {
         requests.push(request);
-        return JSON.stringify({
-          created: [
-            { planItemId: "external-blocker-1", title: "Clear blocker title", url: "https://github.com/owner/repo/issues/300", number: 300 },
-            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-          ],
-          failed: [],
-          relationshipOutcomes: [{ planItemId: "external-blocker-1", status: "not-requested", message: "No native relationship was requested for this plan item." }],
-        });
+        return submitIssueDrafts(request, { issues: [
+          issueDraft("external-blocker-1", { title: "Clear blocker title" }),
+          issueDraft("follow-up-1"),
+        ] });
       },
     });
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.skillPaths).toBeUndefined();
     expect(requests[0]?.fileEditingToolsEnabled).toBe(false);
-    expect(requests[0]?.prompt).toContain("write the final GitHub issue title and body yourself");
-    expect(requests[0]?.prompt).toContain("Do not copy the plan's proposedBody as the final body");
+    expect(requests[0]?.prompt).toContain("submit_issue_drafts");
     expect(requests[0]?.prompt).toContain("external-blocker-1");
     expect(result.created.map((entry) => entry.number)).toEqual([300, 301]);
     expect(result.created[0]?.title).toBe("Clear blocker title");
-    expect(result.relationshipOutcomes).toEqual([{ planItemId: "external-blocker-1", status: "not-requested", message: "No native relationship was requested for this plan item." }]);
+    expect(result.relationshipOutcomes).toEqual([]);
+    expect(publishRequests[0]?.labels).toEqual(["needs-triage", "review:external-blocker"]);
+    expect(publishRequests[0]?.body).toContain("## Simple summary");
+    expect(publishRequests[0]?.body).toContain("- Source issue: #12 Source title");
+    expect(publishRequests[0]?.body).toContain("- Source finding IDs: review-a:external-blocker-1");
+    expect(publishRequests[0]?.body).not.toContain("## Source\n");
+    expect(JSON.parse(await readArtifact(context, "issueDrafts"))).toHaveProperty("issues.0.planItemId", "external-blocker-1");
+    expect(await readArtifact(context, "issueDraftsMarkdown")).toContain("# Clear blocker title");
   });
 
   test("publishing context names the result artifact and completes only after it is persisted", async () => {
@@ -206,17 +212,14 @@ describe("createIssuesFromCurationPlan", () => {
         context,
         clock,
         labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
         agentRunner: async (request) => {
           await noopAsync();
           expectedArtifact = request.display.expectedArtifact;
-          return JSON.stringify({
-            created: [
-              { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-              { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-            ],
-            failed: [],
-            relationshipOutcomes: [],
-          });
+          return submitIssueDrafts(request, { issues: [
+            issueDraft("external-blocker-1"),
+            issueDraft("follow-up-1"),
+          ] });
         },
       });
     } finally {
@@ -240,26 +243,17 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async (request) => {
-        await noopAsync();
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => {
         requests.push(request);
-        return JSON.stringify({
-          created: [
-            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-          ],
-          failed: [],
-          relationshipOutcomes: [],
-        });
+        return submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")] });
       },
     });
 
     const expectedPlanPath = path.join("..", "control", ".roark", "runs", "issue", "12", "attempts", "2", "issue-curation-plan.json");
-    const expectedResultPath = path.join("..", "control", ".roark", "runs", "issue", "12", "attempts", "2", "issue-creation-results.json");
     expect(requests).toHaveLength(1);
     expect(requests[0]?.cwd).toBe(agentCwd);
     expect(requests[0]?.prompt).toContain(`The curation plan at \`${expectedPlanPath}\``);
-    expect(requests[0]?.prompt).toContain(`Roark will write \`${expectedResultPath}\``);
   });
 
   test("approved publishing agent uses the issue-publishing thinking stage", async () => {
@@ -273,25 +267,17 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async (request) => {
-        await noopAsync();
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => {
         thinkingLevels.push(request.thinkingLevel);
-        return JSON.stringify({
-          created: [
-            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-          ],
-          failed: [],
-          relationshipOutcomes: [],
-        });
+        return submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")] });
       },
     });
 
     expect(thinkingLevels).toEqual(["minimal"]);
   });
 
-  test("approved agent response must cover every creatable plan item exactly once", async () => {
-  await noopAsync();
+  test("structured issue drafts must cover every creatable plan item exactly once", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -299,20 +285,16 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async () => (await noopAsync(), JSON.stringify({
-        created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
-        failed: [],
-        relationshipOutcomes: [],
-      })),
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1")] }),
     });
 
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]?.message).toContain("omitted result for planItemId(s): follow-up-1");
+    expect(result.failed[0]?.message).toContain("Issue drafts omit planItemId(s): follow-up-1");
   });
 
-  test("approved agent response rejects duplicate plan item results", async () => {
-        await noopAsync();
+  test("structured issue drafts reject duplicate plan item IDs", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -320,66 +302,17 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async () => (await noopAsync(), JSON.stringify({
-        created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 }],
-        failed: [
-          { planItemId: "external-blocker-1", message: "duplicate status" },
-          { planItemId: "follow-up-1", message: "not created" },
-        ],
-        relationshipOutcomes: [],
-      })),
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => submitIssueDrafts(request, { issues: [
+        issueDraft("external-blocker-1"),
+        issueDraft("external-blocker-1"),
+        issueDraft("follow-up-1"),
+      ] }),
     });
 
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]?.message).toContain("duplicate result for planItemId(s): external-blocker-1");
-  });
-
-  test("approved agent relationship outcomes must reference approved plan items with status and message", async () => {
-        await noopAsync();
-    const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-
-    const result = await createIssuesFromCurationPlan({
-      context,
-      clock,
-      labelEnsurer: false,
-      agentRunner: async () => (await noopAsync(), JSON.stringify({
-        created: [
-          { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-          { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-        ],
-        failed: [],
-        relationshipOutcomes: [{ planItemId: "outside-plan", status: "created", message: "Created a relationship." }],
-      })),
-    });
-
-    expect(result.created).toEqual([]);
-    expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]?.message).toContain("unknown relationship outcome planItemId 'outside-plan'");
-  });
-
-  test("approved agent relationship outcomes must include status and message", async () => {
-        await noopAsync();
-    const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-
-    const result = await createIssuesFromCurationPlan({
-      context,
-      clock,
-      labelEnsurer: false,
-      agentRunner: async () => (await noopAsync(), JSON.stringify({
-        created: [
-          { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/300", number: 300 },
-          { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/301", number: 301 },
-        ],
-        failed: [],
-        relationshipOutcomes: [{ planItemId: "external-blocker-1", status: "created" }],
-      })),
-    });
-
-    expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]?.message).toContain("without a non-empty message");
+    expect(result.failed[0]?.message).toContain("Issue drafts contain duplicate planItemId(s): external-blocker-1");
   });
 
   test("publishing agent failures are recorded for every creatable issue", async () => {
@@ -406,7 +339,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(artifactExists(context, "issueCreationResults")).toBe(true);
   });
 
-  test("records partial agent-publishing failures while preserving successes", async () => {
+  test("records partial GitHub publishing failures while preserving successes", async () => {
     const context = await tempContext({ yes: true });
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
 
@@ -414,13 +347,14 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async () => {
+      agentRunner: (request) => submitIssueDrafts(request, { issues: [
+        issueDraft("external-blocker-1", { title: "Blocking tracker" }),
+        issueDraft("follow-up-1", { title: "Follow-up tracker" }),
+      ] }),
+      issuePublisher: async (request) => {
         await noopAsync();
-        return JSON.stringify({
-          created: [{ planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/200", number: 200 }],
-          failed: [{ planItemId: "follow-up-1", message: "rate limited" }],
-          relationshipOutcomes: [],
-        });
+        if (request.title === "Follow-up tracker") throw new Error("rate limited");
+        return { url: "https://github.com/owner/repo/issues/200", number: 200 };
       },
     });
 
@@ -444,14 +378,10 @@ describe("createIssuesFromCurationPlan", () => {
       context,
       clock,
       labelEnsurer: false,
-      agentRunner: async () => {
-        await noopAsync();
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => {
         agentCalls += 1;
-        return JSON.stringify({
-          created: [{ planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/11", number: 11 }],
-          failed: [],
-          relationshipOutcomes: [],
-        });
+        return submitIssueDrafts(request, { issues: [issueDraft("follow-up-1")] });
       },
     });
     expect(agentCalls).toBe(1);
@@ -464,17 +394,10 @@ describe("createIssuesFromCurationPlan", () => {
       context: forcedContext,
       clock,
       labelEnsurer: false,
-      agentRunner: async () => {
-        await noopAsync();
+      issuePublisher: successfulIssuePublisher,
+      agentRunner: (request) => {
         forcedAgentCalls += 1;
-        return JSON.stringify({
-          created: [
-            { planItemId: "external-blocker-1", url: "https://github.com/owner/repo/issues/12", number: 12 },
-            { planItemId: "follow-up-1", url: "https://github.com/owner/repo/issues/13", number: 13 },
-          ],
-          failed: [],
-          relationshipOutcomes: [],
-        });
+        return submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")] });
       },
     });
     expect(forcedAgentCalls).toBe(1);
@@ -509,7 +432,7 @@ function basePlan(): IssueCurationPlan {
       runDirRelative: ".roark/runs/issue/12/attempts/2",
       attempt: 2,
       generatedAt: "2026-05-07T00:00:00.000Z",
-      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a.md"],
+      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a-0.json"],
     },
     issuesToCreate: [
       planItem("external-blocker-1", "Blocking tracker", ["needs-triage", "needs-human", "external-blocker"], "external-blocker"),
@@ -527,7 +450,7 @@ function basePlan(): IssueCurationPlan {
       reviewerSources: ["review-a", "review-b"],
       reason: "same title",
     }],
-    warnings: ["parser warning"],
+    warnings: ["source artifact was unavailable"],
   };
 }
 
@@ -550,7 +473,7 @@ function planItem(id: string, title: string, labels: string[], classification: "
     runContext: {
       runDirRelative: ".roark/runs/issue/12/attempts/2",
       attempt: 2,
-      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a.md"],
+      artifactPaths: [".roark/runs/issue/12/attempts/2/review-a-0.json"],
     },
     proposedLabels: labels,
   };

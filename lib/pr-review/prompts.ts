@@ -1,7 +1,7 @@
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewComparison } from "../autorun/workspace.ts";
 import { escapePromptXmlAttribute, escapePromptXmlText } from "../prompts/xml.ts";
-import { renderFindingsLedgerContract, renderReviewVerdictSemantics, type ReviewLensDefinition } from "../review/contract.ts";
+import { renderStructuredReviewContract, type ReviewLensDefinition } from "../review/contract.ts";
 
 export function prReviewPrompt(input: {
   context: PrReviewContext;
@@ -41,9 +41,8 @@ export function prReviewPrompt(input: {
   </source_policy>
   <required_fixes_policy>
     <instruction>${lens.requiredFixesPolicy}</instruction>
-    <instruction>${renderReviewVerdictSemantics("the current PR", false)}</instruction>
   </required_fixes_policy>
-${renderFindingsLedgerContract("the current PR")}
+${renderStructuredReviewContract("the current PR", false)}
   <constraints>
     <instruction>Use shell commands for static inspection only. Do not execute repository code, package scripts, tests, builds, installers, hooks, generated binaries, or the verification command; use the persisted verification artifact as the sole verification result.</instruction>
     <instruction>Do not edit or write repository files, change HEAD, commit, push, publish comments, or alter git configuration.</instruction>
@@ -51,19 +50,7 @@ ${renderFindingsLedgerContract("the current PR")}
     ${lens.extraConstraints.map((constraint) => `<instruction>${escapePromptXmlText(constraint)}</instruction>`).join("\n    ")}
   </constraints>
   <output_contract>
-# Review ${lens.reviewerLabel}
-
-## Verdict
-approve|fixes-required|blocked
-
-## Summary
-
-## Evidence Reviewed
-
-## Required Fixes
-
-## Findings Ledger
-None, or one or more entries containing all required fields.
+Call submit_review with the final structured result. Do not return Markdown.
   </output_contract>
 </pr_review>`;
 }

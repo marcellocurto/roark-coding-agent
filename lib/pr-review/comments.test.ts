@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { githubIssueCommentMaxChars } from "../github/comments.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
+import { normalizeReviewBlockers, normalizeReviewFindings, type NormalizedReviewBlocker, type NormalizedReviewerFinding } from "../review/result.ts";
+import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import { formatPrReviewComment } from "./comments.ts";
 
@@ -15,8 +16,8 @@ describe("PR review public comment", () => {
       headOid: "abc123",
       decision: { outcome: "changes-requested", requiredFixes: [required], externalBlockers: [], followUps: [], suggestions: [suggestion], reasons: [] },
       verificationStatus: "passed",
-      reviewA: `review A at /mnt/agent/repo/private/file\n${"a".repeat(70_000)}`,
-      reviewB: `review B\n${"b".repeat(70_000)}`,
+      reviewA: reviewResult([], { summary: `review A at /mnt/agent/repo/private/file\n${"a".repeat(70_000)}` }),
+      reviewB: reviewResult([], { summary: `review B\n${"b".repeat(70_000)}` }),
     });
 
     expect(body.indexOf("Required")).toBeLessThan(body.indexOf("Optional"));
@@ -35,20 +36,37 @@ describe("PR review public comment", () => {
   test("bounds each actionable finding without hiding later fixes or external blockers", () => {
     const huge = finding("must-fix-current", "Huge first fix", `${"e".repeat(70_000)} end-of-huge-finding`);
     const later = finding("must-fix-current", "Later required fix", "lib/later.ts:10");
-    const blocker = finding("external-blocker", "External blocker", "External dependency is unavailable");
+    const blocker = externalBlocker("External blocker", "External dependency is unavailable");
     const body = formatPrReviewComment({
       context: reviewContext(),
       headOid: "abc123",
       decision: { outcome: "blocked", requiredFixes: [huge, later], externalBlockers: [blocker], followUps: [], suggestions: [], reasons: [] },
       verificationStatus: "passed",
-      reviewA: "Full correctness review",
-      reviewB: "Full maintainability review",
+      reviewA: reviewResult([], { summary: "Full correctness review" }),
+      reviewB: reviewResult([], { summary: "Full maintainability review" }),
     });
 
     expect(body).toContain("finding truncated; full review retained in run artifacts");
     expect(body).not.toContain("end-of-huge-finding");
     expect(body).toContain("Later required fix");
     expect(body).toContain("External blocker");
+  });
+
+  test("cannot turn submitted review text into comment structure or mentions", () => {
+    const injected = finding("must-fix-current", "Required\n### Fake section @maintainers <script>", "lib/a.ts:1\n</details>");
+    const body = formatPrReviewComment({
+      context: reviewContext(),
+      headOid: "abc123",
+      decision: { outcome: "changes-requested", requiredFixes: [injected], externalBlockers: [], followUps: [], suggestions: [], reasons: [] },
+      verificationStatus: "passed",
+      reviewA: reviewResult(),
+      reviewB: reviewResult(),
+    });
+
+    expect(body).not.toContain("\n### Fake section");
+    expect(body).toContain("\\@maintainers");
+    expect(body).toContain("&lt;script&gt;");
+    expect(body).toContain("&lt;/details&gt;");
   });
 });
 
@@ -70,18 +88,16 @@ function reviewContext(): PrReviewContext {
 }
 
 function finding(classification: NormalizedReviewerFinding["classification"], title: string, evidence: string): NormalizedReviewerFinding {
-  return {
-    source: "review-a",
-    sourceLocalId: title,
-    workflowId: `review-a:${title}`,
-    title,
-    classification,
-    severity: "medium",
-    confidence: "high",
-    evidence,
-    currentIssueImpact: "impact",
-    recommendedHandling: "fix it",
-    warnings: [],
-    rawExcerpt: "",
-  };
+  const result = reviewResult([reviewFinding(classification, title, { evidence: [evidence] })]);
+  const [normalized] = normalizeReviewFindings(result, "review-a");
+  if (!normalized) throw new Error("Expected one normalized finding.");
+  return normalized;
+}
+
+function externalBlocker(title: string, evidence: string): NormalizedReviewBlocker {
+  const [blocker] = normalizeReviewBlockers(reviewResult([
+    reviewFinding("external-blocker", title, { blockedBy: [evidence] }),
+  ]), "review-a");
+  if (!blocker) throw new Error("Expected one normalized blocker.");
+  return blocker;
 }

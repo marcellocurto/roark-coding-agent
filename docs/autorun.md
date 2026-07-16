@@ -21,8 +21,8 @@ roark auto --repo owner/repo --limit 1
 8. Run the verification gate.
 9. If verification fails and `maxFixPasses` has budget, repair through a fix pass, code refinement, numbered Review A/B, and readiness, then rerun verification.
 10. On success, commit code changes and push the branch.
-11. A PR publishing agent writes a reviewer-friendly PR title/body from the source issue, workflow artifacts, and verification result, then opens the PR.
-12. Reviewer-generated follow-up issues are created after the PR exists, and a PR body update agent adds their links while preserving the human-authored PR explanation.
+11. A PR authoring agent submits a schema-validated draft from the source issue, workflow artifacts, and verification result. Roark renders the Markdown and opens the PR with `gh`.
+12. Reviewer-generated follow-up issue drafts are submitted as structured data. Roark renders and publishes them, then rerenders the PR body from `pr-draft.json` with their links and updates it directly.
 13. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
 
 ## Recommended posture

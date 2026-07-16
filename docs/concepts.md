@@ -77,15 +77,19 @@ Roark reviews changes on two independent axes:
 
 A change must pass both. Success on one axis never compensates for failure on the other.
 
+Review findings separate routing from constraints. `handling` says whether work belongs in the current fix pass, a follow-up, or an optional suggestion. `blockedBy` independently records outside access, information, dependencies, or human decisions. Roark fixes unblocked current work before stopping on unresolved external constraints.
+
+Every review records concrete inspected evidence, a completeness status, and structured limitations. A limitation can block approval without being disguised as a code finding. Finding IDs are semantic and remain stable across review passes while the same concern persists.
+
 ## Readiness Gate
 
-The readiness gate checks Roark's final readiness artifact. The run can publish only when `readiness.md` declares:
+The readiness gate validates Roark's final `readiness.json` artifact. The run can publish only when its structured decision status is:
 
 ```text
 ready-for-pr
 ```
 
-This gate prevents publishing when the agent workflow itself reports unresolved blockers.
+`readiness.md` is a deterministic human rendering of the same decision; it is never parsed to decide whether to publish.
 
 ## Verification Gate
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { decidePublish, parseReadinessStatus } from "./publish-gate.ts";
+import { decidePublish } from "./publish-gate.ts";
 import type { VerificationResult } from "./verification.ts";
 
 const okVerification: VerificationResult = {
@@ -18,36 +18,6 @@ const failedVerification: VerificationResult = {
   stderr: "errors",
 };
 
-describe("parseReadinessStatus", () => {
-  test("reads ready-for-pr from the readiness markdown", () => {
-    const md = `# PR Readiness\n\n## Status\nready-for-pr\n\n## Issue\n#1\n`;
-    expect(parseReadinessStatus(md)).toBe("ready-for-pr");
-  });
-
-  test("reads not-ready from the readiness markdown", () => {
-    const md = `# PR Readiness\n\n## Status\nnot-ready\n`;
-    expect(parseReadinessStatus(md)).toBe("not-ready");
-  });
-
-  test("tolerates whitespace and casing", () => {
-    const md = `## Status\n  Ready-For-PR  \n`;
-    expect(parseReadinessStatus(md)).toBe("ready-for-pr");
-  });
-
-  test("returns undefined when the section is missing", () => {
-    expect(parseReadinessStatus("# PR Readiness\n\nnope\n")).toBeUndefined();
-  });
-
-  test("returns undefined for unknown status tokens", () => {
-    expect(parseReadinessStatus("## Status\nunclear\n")).toBeUndefined();
-  });
-
-  test("rejects annotated readiness values instead of weakening the publication gate", () => {
-    expect(parseReadinessStatus("## Status\nready-for-pr but not actually ready\n")).toBeUndefined();
-    expect(parseReadinessStatus("## Status\nnot-ready pending maintainer approval\n")).toBeUndefined();
-  });
-});
-
 describe("decidePublish", () => {
   test("blocks publish when readiness is not-ready", () => {
     const decision = decidePublish({ readinessStatus: "not-ready" });
@@ -55,7 +25,7 @@ describe("decidePublish", () => {
       publish: false,
       phase: "readiness",
       reason: 'readiness status is "not-ready"',
-      artifactPath: "readiness.md",
+      artifactPath: "readiness.json",
     });
   });
 
@@ -65,7 +35,7 @@ describe("decidePublish", () => {
     if (decision.publish) return;
     expect(decision.phase).toBe("readiness");
     expect(decision.reason).toContain('"missing"');
-    expect(decision.artifactPath).toBe("readiness.md");
+    expect(decision.artifactPath).toBe("readiness.json");
   });
 
   test("publishes when readiness is ready and verification passed", () => {

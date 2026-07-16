@@ -5,7 +5,6 @@ import { createFileRunObserver } from "../observability/observer.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { presenter, type AgentDisplayContext, type AgentOperation } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { artifactOutcome } from "./markdown-token.ts";
 import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import {
@@ -15,9 +14,8 @@ import {
   implementationRestartLogRef,
   inferNextFixPass,
   inferNextRefinementPass,
+  latestCompleteReviewCycle,
   readArtifact,
-  reviewARef,
-  reviewBRef,
   type ArtifactRef,
   type WorkflowContext,
   writeArtifact,
@@ -27,7 +25,7 @@ import { validateAgentArtifact } from "./artifact-validation.ts";
 import { assertCleanGit, capturePreImplementationBaseline, resetWorktreeToPreImplementationBaseline, type PreImplementationBaseline } from "./git.ts";
 import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
-import { buildReadinessMarkdown } from "./readiness.ts";
+import { buildReadinessArtifacts } from "./readiness.ts";
 import {
   issueArtifactHasRelationshipSnapshot,
   planWorkflowProgression,
@@ -39,13 +37,18 @@ import {
   type CodeRefinementSource,
   fixTask,
   implementationTaskForPass,
-  planDraftTask,
-  planTask,
   reviewATaskForPass,
   reviewBTaskForPass,
-  runAgentTask,
-  triageTask,
+  runChangeReportTask,
+  runPlanDraftTask,
+  runPlanTask,
+  runReviewTask,
+  runTriageTask,
 } from "./tasks.ts";
+import type { ReviewResult } from "../review/result.ts";
+import type { TriageResult } from "../triage/result.ts";
+import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
+import type { ChangeReport } from "../change-report/result.ts";
 
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
@@ -83,16 +86,16 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
   });
 }
 
-export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, triageTask);
+export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<TriageResult> {
+  return runTriageTask(context, runner);
 }
 
-export async function planDraftPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, planDraftTask);
+export async function planDraftPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<ImplementationPlanResult> {
+  return runPlanDraftTask(context, runner);
 }
 
-export async function planPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<string> {
-  return runAgentTask(context, runner, planTask);
+export async function planPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<ImplementationPlanResult> {
+  return runPlanTask(context, runner);
 }
 
 export async function captureBaselinePhase(context: WorkflowContext): Promise<string> {
@@ -116,17 +119,17 @@ export async function captureBaselinePhase(context: WorkflowContext): Promise<st
   }, () => ({ outcome, artifact: display.expectedArtifact }));
 }
 
-export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<string> {
+export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<ChangeReport> {
   const task = implementationTaskForPass(restartPass);
   if (await shouldRegenerateArtifact(context, task.artifact) || restartPass > 0) {
     await assertCleanGit({ cwd: context.agentCwd, yes: context.yes || restartPass > 0 });
   }
-  const content = await runAgentTaskWithForceOverride(context, runner, task, restartPass > 0);
+  const content = await runChangeReportTaskWithForceOverride(context, runner, task, restartPass > 0);
   if (restartPass > 0) {
     await writeArtifact(
       context,
       implementationRestartLogRef(restartPass),
-      `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.md for the implementation log.\n`,
+      `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.json for the authoritative report and implementation-log.md for its human-readable view.\n`,
     );
   }
   return content;
@@ -136,8 +139,8 @@ export async function codeRefinementPhase(
   context: WorkflowContext,
   pass = inferNextRefinementPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<string> {
-  return runAgentTask(context, runner, codeRefinementTask(pass, codeRefinementSourceForPass(context, pass)));
+): Promise<ChangeReport> {
+  return runChangeReportTask(context, runner, codeRefinementTask(pass, codeRefinementSourceForPass(context, pass)));
 }
 
 function codeRefinementSourceForPass(context: WorkflowContext, pass: number): CodeRefinementSource {
@@ -151,22 +154,26 @@ export async function reviewPhase(
   context: WorkflowContext,
   pass = inferNextReviewPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<{ reviewA: string; reviewB: string }> {
-  const reviewA = await runAgentTask(context, runner, reviewATaskForPass(pass));
-  const reviewB = await runAgentTask(context, runner, reviewBTaskForPass(pass));
-  return { reviewA, reviewB };
+): Promise<{ reviewA: ReviewResult; reviewB: ReviewResult }> {
+  const [reviewA, reviewB] = await Promise.allSettled([
+    runReviewTask(context, runner, reviewATaskForPass(pass)),
+    runReviewTask(context, runner, reviewBTaskForPass(pass)),
+  ]);
+  if (reviewA.status === "rejected") throw reviewA.reason;
+  if (reviewB.status === "rejected") throw reviewB.reason;
+  return { reviewA: reviewA.value, reviewB: reviewB.value };
 }
 
 export async function fixPhase(
   context: WorkflowContext,
   pass = inferNextFixPass(context),
   runner: AgentRunner = runPiAgent,
-): Promise<string> {
+): Promise<ChangeReport> {
   const task = fixTask(pass);
   if (await shouldRegenerateArtifact(context, task.artifact)) {
     await assertCleanGit({ cwd: context.agentCwd, yes: true });
   }
-  return runAgentTask(context, runner, task);
+  return runChangeReportTask(context, runner, task);
 }
 
 export async function resetBaselinePhase(context: WorkflowContext, pass: number): Promise<string> {
@@ -185,11 +192,12 @@ export async function readinessPhase(context: WorkflowContext): Promise<string> 
   const display = deterministicDisplay(context, "readiness", "Readiness", "readiness.md", "inspect");
   await context.observer?.phaseStarted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
   return runPresentedPhase(display, async () => {
-    const readiness = await buildReadinessMarkdown(context);
-    await writeArtifact(context, "readiness", readiness);
+    const readiness = await buildReadinessArtifacts(context);
+    await writeJsonArtifact(context, "readiness", readiness.result);
+    await writeArtifact(context, "readinessMarkdown", readiness.markdown);
     await context.observer?.phaseCompleted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
-    return readiness;
-  }, (readiness) => ({ outcome: artifactOutcome(readiness), artifact: "readiness.md" }), {
+    return readiness.markdown;
+  }, () => ({ outcome: "generated", artifact: "readiness.md" }), {
     onError: (error) => context.observer?.phaseFailed({ phase: "readiness", label: "Readiness", artifact: "readiness", error }),
   });
 }
@@ -229,6 +237,17 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
     }
 
     if (next.type === "run") {
+      const following = progression.actions[1];
+      if (
+        next.phase === "review-a" &&
+        following?.type === "run" &&
+        following.phase === "review-b" &&
+        following.pass === next.pass
+      ) {
+        await reviewPhase(context, next.pass ?? 0, runner);
+        completedActions.push(next, following);
+        continue;
+      }
       await runWorkflowPhase(context, runner, next.phase, next.pass);
       completedActions.push(next);
       continue;
@@ -264,8 +283,8 @@ async function runWorkflowPhase(
     case "capture-baseline": await captureBaselinePhase(context); return;
     case "implement": await implementationPhase(context, runner, pass ?? 0); return;
     case "refine-code": await codeRefinementPhase(context, pass, runner); return;
-    case "review-a": await runAgentTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
-    case "review-b": await runAgentTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
+    case "review-a": await runReviewTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
+    case "review-b": await runReviewTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
     case "fix": await fixPhase(context, pass, runner); return;
     case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
     default: return assertNever(phase);
@@ -277,22 +296,20 @@ function assertNever(value: never): never {
 }
 
 function inferNextReviewPass(context: WorkflowContext): number {
-  for (let pass = 0; ; pass++) {
-    if (!artifactExists(context, reviewARef(pass)) || !artifactExists(context, reviewBRef(pass))) return pass;
-  }
+  return (latestCompleteReviewCycle(context) ?? -1) + 1;
 }
 
-async function runAgentTaskWithForceOverride(
+async function runChangeReportTaskWithForceOverride(
   context: WorkflowContext,
   runner: AgentRunner,
-  task: Parameters<typeof runAgentTask>[2],
+  task: Parameters<typeof runChangeReportTask>[2],
   force: boolean,
-): Promise<string> {
-  if (!force) return runAgentTask(context, runner, task);
+): Promise<ChangeReport> {
+  if (!force) return runChangeReportTask(context, runner, task);
   const previous = context.force;
   context.force = true;
   try {
-    return await runAgentTask(context, runner, task);
+    return await runChangeReportTask(context, runner, task);
   } finally {
     context.force = previous;
   }

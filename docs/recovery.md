@@ -37,6 +37,7 @@ Uncommitted failed work is recoverable only while the persistent issue workspace
 - `.roark/runs/issue/<n>/attempts/<k>/summary.json`
 - `.roark/runs/issue/<n>/attempts/<k>/verification.md`
 - `.roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>.md`
+- `.roark/runs/issue/<n>/attempts/<k>/readiness.json`
 - `.roark/runs/issue/<n>/attempts/<k>/readiness.md`
 
 See [Artifacts](artifacts.md) for the full layout.
@@ -44,7 +45,7 @@ See [Artifacts](artifacts.md) for the full layout.
 ## Recovery checklist
 
 1. Open `summary.json`.
-2. Open `readiness.md` and `verification.md`.
+2. Open `readiness.md` and `verification.md`; use `readiness.json` when auditing the exact gate state.
 3. Inspect the managed workspace if uncommitted edits matter.
 4. Fix host setup, config, hook, ignored-file, or code issues.
 5. Run `roark continue`.

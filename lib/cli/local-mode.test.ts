@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createWorkflowContext, writeArtifact } from "../workflow/artifacts.ts";
+import { createWorkflowContext, writeJsonArtifact } from "../workflow/artifacts.ts";
+import { readinessResult } from "../testing/workflow-results.ts";
 import {
   formatDoLocalModeStartMessage,
   printDoLocalModeReadyMessageIfReady,
@@ -38,7 +39,7 @@ describe("do local/manual mode messaging", () => {
       yes: false,
       maxFixPasses: 1,
     });
-    await writeArtifact(context, "readiness", "# PR Readiness\n\n## Status\nready-for-pr\n");
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
 
     const logs: string[] = [];
     await printDoLocalModeReadyMessageIfReady(context, (message) => logs.push(message));

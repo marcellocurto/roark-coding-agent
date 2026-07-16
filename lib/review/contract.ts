@@ -1,23 +1,24 @@
-import { parseReviewFindings, type ParsedReviewFindings, type ReviewFindingSource } from "../workflow/findings.ts";
-import { parseVerdict } from "../workflow/verdicts.ts";
-
 export type ReviewLensName = "correctness" | "maintainability";
 
-export function renderFindingsLedgerContract(subject: string): string {
-  return `  <findings_ledger_contract>
-    <instruction>Output a structured Findings Ledger as the canonical list of review findings.</instruction>
-    <instruction>Classify each finding as exactly one of: <value>must-fix-current</value>, <value>external-blocker</value>, <value>follow-up</value>, or <value>suggestion</value>.</instruction>
-    <instruction>Each finding must include: identifier, classification, title, severity, confidence, evidence, current-issue impact, recommended handling, and optional suggested issue title.</instruction>
-    <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed.</instruction>
-    <instruction>Use <value>external-blocker</value> when the workflow cannot safely proceed without outside information, access, dependency resolution, or human decision.</instruction>
-    <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval.</instruction>
-    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements.</instruction>
-  </findings_ledger_contract>`;
-}
-
-export function renderReviewVerdictSemantics(subject: string, allowRestart: boolean): string {
-  const restart = allowRestart ? ", <value>restart-required</value> when the implementation direction is fundamentally wrong and resetting is safer than incremental fixes" : "";
-  return `Verdict semantics: use <value>approve</value> when ${subject} has no current required fixes, <value>fixes-required</value> when at least one <value>must-fix-current</value> finding blocks ${subject}${restart}, and <value>blocked</value> when outside information, access, dependency resolution, or a human decision prevents a safe verdict.`;
+export function renderStructuredReviewContract(subject: string, allowRestart: boolean): string {
+  return `  <structured_review_contract>
+    <instruction>Complete the review only by calling <tool>submit_review</tool>. Do not return a Markdown review.</instruction>
+    <instruction>Record at least one concrete item in evidenceReviewed. Do not claim a complete review without inspecting the relevant diff and requirements or repository guidance.</instruction>
+    <instruction>Give every finding a stable semantic kebab-case id and reuse that id in later passes while the same concern persists.</instruction>
+    <instruction>Set each finding's handling to exactly one of: <value>must-fix-current</value>, <value>follow-up</value>, or <value>suggestion</value>. Handling controls routing; severity describes impact and confidence describes certainty.</instruction>
+    <instruction>Each finding must include id, handling, blockedBy, title, severity, confidence, concrete evidence, current-issue impact, and recommended handling; it may include a suggested issue title for separate tracking.</instruction>
+    <instruction>Use <value>must-fix-current</value> only when ${subject} cannot be approved until this repository change is fixed, and only with medium or high confidence.</instruction>
+    <instruction>Use blockedBy independently of handling when outside information, access, dependency resolution, or a human decision prevents the finding from being handled. Leave blockedBy empty when local work can proceed.</instruction>
+    <instruction>Use <value>follow-up</value> for valid concerns outside ${subject}; these must not block approval unless blockedBy independently records an external constraint.</instruction>
+    <instruction>Use <value>suggestion</value> for optional, non-blocking improvements. A critical concern cannot be a suggestion.</instruction>
+    <instruction>Set completeness to <value>limited</value> and report structured limitations whenever relevant review coverage was unavailable. Mark blocksApproval only when the missing coverage makes approval unsafe. Use <value>complete</value> with no limitations otherwise.</instruction>
+    <instruction>Use additionalSections for material problem-specific synthesis, alternatives, positive observations, hypotheses, or non-blocking questions that do not fit the standard fields. Choose each heading freely.</instruction>
+    <instruction>Additional sections are non-routing context. Every concern that can affect approval or workflow routing must still be represented as a finding or limitation; do not hide actionable work in an additional section.</instruction>
+    <instruction>Roark derives the outcome from the submitted findings; do not provide a separate verdict.</instruction>
+    ${allowRestart
+      ? "<instruction>Set restartRecommendation only when resetting to the pre-implementation baseline is safer than incremental fixes. Reference every relevant unblocked must-fix finding by id.</instruction>"
+      : "<instruction>Do not set restartRecommendation in this workflow.</instruction>"}
+  </structured_review_contract>`;
 }
 
 export interface ReviewLensDefinition {
@@ -46,6 +47,7 @@ export const correctnessReviewLens: ReviewLensDefinition = {
     "Logic bugs, off-by-one errors, and unhandled edge cases or invalid inputs.",
     "Missing or incorrect error handling, race conditions, and ordering issues.",
     "Regressions or broken contracts in unrelated callers touched by the diff.",
+    "Cross-cutting risks implicated by the change, including security, privacy, accessibility, data migration, performance, licensing, and operational behavior. Record a limitation instead of claiming coverage that was unavailable.",
     "Missing behavior-oriented regression coverage only where a realistic defect could escape existing tests. Coverage should exercise a stable behavior seam and survive internal refactoring. Do not require tests by default.",
     "Gaps or unsubstantiated claims in available validation evidence.",
   ],
@@ -82,25 +84,3 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
   requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
   extraConstraints: ["Do not read Review Agent A's output."],
 };
-
-export interface ValidatedReviewOutput {
-  verdict: "approve" | "fixes-required" | "blocked";
-  findings: ParsedReviewFindings;
-}
-
-export function validateReviewOutput(markdown: string, source: ReviewFindingSource): ValidatedReviewOutput {
-  if (!markdown.trim()) throw new Error(`${source} output is empty.`);
-  const findings = parseReviewFindings(markdown, source);
-  const parsedVerdict = parseVerdict(markdown);
-  const verdict = parsedVerdict === "approve" || parsedVerdict === "fixes-required" || parsedVerdict === "blocked"
-    ? parsedVerdict
-    : inferVerdict(findings);
-  return { verdict, findings };
-}
-
-function inferVerdict(findings: ParsedReviewFindings): ValidatedReviewOutput["verdict"] {
-  if (findings.findings.some((finding) => finding.classification === "external-blocker")) return "blocked";
-  if (findings.findings.some((finding) => finding.classification === "must-fix-current")) return "fixes-required";
-  if (findings.findings.length > 0 && findings.rejected.length === 0) return "approve";
-  return "fixes-required";
-}

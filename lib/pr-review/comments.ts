@@ -1,6 +1,6 @@
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment } from "../github/comments.ts";
-import type { NormalizedReviewerFinding } from "../workflow/findings.ts";
+import { escapeReviewMarkdownText, formatReviewResultMarkdown, type NormalizedReviewBlocker, type NormalizedReviewerFinding, type ReviewResult } from "../review/result.ts";
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewDecision } from "./outcome.ts";
 
@@ -17,11 +17,12 @@ export function formatPrReviewComment(input: {
   headOid: string;
   decision: PrReviewDecision;
   verificationStatus: string;
-  reviewA: string;
-  reviewB: string;
+  reviewA: ReviewResult;
+  reviewB: ReviewResult;
 }): string {
   const localRoots = [input.context.controlCwd, input.context.agentCwd, input.context.outDir, input.context.reviewDir];
   const sanitize = (value: string) => sanitizePublicMarkdown(value, { localRoots });
+  const renderReviewText = (value: string) => escapeReviewMarkdownText(sanitize(value));
   const lines = [
     buildPrReviewMarker(input.context.prNumber),
     "",
@@ -32,23 +33,29 @@ export function formatPrReviewComment(input: {
     `- Verification: ${sanitize(input.verificationStatus)}`,
     "",
     "### Required fixes",
-    ...renderFindings(input.decision.requiredFixes, sanitize, blockingFindingSectionMaxChars),
+    ...renderFindings(input.decision.requiredFixes, renderReviewText, blockingFindingSectionMaxChars),
     "",
     "### External blockers",
-    ...renderFindings(input.decision.externalBlockers, sanitize, blockingFindingSectionMaxChars),
+    ...renderBlockers(input.decision.externalBlockers, renderReviewText, blockingFindingSectionMaxChars),
     "",
     "### Outcome notes",
     ...(input.decision.reasons.length > 0 ? input.decision.reasons.map((reason) => `- ${sanitize(reason)}`) : ["- None."]),
     "",
     "### Follow-ups",
-    ...renderFindings(input.decision.followUps, sanitize, nonBlockingFindingSectionMaxChars),
+    ...renderFindings(input.decision.followUps, renderReviewText, nonBlockingFindingSectionMaxChars),
     "",
     "### Suggestions",
-    ...renderFindings(input.decision.suggestions, sanitize, nonBlockingFindingSectionMaxChars),
+    ...renderFindings(input.decision.suggestions, renderReviewText, nonBlockingFindingSectionMaxChars),
     "",
-    formatBoundedMarkdownDetails("Correctness review details", sanitize(input.reviewA)),
+    formatBoundedMarkdownDetails("Correctness review details", sanitize(formatReviewResultMarkdown(input.reviewA, {
+      title: "Review A: Spec and Correctness",
+      source: "review-a",
+    }))),
     "",
-    formatBoundedMarkdownDetails("Maintainability review details", sanitize(input.reviewB)),
+    formatBoundedMarkdownDetails("Maintainability review details", sanitize(formatReviewResultMarkdown(input.reviewB, {
+      title: "Review B: Standards and Maintainability",
+      source: "review-b",
+    }))),
   ];
   return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
@@ -69,9 +76,19 @@ function renderFindings(findings: readonly NormalizedReviewerFinding[], sanitize
   if (findings.length === 0) return ["- None."];
   const maxChars = Math.min(findingMaxChars, Math.max(1, Math.floor(sectionMaxChars / findings.length)));
   return findings.map((finding) => {
-    const evidence = sanitize(finding.evidence);
+    const evidence = finding.evidence.map(sanitize).join(" ");
     const handling = sanitize(finding.recommendedHandling);
     const rendered = `- **${sanitize(finding.title)}** (${sanitize(finding.severity)}, ${sanitize(finding.confidence)}) — ${evidence} Recommended handling: ${handling}`;
+    return truncateFinding(rendered, maxChars);
+  });
+}
+
+function renderBlockers(blockers: readonly NormalizedReviewBlocker[], sanitize: (value: string) => string, sectionMaxChars: number): string[] {
+  if (blockers.length === 0) return ["- None."];
+  const maxChars = Math.min(findingMaxChars, Math.max(1, Math.floor(sectionMaxChars / blockers.length)));
+  return blockers.map((blocker) => {
+    const evidence = blocker.evidence.map(sanitize).join(" ");
+    const rendered = `- **${sanitize(blocker.title)}** — ${evidence} Recommended handling: ${sanitize(blocker.recommendedHandling)}`;
     return truncateFinding(rendered, maxChars);
   });
 }

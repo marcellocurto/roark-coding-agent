@@ -47,7 +47,7 @@ An isolated clone where Roark runs the agent and verification away from the cont
 
 ## Readiness Gate
 
-The gate that checks `readiness.md` for `ready-for-pr`.
+The gate that validates `readiness.json` and requires its structured decision status to be `ready-for-pr`.
 
 ## PR Review Generation
 

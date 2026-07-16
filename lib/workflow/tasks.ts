@@ -8,16 +8,19 @@ import {
   type ArtifactRef,
   baselineResetLogRef,
   fixLogRef,
+  fixLogMarkdownRef,
   implementationRestartLogRef,
   readArtifact,
   refinementLogRef,
+  refinementLogMarkdownRef,
   reviewARef,
+  reviewAMarkdownRef,
   reviewBRef,
+  reviewBMarkdownRef,
   requireArtifacts,
   type WorkflowContext,
   writeArtifact,
 } from "./artifacts.ts";
-import { ArtifactValidationError, validateAgentArtifact } from "./artifact-validation.ts";
 import {
   codeRefinementPrompt,
   fixPrompt,
@@ -30,9 +33,31 @@ import {
   triagePrompt,
 } from "../prompts/workflow-prompts.ts";
 import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
+import { normalizeReviewPair, parseReviewResultJson, type ReviewFindingSource, type ReviewResult } from "../review/result.ts";
+import { ReviewOutputContractError, reviewArtifactDefinition } from "../review/artifact.ts";
+import {
+  parseTriageResultJson,
+  triageArtifactDefinition,
+  TriageOutputContractError,
+  type TriageResult,
+} from "../triage/result.ts";
+import {
+  implementationPlanArtifactDefinition,
+  ImplementationPlanOutputContractError,
+  parseImplementationPlanResultJson,
+  type ImplementationPlanKind,
+  type ImplementationPlanResult,
+} from "../implementation-plan/result.ts";
+import {
+  ChangeReportOutputContractError,
+  changeReportArtifactDefinition,
+  parseChangeReportJson,
+  requireAddressedFindingIds,
+  type ChangeReport,
+} from "../change-report/result.ts";
+import { runStructuredArtifact, type StructuredArtifactDefinition } from "../structured-output/runner.ts";
 import { presenter, type AgentDisplayContext, type AgentOperation } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { artifactOutcome } from "./markdown-token.ts";
 
 export interface AgentTask {
   artifact: ArtifactRef;
@@ -76,7 +101,7 @@ export class AgentTaskRunError extends Error {
   }
 }
 
-export const triageTask: AgentTask = {
+const triageTask: AgentTask = {
   artifact: "triage",
   label: "Triage",
   fileEditingToolsEnabled: false,
@@ -85,7 +110,7 @@ export const triageTask: AgentTask = {
   prompt: triagePrompt,
 };
 
-export const planDraftTask: AgentTask = {
+const planDraftTask: AgentTask = {
   artifact: "implementationPlanDraft",
   label: "Implementation plan draft",
   fileEditingToolsEnabled: false,
@@ -94,7 +119,7 @@ export const planDraftTask: AgentTask = {
   prompt: planDraftPrompt,
 };
 
-export const planTask: AgentTask = {
+const planTask: AgentTask = {
   artifact: "implementationPlan",
   label: "Implementation plan refinement",
   fileEditingToolsEnabled: false,
@@ -172,52 +197,277 @@ export function fixTask(pass: number): AgentTask {
   };
 }
 
-export async function runAgentTask(
+export async function runReviewTask(
   context: WorkflowContext,
   runner: AgentRunner,
   task: AgentTask,
   retryOptions: AgentTaskRetryOptions = {},
-): Promise<string> {
-  requireArtifacts(context, ...task.prerequisites);
+): Promise<ReviewResult> {
+  const presentation = reviewPresentation(task.artifact, task.label);
+  return runStructuredArtifactTask(context, runner, task, retryOptions, {
+    parse: (content) => parseReviewResultJson(content, { allowRestart: true }),
+    definition: reviewArtifactDefinition({
+      allowRestart: true,
+      title: task.label,
+      source: presentation.source,
+    }),
+    markdownArtifact: presentation.markdownArtifact,
+    isOutputContractError: (error) => error instanceof ReviewOutputContractError,
+  });
+}
 
+export function runTriageTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<TriageResult> {
+  return runStructuredArtifactTask(context, runner, triageTask, retryOptions, {
+    parse: parseTriageResultJson,
+    definition: triageArtifactDefinition,
+    markdownArtifact: "triageMarkdown",
+    isOutputContractError: (error) => error instanceof TriageOutputContractError,
+  });
+}
+
+export function runPlanDraftTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<ImplementationPlanResult> {
+  return runImplementationPlanTask(context, runner, planDraftTask, "draft", retryOptions);
+}
+
+export function runPlanTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<ImplementationPlanResult> {
+  return runImplementationPlanTask(context, runner, planTask, "final", retryOptions);
+}
+
+export async function runChangeReportTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: AgentTask,
+  retryOptions: AgentTaskRetryOptions = {},
+): Promise<ChangeReport> {
+  const presentation = changeReportPresentation(task.artifact);
+  const expectedFindingIds = await requiredFixFindingIds(context, task.artifact);
+  const validateForTask = (report: ChangeReport) => {
+    if (expectedFindingIds !== undefined) return requireAddressedFindingIds(report, expectedFindingIds);
+    if (report.addressedFindingIds.length > 0) {
+      throw new ChangeReportOutputContractError("Only fix reports may contain addressedFindingIds.");
+    }
+    return report;
+  };
+
+  return runStructuredArtifactTask(context, runner, task, retryOptions, {
+    parse: (content) => validateForTask(parseChangeReportJson(content)),
+    definition: changeReportArtifactDefinition({ title: presentation.title, validate: validateForTask }),
+    markdownArtifact: presentation.markdownArtifact,
+    isOutputContractError: (error) => error instanceof ChangeReportOutputContractError,
+    retryCompletionInstruction: "finish the phase, run validation, and call submit_change_report with the complete structured report",
+  });
+}
+
+function runImplementationPlanTask(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: AgentTask,
+  kind: ImplementationPlanKind,
+  retryOptions: AgentTaskRetryOptions,
+): Promise<ImplementationPlanResult> {
+  return runStructuredArtifactTask(context, runner, task, retryOptions, {
+    parse: parseImplementationPlanResultJson,
+    definition: implementationPlanArtifactDefinition(kind),
+    markdownArtifact: kind === "draft" ? "implementationPlanDraftMarkdown" : "implementationPlanMarkdown",
+    isOutputContractError: (error) => error instanceof ImplementationPlanOutputContractError,
+  });
+}
+
+async function runStructuredArtifactTask<T>(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  task: AgentTask,
+  retryOptions: AgentTaskRetryOptions,
+  contract: {
+    parse: (content: string) => T;
+    definition: StructuredArtifactDefinition<T>;
+    markdownArtifact: ArtifactRef;
+    isOutputContractError: (error: unknown) => boolean;
+    retryCompletionInstruction?: string | undefined;
+  },
+): Promise<T> {
+  const prepared = prepareTaskRun(context, task);
+  const existing = await reuseTaskArtifact(context, task, prepared, contract.parse);
+  if (existing.reused) {
+    await writeArtifact(context, contract.markdownArtifact, contract.definition.formatMarkdown(existing.value));
+    return existing.value;
+  }
+
+  return executeTaskLifecycle(context, task, prepared, {
+    run: async () => {
+      const artifact = await runStructuredArtifact(
+        prepared.createRequest(),
+        (agentRequest) => runAgentRequestWithTransientRetries(
+          runner,
+          agentRequest,
+          task,
+          retryOptions,
+          contract.retryCompletionInstruction,
+        ),
+        contract.definition,
+        {
+          writeJson: (content) => writeArtifact(context, task.artifact, content),
+          writeMarkdown: (content) => writeArtifact(context, contract.markdownArtifact, content),
+        },
+      );
+      return artifact.value;
+    },
+    failurePhase: (error) => contract.isOutputContractError(error) ? "output-contract" : "agent-error",
+  });
+}
+
+function reviewPresentation(
+  artifact: ArtifactRef,
+  title: string,
+): { markdownArtifact: ArtifactRef; source: ReviewFindingSource } {
+  if (typeof artifact !== "string" && artifact.name === "reviewA") {
+    return { markdownArtifact: reviewAMarkdownRef(artifact.pass), source: "review-a" };
+  }
+  if (typeof artifact !== "string" && artifact.name === "reviewB") {
+    return { markdownArtifact: reviewBMarkdownRef(artifact.pass), source: "review-b" };
+  }
+  throw new Error(`${title} does not target a review artifact.`);
+}
+
+function changeReportPresentation(artifact: ArtifactRef): { markdownArtifact: ArtifactRef; title: string } {
+  if (artifact === "implementationLog") {
+    return { markdownArtifact: "implementationLogMarkdown", title: "Implementation Log" };
+  }
+  if (typeof artifact !== "string" && artifact.name === "refinementLog") {
+    return { markdownArtifact: refinementLogMarkdownRef(artifact.pass), title: `Refinement Log Pass ${artifact.pass}` };
+  }
+  if (typeof artifact !== "string" && artifact.name === "fixLog") {
+    return { markdownArtifact: fixLogMarkdownRef(artifact.pass), title: `Fix Log Pass ${artifact.pass}` };
+  }
+  throw new Error(`Artifact ${typeof artifact === "string" ? artifact : `${artifact.name}-${artifact.pass}`} is not a change report.`);
+}
+
+async function requiredFixFindingIds(context: WorkflowContext, artifact: ArtifactRef): Promise<string[] | undefined> {
+  if (typeof artifact === "string" || artifact.name !== "fixLog") return undefined;
+  const previousCycle = Math.max(0, artifact.pass - 1);
+  const [reviewA, reviewB] = await Promise.all([
+    readArtifact(context, reviewARef(previousCycle)),
+    readArtifact(context, reviewBRef(previousCycle)),
+  ]);
+  return normalizeReviewPair({
+    reviewA: parseReviewResultJson(reviewA, { allowRestart: true }),
+    reviewB: parseReviewResultJson(reviewB, { allowRestart: true }),
+  })
+    .filter((finding) => finding.classification === "must-fix-current" && finding.blockedBy.length === 0)
+    .map((finding) => finding.workflowId);
+}
+
+function prepareTaskRun(context: WorkflowContext, task: AgentTask) {
+  requireArtifacts(context, ...task.prerequisites);
   const phase = phaseNameForArtifact(task.artifact);
   const thinkingLevel = thinkingLevelForTask(context, task);
   const model = effectiveModelForStage(context.model, task.thinkingStage);
-
-  if (!context.force && artifactExists(context, task.artifact)) {
-    const existing = await readArtifact(context, task.artifact);
-    const validation = validateAgentArtifact(task.artifact, existing);
-    if (validation.ok) {
-      const display = displayContextForTask(context, task, phase);
-      return runPresentedPhase(display, async () => {
-        await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, reused: true });
-        return existing;
-      }, () => ({
-        outcome: `reused ${artifactOutcome(existing)}`,
-        artifact: artifactRelativePath(context, task.artifact),
-      }));
-    }
-    presenter().warning(
-      `WARNING ${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${validation.reason}); regenerating.`,
-    );
-  }
-
   const display = displayContextForTask(context, task, phase);
-  await context.observer?.phaseStarted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
-  return runPresentedPhase(display, async () => {
+  const createRequest = (): AgentRunRequest => ({
+    cwd: context.agentCwd,
+    model,
+    thinkingLevel,
+    systemPrompt: sharedSystemPrompt,
+    prompt: task.prompt(context),
+    fileEditingToolsEnabled: task.fileEditingToolsEnabled,
+    observer: context.observer,
+    display,
+  });
+  return { phase, thinkingLevel, model, display, createRequest };
+}
+
+type PreparedTaskRun = ReturnType<typeof prepareTaskRun>;
+type ReusedTaskArtifact<T> = { reused: true; value: T } | { reused: false };
+
+async function reuseTaskArtifact<T>(
+  context: WorkflowContext,
+  task: AgentTask,
+  prepared: PreparedTaskRun,
+  parse: (content: string) => T,
+): Promise<ReusedTaskArtifact<T>> {
+  if (context.force || !artifactExists(context, task.artifact)) return { reused: false };
+  const content = await readArtifact(context, task.artifact);
+  try {
+    const value = parse(content);
+    return await runPresentedPhase(prepared.display, async () => {
+      await context.observer?.phaseCompleted({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+        reused: true,
+      });
+      return { reused: true as const, value };
+    }, () => ({
+      outcome: "reused",
+      artifact: artifactRelativePath(context, task.artifact),
+    }));
+  } catch (error) {
+    presenter().warning(
+      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(error)}); regenerating.`,
+    );
+    return { reused: false };
+  }
+}
+
+async function executeTaskLifecycle<T>(
+  context: WorkflowContext,
+  task: AgentTask,
+  prepared: PreparedTaskRun,
+  options: {
+    run: () => Promise<T>;
+    failurePhase: (error: unknown) => AgentTaskFailurePhase;
+    persistFailure?: ((phase: AgentTaskFailurePhase, error: unknown) => Promise<void>) | undefined;
+  },
+): Promise<T> {
+  await context.observer?.phaseStarted({
+    phase: prepared.phase,
+    label: task.label,
+    artifact: task.artifact,
+    model: prepared.model,
+    thinkingLevel: prepared.thinkingLevel,
+  });
+  return runPresentedPhase(prepared.display, async () => {
     try {
-      const content = await runTaskWithOutputContract(context, runner, task, display, retryOptions);
-      await writeArtifact(context, task.artifact, content);
-      await context.observer?.phaseCompleted({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel });
-      return content;
+      const result = await options.run();
+      await context.observer?.phaseCompleted({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+      });
+      return result;
     } catch (error) {
-      const failurePhase = error instanceof ArtifactValidationError ? "output-contract" : "agent-error";
-      const diagnostic = formatAgentTaskErrorArtifact({ context, task, phase: failurePhase, error });
-      await writeArtifact(context, task.artifact, diagnostic);
-      await context.observer?.phaseFailed({ phase, label: task.label, artifact: task.artifact, model, thinkingLevel, error });
+      const failurePhase = options.failurePhase(error);
+      await options.persistFailure?.(failurePhase, error);
+      await context.observer?.phaseFailed({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+        error,
+      });
       throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
     }
-  }, (content) => ({ outcome: artifactOutcome(content), artifact: artifactRelativePath(context, task.artifact) }), {
+  }, () => ({
+    outcome: "completed",
+    artifact: artifactRelativePath(context, task.artifact),
+  }), {
     failure: (error) => ({
       outcome: error instanceof AgentTaskRunError ? error.originalMessage : formatError(error),
       artifact: artifactRelativePath(context, task.artifact),
@@ -225,51 +475,21 @@ export async function runAgentTask(
   });
 }
 
-async function runTaskWithOutputContract(
-  context: WorkflowContext,
-  runner: AgentRunner,
-  task: AgentTask,
-  display: AgentDisplayContext,
-  retryOptions: AgentTaskRetryOptions,
-): Promise<string> {
-  const request = {
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, task.thinkingStage),
-    thinkingLevel: thinkingLevelForTask(context, task),
-    systemPrompt: sharedSystemPrompt,
-    fileEditingToolsEnabled: task.fileEditingToolsEnabled,
-    observer: context.observer,
-    display,
-  };
-  const prompt = task.prompt(context);
-
-  const first = await runAgentRequestWithTransientRetries(runner, { ...request, prompt }, task, retryOptions);
-  const firstValidation = validateAgentArtifact(task.artifact, first);
-  if (firstValidation.ok) return first;
-
-  presenter().warning(`${task.label}: output invalid (${firstValidation.reason}); retrying once.`);
-  const second = await runAgentRequestWithTransientRetries(runner, {
-    ...request,
-    prompt: repairPrompt(prompt, task, firstValidation.reason, first),
-  }, task, retryOptions);
-  const secondValidation = validateAgentArtifact(task.artifact, second);
-  if (secondValidation.ok) return second;
-
-  throw new ArtifactValidationError(task.artifact, secondValidation.reason);
-}
-
 async function runAgentRequestWithTransientRetries(
   runner: AgentRunner,
   request: AgentRunRequest,
   task: AgentTask,
   options: AgentTaskRetryOptions,
+  retryCompletionInstruction?: string,
 ): Promise<string> {
   const delaysMs = options.delaysMs ?? transientAgentRetryDelaysMs;
   const sleep = options.sleep ?? defaultSleep;
 
   for (let retryIndex = 0; ; retryIndex++) {
     try {
-      const attemptRequest = retryIndex === 0 ? request : withTransientConnectionRetryPrompt(request, task);
+      const attemptRequest = retryIndex === 0
+        ? request
+        : withTransientConnectionRetryPrompt(request, task, retryCompletionInstruction);
       return await runner(attemptRequest);
     } catch (error) {
       if (!isTransientAgentConnectionError(error) || retryIndex >= delaysMs.length) throw error;
@@ -285,11 +505,15 @@ async function runAgentRequestWithTransientRetries(
   }
 }
 
-function withTransientConnectionRetryPrompt(request: AgentRunRequest, task: AgentTask): AgentRunRequest {
+function withTransientConnectionRetryPrompt(
+  request: AgentRunRequest,
+  task: AgentTask,
+  completionInstruction?: string,
+): AgentRunRequest {
   if (!task.fileEditingToolsEnabled) return request;
   return {
     ...request,
-    prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, finish the phase, run validation, and return the complete required Markdown artifact.\n</transient_connection_retry>`,
+    prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, ${completionInstruction ?? "finish the phase and complete its required output contract"}.\n</transient_connection_retry>`,
   };
 }
 
@@ -331,53 +555,6 @@ function formatRetryDelay(delayMs: number): string {
     return `in ${seconds} second${seconds === 1 ? "" : "s"}`;
   }
   return `in ${delayMs}ms`;
-}
-
-function repairPrompt(originalPrompt: string, task: AgentTask, reason: string, invalidOutput: string): string {
-  return `${originalPrompt}\n\n<output_contract_repair>\nThe previous ${task.label} response did not satisfy the required Markdown output contract.\nReason: ${escapeForPrompt(reason)}\nReturn the complete ${task.label} Markdown artifact again, with the required heading/verdict/status/ready token needed by the workflow. Do not include commentary outside the artifact.\n</output_contract_repair>\n\n<invalid_previous_output>\n${escapeForPrompt(invalidOutput)}\n</invalid_previous_output>`;
-}
-
-function formatAgentTaskErrorArtifact(input: {
-  context: WorkflowContext;
-  task: AgentTask;
-  phase: AgentTaskFailurePhase;
-  error: unknown;
-}): string {
-  const { context, task, phase, error } = input;
-  const lines = [
-    `# ${task.label} Error`,
-    "",
-    "## Status",
-    "errored",
-    "",
-    "## Phase",
-    phase,
-    "",
-    "## Artifact",
-    `\`${artifactRelativePath(context, task.artifact)}\``,
-    "",
-    "## Model",
-    `\`${effectiveModelForStage(context.model, task.thinkingStage)}\``,
-    "",
-    "## Thinking Level",
-    `\`${thinkingLevelForTask(context, task)}\``,
-    "",
-    "## Error",
-    formatFencedBlock(formatError(error), "text"),
-    "",
-    "## Recovery",
-    "Fix the provider/output-contract error, then rerun the same phase or `continue` the autorun attempt. This diagnostic artifact is intentionally invalid as a workflow phase output so continuation will regenerate it.",
-  ];
-  return `${lines.join("\n")}\n`;
-}
-
-function formatFencedBlock(value: string, language: string): string {
-  const fence = value.includes("````") ? "`````" : "````";
-  return `${fence}${language}\n${value}\n${fence}`;
-}
-
-function escapeForPrompt(value: string): string {
-  return value.replaceAll("</", "<\\/");
 }
 
 function formatError(error: unknown): string {

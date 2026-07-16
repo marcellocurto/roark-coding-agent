@@ -99,7 +99,7 @@ describe("observability summary writing", () => {
     expect(summary.status).toBe("completed");
     expect(summary.attempt).toBe(2);
     expect(summary.phases.triage.status).toBe("completed");
-    expect(summary.phases.triage.artifactPath).toBe(".roark/runs/issue/42/attempts/2/triage.md");
+    expect(summary.phases.triage.artifactPath).toBe(".roark/runs/issue/42/attempts/2/triage.json");
     expect(summary.phases.triage.sessionId).toBe("session-1");
     expect(summary.phases.triage).toMatchObject({
       thinkingLevel: "xhigh",

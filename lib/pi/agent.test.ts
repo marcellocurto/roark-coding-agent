@@ -2,10 +2,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, spyOn, test } from "bun:test";
+import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
 import { AuthStorage, createAgentSession, DefaultResourceLoader, getAgentDir, ModelRegistry, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
-import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, createRoarkResourceLoader, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, toolsForFileEditingMode } from "./agent.ts";
+import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, createRoarkResourceLoader, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, runPiAgent, toolsForFileEditingMode } from "./agent.ts";
 import { agentSkillPaths, bundledSkillNames } from "./bundled-skills.ts";
 
 const workflowRole = "You are one agent in a multi-agent coding workflow.";
@@ -163,7 +164,7 @@ describe("Roark effective system prompt", () => {
     const sessionCases = [
       { systemPrompt: sharedSystemPrompt, fileEditingToolsEnabled: false, expectedRole: workflowRole },
       { systemPrompt: sharedSystemPrompt, fileEditingToolsEnabled: true, expectedRole: workflowRole },
-      { systemPrompt: prPublishingSystemPrompt(), fileEditingToolsEnabled: false, expectedRole: "You are the Roark PR authoring and publishing agent." },
+      { systemPrompt: prPublishingSystemPrompt(), fileEditingToolsEnabled: false, expectedRole: "You are the Roark PR authoring agent." },
     ];
 
     try {
@@ -198,8 +199,6 @@ describe("Roark effective system prompt", () => {
 
       for (const session of sessions.slice(0, 2)) {
         expect(occurrenceCount(session.agent.state.systemPrompt, workflowRole)).toBe(1);
-        expect(session.agent.state.systemPrompt).toContain("Return only the requested Markdown for workflow phases.");
-        expect(session.agent.state.systemPrompt).toContain("Keep required verdict/status/ready tokens exact.");
       }
     } finally {
       for (const session of sessions) session.dispose();
@@ -268,6 +267,44 @@ describe("Roark effective system prompt", () => {
       errorSpy.mockRestore();
       session?.dispose();
       await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("Pi custom tool boundary", () => {
+  test("passes custom tools to the production session factory", async () => {
+    const stop = new Error("stop after session options are captured");
+    const createSession = spyOn(PiCodingAgent, "createAgentSession").mockRejectedValue(stop);
+    const submitReview = { name: "submit_review" } as never;
+
+    try {
+      let thrown: unknown;
+      try {
+        await runPiAgent({
+          cwd: import.meta.dir,
+          thinkingLevel: "minimal",
+          systemPrompt: "Review the change.",
+          prompt: "Inspect the diff.",
+          fileEditingToolsEnabled: false,
+          customTools: [submitReview],
+          display: {
+            command: "review-pr",
+            target: "PR #1",
+            phaseId: "pr-review-a",
+            phaseLabel: "PR review A",
+            operation: "review",
+          },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBe(stop);
+
+      const options = createSession.mock.calls[0]?.[0];
+      expect(options?.customTools).toEqual([submitReview]);
+      expect(options?.tools).toContain("submit_review");
+    } finally {
+      createSession.mockRestore();
     }
   });
 });

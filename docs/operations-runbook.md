@@ -111,7 +111,7 @@ roark workspace list
 
 1. Find the issue or PR from scheduler logs or labels.
 2. Open `summary.json`.
-3. Open `verification.md` and `readiness.md`.
+3. Open `verification.md` and `readiness.md`; inspect `readiness.json` for the exact gate state.
 4. Inspect the managed workspace if uncommitted work matters.
 5. Fix host, config, hook, secret-path, or verification issues.
 6. Run:

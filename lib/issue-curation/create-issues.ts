@@ -1,5 +1,8 @@
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
+import { publishIssueWithGitHub, type IssuePublisher } from "../issue-publishing/github.ts";
+import { formatIssueDraftMarkdown, type IssueDraftCollection, type IssueDraftRenderingContext } from "../issue-publishing/result.ts";
+import { issueDraftArtifactDefinition } from "../issue-publishing/artifact.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
@@ -10,6 +13,7 @@ import {
   artifactRelativePath,
   readArtifact,
   type WorkflowContext,
+  writeArtifact,
   writeJsonArtifact,
 } from "../workflow/artifacts.ts";
 import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
@@ -20,6 +24,8 @@ import {
   reviewerIssueManagedLabels,
   reviewerIssueTriageLabels,
 } from "./labels.ts";
+import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
+import { runStructuredArtifact } from "../structured-output/runner.ts";
 
 export interface IssueCreationCreatedEntry {
   planItemId: string;
@@ -100,6 +106,7 @@ export interface CreateIssuesOptions {
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
   labelEnsurer?: ((options: { cwd: string; repo?: string | undefined }) => Promise<unknown>) | false | undefined;
+  issuePublisher?: IssuePublisher | undefined;
 }
 
 type IssuePlanKind = IssuePlanClassification | "blocking";
@@ -110,6 +117,7 @@ interface ValidPlanItem {
   planItemId: string;
   title: string;
   labels: string[];
+  renderingContext: IssueDraftRenderingContext;
 }
 
 const issueCreationDefaultClock = { now: () => new Date() };
@@ -217,14 +225,14 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
   const create = async () => {
     const publishResult = display === undefined
       ? { createdCurrentRun: [], failed: [], relationshipOutcomes: [] }
-      : await publishIssuesWithAgent({
+      : await authorAndPublishIssues({
         context,
         promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
-        promptResultPath: artifactAgentPath(context, "issueCreationResults"),
         creatable,
         agentRunner,
         approvalReason,
         display,
+        issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
       });
 
     const result = buildResult({
@@ -263,19 +271,22 @@ interface PublishResult {
   relationshipOutcomes: IssueCreationRelationshipOutcomeEntry[];
 }
 
-async function publishIssuesWithAgent(input: {
+async function authorAndPublishIssues(input: {
   context: WorkflowContext;
   promptSourcePlanPath: string;
-  promptResultPath: string;
   creatable: ValidPlanItem[];
   agentRunner: AgentRunner;
   approvalReason: string;
+  issuePublisher: IssuePublisher;
   display: AgentDisplayContext;
 }): Promise<PublishResult> {
-  const { context, promptSourcePlanPath, promptResultPath, creatable, agentRunner, approvalReason, display } = input;
+  const { context, promptSourcePlanPath, creatable, agentRunner, approvalReason, issuePublisher, display } = input;
 
   try {
-    const output = await agentRunner({
+    const itemsById = new Map(creatable.map((item) => [item.planItemId, item]));
+    const localRoots = [context.controlCwd, context.agentCwd];
+    const renderDrafts = (drafts: IssueDraftCollection) => renderIssueDrafts(drafts, itemsById, localRoots);
+    const artifact = await runStructuredArtifact({
       cwd: context.agentCwd,
       model: effectiveModelForStage(context.model, "issuePublishing"),
       thinkingLevel: context.thinkingConfig.issuePublishing,
@@ -283,7 +294,6 @@ async function publishIssuesWithAgent(input: {
       prompt: issuePublishingPrompt({
         context,
         sourcePlanPath: promptSourcePlanPath,
-        resultPath: promptResultPath,
         approvalReason,
         allowedItems: creatable.map((item) => ({
           planItemId: item.planItemId,
@@ -295,8 +305,51 @@ async function publishIssuesWithAgent(input: {
       fileEditingToolsEnabled: false,
       observer: context.observer,
       display,
+    }, agentRunner, issueDraftArtifactDefinition({
+      expectedPlanItemIds: creatable.map((item) => item.planItemId),
+      formatMarkdown: (drafts) => formatIssueDraftCollectionMarkdown(drafts, renderDrafts(drafts)),
+    }), {
+      writeJson: (content) => writeArtifact(context, "issueDrafts", content),
+      writeMarkdown: (content) => writeArtifact(context, "issueDraftsMarkdown", content),
     });
-    return toPublishResult(parseIssuePublishingAgentResponse(output), creatable);
+
+    const drafts = artifact.value;
+    const renderedById = renderDrafts(drafts);
+
+    const createdCurrentRun: IssueCreationCreatedEntry[] = [];
+    const failed: IssueCreationFailedEntry[] = [];
+    for (const draft of drafts.issues) {
+      const item = itemsById.get(draft.planItemId);
+      if (!item) throw new Error(`Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`);
+      const rendered = renderedById.get(draft.planItemId);
+      if (!rendered) throw new Error(`Structured issue draft '${draft.planItemId}' was not rendered.`);
+      try {
+        const published = await issuePublisher({
+          cwd: context.agentCwd,
+          repo: context.repo,
+          title: rendered.title,
+          body: rendered.body,
+          labels: labelsForPlanItem(item),
+        });
+        createdCurrentRun.push({
+          planItemId: item.planItemId,
+          kind: item.kind,
+          title: rendered.title,
+          url: published.url,
+          ...(published.number !== undefined ? { number: published.number } : {}),
+          ...(published.stdout ? { stdout: published.stdout } : {}),
+          source: "current-run",
+        });
+      } catch (error) {
+        failed.push({
+          planItemId: item.planItemId,
+          kind: item.kind,
+          title: rendered.title,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { createdCurrentRun, failed, relationshipOutcomes: [] };
   } catch (error) {
     return {
       createdCurrentRun: [],
@@ -311,119 +364,30 @@ async function publishIssuesWithAgent(input: {
   }
 }
 
-export function parseIssuePublishingAgentResponse(output: string): {
-  created: unknown[];
-  failed: unknown[];
-  relationshipOutcomes: unknown[];
-} {
-  const trimmed = output.trim();
-  const jsonText = trimmed.startsWith("```") ? extractFencedJson(trimmed) : trimmed;
-  const parsed = JSON.parse(jsonText) as unknown;
-  if (!isRecord(parsed)) throw new Error("Issue-publishing agent response was not a JSON object.");
-  return {
-    created: asOptionalArrayProperty(parsed, "created"),
-    failed: asOptionalArrayProperty(parsed, "failed"),
-    relationshipOutcomes: asOptionalArrayProperty(parsed, "relationshipOutcomes"),
-  };
+function renderIssueDrafts(
+  drafts: IssueDraftCollection,
+  itemsById: ReadonlyMap<string, ValidPlanItem>,
+  localRoots: readonly string[],
+): Map<string, { title: string; body: string }> {
+  return new Map(drafts.issues.map((draft) => {
+    const item = itemsById.get(draft.planItemId);
+    if (!item) throw new Error(`Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`);
+    return [draft.planItemId, {
+      title: sanitizePublicMarkdown(draft.title, { localRoots }),
+      body: sanitizePublicMarkdown(formatIssueDraftMarkdown(draft, item.renderingContext), { localRoots }),
+    }] as const;
+  }));
 }
 
-function toPublishResult(agentResult: ReturnType<typeof parseIssuePublishingAgentResponse>, creatable: ValidPlanItem[]): PublishResult {
-  const itemsById = new Map(creatable.map((item) => [item.planItemId, item]));
-  const createdCurrentRun = agentResult.created.map((entry) => {
-    if (!isRecord(entry)) throw new Error("Issue-publishing agent returned a non-object created entry.");
-    const planItemId = asNonEmptyString(entry["planItemId"]);
-    if (!planItemId || !itemsById.has(planItemId)) throw new Error(`Issue-publishing agent returned unknown created planItemId '${planItemId ?? ""}'.`);
-    const item = itemsById.get(planItemId);
-    if (item === undefined) throw new Error(`Issue-publishing agent returned unknown created planItemId '${planItemId}'.`);
-    const number = typeof entry["number"] === "number" && Number.isInteger(entry["number"]) ? entry["number"] : undefined;
-    return {
-      planItemId,
-      kind: item.kind,
-      title: asNonEmptyString(entry["title"]) ?? item.title,
-      ...(asNonEmptyString(entry["url"]) ? { url: asNonEmptyString(entry["url"]) } : {}),
-      ...(number !== undefined ? { number } : {}),
-      ...(asNonEmptyString(entry["stdout"]) ? { stdout: asNonEmptyString(entry["stdout"]) } : {}),
-      source: "current-run" as const,
-    };
-  });
-  const failed = agentResult.failed.map((entry) => {
-    if (!isRecord(entry)) throw new Error("Issue-publishing agent returned a non-object failed entry.");
-    const planItemId = asNonEmptyString(entry["planItemId"]);
-    if (!planItemId || !itemsById.has(planItemId)) throw new Error(`Issue-publishing agent returned unknown failed planItemId '${planItemId ?? ""}'.`);
-    const item = itemsById.get(planItemId);
-    if (item === undefined) throw new Error(`Issue-publishing agent returned unknown failed planItemId '${planItemId}'.`);
-    return {
-      planItemId,
-      kind: item.kind,
-      title: item.title,
-      message: asNonEmptyString(entry["message"]) ?? "Issue-publishing agent reported failure without a message.",
-    };
-  });
-  assertResultCoverage(createdCurrentRun, failed, itemsById);
-  const relationshipOutcomes = normalizeRelationshipOutcomes(agentResult.relationshipOutcomes, itemsById);
-  return { createdCurrentRun, failed, relationshipOutcomes };
-}
-
-function assertResultCoverage(
-  created: IssueCreationCreatedEntry[],
-  failed: IssueCreationFailedEntry[],
-  itemsById: Map<string, ValidPlanItem>,
-): void {
-  const seen = new Map<string, number>();
-  for (const entry of [...created, ...failed]) {
-    seen.set(entry.planItemId, (seen.get(entry.planItemId) ?? 0) + 1);
-  }
-
-  const duplicates = [...seen.entries()].filter(([, count]) => count > 1).map(([planItemId]) => planItemId);
-  if (duplicates.length > 0) {
-    throw new Error(`Issue-publishing agent returned duplicate result for planItemId(s): ${duplicates.join(", ")}.`);
-  }
-
-  const missing = [...itemsById.keys()].filter((planItemId) => !seen.has(planItemId));
-  if (missing.length > 0) {
-    throw new Error(`Issue-publishing agent omitted result for planItemId(s): ${missing.join(", ")}.`);
-  }
-}
-
-function normalizeRelationshipOutcomes(entries: unknown[], itemsById: Map<string, ValidPlanItem>): IssueCreationRelationshipOutcomeEntry[] {
-  return entries.map((entry) => {
-    if (!isRecord(entry)) throw new Error("Issue-publishing agent returned a non-object relationship outcome entry.");
-
-    const planItemId = asNonEmptyString(entry["planItemId"]);
-    if (!planItemId || !itemsById.has(planItemId)) {
-      throw new Error(`Issue-publishing agent returned unknown relationship outcome planItemId '${planItemId ?? ""}'.`);
-    }
-
-    const status = asNonEmptyString(entry["status"]);
-    if (!status) throw new Error(`Issue-publishing agent returned relationship outcome for '${planItemId}' without a non-empty status.`);
-
-    const message = asNonEmptyString(entry["message"]);
-    if (!message) throw new Error(`Issue-publishing agent returned relationship outcome for '${planItemId}' without a non-empty message.`);
-
-    const targetPlanItemId = asNonEmptyString(entry["targetPlanItemId"]);
-    if (targetPlanItemId && !itemsById.has(targetPlanItemId)) {
-      throw new Error(`Issue-publishing agent returned relationship outcome for '${planItemId}' with unknown targetPlanItemId '${targetPlanItemId}'.`);
-    }
-
-    const sourceIssueNumber = asInteger(entry["sourceIssueNumber"]);
-    const targetIssueNumber = asInteger(entry["targetIssueNumber"]);
-    return {
-      planItemId,
-      status,
-      message,
-      ...(asNonEmptyString(entry["relationship"]) ? { relationship: asNonEmptyString(entry["relationship"]) } : {}),
-      ...(targetPlanItemId ? { targetPlanItemId } : {}),
-      ...(sourceIssueNumber !== undefined ? { sourceIssueNumber } : {}),
-      ...(targetIssueNumber !== undefined ? { targetIssueNumber } : {}),
-      ...(asNonEmptyString(entry["url"]) ? { url: asNonEmptyString(entry["url"]) } : {}),
-    };
-  });
-}
-
-function extractFencedJson(output: string): string {
-  const match = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(output);
-  if (!match?.[1]) throw new Error("Issue-publishing agent response was fenced but did not contain JSON.");
-  return match[1];
+function formatIssueDraftCollectionMarkdown(
+  drafts: IssueDraftCollection,
+  renderedById: ReadonlyMap<string, { title: string; body: string }>,
+): string {
+  return drafts.issues.map((draft) => {
+    const rendered = renderedById.get(draft.planItemId);
+    if (!rendered) throw new Error(`Structured issue draft '${draft.planItemId}' was not rendered.`);
+    return [`# ${rendered.title}`, "", rendered.body].join("\n");
+  }).join("\n---\n\n");
 }
 
 async function readIssueCurationPlan(context: WorkflowContext): Promise<IssueCurationPlan> {
@@ -530,22 +494,63 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
 
   const planItemId = asNonEmptyString(raw["planItemId"]);
   const title = asNonEmptyString(raw["proposedTitle"]);
+  const renderingContext = parseIssueDraftRenderingContext(raw, kind);
   const missing = [
     ...(planItemId ? [] : ["planItemId"]),
     ...(title ? [] : ["proposedTitle"]),
+    ...(renderingContext ? [] : ["structured issue context"]),
   ];
-  if (missing.length > 0 || !planItemId || !title) {
+  if (missing.length > 0 || !planItemId || !title || !renderingContext) {
     return { skipped: malformedSkip(planItemId ?? fallbackId, kind, title, `Missing required field(s): ${missing.join(", ")}.`) };
   }
+  const { proposedLabels } = raw;
 
   return {
     item: {
       kind,
       planItemId,
       title,
-      labels: Array.isArray(raw["proposedLabels"]) ? raw["proposedLabels"].filter((label): label is string => typeof label === "string") : [],
+      labels: Array.isArray(proposedLabels) ? proposedLabels.filter((label): label is string => typeof label === "string") : [],
+      renderingContext,
     },
   };
+}
+
+function parseIssueDraftRenderingContext(value: Record<string, unknown>, kind: IssuePlanKind): IssueDraftRenderingContext | undefined {
+  const sourceIssue = value["sourceIssueContext"];
+  const runContext = value["runContext"];
+  if (!isStringArray(value["sourceFindingIds"])
+    || !isStringArray(value["reviewerSources"])
+    || !isRecord(sourceIssue)
+    || typeof sourceIssue["number"] !== "number"
+    || !Number.isInteger(sourceIssue["number"])
+    || typeof sourceIssue["title"] !== "string"
+    || !isRecord(runContext)
+    || typeof runContext["runDirRelative"] !== "string"
+    || !isStringArray(runContext["artifactPaths"])) return undefined;
+  const sourceUrl = asNonEmptyString(sourceIssue["url"]);
+  const relatedPrUrl = asNonEmptyString(runContext["prUrl"]);
+  const attempt = typeof runContext["attempt"] === "number" && Number.isInteger(runContext["attempt"])
+    ? runContext["attempt"]
+    : undefined;
+  return {
+    sourceIssue: {
+      number: sourceIssue["number"],
+      title: sourceIssue["title"],
+      ...(sourceUrl ? { url: sourceUrl } : {}),
+    },
+    ...(relatedPrUrl ? { relatedPrUrl } : {}),
+    classification: classificationForKind(kind),
+    sourceFindingIds: value["sourceFindingIds"],
+    reviewerSources: value["reviewerSources"],
+    runDirectory: runContext["runDirRelative"],
+    ...(attempt !== undefined ? { attempt } : {}),
+    artifactPaths: runContext["artifactPaths"],
+  };
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function malformedSkip(planItemId: string, kind: IssueCreationSkippedKind, title: string | undefined, message: string): IssueCreationSkippedEntry {
@@ -664,13 +669,13 @@ function printApprovedSummary(context: WorkflowContext, result: IssueCreationRes
 }
 
 function printSkippedCounts(result: IssueCreationResults): void {
-  presenter().line(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; parser warnings: ${result.counts.skippedParserWarnings}.`);
+  presenter().line(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`);
 }
 
 function zeroCreatedExplanation(result: IssueCreationResults): string {
   if (result.counts.acceptedPlanItems === 0) {
-    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review parser warnings and missing artifacts in the curation plan.";
-    if (result.counts.skippedRejectedCandidates > 0) return "All parsed candidates were rejected by curation policy; inspect rejectedCandidates for reasons.";
+    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review warnings and missing artifacts in the curation plan.";
+    if (result.counts.skippedRejectedCandidates > 0) return "All reviewer findings were rejected by curation policy; inspect rejectedCandidates for reasons.";
     return "The curation plan contains no accepted reviewer findings.";
   }
   if (result.counts.skippedAlreadyCreated >= result.counts.acceptedPlanItems) return "All accepted plan items were already recorded as created; use --force only if you intentionally want duplicates.";
@@ -683,19 +688,8 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-function asOptionalArrayProperty(record: Record<string, unknown>, key: string): unknown[] {
-  const value = record[key];
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new Error(`Issue-publishing agent response field '${key}' was not an array.`);
-  return value;
-}
-
 function asNonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
-}
-
-function asInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) ? value : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

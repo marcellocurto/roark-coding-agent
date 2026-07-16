@@ -89,8 +89,8 @@ describe("workflow prompt safety policy", () => {
     expect(ambiguityPolicy).toContain("<value>blocked</value>");
     expect(ambiguityPolicy).toContain("non-ready outcome");
     expect(triagePrompt(context)).toContain("needs-human-decision");
-    expect(planDraftPrompt(context)).toContain("## Ready For Implementation\nyes/no");
-    expect(reviewAPrompt(context)).toContain("blocked");
+    expect(reviewAPrompt(context)).toContain("blockedBy independently");
+    expect(reviewAPrompt(context)).toContain("human decision");
   });
 
   test("draft planning does not override the shared ambiguity policy", () => {
@@ -164,60 +164,34 @@ describe("workflow prompt safety policy", () => {
   test("phase input artifact paths are reachable from split agent cwd", () => {
     const prompt = implementationPrompt(splitContext);
     expect(prompt).toContain('<artifact kind="issue">../../runs/issue/123/issue.md</artifact>');
-    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.md</artifact>');
+    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.json</artifact>');
     expect(prompt).not.toContain('<artifact kind="issue">.roark/runs/issue/123/issue.md</artifact>');
   });
 });
 
-describe("review findings ledger contract", () => {
-  const reviewPrompts = [reviewAPrompt(context), reviewBPrompt(context)];
-
-  test("review prompts require a structured findings ledger", () => {
-    for (const prompt of reviewPrompts) {
-      expect(prompt).toContain("Findings Ledger");
-      expect(prompt).toContain("structured Findings Ledger");
-      expect(prompt).toContain("canonical list of review findings");
-    }
-  });
-
-  test("review prompts define the classification vocabulary", () => {
-    for (const prompt of reviewPrompts) {
-      for (const classification of ["must-fix-current", "external-blocker", "follow-up", "suggestion"]) {
-        expect(prompt).toContain(classification);
-      }
-    }
-  });
-
-  test("review prompts require the finding fields", () => {
-    for (const prompt of reviewPrompts) {
-      for (const field of [
-        "identifier",
-        "classification",
-        "title",
-        "severity",
-        "confidence",
-        "evidence",
-        "current-issue impact",
-        "recommended handling",
-        "suggested issue title",
-      ]) {
-        expect(prompt.toLowerCase()).toContain(field);
-      }
-    }
-  });
-
-  test("review agent B remains independent from review agent A", () => {
+describe("structured review contract", () => {
+  test("review agent B does not receive review agent A's artifact", () => {
     const prompt = reviewBPrompt(context);
-    expect(prompt).toContain("Do not read Review Agent A's output");
     expect(prompt).not.toContain('artifact kind="review_a"');
+  });
+
+  test("later review passes receive only their own prior stable finding IDs", () => {
+    const reviewA = reviewAPrompt(context, 1);
+    const reviewB = reviewBPrompt(context, 1);
+    expect(reviewA).toContain('<artifact kind="prior_review_a">.roark/runs/issue/123/review-a-0.json</artifact>');
+    expect(reviewA).not.toContain('kind="prior_review_b"');
+    expect(reviewB).toContain('<artifact kind="prior_review_b">.roark/runs/issue/123/review-b-0.json</artifact>');
+    expect(reviewB).not.toContain('kind="prior_review_a"');
   });
 });
 
 describe("fix-oriented prompt finding handling", () => {
   test("fix prompt applies only current-issue blocking findings", () => {
     const prompt = fixPrompt(context, 1);
-    expect(prompt).toContain("Apply only unresolved review findings classified as <value>must-fix-current</value>");
+    expect(prompt).toContain("handling is <value>must-fix-current</value> and whose blockedBy list is empty");
     expect(prompt).toContain("Do not fix non-blocking <value>follow-up</value> or <value>suggestion</value> findings");
+    expect(prompt).toContain("prefix its submitted id with review-a: or review-b:");
+    expect(prompt).toContain("addressedFindingIds must contain every and only unblocked must-fix-current workflow ID");
   });
 
   test("code refinement prompt changes code only for concrete behavior-preserving improvements", () => {
@@ -230,7 +204,8 @@ describe("fix-oriented prompt finding handling", () => {
     expect(prompt).toContain("Do not broaden scope");
     expect(prompt).toContain("identify the affected file or behavior");
     expect(prompt).toContain("If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason");
-    expect(prompt).toContain("## Behavior Risk Decisions");
+    expect(prompt).toContain("Call submit_change_report exactly once");
+    expect(prompt).toContain("material simplification, naming, behavior-risk, and plan-alignment decisions in deviations");
   });
 
   test("restart code refinement prompt reads restarted implementation context instead of a fix log", () => {

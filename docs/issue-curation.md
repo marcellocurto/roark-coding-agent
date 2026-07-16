@@ -61,6 +61,8 @@ Issue curation writes:
 
 ```text
 .roark/runs/issue/<n>/attempts/<k>/issue-curation-plan.json
+.roark/runs/issue/<n>/attempts/<k>/issue-drafts.json
+.roark/runs/issue/<n>/attempts/<k>/issue-drafts.md
 .roark/runs/issue/<n>/attempts/<k>/issue-creation-results.json
 ```
 
@@ -70,9 +72,9 @@ Review the plan before publishing.
 
 The curation plan is structured context, not the final prose contract for GitHub.
 
-On approved `create-issues --yes` runs, Roark calls an issue-publishing LLM agent with the curation plan, approved plan item IDs, labels, source issue, related PR, reviewer evidence, impact, recommended handling, non-goals, and run artifacts. The agent writes the final human-readable issue title and body, searches likely duplicates, creates the issue with `gh`, and returns machine-readable creation results.
+On approved `create-issues --yes` runs, Roark calls an issue-authoring agent with the curation plan and approved plan item IDs. The agent must call `submit_issue_drafts` with one schema-validated draft per approved item. It cannot publish, return raw JSON, or supply labels and provenance as unvalidated prose.
 
-This path uses a narrow Roark publishing prompt so the already-approved plan is published directly with issue prose tailored to the reviewer finding.
+Roark constructs each Markdown body from the accepted draft plus authoritative plan provenance, applies the plan's labels, checks GitHub for an exact normalized-title duplicate, and creates the issue with `gh`. `issue-creation-results.json` records the actual GitHub outcomes. Native issue relationships are not inferred from prose or created unless a future structured plan explicitly models them.
 
 ## Approval Flow
 

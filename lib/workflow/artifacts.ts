@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import type { RunObserver } from "../observability/observer.ts";
@@ -15,16 +15,21 @@ import {
   reviewBRef,
 } from "./artifact-catalog.ts";
 import type { ArtifactRef, StaticArtifactName } from "./artifact-catalog.ts";
+import { parseReviewResultJson } from "../review/result.ts";
 export type { ArtifactRef, NumberedArtifactName, StaticArtifactName } from "./artifact-catalog.ts";
 export {
   artifactFilename,
   baselineResetLogRef,
   fixLogRef,
+  fixLogMarkdownRef,
   formatArtifactRef,
   implementationRestartLogRef,
   refinementLogRef,
+  refinementLogMarkdownRef,
   reviewARef,
+  reviewAMarkdownRef,
   reviewBRef,
+  reviewBMarkdownRef,
   verificationBeforeFixRef,
   verificationBeforeFixFullRef,
 } from "./artifact-catalog.ts";
@@ -158,10 +163,21 @@ export function inferNextFixPass(context: WorkflowContext): number {
 
 export function latestCompleteReviewCycle(context: WorkflowContext): number | undefined {
   let latest: number | undefined;
-  for (let pass = 0; artifactExists(context, reviewARef(pass)) && artifactExists(context, reviewBRef(pass)); pass++) {
+  for (let pass = 0; validReviewArtifactExists(context, reviewARef(pass)) && validReviewArtifactExists(context, reviewBRef(pass)); pass++) {
     latest = pass;
   }
   return latest;
+}
+
+function validReviewArtifactExists(context: WorkflowContext, artifact: ArtifactRef): boolean {
+  const file = artifactPath(context, artifact);
+  if (!existsSync(file)) return false;
+  try {
+    parseReviewResultJson(readFileSync(file, "utf8"), { allowRestart: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function inferNextRefinementPass(context: WorkflowContext): number {
