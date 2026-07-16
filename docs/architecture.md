@@ -27,7 +27,9 @@ flowchart LR
   config --> workspace["Workspace manager"]
   workspace --> phases["Workflow phases"]
   github --> phases
+  phases --> presentation["Terminal presentation"]
   phases --> pi["Pi agent runner"]
+  pi --> presentation
   phases --> artifacts["Artifact catalog and validation"]
   phases --> gates["Readiness and verification gates"]
   gates --> publish["Publish or recover"]
@@ -88,6 +90,16 @@ Agent-produced JSON/Markdown pairs pass through one structured-artifact runner: 
 Numbered artifacts include fix logs, refinements, and Review A/B cycles.
 
 The review domain model keeps work routing (`must-fix-current`, `follow-up`, or `suggestion`) separate from external constraints and review-wide limitations. Validation trims strings, rejects empty inspection evidence, bounds artifact size/cardinality, requires stable semantic IDs, and ties restart recommendations to specific unblocked findings. Renderers treat submitted strings as plain Markdown content.
+
+## Terminal Presentation
+
+Shared operational output and terminal-title handling live under:
+
+```text
+lib/presentation/
+```
+
+Workflow code supplies structured target, phase, revision/pass, artifact, and operation context. The presentation layer owns safe line formatting, width/path bounding, phase timing, tool activity, verification summaries, final outcomes, and TTY-gated title sequences. Persistent observability and artifacts remain independent consumers of the same workflow phase identity.
 
 ## Pi Integration
 

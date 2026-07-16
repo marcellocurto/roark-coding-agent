@@ -10,9 +10,10 @@ const options: AutorunGateOptions = {
   cwd: "/repo",
   repo: "owner/repo",
   verifyCommand: "bun test",
-  failureLabel: "roark-failed",
-  successLabel: "roark-pr-opened",
-  inProgressLabel: "roark-in-progress",
+  readyLabel: "ready-for-agent",
+  failureLabel: "agent-failed",
+  successLabel: "agent-pr-opened",
+  inProgressLabel: "agent-in-progress",
   remote: "origin",
   baseBranch: "main",
 };
@@ -33,7 +34,7 @@ const workflowContext: WorkflowContext = {
 };
 
 const branchPlan = { issueNumber: 12, branchName: "roark/issue-12", baseBranch: "main" };
-const issue = { number: 12, title: "Handle no-op", url: "https://github.com/owner/repo/issues/12" };
+const issue = { number: 12, title: "Handle no-op", url: "https://github.com/owner/repo/issues/12", labels: [{ name: "ready-for-agent" }] };
 const attemptMetadata = formatAttemptMetadata({
   attempt: 1,
   issueNumber: 12,
@@ -81,7 +82,7 @@ describe("completeAutorunWorkflow", () => {
       triageVerdict: "blocked",
       triageArtifactPath: ".roark/runs/issue/12/attempts/1/triage.json",
       attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
-      removeLabels: ["roark-in-progress", "roark-failed"],
+      removeLabels: ["ready-for-agent", "agent-in-progress", "agent-failed"],
     });
   });
 

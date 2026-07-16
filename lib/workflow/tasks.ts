@@ -56,6 +56,8 @@ import {
   type ChangeReport,
 } from "../change-report/result.ts";
 import { runStructuredArtifact, type StructuredArtifactDefinition } from "../structured-output/runner.ts";
+import { presenter, type AgentDisplayContext, type AgentOperation } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 
 export interface AgentTask {
   artifact: ArtifactRef;
@@ -372,6 +374,7 @@ function prepareTaskRun(context: WorkflowContext, task: AgentTask) {
   const phase = phaseNameForArtifact(task.artifact);
   const thinkingLevel = thinkingLevelForTask(context, task);
   const model = effectiveModelForStage(context.model, task.thinkingStage);
+  const display = displayContextForTask(context, task, phase);
   const createRequest = (): AgentRunRequest => ({
     cwd: context.agentCwd,
     model,
@@ -380,9 +383,9 @@ function prepareTaskRun(context: WorkflowContext, task: AgentTask) {
     prompt: task.prompt(context),
     fileEditingToolsEnabled: task.fileEditingToolsEnabled,
     observer: context.observer,
-    phase,
+    display,
   });
-  return { phase, thinkingLevel, model, createRequest };
+  return { phase, thinkingLevel, model, display, createRequest };
 }
 
 type PreparedTaskRun = ReturnType<typeof prepareTaskRun>;
@@ -398,18 +401,24 @@ async function reuseTaskArtifact<T>(
   const content = await readArtifact(context, task.artifact);
   try {
     const value = parse(content);
-    console.log(`✓ ${task.label}: using existing ${artifactRelativePath(context, task.artifact)}`);
-    await context.observer?.phaseCompleted({
-      phase: prepared.phase,
-      label: task.label,
-      artifact: task.artifact,
-      model: prepared.model,
-      thinkingLevel: prepared.thinkingLevel,
-      reused: true,
-    });
-    return { reused: true, value };
+    return await runPresentedPhase(prepared.display, async () => {
+      await context.observer?.phaseCompleted({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+        reused: true,
+      });
+      return { reused: true as const, value };
+    }, () => ({
+      outcome: "reused",
+      artifact: artifactRelativePath(context, task.artifact),
+    }));
   } catch (error) {
-    console.log(`! ${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(error)}); regenerating.`);
+    presenter().warning(
+      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(error)}); regenerating.`,
+    );
     return { reused: false };
   }
 }
@@ -424,7 +433,6 @@ async function executeTaskLifecycle<T>(
     persistFailure?: ((phase: AgentTaskFailurePhase, error: unknown) => Promise<void>) | undefined;
   },
 ): Promise<T> {
-  console.log(`\n=== ${task.label} ===`);
   await context.observer?.phaseStarted({
     phase: prepared.phase,
     label: task.label,
@@ -432,33 +440,39 @@ async function executeTaskLifecycle<T>(
     model: prepared.model,
     thinkingLevel: prepared.thinkingLevel,
   });
-  try {
-    const result = await options.run();
-    await context.observer?.phaseCompleted({
-      phase: prepared.phase,
-      label: task.label,
-      artifact: task.artifact,
-      model: prepared.model,
-      thinkingLevel: prepared.thinkingLevel,
-    });
-    console.log(`\n✓ ${task.label}: wrote ${artifactRelativePath(context, task.artifact)}`);
-    return result;
-  } catch (error) {
-    const failurePhase = options.failurePhase(error);
-    await options.persistFailure?.(failurePhase, error);
-    await context.observer?.phaseFailed({
-      phase: prepared.phase,
-      label: task.label,
-      artifact: task.artifact,
-      model: prepared.model,
-      thinkingLevel: prepared.thinkingLevel,
-      error,
-    });
-    console.log(options.persistFailure
-      ? `\n✗ ${task.label}: wrote error details to ${artifactRelativePath(context, task.artifact)}`
-      : `\n✗ ${task.label}: ${formatError(error)}`);
-    throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
-  }
+  return runPresentedPhase(prepared.display, async () => {
+    try {
+      const result = await options.run();
+      await context.observer?.phaseCompleted({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+      });
+      return result;
+    } catch (error) {
+      const failurePhase = options.failurePhase(error);
+      await options.persistFailure?.(failurePhase, error);
+      await context.observer?.phaseFailed({
+        phase: prepared.phase,
+        label: task.label,
+        artifact: task.artifact,
+        model: prepared.model,
+        thinkingLevel: prepared.thinkingLevel,
+        error,
+      });
+      throw new AgentTaskRunError({ artifact: task.artifact, label: task.label, phase: failurePhase, originalError: error });
+    }
+  }, () => ({
+    outcome: "completed",
+    artifact: artifactRelativePath(context, task.artifact),
+  }), {
+    failure: (error) => ({
+      outcome: error instanceof AgentTaskRunError ? error.originalMessage : formatError(error),
+      artifact: artifactRelativePath(context, task.artifact),
+    }),
+  });
 }
 
 async function runAgentRequestWithTransientRetries(
@@ -483,8 +497,8 @@ async function runAgentRequestWithTransientRetries(
       const delayMs = delaysMs[retryIndex] ?? 0;
       const retryNumber = retryIndex + 1;
       const retryCount = delaysMs.length;
-      console.log(
-        `! ${task.label}: transient agent connection error: ${formatError(error)}; retry ${retryNumber}/${retryCount} ${formatRetryDelay(delayMs)}.`,
+      presenter().warning(
+        `WARNING ${task.label}: transient agent connection error: ${formatError(error)}; retry ${retryNumber}/${retryCount} ${formatRetryDelay(delayMs)}.`,
       );
       if (delayMs > 0) await sleep(delayMs);
     }
@@ -505,6 +519,25 @@ function withTransientConnectionRetryPrompt(
 
 function thinkingLevelForTask(context: WorkflowContext, task: AgentTask) {
   return context.thinkingConfig[task.thinkingStage];
+}
+
+function displayContextForTask(context: WorkflowContext, task: AgentTask, phaseId: string): AgentDisplayContext {
+  const pass = typeof task.artifact === "object" ? task.artifact.pass : undefined;
+  return {
+    command: context.displayCommand ?? "issue-workflow",
+    repository: context.repo,
+    target: `#${context.issueNumber}`,
+    phaseId,
+    phaseLabel: task.label,
+    ...(pass !== undefined ? { pass } : {}),
+    expectedArtifact: artifactRelativePath(context, task.artifact),
+    operation: operationForTask(task),
+  };
+}
+
+function operationForTask(task: AgentTask): AgentOperation {
+  if (task.thinkingStage === "reviewA" || task.thinkingStage === "reviewB") return "review";
+  return task.fileEditingToolsEnabled ? "edit" : "inspect";
 }
 
 function defaultSleep(ms: number): Promise<void> {

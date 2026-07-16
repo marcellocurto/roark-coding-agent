@@ -4,9 +4,11 @@ import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { artifactOutcome } from "../workflow/markdown-token.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
 import {
   classifyVerificationFailure,
+  formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   runVerification,
   verificationFailureReason,
@@ -18,6 +20,8 @@ import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { noopAsync } from "../utils/async.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { assertCleanGitTree, gitDirtyLines } from "../workflow/git.ts";
 import {
   createPrRevisionContext,
@@ -98,14 +102,16 @@ export async function runPrRevision(
   const repo = feedback.repo;
   validatePrBranchSafety(feedback.pr, repo);
 
+  presenter().transition("Revision preparation", `PR #${feedback.pr.number}`, { operation: "edit" });
   const preparedWorkspace = await prepareRevisionWorkspace({ options, repo, feedback, deps });
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
   const hooks = options.hooks ?? defaultLifecycleHooks;
 
   try {
     const context = await createPrRevisionContext({ ...options, repo, controlCwd, agentCwd: preparedWorkspace.path });
-    console.log(`Run directory: ${context.revisionDirRelative}`);
-    if (context.agentCwd !== context.controlCwd) console.log(`Revision workspace: ${context.agentCwd}`);
+    presenter().transition("Revision preparation", `PR #${context.prNumber}`, { revision: context.revision, operation: "edit" });
+    presenter().line(`Run directory: ${context.revisionDirRelative}`);
+    if (context.agentCwd !== context.controlCwd) presenter().line(`Revision workspace: ${path.basename(context.agentCwd)}`);
 
     await hookRunner("beforeRun", hooks, context.agentCwd);
     await writeInitialArtifacts(context, feedback);
@@ -119,7 +125,7 @@ export async function runPrRevision(
 
     if (planStatus === "no-action-needed") {
       await updateMetadata(context, feedback, { outcome: "no-action-needed", planStatus, endedAt: new Date().toISOString() });
-      console.log(context.comment
+      presenter().line(context.comment
         ? "No action needed; not mutating code, committing, or pushing. Posting summary comment."
         : "No action needed; not mutating code, committing, pushing, or commenting.");
       if (context.comment) {
@@ -153,6 +159,7 @@ export async function runPrRevision(
     const artifactFilenames = ["pr-feedback.md", "revision-plan.json", "revision-plan.md"];
 
     let execution = await runRevisionExecutionPhase(context, runner, {
+      phaseId: "revision-implementation",
       label: "Revision implementation",
       artifact: "revision-log.json",
       title: "Revision Log",
@@ -162,6 +169,7 @@ export async function runPrRevision(
     artifactFilenames.push("revision-log.json", "revision-log.md");
 
     let review = await runRevisionReviewAgent(context, runner, {
+      phaseId: "revision-review",
       label: "Revision review",
       artifact: "revision-review.json",
       prompt: revisionReviewPrompt(context, 0),
@@ -191,6 +199,8 @@ export async function runPrRevision(
         const pass = ++fixPassesUsed;
         const logArtifact = `revision-log-fix-pass-${pass}.json`;
         execution = await runRevisionExecutionPhase(context, runner, {
+          phaseId: `revision-fix-${pass}`,
+          pass,
           label: `Revision fix pass ${pass}`,
           artifact: logArtifact,
           title: `Revision Log Fix Pass ${pass}`,
@@ -201,6 +211,8 @@ export async function runPrRevision(
 
         const reviewArtifact = `revision-review-pass-${pass}.json`;
         review = await runRevisionReviewAgent(context, runner, {
+          phaseId: `revision-review-${pass}`,
+          pass,
           label: `Revision review pass ${pass}`,
           artifact: reviewArtifact,
           prompt: revisionReviewPrompt(context, pass),
@@ -226,9 +238,21 @@ export async function runPrRevision(
       }
 
       await hookRunner("beforeVerify", hooks, context.agentCwd);
-      verification = await runVerification({ command: context.verifyCommand, cwd: context.agentCwd, runner: deps.verificationRunner });
+      verification = await runVerification({
+        command: context.verifyCommand,
+        cwd: context.agentCwd,
+        runner: deps.verificationRunner,
+        display: {
+          target: `PR #${context.prNumber}`,
+          repository: context.repo,
+          revision: context.revision,
+          ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
+        },
+      });
       await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
+      await writePrRevisionArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
       addArtifactFilename(artifactFilenames, "verification.md");
+      presenter().artifact(prRevisionArtifactRelativePath(context, "verification.md"));
 
       if (verification.ok) break;
 
@@ -238,6 +262,7 @@ export async function runPrRevision(
         : verificationFailureReason(verification);
 
       if (!classification.repairable || fixPassesUsed >= context.maxFixPasses) {
+        presenter().line(`ACTION user action required: ${classification.recoveryGuidance ?? failedReason}`);
         await updateMetadata(context, feedback, {
           outcome: "verification-failed",
           planStatus,
@@ -263,13 +288,17 @@ export async function runPrRevision(
       }
 
       const pass = ++fixPassesUsed;
+      presenter().line(`Verification repair will run as fix pass ${pass}`);
       const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
       await writePrRevisionArtifact(context, verificationBeforeFixArtifact, formatVerificationArtifact(verification));
+      await writePrRevisionArtifact(context, `verification-before-fix-${pass}-full.md`, formatCompleteVerificationArtifact(verification));
       artifactFilenames.push(verificationBeforeFixArtifact);
-      console.log(`Archived verification failure: ${prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact)}`);
+      presenter().artifact(prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact));
 
       const logArtifact = `revision-log-fix-pass-${pass}.json`;
       execution = await runRevisionExecutionPhase(context, runner, {
+        phaseId: `revision-fix-${pass}`,
+        pass,
         label: `Revision fix pass ${pass}`,
         artifact: logArtifact,
         title: `Revision Log Fix Pass ${pass}`,
@@ -280,6 +309,8 @@ export async function runPrRevision(
 
       const reviewArtifact = `revision-review-pass-${pass}.json`;
       review = await runRevisionReviewAgent(context, runner, {
+        phaseId: `revision-review-${pass}`,
+        pass,
         label: `Revision review pass ${pass}`,
         artifact: reviewArtifact,
         prompt: revisionReviewPrompt(context, pass),
@@ -306,7 +337,20 @@ export async function runPrRevision(
 
     const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
     await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
-    const commitSha = await commitAndPushRevision(context, feedback.pr.headRefName);
+    const publishDisplay: AgentDisplayContext = {
+      command: "revise-pr",
+      repository: context.repo,
+      target: `PR #${context.prNumber}`,
+      phaseId: "pr-revision-publish",
+      phaseLabel: "Commit and push revision",
+      revision: context.revision,
+      operation: "publish",
+    };
+    const commitSha = await runPresentedPhase(
+      publishDisplay,
+      () => commitAndPushRevision(context, feedback.pr.headRefName),
+      (sha) => ({ outcome: sha ? `pushed ${sha.slice(0, 12)}` : "pushed" }),
+    );
     await postSummary({
       context,
       outcome: "published",
@@ -371,65 +415,91 @@ async function prepareRevisionWorkspace(input: {
 async function runRevisionExecutionPhase(
   context: PrRevisionContext,
   runner: AgentRunner,
-  input: { label: string; artifact: string; title: string; thinkingStage: WorkflowThinkingStage; prompt: string },
+  input: {
+    phaseId: string;
+    label: string;
+    artifact: string;
+    title: string;
+    thinkingStage: WorkflowThinkingStage;
+    prompt: string;
+    pass?: number | undefined;
+  },
 ): Promise<RevisionExecutionResult> {
-  console.log(`\n=== ${input.label} ===`);
-  const artifact = await runStructuredArtifact({
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, input.thinkingStage),
-    thinkingLevel: context.thinkingConfig[input.thinkingStage],
-    systemPrompt: sharedSystemPrompt,
-    prompt: input.prompt,
-    fileEditingToolsEnabled: true,
-  }, runner, revisionExecutionArtifactDefinition(input.title), {
-    writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
-    writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
-  });
-  console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);
+  const display = revisionDisplay(context, input, "edit");
+  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
+      cwd: context.agentCwd,
+      model: effectiveModelForStage(context.model, input.thinkingStage),
+      thinkingLevel: context.thinkingConfig[input.thinkingStage],
+      systemPrompt: sharedSystemPrompt,
+      prompt: input.prompt,
+      fileEditingToolsEnabled: true,
+      display,
+    }, runner, revisionExecutionArtifactDefinition(input.title), {
+      writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
+      writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
+    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
   return artifact.value;
 }
 
 async function runRevisionPlanPhase(context: PrRevisionContext, runner: AgentRunner): Promise<RevisionPlanResult> {
-  const label = "Revision plan";
-  console.log(`\n=== ${label} ===`);
-  const artifact = await runStructuredArtifact({
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, "revisionPlan"),
-    thinkingLevel: context.thinkingConfig.revisionPlan,
-    systemPrompt: sharedSystemPrompt,
-    prompt: revisionPlanPrompt(context),
-    fileEditingToolsEnabled: false,
-  }, runner, revisionPlanArtifactDefinition, {
-    writeJson: (content) => writePrRevisionArtifact(context, "revision-plan.json", content),
-    writeMarkdown: (content) => writePrRevisionArtifact(context, "revision-plan.md", content),
-  });
-  console.log(`✓ ${label}: wrote ${prRevisionArtifactRelativePath(context, "revision-plan.json")}`);
+  const input = { phaseId: "revision-plan", label: "Revision plan", artifact: "revision-plan.json" };
+  const display = revisionDisplay(context, input, "inspect");
+  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
+      cwd: context.agentCwd,
+      model: effectiveModelForStage(context.model, "revisionPlan"),
+      thinkingLevel: context.thinkingConfig.revisionPlan,
+      systemPrompt: sharedSystemPrompt,
+      prompt: revisionPlanPrompt(context),
+      fileEditingToolsEnabled: false,
+      display,
+    }, runner, revisionPlanArtifactDefinition, {
+      writeJson: (content) => writePrRevisionArtifact(context, "revision-plan.json", content),
+      writeMarkdown: (content) => writePrRevisionArtifact(context, "revision-plan.md", content),
+    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
   return artifact.value;
 }
 
 async function runRevisionReviewAgent(
   context: PrRevisionContext,
   runner: AgentRunner,
-  input: { label: string; artifact: string; prompt: string },
+  input: { phaseId: string; label: string; artifact: string; prompt: string; pass?: number | undefined },
 ): Promise<ReviewResult> {
-  console.log(`\n=== ${input.label} ===`);
-  const artifact = await runStructuredArtifact({
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, "revisionReview"),
-    thinkingLevel: context.thinkingConfig.revisionReview,
-    systemPrompt: sharedSystemPrompt,
-    prompt: input.prompt,
-    fileEditingToolsEnabled: false,
-  }, runner, reviewArtifactDefinition({
-    allowRestart: false,
-    title: input.label,
-    source: "revision-review",
-  }), {
-    writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
-    writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
-  });
-  console.log(`✓ ${input.label}: wrote ${prRevisionArtifactRelativePath(context, input.artifact)}`);
+  const display = revisionDisplay(context, input, "review");
+  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
+      cwd: context.agentCwd,
+      model: effectiveModelForStage(context.model, "revisionReview"),
+      thinkingLevel: context.thinkingConfig.revisionReview,
+      systemPrompt: sharedSystemPrompt,
+      prompt: input.prompt,
+      fileEditingToolsEnabled: false,
+      display,
+    }, runner, reviewArtifactDefinition({
+      allowRestart: false,
+      title: input.label,
+      source: "revision-review",
+    }), {
+      writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
+      writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
+    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
   return artifact.value;
+}
+
+function revisionDisplay(
+  context: PrRevisionContext,
+  input: { phaseId: string; label: string; artifact: string; pass?: number | undefined },
+  operation: AgentDisplayContext["operation"],
+): AgentDisplayContext {
+  return {
+    command: "revise-pr",
+    repository: context.repo,
+    target: `PR #${context.prNumber}`,
+    phaseId: `pr-revision-${input.phaseId}`,
+    phaseLabel: input.label,
+    revision: context.revision,
+    ...(input.pass === undefined ? {} : { pass: input.pass }),
+    expectedArtifact: prRevisionArtifactRelativePath(context, input.artifact.replace(/\.json$/, ".md")),
+    operation,
+  };
 }
 
 async function writeInitialArtifacts(context: PrRevisionContext, feedback: PullRequestFeedback): Promise<void> {

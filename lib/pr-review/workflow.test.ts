@@ -11,8 +11,48 @@ import type { ReviewResult } from "../review/result.ts";
 import { runPrReview } from "./workflow.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import { formatPrReviewComment } from "./comments.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 
 describe("runPrReview", () => {
+  test("sets the preparation title while workspace preparation is pending", async () => {
+    let output = "";
+    const stream: TerminalStream = { isTTY: true, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, env: { TERM: "xterm" } });
+    let preparationStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { preparationStarted = resolve; });
+    let rejectPreparation: ((error: Error) => void) | undefined;
+    const pendingPreparation = new Promise<never>((_, reject) => { rejectPreparation = reject; });
+
+    const running = runPrReview({
+      command: "review-pr",
+      prNumber: 12,
+      cwd: "/tmp/control",
+      outDir: ".roark/runs",
+      repo: "owner/repo",
+      verificationSource: "unresolved",
+      comment: false,
+      workspace: defaultWorkspaceConfig,
+    }, {
+      fetchFeedback: async () => (await noopAsync(), reviewFeedback()),
+      prepareWorkspace: async () => {
+        preparationStarted?.();
+        return pendingPreparation;
+      },
+    });
+
+    try {
+      await started;
+      const outputWhilePending = output;
+      rejectPreparation?.(new Error("stop after title assertion"));
+      expect(running).rejects.toThrow("stop after title assertion");
+      await running.catch(() => undefined);
+      expect(outputWhilePending).toContain("PR #12 · Review preparation");
+    } finally {
+      configurePresenter({});
+    }
+  });
+
   test("publishes every structured required fix from both reviewers", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
@@ -54,7 +94,7 @@ describe("runPrReview", () => {
       },
       agentRunner: async (request) => {
         await noopAsync();
-        return submitReview(request, request.phase?.endsWith("a") === true
+        return submitReview(request, request.display.phaseId.endsWith("a")
           ? reviewResult([
             reviewFinding("must-fix-current", "Malformed IDs"),
             reviewFinding("must-fix-current", "Unseeded auth test"),
@@ -127,7 +167,7 @@ describe("runPrReview", () => {
       verificationRunner: async ({ command }) => (await noopAsync(), { ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
       agentRunner: async (request) => {
         agentCalls.push(request);
-        return submitReview(request, approvedReview(request.phase ?? "review"));
+        return submitReview(request, approvedReview(request.display.phaseId));
       },
     });
 
@@ -196,7 +236,7 @@ describe("runPrReview", () => {
       }),
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      agentRunner: async (request) => submitReview(request, approvedReview(request.phase ?? "review")),
+      agentRunner: async (request) => submitReview(request, approvedReview(request.display.phaseId)),
     });
 
     const reviewContext = await readFile(path.join(result.context.reviewDir, "pr-context.md"), "utf8");
@@ -247,7 +287,7 @@ describe("runPrReview", () => {
         stdout: `diagnostic-at-start\n${"x".repeat(5_000)}\ndiagnostic-at-end`,
         stderr: "",
       }),
-      agentRunner: async (request) => submitReview(request, approvedReview(request.phase ?? "review")),
+      agentRunner: async (request) => submitReview(request, approvedReview(request.display.phaseId)),
     });
 
     const reviewerVerification = await readFile(path.join(result.context.reviewDir, "verification.md"), "utf8");
@@ -371,7 +411,7 @@ describe("runPrReview", () => {
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
       agentRunner: async (request) => {
-        if (request.phase === "pr-review-a") throw new Error("review A unavailable");
+        if (request.display.phaseId === "pr-review-a") throw new Error("review A unavailable");
         await new Promise((resolve) => setTimeout(resolve, 20));
         secondReviewerFinished = true;
         return submitReview(request, approvedReview("B1"));

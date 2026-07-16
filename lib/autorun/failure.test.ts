@@ -68,29 +68,29 @@ describe("autorun failure", () => {
 
   test("buildFailureLabelArgv composes a gh issue edit command", () => {
     expect(
-      buildFailureLabelArgv({ issueNumber: 8, label: "roark-failed", repo: "owner/repo" }),
-    ).toEqual(["gh", "issue", "edit", "8", "--add-label", "roark-failed", "--repo", "owner/repo"]);
+      buildFailureLabelArgv({ issueNumber: 8, label: "agent-failed", repo: "owner/repo" }),
+    ).toEqual(["gh", "issue", "edit", "8", "--add-label", "agent-failed", "--repo", "owner/repo"]);
   });
 
   test("buildFailureLabelArgv omits --repo when not provided", () => {
-    expect(buildFailureLabelArgv({ issueNumber: 8, label: "roark-failed" })).toEqual([
+    expect(buildFailureLabelArgv({ issueNumber: 8, label: "agent-failed" })).toEqual([
       "gh",
       "issue",
       "edit",
       "8",
       "--add-label",
-      "roark-failed",
+      "agent-failed",
     ]);
   });
 
   test("buildRemoveLabelArgv composes a gh issue edit remove-label command", () => {
-    expect(buildRemoveLabelArgv({ issueNumber: 8, label: "roark-in-progress", repo: "owner/repo" })).toEqual([
+    expect(buildRemoveLabelArgv({ issueNumber: 8, label: "agent-in-progress", repo: "owner/repo" })).toEqual([
       "gh",
       "issue",
       "edit",
       "8",
       "--remove-label",
-      "roark-in-progress",
+      "agent-in-progress",
       "--repo",
       "owner/repo",
     ]);

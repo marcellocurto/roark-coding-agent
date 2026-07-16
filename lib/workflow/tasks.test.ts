@@ -91,8 +91,8 @@ describe("runAgentTask thinking profiles", () => {
     const runner: AgentRunner = async (request) => {
       await noopAsync();
       requests.push(`${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`);
-      if (request.phase === "refinementLog-0") return submitChangeReport(request, changeReport({ summary: "Refined." }));
-      if (request.phase === "reviewA-0" || request.phase === "reviewB-0") {
+      if (request.display.phaseId === "refinementLog-0") return submitChangeReport(request, changeReport({ summary: "Refined." }));
+      if (request.display.phaseId === "reviewA-0" || request.display.phaseId === "reviewB-0") {
         return submitReview(request, reviewResult());
       }
       return submitChangeReport(request, changeReport());

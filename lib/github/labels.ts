@@ -1,4 +1,5 @@
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export interface RequiredGitHubLabel {
   name: string;
@@ -53,9 +54,9 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
 
   if (options.dryRun === true) {
     if (missing.length > 0) {
-      console.log("\nRequired GitHub labels missing:");
-      for (const label of missing) console.log(`- ${label.name} (${label.role})`);
-      console.log("Dry run: would create these labels before a real autorun.");
+      presenter().line("Required GitHub labels missing:");
+      for (const label of missing) presenter().line(`- ${label.name} (${label.role})`);
+      presenter().line("Dry run: would create these labels before a real autorun");
     }
     return { existing, missing, created: [] };
   }
@@ -88,8 +89,8 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
   }
 
   if (created.length > 0) {
-    console.log("\nCreated required GitHub labels:");
-    for (const label of created) console.log(`- ${label.name} (${label.role})`);
+    presenter().line("Created required GitHub labels:");
+    for (const label of created) presenter().line(`- ${label.name} (${label.role})`);
   }
 
   return { existing, missing, created };

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { presenter } from "../presentation/presenter.ts";
 import { artifactExists, artifactRelativePath, fixLogRef, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { createIssuesFromCurationPlan, type IssueCreationResults } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "../workflow/issue-curation.ts";
@@ -20,6 +21,7 @@ import { formatPrCreatedComment, formatReadinessLedgerComment, publishIssueLedge
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
@@ -71,8 +73,13 @@ export async function runPublishGate(input: {
   if (readinessStatus === "ready-for-pr") {
     await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
     await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
-    verification = await verify({ command: options.verifyCommand, cwd: workflowContext.agentCwd });
+    verification = await verify({
+      command: options.verifyCommand,
+      cwd: workflowContext.agentCwd,
+      display: { target: `#${workflowContext.issueNumber}`, repository: workflowContext.repo },
+    });
     await writeVerification(workflowContext, verification);
+    presenter().artifact(artifactRelativePath(workflowContext, "verification"));
   }
 
   let decision = decidePublish({ readinessStatus, verification });
@@ -97,12 +104,7 @@ export async function runPublishGate(input: {
         body: formatReadinessLedgerComment({
           issueNumber: issue.number,
           attempt: attemptMetadata.attempt,
-          artifactPath: artifactRelativePath(workflowContext, "readiness"),
           artifactContent: readinessMarkdown ?? "",
-          attemptMetadataPath,
-          outcome: "published",
-          verification,
-          prUrl,
         }),
       });
       await publishLedger({
@@ -122,7 +124,7 @@ export async function runPublishGate(input: {
       try {
         issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl }) ?? undefined;
       } catch (error) {
-        console.warn(`Reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
+        presenter().warning(`reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
       }
       try {
         await editPrBody({
@@ -136,7 +138,7 @@ export async function runPublishGate(input: {
           followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
         });
       } catch (error) {
-        console.warn(`Failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
+        presenter().warning(`failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
     return { outcome: "published", outcomeDetail: null };
@@ -146,8 +148,8 @@ export async function runPublishGate(input: {
     const classification = classifyVerificationFailure(verification);
     const repair = await planVerificationRepair(workflowContext, verification);
     if (repair) {
-      console.log(`\nVerification failed; scheduling fix pass ${repair.pass} before terminal failure.`);
-      console.log(`Archived failure: ${artifactRelativePath(workflowContext, verificationBeforeFixRef(repair.pass))}`);
+      presenter().line(`Verification failed; scheduling fix pass ${repair.pass} before terminal failure`);
+      presenter().artifact(artifactRelativePath(workflowContext, verificationBeforeFixRef(repair.pass)));
       return {
         outcome: "verification-needs-fix",
         outcomeDetail: decision.reason,
@@ -160,6 +162,7 @@ export async function runPublishGate(input: {
         ? `Verification failed after ${workflowContext.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
         : verificationFailureReason(verification),
     };
+    presenter().line(`ACTION user action required: ${classification.recoveryGuidance ?? decision.reason}`);
   }
 
   if (decision.phase === "verification") {
@@ -172,12 +175,7 @@ export async function runPublishGate(input: {
       body: formatReadinessLedgerComment({
         issueNumber: issue.number,
         attempt: attemptMetadata.attempt,
-        artifactPath: artifactRelativePath(workflowContext, "readiness"),
         artifactContent: readinessMarkdown ?? "",
-        attemptMetadataPath,
-        outcome: "failed-verification",
-        outcomeDetail: decision.reason,
-        verification,
         recoveryCommand,
       }),
     });
@@ -201,7 +199,8 @@ export async function createReviewerIssuesAfterPr(input: {
     approvalReason: "Roark opened the autorun pull request successfully",
   });
   if (result.failed.length > 0) {
-    console.warn(`Reviewer-generated issue creation reported ${result.failed.length} failure(s). See ${artifactRelativePath(input.workflowContext, "issueCreationResults")}.`);
+    presenter().warning(`reviewer-generated issue creation reported ${result.failed.length} failure(s)`);
+    presenter().artifact(artifactRelativePath(input.workflowContext, "issueCreationResults"));
   }
   return result;
 }
@@ -249,20 +248,16 @@ export async function handleNonPublish(input: {
   const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
   const artifactContent = await readDecisionArtifact(workflowContext, decision.phase);
 
-  console.log(`\nNot publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
-  console.log(`Artifact: ${artifactPath}`);
-  console.log(`Attempt: ${attemptMetadataPath}`);
-  if (recoveryCommand) console.log(`Continue: ${recoveryCommand}`);
+  presenter().line(`Not publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
+  presenter().artifact(artifactPath);
+  presenter().artifact(attemptMetadataPath);
+  if (recoveryCommand) presenter().recovery(recoveryCommand);
 
   const comment = decision.phase === "readiness"
     ? formatReadinessLedgerComment({
       issueNumber: issue.number,
       attempt: attemptMetadata.attempt,
-      artifactPath,
       artifactContent: artifactContent ?? "",
-      attemptMetadataPath,
-      outcome: "failed-readiness",
-      outcomeDetail: decision.reason,
       recoveryCommand,
     })
     : formatFailureComment({
@@ -286,7 +281,12 @@ export async function handleNonPublish(input: {
     issueNumber: issue.number,
     label: options.failureLabel,
     comment,
-    removeLabels: [options.inProgressLabel],
+    removeLabels: labelsToRemoveForAutorunTransition({
+      issueLabels: issue.labels,
+      workflow: options,
+      nextLabel: options.failureLabel,
+      knownPresent: [options.inProgressLabel],
+    }),
     marker,
     existingCommentId: attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
   });

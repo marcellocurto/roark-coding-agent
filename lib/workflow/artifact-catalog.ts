@@ -15,6 +15,7 @@ export type StaticArtifactName =
   | "readiness"
   | "readinessMarkdown"
   | "verification"
+  | "verificationFull"
   | "metadata"
   | "issueCurationPlan"
   | "issueDrafts"
@@ -25,6 +26,7 @@ export type NumberedArtifactName =
   | "fixLog"
   | "fixLogMarkdown"
   | "verificationBeforeFix"
+  | "verificationBeforeFixFull"
   | "implementationRestartLog"
   | "refinementLog"
   | "refinementLogMarkdown"
@@ -45,6 +47,7 @@ export interface StaticArtifactDefinition {
 export interface NumberedArtifactDefinition {
   readonly name: NumberedArtifactName;
   readonly filenamePrefix: string;
+  readonly filenameSuffix?: string;
   readonly displayName: string;
   readonly extension?: "md" | "json" | undefined;
 }
@@ -78,6 +81,7 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "readiness", filename: "readiness.json", displayName: "Readiness" },
   { name: "readinessMarkdown", filename: "readiness.md", displayName: "Readiness Markdown" },
   { name: "verification", filename: "verification.md", displayName: "Verification" },
+  { name: "verificationFull", filename: "verification-full.md", displayName: "Complete Verification" },
   { name: "metadata", filename: "metadata.json", displayName: "Metadata" },
   { name: "issueCurationPlan", filename: "issue-curation-plan.json", displayName: "Issue Curation Plan" },
   { name: "issueDrafts", filename: "issue-drafts.json", displayName: "Issue Drafts" },
@@ -89,6 +93,7 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   { name: "fixLog", filenamePrefix: "fix-log", displayName: "Fix Log", extension: "json" },
   { name: "fixLogMarkdown", filenamePrefix: "fix-log", displayName: "Fix Log Markdown" },
   { name: "verificationBeforeFix", filenamePrefix: "verification-before-fix", displayName: "Verification Before Fix" },
+  { name: "verificationBeforeFixFull", filenamePrefix: "verification-before-fix", filenameSuffix: "-full", displayName: "Complete Verification Before Fix" },
   { name: "implementationRestartLog", filenamePrefix: "implementation-restart-log", displayName: "Implementation Restart Log" },
   { name: "refinementLog", filenamePrefix: "refinement-log", displayName: "Refinement Log", extension: "json" },
   { name: "refinementLogMarkdown", filenamePrefix: "refinement-log", displayName: "Refinement Log Markdown" },
@@ -124,6 +129,7 @@ const numberedContracts: Record<NumberedArtifactName, (pass: number) => Artifact
   fixLog: () => ({}),
   fixLogMarkdown: () => ({}),
   verificationBeforeFix: () => ({}),
+  verificationBeforeFixFull: () => ({}),
   implementationRestartLog: (pass) => ({ requiredHeading: `Implementation Restart Log Pass ${pass}` }),
   refinementLog: () => ({}),
   refinementLogMarkdown: () => ({}),
@@ -144,6 +150,10 @@ export function fixLogMarkdownRef(pass: number): ArtifactRef {
 
 export function verificationBeforeFixRef(pass: number): ArtifactRef {
   return { name: "verificationBeforeFix", pass };
+}
+
+export function verificationBeforeFixFullRef(pass: number): ArtifactRef {
+  return { name: "verificationBeforeFixFull", pass };
 }
 
 export function implementationRestartLogRef(pass: number): ArtifactRef {
@@ -181,7 +191,7 @@ export function baselineResetLogRef(pass: number): ArtifactRef {
 export function artifactFilename(artifact: ArtifactRef): string {
   if (typeof artifact === "string") return staticArtifactByName[artifact].filename;
   const definition = numberedArtifactByName[artifact.name];
-  return `${definition.filenamePrefix}-${artifact.pass}.${definition.extension ?? "md"}`;
+  return `${definition.filenamePrefix}-${artifact.pass}${definition.filenameSuffix ?? ""}.${definition.extension ?? "md"}`;
 }
 
 export function formatArtifactRef(artifact: ArtifactRef): string {

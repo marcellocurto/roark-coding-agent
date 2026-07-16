@@ -10,6 +10,13 @@ const request: AgentRunRequest = {
   systemPrompt: "system",
   prompt: "prompt",
   fileEditingToolsEnabled: false,
+  display: {
+    command: "test",
+    target: "example",
+    phaseId: "structured-example",
+    phaseLabel: "Structured example",
+    operation: "inspect",
+  },
 };
 
 describe("runStructuredArtifact", () => {

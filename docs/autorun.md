@@ -31,7 +31,7 @@ Keep `--limit 1` while building trust. Roark is intentionally one-shot; use an e
 
 ## Selection labels
 
-The default ready label is `afk`. The default skip set includes lifecycle/status labels such as `roark-in-progress`, `roark-failed`, and `roark-pr-opened`.
+The default ready label is `ready-for-agent`. The default skip set includes intake, paused, terminal, and lifecycle states such as `needs-triage`, `needs-human`, `agent-in-progress`, `agent-failed`, and `agent-pr-opened`.
 
 See [Label semantics](label-semantics.md) for the full label reference.
 

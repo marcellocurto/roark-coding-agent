@@ -1,10 +1,11 @@
 import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { formatReviewResultMarkdown, parseReviewResultJson, type ReviewFindingSource } from "../review/result.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export type LedgerCommentPhase = string;
 
@@ -16,13 +17,9 @@ export interface LedgerCommentArtifactInput {
   attemptMetadataPath?: string | undefined;
 }
 
-export interface ReadinessLedgerCommentInput extends LedgerCommentArtifactInput {
-  outcome?: string | undefined;
-  outcomeDetail?: string | null | undefined;
-  verification?: { ok: boolean; command: string; exitCode: number } | undefined;
-  prUrl?: string | undefined;
+export type ReadinessLedgerCommentInput = Pick<LedgerCommentArtifactInput, "issueNumber" | "attempt" | "artifactContent"> & {
   recoveryCommand?: string | undefined;
-}
+};
 
 export function formatAttemptStartComment(input: {
   issueNumber: number;
@@ -136,7 +133,7 @@ export async function publishIssueLedgerComment(input: {
     });
     recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
   } catch (error) {
-    console.warn(`Failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`);
+    presenter().warning(`failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`);
   }
 }
 
@@ -174,23 +171,11 @@ export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifa
 export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "readiness" });
   const lines = [marker];
-  const outcome: string[] = [];
-  if (input.outcome) outcome.push(`Outcome: ${input.outcome}`);
-  if (input.outcomeDetail) outcome.push(`Detail: ${sanitizePublicMarkdown(input.outcomeDetail)}`);
-  if (input.verification) {
-    outcome.push(`Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`);
-  }
-  if (input.prUrl) outcome.push(`PR: ${input.prUrl}`);
-  if (outcome.length > 0) lines.push("", "## Run outcome", "", ...outcome);
   if (input.recoveryCommand) {
     lines.push("", "## Recovery", "", formatFencedBlock(sanitizePublicMarkdown(input.recoveryCommand), "bash"));
   }
-  lines.push("", formatArtifactDetails([
-    `Readiness artifact: \`${input.artifactPath}\``,
-    ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
-  ]));
   const readiness = sanitizePublicMarkdown(input.artifactContent).trimEnd();
-  if (readiness) lines.push("", formatBoundedMarkdownDetails("Readiness details", readiness));
+  if (readiness) lines.push("", readiness);
   return `${lines.join("\n")}\n`;
 }
 

@@ -4,6 +4,8 @@ import { publishIssueWithGitHub, type IssuePublisher } from "../issue-publishing
 import { formatIssueDraftMarkdown, type IssueDraftCollection, type IssueDraftRenderingContext } from "../issue-publishing/result.ts";
 import { issueDraftArtifactDefinition } from "../issue-publishing/artifact.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
   artifactAgentPath,
@@ -15,7 +17,13 @@ import {
   writeJsonArtifact,
 } from "../workflow/artifacts.ts";
 import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
-import { ensureReviewerIssueLabels, reviewerIssueClassificationLabels, reviewerIssueHumanLabels } from "./labels.ts";
+import {
+  ensureReviewerIssueLabels,
+  reviewerIssueClassificationLabels,
+  reviewerIssueLabelForClassification,
+  reviewerIssueManagedLabels,
+  reviewerIssueTriageLabels,
+} from "./labels.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
 
@@ -205,33 +213,54 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     }
   }
 
-  const publishResult = await authorAndPublishIssues({
-      context,
-      sourcePlanPath,
-      promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
-      creatable,
-      agentRunner,
-      approvalReason,
-      issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
-  });
+  const display: AgentDisplayContext | undefined = creatable.length === 0 ? undefined : {
+    command: context.displayCommand ?? "create-issues",
+    repository: context.repo,
+    target: `#${context.issueNumber}`,
+    phaseId: "issue-publishing",
+    phaseLabel: "Author and create issues",
+    expectedArtifact: resultPath,
+    operation: "publish",
+  };
+  const create = async () => {
+    const publishResult = display === undefined
+      ? { createdCurrentRun: [], failed: [], relationshipOutcomes: [] }
+      : await authorAndPublishIssues({
+        context,
+        promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
+        creatable,
+        agentRunner,
+        approvalReason,
+        display,
+        issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
+      });
 
-  const result = buildResult({
-    context,
-    plan,
-    sourcePlanPath,
-    resultPath,
-    generatedAt: clock.now().toISOString(),
-    dryRun: false,
-    approved: true,
-    existingCreated,
-    createdCurrentRun: publishResult.createdCurrentRun,
-    failed: publishResult.failed,
-    skipped,
-    wouldCreate: [],
-    relationshipOutcomes: publishResult.relationshipOutcomes,
-    countsInput: collected.counts,
-  });
-  await writeJsonArtifact(context, "issueCreationResults", result);
+    const result = buildResult({
+      context,
+      plan,
+      sourcePlanPath,
+      resultPath,
+      generatedAt: clock.now().toISOString(),
+      dryRun: false,
+      approved: true,
+      existingCreated,
+      createdCurrentRun: publishResult.createdCurrentRun,
+      failed: publishResult.failed,
+      skipped,
+      wouldCreate: [],
+      relationshipOutcomes: publishResult.relationshipOutcomes,
+      countsInput: collected.counts,
+    });
+    await writeJsonArtifact(context, "issueCreationResults", result);
+    return result;
+  };
+  const result = display
+    ? await runPresentedPhase(display, create, (created) => ({
+      outcome: `created ${created.counts.createdCurrentRun}, failed ${created.failed.length}`,
+      artifact: resultPath,
+      failed: created.failed.length > 0,
+    }))
+    : await create();
   printApprovedSummary(context, result);
   return result;
 }
@@ -244,17 +273,14 @@ interface PublishResult {
 
 async function authorAndPublishIssues(input: {
   context: WorkflowContext;
-  sourcePlanPath: string;
   promptSourcePlanPath: string;
   creatable: ValidPlanItem[];
   agentRunner: AgentRunner;
   approvalReason: string;
   issuePublisher: IssuePublisher;
+  display: AgentDisplayContext;
 }): Promise<PublishResult> {
-  const { context, sourcePlanPath, promptSourcePlanPath, creatable, agentRunner, approvalReason, issuePublisher } = input;
-  if (creatable.length === 0) return { createdCurrentRun: [], failed: [], relationshipOutcomes: [] };
-
-  console.log(`\n=== Author and create issues from ${sourcePlanPath} ===`);
+  const { context, promptSourcePlanPath, creatable, agentRunner, approvalReason, issuePublisher, display } = input;
 
   try {
     const itemsById = new Map(creatable.map((item) => [item.planItemId, item]));
@@ -278,7 +304,7 @@ async function authorAndPublishIssues(input: {
       }),
       fileEditingToolsEnabled: false,
       observer: context.observer,
-      phase: "issue-publishing",
+      display,
     }, agentRunner, issueDraftArtifactDefinition({
       expectedPlanItemIds: creatable.map((item) => item.planItemId),
       formatMarkdown: (drafts) => formatIssueDraftCollectionMarkdown(drafts, renderDrafts(drafts)),
@@ -399,7 +425,7 @@ async function readExistingCreatedEntries(context: WorkflowContext): Promise<Iss
       }];
     });
   } catch (error) {
-    console.warn(`Could not parse existing ${artifactRelativePath(context, "issueCreationResults")}; rerun idempotence will not use it: ${error instanceof Error ? error.message : String(error)}`);
+    presenter().warning(`could not parse existing ${artifactRelativePath(context, "issueCreationResults")}; rerun idempotence will not use it: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
 }
@@ -514,7 +540,7 @@ function parseIssueDraftRenderingContext(value: Record<string, unknown>, kind: I
       ...(sourceUrl ? { url: sourceUrl } : {}),
     },
     ...(relatedPrUrl ? { relatedPrUrl } : {}),
-    classification: classificationLabelForKind(kind),
+    classification: classificationForKind(kind),
     sourceFindingIds: value["sourceFindingIds"],
     reviewerSources: value["reviewerSources"],
     runDirectory: runContext["runDirRelative"],
@@ -589,10 +615,16 @@ function buildResult(input: {
 }
 
 function labelsForPlanItem(item: Pick<ValidPlanItem, "kind" | "labels">): string[] {
-  return normalizeLabels([...reviewerIssueHumanLabels, classificationLabelForKind(item.kind), ...item.labels]);
+  const managedLabels = new Set<string>(reviewerIssueManagedLabels.map((label) => label.toLowerCase()));
+  const additionalLabels = item.labels.filter((label) => !managedLabels.has(label.trim().toLowerCase()));
+  return normalizeLabels([
+    ...reviewerIssueTriageLabels,
+    reviewerIssueLabelForClassification(classificationForKind(item.kind)),
+    ...additionalLabels,
+  ]);
 }
 
-function classificationLabelForKind(kind: IssuePlanKind): IssuePlanClassification {
+function classificationForKind(kind: IssuePlanKind): IssuePlanClassification {
   return kind === "blocking" ? "external-blocker" : kind;
 }
 
@@ -609,35 +641,35 @@ function normalizeLabels(labels: string[]): string[] {
 }
 
 function printDryRunSummary(context: WorkflowContext, result: IssueCreationResults): void {
-  console.log(`\n=== Dry run: create issues from ${result.sourcePlanPath} ===`);
-  console.log("No GitHub issues were created. Pass --yes to create approved plan items.");
-  console.log(`Target repo: ${context.repo ?? "gh default repository"}`);
+  presenter().line(`Dry run: create issues from ${result.sourcePlanPath}`);
+  presenter().line("No GitHub issues were created. Pass --yes to create approved plan items.");
+  presenter().line(`Target repo: ${context.repo ?? "gh default repository"}`);
   if (result.wouldCreate.length === 0) {
-    console.log(`No approved plan items would be created. ${zeroCreatedExplanation(result)}`);
+    presenter().line(`No approved plan items would be created. ${zeroCreatedExplanation(result)}`);
   } else {
     for (const item of result.wouldCreate) {
-      console.log(`- ${item.planItemId} [${item.kind}]: ${item.title}`);
-      console.log(`  labels: ${item.labels.join(", ")}`);
+      presenter().line(`- ${item.planItemId} [${item.kind}]: ${item.title}`);
+      presenter().line(`labels: ${item.labels.join(", ")}`);
     }
   }
   printSkippedCounts(result);
 }
 
 function printApprovedSummary(context: WorkflowContext, result: IssueCreationResults): void {
-  console.log(`\n✓ Issue creation: wrote ${artifactRelativePath(context, "issueCreationResults")}`);
-  console.log(`Created this run: ${result.counts.createdCurrentRun}; failed: ${result.failed.length}; skipped already-created: ${result.counts.skippedAlreadyCreated}; malformed: ${result.counts.skippedMalformed}.`);
-  if (result.counts.createdCurrentRun === 0) console.log(`Zero created explanation: ${zeroCreatedExplanation(result)}`);
+  presenter().line(`Issue creation: wrote ${artifactRelativePath(context, "issueCreationResults")}`);
+  presenter().line(`Created this run: ${result.counts.createdCurrentRun}; failed: ${result.failed.length}; skipped already-created: ${result.counts.skippedAlreadyCreated}; malformed: ${result.counts.skippedMalformed}.`);
+  if (result.counts.createdCurrentRun === 0) presenter().line(`Zero created explanation: ${zeroCreatedExplanation(result)}`);
   for (const entry of result.created.filter((created) => created.source === "current-run")) {
-    console.log(`- created ${entry.planItemId}${entry.url ? `: ${entry.url}` : ""}`);
+    presenter().line(`- created ${entry.planItemId}${entry.url ? `: ${entry.url}` : ""}`);
   }
   for (const entry of result.failed) {
-    console.log(`- failed ${entry.planItemId}: ${entry.message}`);
+    presenter().line(`- failed ${entry.planItemId}: ${entry.message}`);
   }
   printSkippedCounts(result);
 }
 
 function printSkippedCounts(result: IssueCreationResults): void {
-  console.log(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`);
+  presenter().line(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`);
 }
 
 function zeroCreatedExplanation(result: IssueCreationResults): string {

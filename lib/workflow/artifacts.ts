@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
 import type { RunObserver } from "../observability/observer.ts";
+import { presenter } from "../presentation/presenter.ts";
 import { getWorkflowThinkingConfig, type ThinkingProfileName, type WorkflowThinkingConfig } from "./thinking.ts";
 import { parseIssueRef } from "../github/issue.ts";
 import {
@@ -30,6 +31,7 @@ export {
   reviewBRef,
   reviewBMarkdownRef,
   verificationBeforeFixRef,
+  verificationBeforeFixFullRef,
 } from "./artifact-catalog.ts";
 
 export interface WorkflowContext {
@@ -40,6 +42,7 @@ export interface WorkflowContext {
   runDirRelative: string;
   issueInput: string;
   issueNumber: string;
+  displayCommand?: string | undefined;
   attempt?: number | undefined;
   repo?: string | undefined  ;
   model?: string | undefined  ;
@@ -55,7 +58,7 @@ export interface WorkflowContext {
 
 export function createWorkflowContext(
   options: IssueCliOptions,
-  overrides: { agentCwd?: string  | undefined} = {},
+  overrides: { agentCwd?: string | undefined; displayCommand?: string | undefined } = {},
 ): WorkflowContext {
   const controlCwd = path.resolve(options.cwd);
   const agentCwd = path.resolve(overrides.agentCwd ?? controlCwd);
@@ -75,6 +78,7 @@ export function createWorkflowContext(
     runDirRelative,
     issueInput: options.issue,
     issueNumber: parsed.issueNumber,
+    displayCommand: overrides.displayCommand ?? options.command,
     attempt: options.attempt,
     repo: parsed.repo,
     model: options.model,
@@ -128,14 +132,14 @@ export async function produceArtifact(
   produce: () => Promise<string>,
 ): Promise<string> {
   if (!context.force && artifactExists(context, artifact)) {
-    console.log(`✓ ${label}: using existing ${artifactRelativePath(context, artifact)}`);
+    presenter().line(`${label}: using existing ${artifactRelativePath(context, artifact)}`);
     return readArtifact(context, artifact);
   }
 
-  console.log(`\n=== ${label} ===`);
+  presenter().line(label);
   const content = await produce();
   await writeArtifact(context, artifact, content);
-  console.log(`\n✓ ${label}: wrote ${artifactRelativePath(context, artifact)}`);
+  presenter().line(`${label}: wrote ${artifactRelativePath(context, artifact)}`);
   return content;
 }
 

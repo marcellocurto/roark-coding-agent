@@ -12,6 +12,8 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 - Added `roark remove` with repository-scoped workspace discovery, interactive multi-selection, positional issue shorthand, explicit PR targets, and atomic dirty-workspace preflight for batch removal.
 - Added schema-validated `submit_triage`, `submit_implementation_plan`, `submit_change_report`, `submit_review`, `submit_revision_plan`, `submit_revision_execution`, `submit_pr_draft`, and `submit_issue_drafts` tool contracts, with structured JSON source artifacts and deterministic Markdown presentation.
+- Added `--verbose` completed-agent output and `--no-title` terminal-title opt-out for long-running commands.
+- Added complete `verification-full.md` companion artifacts while retaining bounded verification artifacts for routine inspection.
 
 ### Changed
 
@@ -23,6 +25,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 - All structured agent phases now use one runner for terminating tool submission, validation, canonical JSON serialization, deterministic Markdown rendering, and paired persistence. Issue-workflow reviews now persist matching Markdown companions without using them as workflow state.
 - Review findings now use stable semantic IDs and separate handling from external constraints. Reviews require substantive inspected evidence, bounded content, explicit completeness/limitations, finding-linked restart recommendations, and escaped Markdown rendering; workflows complete available local fixes before stopping on remaining blockers.
 - Readiness artifacts now use schema version 2 to represent the revised review finding and blocker model without misreading version 1 data.
+- Long-running commands now use compact phase-aware operational output, safe target-first interactive terminal titles, and concise final outcomes instead of streaming generated artifact Markdown by default.
 
 ### Removed
 

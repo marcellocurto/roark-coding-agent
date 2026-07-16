@@ -68,21 +68,21 @@ describe("runAutorunAttemptLifecycle", () => {
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
         await noopAsync();
-        phases.push(request.phase ?? "unknown");
+        phases.push(request.display.phaseId);
         expect(request.prompt).toContain("failed_verification");
-        if (request.phase === "fixLog-1") {
+        if (request.display.phaseId === "fixLog-1") {
           return submitChangeReport(request, changeReport({ summary: "Addressed verification failure." }));
         }
-        if (request.phase === "refinementLog-1") {
+        if (request.display.phaseId === "refinementLog-1") {
           return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
-        if (request.phase === "reviewA-1") {
+        if (request.display.phaseId === "reviewA-1") {
           return submitReview(request, reviewResult());
         }
-        if (request.phase === "reviewB-1") {
+        if (request.display.phaseId === "reviewB-1") {
           return submitReview(request, reviewResult());
         }
-        throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
+        throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:30:00.000Z") },
@@ -118,39 +118,39 @@ describe("runAutorunAttemptLifecycle", () => {
       issue: { number: 44, title: "Lifecycle", url: "https://github.com/owner/repo/issues/44" },
       runner: async (request) => {
         await noopAsync();
-        phases.push(request.phase ?? "unknown");
-        if (request.phase === "fixLog-1") {
+        phases.push(request.display.phaseId);
+        if (request.display.phaseId === "fixLog-1") {
           return submitChangeReport(request, changeReport({
             summary: "Partially addressed verification failure.",
             validation: [{ command: "bun test", status: "failed", details: "Numbered review requested another fix." }],
             remainingConcerns: ["Numbered review requested another fix."],
           }));
         }
-        if (request.phase === "refinementLog-1") {
+        if (request.display.phaseId === "refinementLog-1") {
           return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
-        if (request.phase === "reviewA-1") {
+        if (request.display.phaseId === "reviewA-1") {
           return submitReview(request, reviewResult([reviewFinding("must-fix-current", "Numbered review requested another fix.")]));
         }
-        if (request.phase === "reviewB-1") {
+        if (request.display.phaseId === "reviewB-1") {
           return submitReview(request, reviewResult());
         }
-        if (request.phase === "fixLog-2") {
+        if (request.display.phaseId === "fixLog-2") {
           return submitChangeReport(request, changeReport({
             summary: "Completed verification repair.",
             addressedFindingIds: ["review-a:numbered-review-requested-another-fix"],
           }));
         }
-        if (request.phase === "refinementLog-2") {
+        if (request.display.phaseId === "refinementLog-2") {
           return submitChangeReport(request, changeReport({ summary: "Refined." }));
         }
-        if (request.phase === "reviewA-2") {
+        if (request.display.phaseId === "reviewA-2") {
           return submitReview(request, reviewResult());
         }
-        if (request.phase === "reviewB-2") {
+        if (request.display.phaseId === "reviewB-2") {
           return submitReview(request, reviewResult());
         }
-        throw new Error(`unexpected phase ${request.phase ?? "unknown"}`);
+        throw new Error(`unexpected phase ${request.display.phaseId}`);
       },
     }, {
       clock: { now: () => new Date("2026-05-07T01:45:00.000Z") },

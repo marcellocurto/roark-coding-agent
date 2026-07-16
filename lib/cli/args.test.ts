@@ -39,7 +39,7 @@ describe("parseArgs", () => {
       "--skip-label",
       "blocked",
       "--skip-labels",
-      "needs-human,wontfix",
+      "needs-human,wont-fix",
       "--limit",
       "2",
       "--in-progress-label",
@@ -72,7 +72,7 @@ describe("parseArgs", () => {
 
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.readyLabel).toBe("roark-ready");
-    expect(parsed.skipLabels).toEqual(["blocked", "needs-human", "wontfix"]);
+    expect(parsed.skipLabels).toEqual(["blocked", "needs-human", "wont-fix"]);
     expect(parsed.limit).toBe(2);
     expect(parsed.inProgressLabel).toBe("custom-in-progress");
     expect(parsed.assignee).toBe("roark-codes");
@@ -87,6 +87,23 @@ describe("parseArgs", () => {
     expect(parsed.maxFixPasses).toBe(3);
     expect(parsed.force).toBe(true);
     expect(parsed.yes).toBe(true);
+  });
+
+  test("parses presentation flags for long-running commands and keeps -v reserved", () => {
+    for (const argv of [
+      ["do", "123", "--verbose", "--no-title"],
+      ["auto", "123", "--verbose", "--no-title"],
+      ["continue", "123", "--verbose", "--no-title"],
+      ["review-pr", "42", "--verbose", "--no-title"],
+      ["revise-pr", "42", "--verbose", "--no-title"],
+    ]) {
+      const parsed = parseArgs(argv);
+      if ("help" in parsed) throw new Error("expected options");
+      expect("verbose" in parsed && parsed.verbose).toBe(true);
+      expect("noTitle" in parsed && parsed.noTitle).toBe(true);
+    }
+    expect(() => parseArgs(["status", "123", "--verbose"])).toThrow("Unknown option '--verbose'");
+    expect(() => parseArgs(["do", "123", "-v"])).toThrow("Unknown option '-v'");
   });
 
   test("parses targeted auto issue refs", () => {

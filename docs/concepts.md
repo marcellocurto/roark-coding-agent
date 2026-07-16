@@ -101,7 +101,7 @@ The run can publish only when the command exits `0`. Command output is recorded 
 
 Labels control autorun eligibility and lifecycle state.
 
-The default ready label is `afk`. Default skip and lifecycle labels include `blocked`, `needs-human`, `roark-in-progress`, `roark-failed`, and `roark-pr-opened`.
+The default ready label is `ready-for-agent`. Default workflow skip labels include `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, `wont-fix`, `agent-in-progress`, `agent-failed`, and `agent-pr-opened`.
 
 See [Label semantics](label-semantics.md).
 

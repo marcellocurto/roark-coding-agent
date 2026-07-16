@@ -6,8 +6,9 @@ import { prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishi
 import { prDraftArtifactDefinition } from "../pr-publishing/artifact.ts";
 import { formatPrDraftMarkdown, parsePrDraftJson, type PrDraftRenderingContext } from "../pr-publishing/result.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
-import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
   artifactPath,
@@ -29,8 +30,9 @@ import { sanitizePublicMarkdown } from "./public-output.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
 import { parseChangeReportJson, type ChangeReport } from "../change-report/result.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
-export const defaultAutorunSuccessLabel = "roark-pr-opened";
+export const defaultAutorunSuccessLabel = "agent-pr-opened";
 export const defaultAutorunRemote = "origin";
 
 export interface CommitArgvOptions { message: string }
@@ -39,6 +41,7 @@ export interface SuccessLabelArgvOptions {
   repo?: string | undefined  ;
   issueNumber: number;
   label: string;
+  removeLabels?: readonly string[] | undefined;
 }
 
 export interface FormatPrBodyFollowUpIssue {
@@ -77,7 +80,7 @@ export interface FormatPrBodyNarrative {
 export type AutorunPublishOptions = Pick<
   AutoCliOptions,
   "cwd" | "repo" | "failureLabel" | "successLabel" | "inProgressLabel" | "remote" | "baseBranch"
->;
+> & Partial<Pick<AutoCliOptions, "readyLabel">>;
 
 export interface PublishAutorunResultInput {
   options: AutorunPublishOptions;
@@ -104,7 +107,10 @@ export function buildPushArgv(options: PushArgvOptions): string[] {
 
 export function buildSuccessLabelArgv(options: SuccessLabelArgvOptions): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
+  const removeLabelArgs = (options.removeLabels ?? [])
+    .filter((label) => label !== options.label)
+    .flatMap((label) => ["--remove-label", label]);
+  return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...removeLabelArgs, ...repoArgs];
 }
 
 export function formatCommitMessage(input: { issueNumber: number }): string {
@@ -482,14 +488,31 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
 }
 
 export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
+  const display: AgentDisplayContext = {
+    command: input.workflowContext.displayCommand ?? "auto",
+    repository: input.options.repo,
+    target: `#${input.issue.number}`,
+    phaseId: "pr-publishing",
+    phaseLabel: "Publish pull request",
+    expectedArtifact: input.attemptMetadataPath,
+    operation: "publish",
+  };
+  return runPresentedPhase(
+    display,
+    () => performAutorunPublication(input, display),
+    (prUrl) => ({ outcome: prUrl ? `published ${prUrl}` : "published" }),
+  );
+}
+
+async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext): Promise<string | undefined> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath, agentRunner = runPiAgent } = input;
   const agentCwd = workflowContext.agentCwd;
   const controlCwd = workflowContext.controlCwd;
 
-  console.log(`\n=== Publish #${issue.number} ===`);
+  presenter().line(`Publishing issue #${issue.number}`);
 
   if (await hasUncommittedChanges({ cwd: agentCwd })) {
-    console.log("- Committing worktree changes");
+    presenter().line("Committing worktree changes");
     await runProcessOrThrow(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" });
     await runProcess(["git", "reset", "-q", "--", ".roark"], { cwd: agentCwd });
     await runProcessOrThrow(
@@ -497,10 +520,10 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
       { cwd: agentCwd, label: "git commit" },
     );
   } else {
-    console.log("- No uncommitted changes; skipping commit.");
+    presenter().line("No uncommitted changes; skipping commit");
   }
 
-  console.log(`- Pushing ${branchPlan.branchName} to ${options.remote}`);
+  presenter().line(`Pushing ${branchPlan.branchName} to ${options.remote}`);
   await runProcessOrThrow(
     buildPushArgv({ remote: options.remote, branchName: branchPlan.branchName }),
     { cwd: agentCwd, label: `git push ${options.remote}` },
@@ -508,7 +531,7 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
 
   await writePrNarrativeArtifact(workflowContext);
 
-  console.log("- Authoring and creating pull request");
+  presenter().line("Authoring and creating pull request");
   const publishedPr = await authorAndPublishPullRequest({
     options,
     issue,
@@ -518,32 +541,30 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
     attemptMetadata,
     attemptMetadataPath,
     agentRunner,
-  });
+  }, display);
   const prUrl = publishedPr.url;
-  if (prUrl) console.log(`- PR: ${prUrl}`);
+  if (prUrl) presenter().line(`PR: ${prUrl}`);
 
+  const removeLabels = labelsToRemoveForAutorunTransition({
+    issueLabels: issue.labels,
+    workflow: options,
+    nextLabel: options.successLabel,
+    knownPresent: [options.inProgressLabel, options.failureLabel],
+  });
   try {
     await runProcessOrThrow(
-      buildSuccessLabelArgv({ repo: options.repo, issueNumber: issue.number, label: options.successLabel }),
-      { cwd: controlCwd, label: "gh issue edit --add-label (success)" },
+      buildSuccessLabelArgv({
+        repo: options.repo,
+        issueNumber: issue.number,
+        label: options.successLabel,
+        removeLabels,
+      }),
+      { cwd: controlCwd, label: "gh issue edit --transition-label (success)" },
     );
   } catch (error) {
-    console.warn(
-      `Failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
+    presenter().warning(
+      `WARNING failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
     );
-  }
-
-  for (const label of [options.inProgressLabel, options.failureLabel].filter((label) => label !== options.successLabel)) {
-    try {
-      await runProcessOrThrow(
-        buildRemoveLabelArgv({ repo: options.repo, issueNumber: issue.number, label }),
-        { cwd: controlCwd, label: "gh issue edit --remove-label (success cleanup)" },
-      );
-    } catch (error) {
-      console.warn(
-        `Failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   return prUrl === "" ? undefined : prUrl;
@@ -556,7 +577,10 @@ interface PublishedPullRequest {
   stdout?: string | undefined;
 }
 
-async function authorAndPublishPullRequest(input: PublishAutorunResultInput & { agentRunner: AgentRunner }): Promise<PublishedPullRequest> {
+async function authorAndPublishPullRequest(
+  input: PublishAutorunResultInput & { agentRunner: AgentRunner },
+  display: AgentDisplayContext,
+): Promise<PublishedPullRequest> {
   const renderingContext = prDraftRenderingContext({
     workflowContext: input.workflowContext,
     issueNumber: input.issue.number,
@@ -581,7 +605,7 @@ async function authorAndPublishPullRequest(input: PublishAutorunResultInput & { 
     }),
     fileEditingToolsEnabled: false,
     observer: input.workflowContext.observer,
-    phase: "pr-publishing",
+    display,
   }, input.agentRunner, prDraftArtifactDefinition({
     renderingContext,
     localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd],
@@ -618,22 +642,32 @@ export async function updatePrBody(input: {
   attemptMetadata?: AttemptMetadata | undefined;
   followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
 }): Promise<void> {
-  const draft = parsePrDraftJson(readFileSync(artifactPath(input.workflowContext, "prDraft"), "utf8"));
-  const body = sanitizePublicMarkdown(formatPrDraftMarkdown(draft, prDraftRenderingContext({
-    workflowContext: input.workflowContext,
-    issueNumber: input.issueNumber,
-    followUpIssues: input.followUpIssues,
-    verification: input.verification,
-    attemptMetadata: input.attemptMetadata,
-  })), { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
-  const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
-  await writeArtifact(input.workflowContext, "prDraftMarkdown", body);
-  await runProcessOrThrow([
-    "gh", "pr", "edit", input.pr,
-    "--title", title,
-    "--body-file", "-",
-    ...(input.repo ? ["--repo", input.repo] : []),
-  ], { cwd: input.cwd, label: "gh pr edit", input: body });
+  const display: AgentDisplayContext = {
+    command: input.workflowContext.displayCommand ?? "auto",
+    repository: input.repo,
+    target: `#${input.issueNumber}`,
+    phaseId: "pr-body-update",
+    phaseLabel: "Update PR body",
+    operation: "publish",
+  };
+  await runPresentedPhase(display, async () => {
+    const draft = parsePrDraftJson(readFileSync(artifactPath(input.workflowContext, "prDraft"), "utf8"));
+    const body = sanitizePublicMarkdown(formatPrDraftMarkdown(draft, prDraftRenderingContext({
+      workflowContext: input.workflowContext,
+      issueNumber: input.issueNumber,
+      followUpIssues: input.followUpIssues,
+      verification: input.verification,
+      attemptMetadata: input.attemptMetadata,
+    })), { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
+    const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
+    await writeArtifact(input.workflowContext, "prDraftMarkdown", body);
+    await runProcessOrThrow([
+      "gh", "pr", "edit", input.pr,
+      "--title", title,
+      "--body-file", "-",
+      ...(input.repo ? ["--repo", input.repo] : []),
+    ], { cwd: input.cwd, label: "gh pr edit", input: body });
+  }, () => ({ outcome: "updated" }));
 }
 
 export function buildPrCreateArgv(input: { repo?: string | undefined; baseBranch: string; branchName: string; title: string }): string[] {

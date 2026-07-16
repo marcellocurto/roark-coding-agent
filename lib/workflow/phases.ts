@@ -3,6 +3,8 @@ import path from "node:path";
 import { fetchGitHubIssue } from "../github/issue.ts";
 import { createFileRunObserver } from "../observability/observer.ts";
 import { runPiAgent } from "../pi/agent.ts";
+import { presenter, type AgentDisplayContext, type AgentOperation } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import {
@@ -51,19 +53,21 @@ import type { ChangeReport } from "../change-report/result.ts";
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
 export async function fetchIssuePhase(context: WorkflowContext): Promise<string> {
-  if (!context.force && artifactExists(context, "issue")) {
-    const existingIssue = await readArtifact(context, "issue");
-    if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
-      console.log(`✓ Fetch issue: using existing issue.md`);
-      await context.observer?.phaseCompleted({ phase: "fetch", label: "Fetch issue", artifact: "issue", reused: true });
-      return existingIssue;
+  const display = deterministicDisplay(context, "fetch", "Fetch issue", "issue.md", "inspect");
+  let outcome = "fetched";
+  return runPresentedPhase(display, async () => {
+    if (!context.force && artifactExists(context, "issue")) {
+      const existingIssue = await readArtifact(context, "issue");
+      if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
+        await context.observer?.phaseCompleted({ phase: "fetch", label: "Fetch issue", artifact: "issue", reused: true });
+        outcome = "reused";
+        return existingIssue;
+      }
+      presenter().line("Fetch issue: existing issue.md lacks GitHub relationship snapshot; refetching");
     }
-    console.log(`↻ Fetch issue: existing issue.md lacks GitHub relationship snapshot; refetching`);
-  }
 
-  console.log(`\n=== Fetch issue #${context.issueNumber} ===`);
-  await context.observer?.phaseStarted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
-  try {
+    presenter().line(`Fetching issue #${context.issueNumber}`);
+    await context.observer?.phaseStarted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
     const result = await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo });
     const issueArtifact = formatGitHubIssueArtifact(result.issue, result.relationships);
 
@@ -76,12 +80,10 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
       relationships: result.relationships,
     });
     await context.observer?.phaseCompleted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
-    console.log(`✓ Fetch issue: wrote issue.md and metadata.json`);
     return issueArtifact;
-  } catch (error) {
-    await context.observer?.phaseFailed({ phase: "fetch", label: "Fetch issue", artifact: "issue", error });
-    throw error;
-  }
+  }, () => ({ outcome, artifact: "issue.md" }), {
+    onError: (error) => context.observer?.phaseFailed({ phase: "fetch", label: "Fetch issue", artifact: "issue", error }),
+  });
 }
 
 export async function triagePhase(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<TriageResult> {
@@ -97,18 +99,24 @@ export async function planPhase(context: WorkflowContext, runner: AgentRunner = 
 }
 
 export async function captureBaselinePhase(context: WorkflowContext): Promise<string> {
-  if (!context.force && artifactExists(context, "preImplementationBaseline")) {
-    const existing = await readArtifact(context, "preImplementationBaseline");
-    if (existing.trim()) return existing;
-  }
-  const baseline = await capturePreImplementationBaseline({ cwd: context.agentCwd, yes: context.yes });
-  const content = JSON.stringify({
-    ...baseline,
-    note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
-  }, null, 2);
-  await writeArtifact(context, "preImplementationBaseline", content);
-  console.log(`✓ Capture baseline: wrote pre-implementation-baseline.json`);
-  return content;
+  const display = deterministicDisplay(context, "capture-baseline", "Capture baseline", "pre-implementation-baseline.json", "inspect");
+  let outcome = "captured";
+  return runPresentedPhase(display, async () => {
+    if (!context.force && artifactExists(context, "preImplementationBaseline")) {
+      const existing = await readArtifact(context, "preImplementationBaseline");
+      if (existing.trim()) {
+        outcome = "reused";
+        return existing;
+      }
+    }
+    const baseline = await capturePreImplementationBaseline({ cwd: context.agentCwd, yes: context.yes });
+    const content = JSON.stringify({
+      ...baseline,
+      note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
+    }, null, 2);
+    await writeArtifact(context, "preImplementationBaseline", content);
+    return content;
+  }, () => ({ outcome, artifact: display.expectedArtifact }));
 }
 
 export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<ChangeReport> {
@@ -169,27 +177,29 @@ export async function fixPhase(
 }
 
 export async function resetBaselinePhase(context: WorkflowContext, pass: number): Promise<string> {
-  const baseline = JSON.parse(await readArtifact(context, "preImplementationBaseline")) as PreImplementationBaseline;
-  await resetWorktreeToPreImplementationBaseline({ cwd: context.agentCwd, baseline });
-  const content = `# Baseline Reset Pass ${pass}\n\n## Summary\nReset non-.roark worktree state to pre-implementation baseline ${baseline.head}.\n\n## Preserved Control Plane\n.roark artifacts were preserved.\n`;
-  await writeArtifact(context, baselineResetLogRef(pass), content);
-  console.log(`✓ Reset baseline: wrote baseline-reset-${pass}.md`);
-  return content;
+  const artifact = `baseline-reset-${pass}.md`;
+  const display = { ...deterministicDisplay(context, `baseline-reset-${pass}`, "Reset baseline", artifact, "edit"), pass };
+  return runPresentedPhase(display, async () => {
+    const baseline = JSON.parse(await readArtifact(context, "preImplementationBaseline")) as PreImplementationBaseline;
+    await resetWorktreeToPreImplementationBaseline({ cwd: context.agentCwd, baseline });
+    const content = `# Baseline Reset Pass ${pass}\n\n## Summary\nReset non-.roark worktree state to pre-implementation baseline ${baseline.head}.\n\n## Preserved Control Plane\n.roark artifacts were preserved.\n`;
+    await writeArtifact(context, baselineResetLogRef(pass), content);
+    return content;
+  }, () => ({ outcome: "reset", artifact }));
 }
 
 export async function readinessPhase(context: WorkflowContext): Promise<string> {
+  const display = deterministicDisplay(context, "readiness", "Readiness", "readiness.md", "inspect");
   await context.observer?.phaseStarted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
-  try {
+  return runPresentedPhase(display, async () => {
     const readiness = await buildReadinessArtifacts(context);
     await writeJsonArtifact(context, "readiness", readiness.result);
     await writeArtifact(context, "readinessMarkdown", readiness.markdown);
     await context.observer?.phaseCompleted({ phase: "readiness", label: "Readiness", artifact: "readiness" });
-    console.log(`✓ Readiness: wrote readiness.json and readiness.md`);
     return readiness.markdown;
-  } catch (error) {
-    await context.observer?.phaseFailed({ phase: "readiness", label: "Readiness", artifact: "readiness", error });
-    throw error;
-  }
+  }, () => ({ outcome: "generated", artifact: "readiness.md" }), {
+    onError: (error) => context.observer?.phaseFailed({ phase: "readiness", label: "Readiness", artifact: "readiness", error }),
+  });
 }
 
 export type WorkflowRunResult =
@@ -246,12 +256,12 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
     if (next.type === "write-readiness") {
       await readinessPhase(context);
       completedActions.push(next);
-      if (progression.terminalStatus) return logAndReturnTerminal(progression.terminalStatus);
+      if (progression.terminalStatus) return progression.terminalStatus;
       continue;
     }
 
     if (next.type === "noop") {
-      if (progression.terminalStatus) return logAndReturnTerminal(progression.terminalStatus);
+      if (progression.terminalStatus) return progression.terminalStatus;
       throw new Error(`Workflow progression returned a no-op without a terminal status: ${next.reason}`);
     }
 
@@ -283,13 +293,6 @@ async function runWorkflowPhase(
 
 function assertNever(value: never): never {
   throw new Error(`Unsupported workflow phase '${String(value)}'.`);
-}
-
-function logAndReturnTerminal(result: WorkflowRunResult): WorkflowRunResult {
-  if (result.status === "triage-stopped") console.log(`\nStopped after triage: ${result.triageVerdict}`);
-  else if (result.status === "planning-stopped") console.log("\nStopped after planning: plan is not ready for implementation.");
-  else if (result.status === "review-blocked") console.log("\nStopped after review: at least one review is blocked.");
-  return result;
 }
 
 function inferNextReviewPass(context: WorkflowContext): number {
@@ -363,4 +366,22 @@ function standalonePhasePass(context: WorkflowContext, phase: StandaloneWorkflow
   if (phase === "fix") return context.fixPass ?? inferNextFixPass(context);
   if (phase === "reset-baseline") return context.fixPass ?? 1;
   return undefined;
+}
+
+function deterministicDisplay(
+  context: WorkflowContext,
+  phaseId: string,
+  phaseLabel: string,
+  expectedArtifact: string,
+  operation: AgentOperation,
+): AgentDisplayContext {
+  return {
+    command: context.displayCommand ?? "issue-workflow",
+    repository: context.repo,
+    target: `#${context.issueNumber}`,
+    phaseId,
+    phaseLabel,
+    expectedArtifact,
+    operation,
+  };
 }

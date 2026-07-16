@@ -1,8 +1,9 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
+import { presenter } from "../presentation/presenter.ts";
 
 export type TriageStoppedVerdict = string;
 
@@ -27,29 +28,15 @@ export async function readTriageStoppedVerdict(context: WorkflowContext): Promis
   return parseTriageResultJson(await readArtifact(context, "triage")).verdict;
 }
 
-export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" {
+export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" | "triage-rejected" {
   if (verdict === "blocked") return "blocked";
+  if (verdict === "reject") return "triage-rejected";
   return "needs-human";
 }
 
 export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInput): string {
-  const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
-  const lines: string[] = [];
-  lines.push(
-    `Roark stopped issue ${issueDisplay} during triage with verdict **${input.triageVerdict}**.`,
-    "",
-    "This is a clean terminal triage outcome, so Roark did not run verification, push the branch, or create a PR.",
-  );
-
-  const artifacts: string[] = [];
-  if (input.triageArtifactPath) artifacts.push(`Triage artifact: \`${input.triageArtifactPath}\``);
-  if (input.attemptMetadataPath) artifacts.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  if (artifacts.length > 0) lines.push("", formatArtifactDetails(artifacts));
-  if (input.triageArtifactContent) {
-    lines.push("", formatBoundedMarkdownDetails("Triage artifact excerpt", sanitizePublicMarkdown(input.triageArtifactContent)));
-  }
-
-  return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
+  if (!input.triageArtifactContent?.trim()) return "";
+  return truncateGitHubIssueComment(`${sanitizePublicMarkdown(input.triageArtifactContent).trimEnd()}\n`);
 }
 
 export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {
@@ -72,7 +59,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
       { cwd: options.cwd, label: "gh issue edit --add-label (triage stop)" },
     );
   } catch (error) {
-    console.warn(`Failed to apply triage-stop label '${label}': ${formatError(error)}`);
+    presenter().warning(`failed to apply triage-stop label '${label}': ${formatError(error)}`);
   }
 
   for (const removeLabel of uniqueLabels(options.removeLabels ?? []).filter((candidate) => candidate !== label)) {
@@ -82,7 +69,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
         { cwd: options.cwd, label: "gh issue edit --remove-label (triage stop cleanup)" },
       );
     } catch (error) {
-      console.warn(`Failed to remove label '${removeLabel}': ${formatError(error)}`);
+      presenter().warning(`failed to remove label '${removeLabel}': ${formatError(error)}`);
     }
   }
 
@@ -99,7 +86,7 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
     }
     await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment });
   } catch (error) {
-    console.warn(`Failed to post triage-stop comment: ${formatError(error)}`);
+    presenter().warning(`failed to post triage-stop comment: ${formatError(error)}`);
   }
   return undefined;
 }

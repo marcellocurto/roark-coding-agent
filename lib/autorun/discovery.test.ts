@@ -11,6 +11,7 @@ import { defaultAutorunVerifyCommand } from "./verification.ts";
 import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
 import { noopAsync } from "../utils/async.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
 
 const tempDirs: string[] = [];
 const noOpLabelContract = {
@@ -36,7 +37,7 @@ describe("runAutoDiscovery", () => {
             issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
             issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
             issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-            issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
+            issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "agent-in-progress"]),
           ];
         },
         fetchGitHubIssueRelationships: async (input) => (await noopAsync(), dependencyClearRelationships(Number(input.issueNumber))),
@@ -46,6 +47,49 @@ describe("runAutoDiscovery", () => {
     expect(listed).toBe(true);
     expect(logs.join("\n")).toContain("#3 Issue 3");
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
+  });
+
+  test("retains a discovered dry-run target in the presenter identity", async () => {
+    let output = "";
+    const presentation = configurePresenter({
+      stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } },
+      now: () => 100,
+    });
+    presentation.run({ command: "auto", repository: "owner/repo" });
+    try {
+      const result = await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpLabelContract,
+        listOpenGitHubIssues: async () => (await noopAsync(), [issue(29, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]),
+        fetchGitHubIssueRelationships: async () => (await noopAsync(), dependencyClearRelationships(29)),
+      });
+      presentation.outcome("SUCCESS", presentation.currentTarget(), "dry run complete");
+
+      expect(result.kind).toBe("dry-run");
+      expect(presentation.currentTarget()).toBe("#29");
+      expect(output).toContain("DONE #29 · Discovery");
+      expect(output).toContain("SUCCESS #29 · dry run complete");
+    } finally {
+      configurePresenter({ titleEnabled: false });
+    }
+  });
+
+  test("sanitizes hostile issue metadata in ordinary discovery output", async () => {
+    const logs = await captureLogs(async () => {
+      await runAutoDiscovery({ ...baseOptions(), dryRun: true }, {
+        ...noOpLabelContract,
+        listOpenGitHubIssues: async () => (await noopAsync(), [{
+          ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+          title: "hostile\u001b]0;owned\u0007\rrewritten",
+          url: "https://example.invalid/one\nINJECTED",
+        }]),
+        fetchGitHubIssueRelationships: async () => (await noopAsync(), dependencyClearRelationships(1)),
+      });
+    });
+
+    const output = logs.join("\n");
+    expect(output).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+    expect(output).toContain("hostile ]0;owned rewritten");
+    expect(output).toContain("INJECTED");
   });
 
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
@@ -247,7 +291,7 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["roark-in-progress"])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["agent-in-progress"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         preflighted = true;
@@ -256,7 +300,7 @@ describe("runAutoDiscovery", () => {
         await noopAsync();
         claimed = true;
       },
-    })).rejects.toThrow("Issue #29 has skip label roark-in-progress");
+    })).rejects.toThrow("Issue #29 has skip label agent-in-progress");
 
     expect(preflighted).toBe(false);
     expect(claimed).toBe(false);
@@ -268,7 +312,7 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["ready-for-agent"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         order.push("preflight");
@@ -303,7 +347,7 @@ describe("runAutoDiscovery", () => {
         fetchCount += 1;
         return fetchCount === 1
           ? fetchedGitHubIssue(29, [])
-          : fetchedGitHubIssue(29, ["roark-in-progress"]);
+          : fetchedGitHubIssue(29, ["agent-in-progress"]);
       },
       assertCleanAutorunGit: async () => {
         await noopAsync();
@@ -347,7 +391,7 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpLabelContract,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["ready-for-agent"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         calls.push("preflight");
@@ -356,6 +400,7 @@ describe("runAutoDiscovery", () => {
         await noopAsync();
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
+        expect(input.plan.removeLabels).toEqual(["ready-for-agent"]);
       },
       prepareCloneWorkspace: async (input) => {
   await noopAsync();
@@ -586,15 +631,20 @@ function fetchedGitHubIssue(number: number, labels: string[]) {
 }
 
 async function captureLogs(fn: () => Promise<void>): Promise<string[]> {
-  const original = console.log;
   const logs: string[] = [];
-  console.log = (message?: unknown) => {
-    logs.push(typeof message === "string" ? message : JSON.stringify(message ?? ""));
-  };
+  configurePresenter({
+    stream: {
+      isTTY: false,
+      columns: 80,
+      write(chunk) {
+        logs.push(chunk.replace(/\n$/, ""));
+      },
+    },
+  });
   try {
     await fn();
     return logs;
   } finally {
-    console.log = original;
+    configurePresenter({ titleEnabled: false });
   }
 }

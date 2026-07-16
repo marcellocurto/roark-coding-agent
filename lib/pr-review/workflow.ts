@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
@@ -24,7 +25,10 @@ import type { ReviewResult } from "../review/result.ts";
 import { reviewArtifactDefinition } from "../review/artifact.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { artifactOutcome } from "../workflow/markdown-token.ts";
 import {
   createPrReviewContext,
   removeAgentPrReviewArtifacts,
@@ -62,6 +66,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
   const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber });
   validateReviewablePr(initial);
+  presenter().transition("Review preparation", `PR #${initial.pr.number}`, { operation: "inspect" });
   const hooks = defaultLifecycleHooks;
   const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
   const workspace = prReviewWorkspaceConfig(options.workspace ?? defaultWorkspaceConfig);
@@ -82,8 +87,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
 
   try {
     context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path });
-    console.log(`Run directory: ${context.reviewDirRelative}`);
-    console.log(`Review workspace: ${context.agentCwd}`);
+    presenter().transition("Review preparation", `PR #${context.prNumber}`, { pass: context.generation, operation: "inspect" });
+    presenter().line(`Run directory: ${context.reviewDirRelative}`);
+    presenter().line(`Review workspace: ${path.basename(context.agentCwd)}`);
     await hookRunner("beforeRun", hooks, context.agentCwd);
     await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
@@ -104,11 +110,20 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     if (resolvedVerification.command) {
       await hookRunner("beforeVerify", hooks, context.agentCwd);
       try {
-        verification = await runVerification({ command: resolvedVerification.command, cwd: context.agentCwd, runner: deps.verificationRunner });
+        verification = await runVerification({
+          command: resolvedVerification.command,
+          cwd: context.agentCwd,
+          runner: deps.verificationRunner,
+          display: { target: `PR #${context.prNumber}`, repository: context.repo, pass: context.generation },
+        });
         await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
         await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
+        presenter().artifact(path.join(context.reviewDirRelative, "verification.md"));
         const classification = classifyVerificationFailure(verification);
-        if (!verification.ok && !classification.repairable) verificationUnavailable = classification.recoveryGuidance ?? classification.reason;
+        if (!verification.ok) {
+          presenter().line(`ACTION user action required for verification: ${classification.recoveryGuidance ?? classification.reason}`);
+          if (!classification.repairable) verificationUnavailable = classification.recoveryGuidance ?? classification.reason;
+        }
         verificationStatus = `${verification.ok ? "passed" : "failed"} (${resolvedVerification.source}, \`${resolvedVerification.command}\`, exit ${verification.exitCode})`;
       } catch (error) {
         verificationUnavailable = `Verification could not run: ${errorMessage(error)}`;
@@ -167,16 +182,19 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: decision.outcome, stale: false, endedAt: new Date().toISOString() }));
     let published = false;
     if (context.comment) {
+      const publishDisplay: AgentDisplayContext = {
+        command: "review-pr",
+        repository: context.repo,
+        target: `PR #${context.prNumber}`,
+        phaseId: "pr-review-publication",
+        phaseLabel: "Publish PR review",
+        pass: context.generation,
+        operation: "publish",
+      };
+      presenter().phaseStarted(publishDisplay);
       try {
         const publish = deps.publishComment ?? publishPrReviewComment;
-        await publish({
-          context,
-          headOid: initial.pr.headRefOid,
-          decision,
-          verificationStatus,
-          reviewA,
-          reviewB,
-        });
+        await publish({ context, headOid: initial.pr.headRefOid, decision, verificationStatus, reviewA, reviewB });
         published = true;
         const afterPublish = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
         const afterPublishStaleReasons = prIdentityChanges(initial, afterPublish);
@@ -185,8 +203,10 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
           await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus, stale: true });
           await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestPr: afterPublish.pr, endedAt: new Date().toISOString() }));
           await publish({ context, headOid: initial.pr.headRefOid, decision, verificationStatus, reviewA, reviewB });
+          presenter().phaseCompleted(publishDisplay, { outcome: "published stale review" });
           return { outcome: "blocked", context, decision, verification, published: true, stale: true };
         }
+        presenter().phaseCompleted(publishDisplay, { outcome: "published" });
       } catch (error) {
         await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
           outcome: decision.outcome,
@@ -194,7 +214,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
           publicationError: errorMessage(error),
           endedAt: new Date().toISOString(),
         }));
-        throw new Error(`PR review completed and artifacts were preserved, but comment publishing failed: ${errorMessage(error)}`);
+        const publicationError = new Error(`PR review completed and artifacts were preserved, but comment publishing failed: ${errorMessage(error)}`);
+        presenter().phaseCompleted(publishDisplay, { outcome: publicationError.message, failed: true });
+        throw publicationError;
       }
     }
     return { outcome: decision.outcome, context, decision, verification, published, stale: false };
@@ -237,25 +259,37 @@ async function runReviewer(
   lens: ReviewLensDefinition,
   stage: "reviewA" | "reviewB",
 ): Promise<ReviewResult> {
-  console.log(`\n=== PR Review ${lens.reviewerLabel} ===`);
   const artifactName = stage === "reviewA" ? "review-a" : "review-b";
-  const artifact = await runStructuredArtifact({
-    cwd: context.agentCwd,
-    model: effectiveModelForStage(context.model, stage),
-    thinkingLevel: context.thinkingConfig[stage],
-    systemPrompt: sharedSystemPrompt,
-    prompt: prReviewPrompt({ context, comparison: prepared.comparison, lens }),
-    fileEditingToolsEnabled: false,
-    phase: `pr-review-${lens.reviewerLabel.toLowerCase()}`,
-  }, runner, reviewArtifactDefinition({
-    allowRestart: false,
-    title: stage === "reviewA" ? "Review A: Spec and Correctness" : "Review B: Standards and Maintainability",
-    source: stage === "reviewA" ? "review-a" : "review-b",
-  }), {
-    writeJson: (content) => writePrReviewArtifact(context, `${artifactName}.json`, content),
-    writeMarkdown: (content) => writePrReviewArtifact(context, `${artifactName}.md`, content),
-  });
-  return artifact.value;
+  const display: AgentDisplayContext = {
+    command: "review-pr",
+    repository: context.repo,
+    target: `PR #${context.prNumber}`,
+    phaseId: `pr-review-${lens.reviewerLabel.toLowerCase()}`,
+    phaseLabel: `PR review ${lens.reviewerLabel}`,
+    pass: context.generation,
+    expectedArtifact: `${context.reviewDirRelative}/${artifactName}.md`,
+    operation: "review",
+  };
+  return runPresentedPhase(display, async () => {
+    const artifact = await runStructuredArtifact({
+      cwd: context.agentCwd,
+      model: effectiveModelForStage(context.model, stage),
+      thinkingLevel: context.thinkingConfig[stage],
+      systemPrompt: sharedSystemPrompt,
+      prompt: prReviewPrompt({ context, comparison: prepared.comparison, lens }),
+      fileEditingToolsEnabled: false,
+      display,
+    }, runner, reviewArtifactDefinition({
+      allowRestart: false,
+      title: stage === "reviewA" ? "Review A: Spec and Correctness" : "Review B: Standards and Maintainability",
+      source: stage === "reviewA" ? "review-a" : "review-b",
+    }), {
+      writeJson: (content) => writePrReviewArtifact(context, `${artifactName}.json`, content),
+      writeMarkdown: (content) => writePrReviewArtifact(context, `${artifactName}.md`, content),
+    });
+    return artifact;
+  }, (artifact) => ({ outcome: artifactOutcome(artifact.markdown), artifact: display.expectedArtifact }), { manageTitle: false })
+    .then((artifact) => artifact.value);
 }
 
 export function sameRepositoryClosingIssues(feedback: PullRequestFeedback): PullRequestClosingIssue[] {
@@ -294,7 +328,7 @@ function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullReque
 
 function prReviewWorkspaceConfig(workspace: WorkspaceConfig): WorkspaceConfig {
   if (workspace.copyToWorktree.length === 0) return workspace;
-  console.warn("Skipping workspace.copyToWorktree: review-pr never copies host-only files into a PR checkout.");
+  presenter().warning("skipping workspace.copyToWorktree: review-pr never copies host-only files into a PR checkout");
   return { ...workspace, copyToWorktree: [] };
 }
 

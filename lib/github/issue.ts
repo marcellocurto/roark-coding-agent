@@ -120,10 +120,13 @@ export async function claimGitHubIssue(options: { cwd: string; repo?: string | u
   const issueNumber = String(options.plan.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
 
-  await runProcessOrThrow(
-    ["gh", "issue", "edit", issueNumber, "--add-label", options.plan.inProgressLabel, ...repoArgs],
-    { cwd: options.cwd, label: "gh issue edit --add-label" },
-  );
+  await transitionGitHubIssueLabels({
+    cwd: options.cwd,
+    repo: options.repo,
+    issueNumber: options.plan.issueNumber,
+    nextLabel: options.plan.inProgressLabel,
+    removeLabels: options.plan.removeLabels,
+  });
 
   if (options.plan.assignee) {
     await runProcessOrThrow(
@@ -135,6 +138,24 @@ export async function claimGitHubIssue(options: { cwd: string; repo?: string | u
   if (options.postComment === false) return;
 
   await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber, body: options.plan.commentBody });
+}
+
+export async function transitionGitHubIssueLabels(options: {
+  cwd: string;
+  repo?: string | undefined;
+  issueNumber: string | number;
+  nextLabel: string;
+  removeLabels: readonly string[];
+}): Promise<void> {
+  const issueNumber = String(options.issueNumber);
+  const repoArgs = options.repo ? ["--repo", options.repo] : [];
+  const labelArgs = options.removeLabels
+    .filter((candidate) => candidate !== options.nextLabel)
+    .flatMap((label) => ["--remove-label", label]);
+  await runProcessOrThrow(
+    ["gh", "issue", "edit", issueNumber, "--add-label", options.nextLabel, ...labelArgs, ...repoArgs],
+    { cwd: options.cwd, label: "gh issue edit --transition-label" },
+  );
 }
 
 export function buildIssueDependenciesSummaryArgv(repo: string, issueNumber: string | number): string[] {

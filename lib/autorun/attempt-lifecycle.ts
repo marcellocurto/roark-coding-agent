@@ -23,6 +23,8 @@ import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./le
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
+import { presenter } from "../presentation/presenter.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export interface RunAutorunAttemptLifecycleInput {
   issueDir: string;
@@ -41,6 +43,12 @@ export interface RunAutorunAttemptLifecycleInput {
   initialVerificationRepairPass?: number | undefined  ;
 }
 
+export interface AutorunAttemptResult {
+  issueNumber: number;
+  outcome: AttemptOutcome;
+  outcomeDetail: string | null;
+}
+
 export interface RunAutorunAttemptLifecycleInjected {
   clock?: Clock | undefined;
   runFullWorkflow?: ((context: WorkflowContext, runner?: AgentRunner) => Promise<WorkflowRunResult>) | undefined;
@@ -54,7 +62,7 @@ export interface RunAutorunAttemptLifecycleInjected {
 export async function runAutorunAttemptLifecycle(
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected = {},
-): Promise<void> {
+): Promise<AutorunAttemptResult> {
   const clock = injected.clock ?? defaultClock;
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
   const completeWorkflow = injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
@@ -122,7 +130,7 @@ export async function runAutorunAttemptLifecycle(
     try {
       await input.afterRun?.(attemptMetadata);
     } catch (error) {
-      console.warn(`afterRun hook failed: ${formatError(error)}`);
+      presenter().warning(`afterRun hook failed: ${formatError(error)}`);
     }
     const endedAt = clock.now();
     attemptMetadata = formatAttemptMetadata({
@@ -139,6 +147,8 @@ export async function runAutorunAttemptLifecycle(
       endedAt,
     });
   }
+
+  return { issueNumber: input.attemptMetadata.issueNumber, outcome, outcomeDetail };
 }
 
 async function runVerificationRepairWorkflow(
@@ -147,13 +157,13 @@ async function runVerificationRepairWorkflow(
   runner?: AgentRunner  ,
 ): Promise<WorkflowRunResult> {
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
-    console.log(`\n=== Verification repair pass ${pass} ===`);
+    presenter().line(`Verification repair pass ${pass}`);
     await fixPhase(context, pass, runner);
     await codeRefinementPhase(context, pass, runner);
     const reviews = await reviewPhase(context, pass, runner);
     if (hasBlockedReview(reviews.reviewA, reviews.reviewB) || needsRestart(reviews.reviewA, reviews.reviewB)) break;
     if (!needsFix(reviews.reviewA, reviews.reviewB) || pass >= context.maxFixPasses) break;
-    console.log(`Review requested more fixes; continuing to fix pass ${pass + 1}.`);
+    presenter().line(`Review requested more fixes; continuing to fix pass ${pass + 1}`);
   }
   await readinessPhase(context);
   return { status: "completed" };
@@ -179,9 +189,9 @@ async function markWorkflowError(
   const publishLedger = injected.publishReviewLedgerComments ?? publishReviewLedgerComments;
   const markFailed = injected.markIssueFailed ?? markIssueFailed;
 
-  console.log(`\n${prefix} workflow error on #${issue.number}: ${formatError(error)}`);
-  console.log(`Attempt: ${attemptMetadataPath}`);
-  console.log(`Continue: ${command}`);
+  presenter().line(`${prefix} workflow error on #${issue.number}: ${formatError(error)}`);
+  presenter().artifact(attemptMetadataPath);
+  presenter().recovery(command);
 
   await publishPlanning({
     cwd: input.gateOptions.cwd,
@@ -201,7 +211,7 @@ async function markWorkflowError(
   });
 
   const errorArtifact = await readErrorArtifact(input.workflowContext, error);
-  if (errorArtifact) console.log(`Artifact: ${errorArtifact.path}`);
+  if (errorArtifact) presenter().artifact(errorArtifact.path);
 
   const comment = formatFailureComment({
     issueNumber: issue.number,
@@ -223,7 +233,12 @@ async function markWorkflowError(
     issueNumber: issue.number,
     label: input.gateOptions.failureLabel,
     comment,
-    removeLabels: [input.gateOptions.inProgressLabel],
+    removeLabels: labelsToRemoveForAutorunTransition({
+      issueLabels: issue.labels,
+      workflow: input.gateOptions,
+      nextLabel: input.gateOptions.failureLabel,
+      knownPresent: [input.gateOptions.inProgressLabel],
+    }),
   });
 }
 

@@ -60,11 +60,20 @@ The command, exit code, stdout tail, and stderr tail are written to:
 .roark/runs/issue/<n>/attempts/<k>/verification.md
 ```
 
-Before each verification-driven fix pass, the failed output is also archived as:
+The complete stdout and stderr are retained separately at:
+
+```text
+.roark/runs/issue/<n>/attempts/<k>/verification-full.md
+```
+
+Before each verification-driven fix pass, the failed output tail and its complete companion are archived as:
 
 ```text
 .roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>.md
+.roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>-full.md
 ```
+
+PR revision generations use the same bounded and full companion filenames in their revision artifact directory.
 
 ## Common Commands
 

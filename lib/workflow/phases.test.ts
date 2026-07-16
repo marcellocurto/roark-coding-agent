@@ -66,7 +66,7 @@ describe("review pass selection", () => {
 
     await runSinglePhase(context, "review", async (request) => {
       await noopAsync();
-      phases.push(request.phase ?? "unknown");
+      phases.push(request.display.phaseId);
       return submitReview(request, approveReview());
     });
 
@@ -89,8 +89,8 @@ describe("review pass selection", () => {
     const startedPhases = new Set<string>();
 
     const run = reviewPhase(context, 0, (request) => {
-      startedPhases.add(request.phase ?? "unknown");
-      if (request.phase === "reviewA-0") return pendingReviewA;
+      startedPhases.add(request.display.phaseId);
+      if (request.display.phaseId === "reviewA-0") return pendingReviewA;
       return submitReview(request, approveReview());
     });
     for (let turn = 0; turn < 50 && !startedPhases.has("reviewB-0"); turn++) {
@@ -240,7 +240,7 @@ describe("runFullWorkflow", () => {
 
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      const phase = request.phase ?? "unknown";
+      const phase = request.display.phaseId;
       phases.push(phase);
       if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
       if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
@@ -379,7 +379,7 @@ describe("runFullWorkflow", () => {
 
     const runner: AgentRunner = async (request) => {
       await noopAsync();
-      const phase = request.phase ?? "";
+      const phase = request.display.phaseId;
       if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
       if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
       if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());

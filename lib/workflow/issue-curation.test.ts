@@ -81,7 +81,7 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.planItemId).toBe("follow-up-1");
     expect(item?.classification).toBe("follow-up");
     expect(item?.proposedTitle).toBe("Document retry edge case for users");
-    expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "follow-up"]);
+    expect(item?.proposedLabels).toEqual(["needs-triage", "review:follow-up"]);
     expect(item?.sourceFindingIds).toEqual(["review-a:f1"]);
     expect(item?.proposedBody.startsWith("## Summary\n\nDocument retry edge case for users.")).toBe(true);
     expect(item?.proposedBody).toContain("## Why this issue exists");
@@ -143,7 +143,7 @@ describe("buildIssueCurationPlan", () => {
     const item = plan.issuesToCreate[0];
     expect(item?.planItemId).toBe("external-blocker-1");
     expect(item?.classification).toBe("external-blocker");
-    expect(item?.proposedLabels).toEqual(["needs-triage", "needs-human", "external-blocker"]);
+    expect(item?.proposedLabels).toEqual(["needs-triage", "review:external-blocker"]);
     expect(item?.whyBlockingOrNonBlocking).toContain("prerequisite or external work");
   });
 
@@ -180,7 +180,7 @@ describe("buildIssueCurationPlan", () => {
     const plan = await buildIssueCurationPlan(context, fixedClock);
 
     expect(plan.issuesToCreate.map((item) => item.planItemId)).toEqual(["suggestion-1"]);
-    expect(plan.issuesToCreate[0]?.proposedLabels).toEqual(["needs-triage", "needs-human", "suggestion"]);
+    expect(plan.issuesToCreate[0]?.proposedLabels).toEqual(["needs-triage", "review:suggestion"]);
     expect(plan.rejectedCandidates.map((candidate) => candidate.sourceFindingIds[0])).toEqual(["review-a:m1"]);
     expect(plan.rejectedCandidates[0]?.reason).toContain("current issue/fix pass");
     expect(plan.rejectedCandidates[0]?.evidence).toEqual([

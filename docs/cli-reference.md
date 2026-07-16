@@ -81,25 +81,35 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--all` | `status` | Summarize all known issue runs. |
 | `--force` | phase, implementation, fix, PR revision | Re-run phases or continue past supported dirty-tree preflights. |
 | `--yes` | supported mutation paths | Continue past supported prompts or approve `create-issues` mutations. |
+| `--verbose` | long-running agent commands | Show each completed agent response as readable plain text plus detailed, explicitly labelled aggregate tool statistics. Raw prompts, events, tool results, and debug payloads remain hidden. |
+| `--no-title` | long-running agent commands | Disable Roark terminal-title management. |
 | `-v`, `--version` | top-level only | Print the installed Roark version. |
 | `-h`, `--help` | all commands | Show help. |
+
+## Live output and terminal titles
+
+Long-running commands print an operational stream by default: run identity, phase and pass, compact tool activity, phase wall time, verification status, artifact path, and final outcome. Complete generated Markdown is validated and saved in the run artifacts but is not copied to normal terminal output. Use `--verbose` when you also want the completed response rendered as plain readable text; `-v` remains the version flag.
+
+On supported interactive terminals, Roark updates the window title with the issue or PR, current phase, pass, and short repository name. Titles are sanitized and length-bounded. Pass `--no-title` when your shell or terminal owns its title. Redirected/piped output, CI, and `TERM=dumb` never receive title or ANSI control sequences, and their lines are not width-truncated. Operational warnings continue to use stderr.
+
+Paths in normal status output are repository/run relative when possible, and long lines are shortened only for an interactive terminal's detected width. Phase duration is wall-clock elapsed time. Verbose `aggregate tool execution` is the sum of individual tool durations and is not elapsed runtime (tools may run concurrently).
 
 ## Autorun Options
 
 | Option | Purpose |
 | --- | --- |
-| `--label <label>` | Auto eligibility label. Defaults to `afk`. |
-| `--skip-label <label>` | Auto skip label. Repeatable. Lifecycle labels are still appended. |
-| `--skip-labels <labels>` | Auto skip labels as a comma-separated list. Lifecycle labels are still appended. |
+| `--label <label>` | Auto eligibility label. Defaults to `ready-for-agent`. |
+| `--skip-label <label>` | Auto skip label. Repeatable. Required workflow skip labels are still appended. |
+| `--skip-labels <labels>` | Auto skip labels as a comma-separated list. Required workflow skip labels are still appended. |
 | `--limit <n>` | Maximum number of eligible auto issues to claim. Defaults to `1`. |
-| `--in-progress-label <label>` | Auto claim label and terminal continue cleanup label. Defaults to `roark-in-progress`. |
+| `--in-progress-label <label>` | Auto claim label and terminal continue cleanup label. Defaults to `agent-in-progress`. |
 | `--assignee <login>` | GitHub user to assign when claiming. Defaults to the authenticated `gh` user. |
 | `--no-assign` | Claim without assigning a user. |
 | `--dry-run` | Print selected issues without claiming, switching branches, or running agents. |
 | `--base-branch <branch>` | Auto issue branch base branch. Defaults to `main`. |
 | `--verify <cmd>` | Verification command to run before publishing. Runs through `sh -c`. |
-| `--failure-label <label>` | Label applied when readiness or verification fails. Defaults to `roark-failed`. |
-| `--success-label <label>` | Label applied when a PR is opened. Defaults to `roark-pr-opened`. |
+| `--failure-label <label>` | Label applied when readiness or verification fails. Defaults to `agent-failed`. |
+| `--success-label <label>` | Label applied when a PR is opened. Defaults to `agent-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
 ## PR Review Options

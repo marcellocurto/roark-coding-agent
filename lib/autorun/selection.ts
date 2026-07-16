@@ -13,17 +13,18 @@ export interface IssueSelectionOptions {
   limit: number;
 }
 
-export const defaultAutorunReadyLabel = "afk";
-export const defaultAutorunInProgressLabel = "roark-in-progress";
+export const defaultAutorunReadyLabel = "ready-for-agent";
+export const defaultAutorunInProgressLabel = "agent-in-progress";
 
 export const defaultAutorunSkipLabels = [
+  "needs-triage",
   "blocked",
   "needs-human",
-  "wontfix",
-  "roark-in-progress",
-  "roark-failed",
-  "roark-ready-for-review",
-  "roark-pr-opened",
+  "triage-rejected",
+  "wont-fix",
+  "agent-in-progress",
+  "agent-failed",
+  "agent-pr-opened",
 ] as const;
 
 export function selectEligibleIssues(

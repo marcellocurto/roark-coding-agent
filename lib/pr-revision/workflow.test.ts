@@ -12,6 +12,8 @@ import { revisionPlanResult, submitRevisionPlan } from "../testing/revision-plan
 import { revisionExecutionResult, submitRevisionExecution } from "../testing/revision-executions.ts";
 import { noopAsync } from "../utils/async.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
+import { configurePresenter } from "../presentation/presenter.ts";
+import type { TerminalStream } from "../presentation/terminal.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
 import { parseRevisionExecutionResultJson } from "./execution.ts";
 
@@ -148,6 +150,36 @@ function freshReviewComment(controlCwd: string, agentCwd: string): string {
 }
 
 describe("runPrRevision", () => {
+  test("sets the preparation title while workspace preparation is pending", async () => {
+    const cwd = process.cwd();
+    let output = "";
+    const stream: TerminalStream = { isTTY: true, columns: 80, write(chunk) { output += chunk; } };
+    configurePresenter({ stream, env: { TERM: "xterm" } });
+    let preparationStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { preparationStarted = resolve; });
+    let rejectPreparation: ((error: Error) => void) | undefined;
+    const pendingPreparation = new Promise<never>((_, reject) => { rejectPreparation = reject; });
+
+    const running = runPrRevision(options(cwd, { yes: true }), {
+      fetchFeedback: async () => (await noopAsync(), feedback()),
+      prepareWorkspace: async () => {
+        preparationStarted?.();
+        return pendingPreparation;
+      },
+    });
+
+    try {
+      await started;
+      const outputWhilePending = output;
+      rejectPreparation?.(new Error("stop after title assertion"));
+      expect(running).rejects.toThrow("stop after title assertion");
+      await running.catch(() => undefined);
+      expect(outputWhilePending).toContain("PR #12 · Revision preparation");
+    } finally {
+      configurePresenter({});
+    }
+  });
+
   test("legacy checkout fallback uses the control checkout as the agent workspace", async () => {
     await noopAsync();
     const cwd = await tempGitRepo();
@@ -385,6 +417,36 @@ describe("runPrRevision", () => {
     expect(writableCalls).toBe(1);
     expect(commentCalled).toBe(true);
     expect(existsSync(path.join(result.context.revisionDir, "verification-before-fix-1.md"))).toBe(false);
+  });
+
+  test("verification runner exceptions propagate through PR revision", async () => {
+    const control = await tempGitRepo();
+    const { prepareWorkspace } = await isolatedWorkspace();
+    const failure = new Error("verification runner failed");
+    let calls = 0;
+
+    const running = runPrRevision(options(control, { comment: false }), {
+      fetchFeedback: async () => (await noopAsync(), feedback()),
+      prepareWorkspace,
+      agentRunner: async (request) => {
+        await noopAsync();
+        calls++;
+        if (request.fileEditingToolsEnabled) {
+          return submitRevisionExecution(request, revisionExecutionResult());
+        }
+        if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
+        return submitReview(request, reviewResult());
+      },
+      verificationRunner: () => Promise.reject(failure),
+    });
+
+    let thrown: unknown;
+    try {
+      await running;
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(failure);
   });
 
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {

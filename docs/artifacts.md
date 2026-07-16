@@ -42,7 +42,9 @@ Artifacts are useful for:
                 ├── readiness.json
                 ├── readiness.md
                 ├── verification.md
+                ├── verification-full.md
                 ├── verification-before-fix-1.md
+                ├── verification-before-fix-1-full.md
                 ├── pr-draft.json
                 ├── pr-draft.md
                 ├── attempt.json
@@ -85,7 +87,9 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `fix-log-<n>.json`, `fix-log-<n>.md` | Schema-validated fix report and its deterministic human rendering. Fix reports identify addressed review findings by workflow ID. |
 | `readiness.json`, `readiness.md` | Validated readiness decision used by the publish gate and its deterministic human rendering. |
 | `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
-| `verification-before-fix-<n>.md` | Archived failed verification output that triggered fix pass `n`. |
+| `verification-full.md` | Complete stdout and stderr from the latest verification command. |
+| `verification-before-fix-<n>.md` | Archived failed verification output tail that triggered fix pass `n`. |
+| `verification-before-fix-<n>-full.md` | Complete stdout and stderr for the archived failed verification. |
 | `pr-draft.json`, `pr-draft.md` | Schema-validated PR authoring result and the deterministic GitHub body rendered from it. Follow-up issue links rerender the Markdown from the JSON source. |
 | `issue-drafts.json`, `issue-drafts.md` | Schema-validated reviewer-generated issue drafts and their deterministic GitHub bodies. |
 | `attempt.json` | Branch, workspace, and lifecycle metadata. |
@@ -112,7 +116,7 @@ This records attempts for an issue and is used by `roark continue` when no expli
 
 PR review generations include pinned comparison metadata, PR and optional linked-issue context, verification, independent `review-a.json` and `review-b.json` source artifacts, deterministic Markdown renderings, a deterministic summary, and metadata. Every rerun is preserved under `review-<n>` even though the public marked comment is updated in place.
 
-PR revision artifacts include fetched feedback, a schema-validated `revision-plan.json` source artifact with a deterministic `revision-plan.md` rendering, schema-validated `revision-log*.json` execution results with deterministic Markdown companions, schema-validated `revision-review*.json` source artifacts with deterministic Markdown companions, verification, and metadata when applicable.
+PR revision artifacts include fetched feedback, a schema-validated `revision-plan.json` source artifact with a deterministic `revision-plan.md` rendering, schema-validated `revision-log*.json` execution results with deterministic Markdown companions, schema-validated `revision-review*.json` source artifacts with deterministic Markdown companions, bounded verification files and complete `verification-full.md` and `verification-before-fix-<n>-full.md` companions, and metadata when applicable.
 
 Triage, implementation planning, implementation, code refinement, fixes, review, PR revision planning, PR revision execution, PR authoring, and reviewer-generated issue authoring complete through schema-validated submission tools. Roark derives workflow state and public content from structured objects and renders Markdown companions from accepted data. Free-form or rendered Markdown is not parsed as workflow state or publishing authority.
 

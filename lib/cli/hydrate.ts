@@ -160,6 +160,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       maxFixPasses: raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,
       attempt: raw.attempt,
       verifyCommand,
+      readyLabel: config.readyLabel ?? defaultAutorunReadyLabel,
       failureLabel: raw.failureLabel ?? config.failureLabel ?? defaultAutorunFailureLabel,
       successLabel: raw.successLabel ?? config.successLabel ?? defaultAutorunSuccessLabel,
       inProgressLabel: raw.inProgressLabel ?? config.inProgressLabel ?? defaultAutorunInProgressLabel,

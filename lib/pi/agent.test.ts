@@ -287,6 +287,13 @@ describe("Pi custom tool boundary", () => {
           prompt: "Inspect the diff.",
           fileEditingToolsEnabled: false,
           customTools: [submitReview],
+          display: {
+            command: "review-pr",
+            target: "PR #1",
+            phaseId: "pr-review-a",
+            phaseLabel: "PR review A",
+            operation: "review",
+          },
         });
       } catch (error) {
         thrown = error;
