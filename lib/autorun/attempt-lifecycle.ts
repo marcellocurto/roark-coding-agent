@@ -2,6 +2,7 @@ import { artifactRelativePath, readArtifact, type WorkflowContext } from "../wor
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { codeRefinementPhase, fixPhase, readinessPhase, runFullWorkflow, reviewPhase, type WorkflowRunResult } from "../workflow/phases.ts";
+import type { GitHubIssueSnapshot } from "../github/issue.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { hasBlockedReview, needsFix, needsRestart } from "../workflow/verdicts.ts";
 import { finalizeAttemptObservability } from "./observability.ts";
@@ -41,6 +42,7 @@ export interface RunAutorunAttemptLifecycleInput {
   logPrefix?: string | undefined;
   inProgressOutcomeDetail?: string | null | undefined;
   initialVerificationRepairPass?: number | undefined  ;
+  issueSnapshot?: GitHubIssueSnapshot | undefined;
 }
 
 export interface AutorunAttemptResult {
@@ -51,7 +53,7 @@ export interface AutorunAttemptResult {
 
 export interface RunAutorunAttemptLifecycleInjected {
   clock?: Clock | undefined;
-  runFullWorkflow?: ((context: WorkflowContext, runner?: AgentRunner) => Promise<WorkflowRunResult>) | undefined;
+  runFullWorkflow?: typeof runFullWorkflow | undefined;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
   publishReviewLedgerComments?: typeof publishReviewLedgerComments | undefined;
   publishPlanningLedgerComments?: typeof publishPlanningLedgerComments | undefined;
@@ -89,7 +91,7 @@ export async function runAutorunAttemptLifecycle(
     await persistAttempt(input.issueDir, attemptMetadata);
 
     const workflowResult = input.initialVerificationRepairPass === undefined
-      ? await runWorkflow(input.workflowContext, input.runner)
+      ? await runWorkflow(input.workflowContext, input.runner, { issueSnapshot: input.issueSnapshot })
       : await runVerificationRepairWorkflow(input.workflowContext, input.initialVerificationRepairPass, input.runner);
     const issue = await resolveIssue(input);
     const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);

@@ -111,6 +111,50 @@ describe("review pass selection", () => {
 });
 
 describe("runFullWorkflow", () => {
+  test("force consumes a supplied pre-claim snapshot without fetching GitHub again", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "roark-supplied-snapshot-"));
+    tempDirs.push(dir);
+    const context = createWorkflowContext({
+      command: "do",
+      issue: "12",
+      cwd: dir,
+      outDir: ".roark/runs",
+      force: true,
+      yes: true,
+      maxFixPasses: 1,
+      attempt: 1,
+    });
+    const issueSnapshot = {
+      issue: {
+        number: 12,
+        title: "Fresh pre-claim title",
+        body: "Fresh pre-claim body",
+      },
+      issueNumber: "12",
+      repo: "owner/repo",
+      fetchedAt: "2026-05-07T00:00:01.000Z",
+      relationships: {
+        fetchedAt: "2026-05-07T00:00:00.000Z",
+        repo: "owner/repo",
+        nativeDependenciesAvailable: true,
+        blockedBy: [],
+        blocking: [],
+        bodyDeclaredBlockers: [],
+      },
+    };
+    const runner: AgentRunner = async (request) => submitTriage(request, triageResult("blocked"));
+
+    const result = await runFullWorkflow(context, runner, { issueSnapshot });
+
+    expect(result).toEqual({ status: "triage-stopped", triageVerdict: "blocked" });
+    expect(await readArtifact(context, "issue")).toContain("Fresh pre-claim title");
+    expect(JSON.parse(await readArtifact(context, "metadata"))).toMatchObject({
+      issueNumber: "12",
+      fetchedAt: "2026-05-07T00:00:01.000Z",
+      issue: { title: "Fresh pre-claim title" },
+    });
+  });
+
   test("returns triage-stopped and does not run later agents after blocked triage", async () => {
     const context = await tempContext();
     const prompts: string[] = [];

@@ -118,6 +118,7 @@ describe("runAutoContinue", () => {
         issue: { number: 24, title: "Issue 24", labels: [{ name: "failed" }, { name: "ready-for-agent" }] },
         issueNumber: "24",
         repo: "owner/repo",
+        fetchedAt: "now",
         relationships: { fetchedAt: "now", nativeDependenciesAvailable: true, blockedBy: [], blocking: [], bodyDeclaredBlockers: [] },
       }),
       transitionGitHubIssueLabels: async (input) => {

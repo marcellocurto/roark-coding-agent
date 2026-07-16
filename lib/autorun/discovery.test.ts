@@ -12,6 +12,7 @@ import { readAttemptMetadata } from "./attempts.ts";
 import { runAutoDiscovery } from "./discovery.ts";
 import { noopAsync } from "../utils/async.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
+import { fetchIssuePhase } from "../workflow/phases.ts";
 
 const tempDirs: string[] = [];
 const noOpLabelContract = {
@@ -382,6 +383,7 @@ describe("runAutoDiscovery", () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-clone-workspace-"));
     tempDirs.push(workspacePath);
     const calls: string[] = [];
+    let fetchCount = 0;
 
     await runAutoDiscovery({
       ...baseOptions(cwd),
@@ -391,7 +393,15 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpLabelContract,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["ready-for-agent"])),
+      fetchGitHubIssue: async () => {
+        await noopAsync();
+        fetchCount += 1;
+        return fetchedGitHubIssue(
+          29,
+          ["ready-for-agent"],
+          fetchCount === 1 ? "Initial issue title" : "Fresh issue title",
+        );
+      },
       assertCleanAutorunGit: async () => {
         await noopAsync();
         calls.push("preflight");
@@ -421,11 +431,15 @@ describe("runAutoDiscovery", () => {
         await noopAsync();
         calls.push("ledger");
       },
-      runFullWorkflow: async (context) => {
+      runFullWorkflow: async (context, _runner, workflowOptions) => {
         calls.push(`workflow:${context.runDirRelative}`);
         expect(context.controlCwd).toBe(cwd);
         expect(context.agentCwd).toBe(workspacePath);
+        const suppliedSnapshot = workflowOptions?.issueSnapshot;
+        expect(suppliedSnapshot?.issue.title).toBe("Fresh issue title");
+        if (!suppliedSnapshot) throw new Error("Expected fresh pre-claim issue snapshot");
         expect(await readFile(path.join(workspacePath, "before-run.txt"), "utf8")).toBe("before");
+        await fetchIssuePhase(context, suppliedSnapshot);
         return { status: "completed" };
       },
       completeAutorunWorkflow: async (input) => {
@@ -443,6 +457,10 @@ describe("runAutoDiscovery", () => {
       "workflow:.roark/runs/issue/29/attempts/1",
       "complete:roark/issue-29",
     ]);
+    expect(fetchCount).toBe(2);
+    const issueArtifact = await readFile(path.join(cwd, ".roark/runs/issue/29/attempts/1/issue.md"), "utf8");
+    expect(issueArtifact).toContain("Fresh issue title");
+    expect(issueArtifact).not.toContain("Initial issue title");
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/29"), 1);
     expect(metadata.worktreePath).toBe(workspacePath);
     expect(metadata.workspace).toEqual({
@@ -609,16 +627,17 @@ function bodyBlocker(number: number, title: string, state: string) {
   };
 }
 
-function fetchedGitHubIssue(number: number, labels: string[]) {
+function fetchedGitHubIssue(number: number, labels: string[], title = `Issue ${number}`) {
   return {
     issue: {
       number,
-      title: `Issue ${number}`,
+      title,
       url: `https://github.com/owner/repo/issues/${number}`,
       labels: labels.map((name) => ({ name })),
     },
     issueNumber: String(number),
     repo: "owner/repo",
+    fetchedAt: "2026-05-07T00:00:01.000Z",
     relationships: {
       fetchedAt: "2026-05-07T00:00:00.000Z",
       repo: "owner/repo",

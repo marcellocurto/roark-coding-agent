@@ -1,6 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
-import { fetchGitHubIssue } from "../github/issue.ts";
+import { fetchGitHubIssue, type GitHubIssueSnapshot } from "../github/issue.ts";
 import { createFileRunObserver } from "../observability/observer.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { presenter, type AgentDisplayContext, type AgentOperation } from "../presentation/presenter.ts";
@@ -52,11 +52,14 @@ import type { ChangeReport } from "../change-report/result.ts";
 
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 
-export async function fetchIssuePhase(context: WorkflowContext): Promise<string> {
+export async function fetchIssuePhase(
+  context: WorkflowContext,
+  suppliedSnapshot?: GitHubIssueSnapshot,
+): Promise<string> {
   const display = deterministicDisplay(context, "fetch", "Fetch issue", "issue.md", "inspect");
   let outcome = "fetched";
   return runPresentedPhase(display, async () => {
-    if (!context.force && artifactExists(context, "issue")) {
+    if (!context.force && suppliedSnapshot === undefined && artifactExists(context, "issue")) {
       const existingIssue = await readArtifact(context, "issue");
       if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
         await context.observer?.phaseCompleted({ phase: "fetch", label: "Fetch issue", artifact: "issue", reused: true });
@@ -66,16 +69,19 @@ export async function fetchIssuePhase(context: WorkflowContext): Promise<string>
       presenter().line("Fetch issue: existing issue.md lacks GitHub relationship snapshot; refetching");
     }
 
-    presenter().line(`Fetching issue #${context.issueNumber}`);
+    presenter().line(suppliedSnapshot
+      ? `Using fresh pre-claim snapshot for issue #${context.issueNumber}`
+      : `Fetching issue #${context.issueNumber}`);
     await context.observer?.phaseStarted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
-    const result = await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo });
+    const result = suppliedSnapshot ?? await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo });
+    assertSnapshotMatchesContext(context, result);
     const issueArtifact = formatGitHubIssueArtifact(result.issue, result.relationships);
 
     await writeArtifact(context, "issue", issueArtifact);
     await writeJsonArtifact(context, "metadata", {
       issueNumber: result.issueNumber,
       repo: result.repo,
-      fetchedAt: new Date().toISOString(),
+      fetchedAt: result.fetchedAt,
       issue: result.issue,
       relationships: result.relationships,
     });
@@ -208,11 +214,19 @@ export type WorkflowRunResult =
   | { status: "review-blocked" }
   | { status: "completed" };
 
-export async function runFullWorkflow(context: WorkflowContext, runner: AgentRunner = runPiAgent): Promise<WorkflowRunResult> {
+export interface RunFullWorkflowOptions {
+  issueSnapshot?: GitHubIssueSnapshot | undefined;
+}
+
+export async function runFullWorkflow(
+  context: WorkflowContext,
+  runner: AgentRunner = runPiAgent,
+  options: RunFullWorkflowOptions = {},
+): Promise<WorkflowRunResult> {
   context.observer ??= createFileRunObserver(context);
   await context.observer.runStarted({ command: "do" });
   try {
-    const result = await runFullWorkflowBody(context, runner);
+    const result = await runFullWorkflowBody(context, runner, options);
     await context.observer.runCompleted({ status: result.status });
     return result;
   } catch (error) {
@@ -221,7 +235,11 @@ export async function runFullWorkflow(context: WorkflowContext, runner: AgentRun
   }
 }
 
-async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner): Promise<WorkflowRunResult> {
+async function runFullWorkflowBody(
+  context: WorkflowContext,
+  runner: AgentRunner,
+  options: RunFullWorkflowOptions,
+): Promise<WorkflowRunResult> {
   const completedActions: WorkflowProgressionAction[] = [];
 
   for (;;) {
@@ -248,7 +266,7 @@ async function runFullWorkflowBody(context: WorkflowContext, runner: AgentRunner
         completedActions.push(next, following);
         continue;
       }
-      await runWorkflowPhase(context, runner, next.phase, next.pass);
+      await runWorkflowPhase(context, runner, next.phase, next.pass, options);
       completedActions.push(next);
       continue;
     }
@@ -274,9 +292,10 @@ async function runWorkflowPhase(
   runner: AgentRunner,
   phase: WorkflowRunPhase,
   pass?: number,
+  options: RunFullWorkflowOptions = {},
 ): Promise<void> {
   switch (phase) {
-    case "fetch": await fetchIssuePhase(context); return;
+    case "fetch": await fetchIssuePhase(context, options.issueSnapshot); return;
     case "triage": await triagePhase(context, runner); return;
     case "plan-draft": await planDraftPhase(context, runner); return;
     case "plan": await planPhase(context, runner); return;
@@ -288,6 +307,14 @@ async function runWorkflowPhase(
     case "fix": await fixPhase(context, pass, runner); return;
     case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
     default: return assertNever(phase);
+  }
+}
+
+function assertSnapshotMatchesContext(context: WorkflowContext, snapshot: GitHubIssueSnapshot): void {
+  if (snapshot.issueNumber !== context.issueNumber || String(snapshot.issue.number) !== context.issueNumber) {
+    throw new Error(
+      `Supplied GitHub issue snapshot is for #${snapshot.issueNumber}, but workflow expects #${context.issueNumber}.`,
+    );
   }
 }
 

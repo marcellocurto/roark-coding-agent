@@ -73,6 +73,14 @@ export interface GitHubIssueRelationships {
   unavailableReason?: string | undefined;
 }
 
+export interface GitHubIssueSnapshot {
+  issue: GitHubIssue;
+  issueNumber: string;
+  repo?: string | undefined;
+  fetchedAt: string;
+  relationships: GitHubIssueRelationships;
+}
+
 interface BodyBlockerRef {
   raw: string;
   repo: string;
@@ -183,12 +191,10 @@ export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "num
   ];
 }
 
-export async function fetchGitHubIssue(input: string, options: { cwd: string; repo?: string  | undefined}): Promise<{
-  issue: GitHubIssue;
-  issueNumber: string;
-  repo?: string | undefined  ;
-  relationships: GitHubIssueRelationships;
-}> {
+export async function fetchGitHubIssue(
+  input: string,
+  options: { cwd: string; repo?: string | undefined },
+): Promise<GitHubIssueSnapshot> {
   const parsed = parseIssueRef(input, options.repo);
   const args = [
     "gh",
@@ -214,6 +220,7 @@ export async function fetchGitHubIssue(input: string, options: { cwd: string; re
     issue,
     issueNumber: parsed.issueNumber,
     repo,
+    fetchedAt: new Date().toISOString(),
     relationships,
   };
 }

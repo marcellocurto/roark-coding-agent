@@ -12,6 +12,7 @@ import {
   type GitHubIssue,
   type GitHubIssueDependency,
   type GitHubIssueRelationships,
+  type GitHubIssueSnapshot,
 } from "../github/issue.ts";
 import { ensureRunDir } from "../workflow/artifacts.ts";
 import { assertCleanAutorunGit } from "../workflow/git.ts";
@@ -299,19 +300,20 @@ async function runManagedIssueAttempt(
     mode: "auto",
   });
 
-  const rechecked = await fetchLatestIssueForClaimRecheck(issue, options, injected);
-  const skipReason = claimRecheckSkipReason(rechecked.issue, options, claimOptions);
+  const recheckedSnapshot = await fetchLatestIssueForClaimRecheck(issue, options, injected);
+  const recheckedIssue = toAutorunIssueCandidate(recheckedSnapshot.issue);
+  const skipReason = claimRecheckSkipReason(recheckedIssue, options, claimOptions);
   if (skipReason) {
     presenter().line(`Skipping #${issue.number} before claim: ${skipReason}`);
     return;
   }
-  assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
+  assertDependencyClearForIssue(recheckedIssue, recheckedSnapshot.relationships);
 
-  claimPlan = createClaimPlan(rechecked.issue, {
+  claimPlan = createClaimPlan(recheckedIssue, {
     inProgressLabel: options.inProgressLabel,
     assignee,
     removeLabels: labelsToRemoveForAutorunTransition({
-      issueLabels: rechecked.issue.labels,
+      issueLabels: recheckedIssue.labels,
       workflow: options,
       nextLabel: options.inProgressLabel,
     }),
@@ -324,7 +326,7 @@ async function runManagedIssueAttempt(
   const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
   await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
 
-  const workflowIssue = rechecked.issue;
+  const workflowIssue = recheckedIssue;
   presenter().line(`Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
   const workflowContext = createAutorunWorkflowContext(workflowIssue, branchPlan, options, attempt, preparedWorkspace.path);
   await ensureRunDir(workflowContext);
@@ -347,6 +349,7 @@ async function runManagedIssueAttempt(
     gateOptions: options,
     attemptMetadata,
     issue: workflowIssue,
+    issueSnapshot: recheckedSnapshot,
     logPrefix: "Auto",
     beforeWorkflow: async (metadata) => {
       const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
@@ -386,13 +389,9 @@ async function fetchLatestIssueForClaimRecheck(
   issue: AutorunIssueCandidate,
   options: AutoCliOptions,
   injected: AutoRunInjected,
-): Promise<{ issue: AutorunIssueCandidate; relationships: GitHubIssueRelationships }> {
+): Promise<GitHubIssueSnapshot> {
   const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
-  const fetched = await fetchIssue(issue.url ?? String(issue.number), { cwd: options.cwd, repo: options.repo });
-  return {
-    issue: toAutorunIssueCandidate(fetched.issue),
-    relationships: fetched.relationships,
-  };
+  return fetchIssue(issue.url ?? String(issue.number), { cwd: options.cwd, repo: options.repo });
 }
 
 function claimRecheckSkipReason(
