@@ -89,7 +89,7 @@ describe("buildIssueCurationPlan", () => {
     expect(item?.proposedBody).toContain("## Suggested fix");
     expect(item?.proposedBody).toContain("## Acceptance criteria");
     expect(item?.proposedBody).toContain("## Triage recommendation");
-    expect(item?.proposedBody).toContain("<summary>Run artifacts</summary>");
+    expect(item?.proposedBody).not.toContain(".roark/runs/");
     expect(item?.proposedBody).toContain("## Non-goals");
     expect(item?.proposedBody).toContain("Source issue: #42 Source issue title");
     expect(item?.proposedBody).not.toContain("## Source");

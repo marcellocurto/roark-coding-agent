@@ -365,7 +365,7 @@ Options:
   --success-label <label>
                           Label applied to the issue when a PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
-  --no-comment           review-pr/revise-pr: do not post the terminal PR comment.
+  --no-comment           review-pr/revise-pr: do not post PR comment output.
   --force                Re-run phases, or remove managed workspaces that have uncommitted changes.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
   --verbose              Long-running commands: show completed agent responses and detailed tool statistics.

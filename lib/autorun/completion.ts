@@ -1,4 +1,4 @@
-import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
@@ -47,9 +47,7 @@ export async function completeAutorunWorkflow(
       issueNumber: input.issue.number,
       issueUrl: input.issue.url,
       triageVerdict: input.workflowResult.triageVerdict,
-      triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
       triageArtifactContent: await readArtifactIfExists(input.workflowContext, "triageMarkdown"),
-      attemptMetadataPath: input.attemptMetadataPath,
       removeLabels: labelsToRemoveForAutorunTransition({
         issueLabels: input.issue.labels,
         workflow: input.options,
@@ -72,7 +70,6 @@ export async function completeAutorunWorkflow(
     issue: input.issue,
     workflowContext: input.workflowContext,
     attemptMetadata: input.attemptMetadata,
-    attemptMetadataPath: input.attemptMetadataPath,
   });
 
   await publishReviewLedgerComments({

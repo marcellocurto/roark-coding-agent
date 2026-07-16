@@ -84,7 +84,7 @@ Continue should run from the same control checkout when possible. It depends on 
 
 ## PR Reviews and Revisions
 
-Use `review-pr` for a fresh review of any open or draft PR, including a fork PR. It inspects the complete pinned PR contribution, runs independent correctness and maintainability reviewers, and posts or updates one actionable PR comment. It never edits, commits, or pushes:
+Use `review-pr` for a fresh review of any open or draft PR, including a fork PR. It inspects the complete pinned PR contribution, runs independent correctness and maintainability reviewers, and posts each review directly as its own PR comment. It never edits, commits, or pushes:
 
 ```bash
 roark review-pr 456 --repo owner/repo

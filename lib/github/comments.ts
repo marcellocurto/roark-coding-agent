@@ -44,15 +44,6 @@ export function ensureCommentStartsWithMarker(body: string, marker: string): str
   return body.startsWith(marker) ? body : `${marker}\n${body}`;
 }
 
-export function formatArtifactDetails(lines: readonly string[]): string {
-  return [
-    "<details><summary>Artifacts</summary>",
-    "",
-    ...lines,
-    "</details>",
-  ].join("\n");
-}
-
 export function formatBoundedMarkdownDetails(summary: string, markdown: string, maxChars = 10_000): string {
   const bounded = markdown.length <= maxChars
     ? markdown
@@ -98,6 +89,10 @@ export function buildUpdateIssueCommentArgv(options: { repo: string; commentId: 
 }
 
 export function truncateGitHubIssueComment(body: string): string {
+  // Intentionally use a hard cutoff even though it may split a Markdown fence or
+  // <details> block. We accept imperfect rendering at this extreme: the complete
+  // output remains available in local run artifacts, and oversized comments have
+  // not been an observed operational problem worth more complex truncation logic.
   let characters = 0;
   let end = 0;
   for (const character of body) {

@@ -1,5 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 import { presenter } from "../presentation/presenter.ts";
 
@@ -13,9 +13,7 @@ export interface FailureCommentInput {
   branchName?: string | undefined;
   worktreePath?: string | undefined;
   workspacePath?: string | undefined  ;
-  artifactPath?: string | undefined;
   artifactContent?: string | undefined;
-  attemptMetadataPath?: string | undefined;
   recoveryCommand?: string | undefined  ;
 }
 
@@ -46,13 +44,6 @@ export function formatFailureComment(input: FailureCommentInput): string {
     lines.push("", "## Recovery");
     lines.push("From the same checkout, run:");
     lines.push(formatFencedBlock(formatPublicRecoveryCommand(input.recoveryCommand), "bash"));
-  }
-
-  const metadata: string[] = [];
-  if (input.artifactPath) metadata.push(`Artifact: \`${input.artifactPath}\``);
-  if (input.attemptMetadataPath) metadata.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  if (metadata.length > 0) {
-    lines.push("", formatArtifactDetails(metadata));
   }
 
   if (input.artifactContent !== undefined && input.phase !== "verification") {

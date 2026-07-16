@@ -44,7 +44,7 @@ import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
 import { postPrRevisionSummaryComment } from "./comments.ts";
 import { revisionImplementationPrompt, revisionPlanPrompt, revisionReviewPrompt } from "./prompts.ts";
-import { isUnblockedCurrentFix, normalizeReviewBlockers, normalizeReviewFindings, reviewDisposition, type ReviewResult } from "../review/result.ts";
+import { isUnblockedCurrentFix, reviewDisposition, type ReviewResult } from "../review/result.ts";
 import { reviewArtifactDefinition } from "../review/artifact.ts";
 import {
   revisionPlanArtifactDefinition,
@@ -52,9 +52,8 @@ import {
   type RevisionPlanStatus,
 } from "./plan.ts";
 import {
-  addressedRevisionItems,
+  revisionFeedbackDispositions,
   revisionExecutionArtifactDefinition,
-  skippedRevisionItems,
   type RevisionExecutionResult,
 } from "./execution.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
@@ -119,7 +118,7 @@ export async function runPrRevision(
     const runner = deps.agentRunner ?? runPiAgent;
     const postSummary = deps.postSummaryComment ?? postPrRevisionSummaryComment;
 
-    const plan = await runRevisionPlanPhase(context, runner);
+    const plan = await runRevisionPlanPhase(context, runner, revisionFeedbackSources(feedback));
     const planStatus = plan.status;
     await updateMetadata(context, feedback, { outcome: "planned", planStatus });
 
@@ -132,10 +131,7 @@ export async function runPrRevision(
         await postSummary({
           context,
           outcome: "no-action-needed",
-          planStatus,
-          feedbackConsidered: plan.classifiedFeedback,
-          skipped: ["Planner reported no revision was needed for the current feedback."],
-          artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.json", "revision-plan.md", "metadata.json"]),
+          dispositions: revisionFeedbackDispositions(plan),
         });
       }
       await removeAgentPrRevisionArtifacts(context);
@@ -148,17 +144,13 @@ export async function runPrRevision(
       await postSummary({
         context,
         outcome: "needs-human",
-        planStatus,
-        feedbackConsidered: plan.classifiedFeedback,
-        skipped: plan.humanNeeds,
-        artifactPaths: collectArtifactPaths(context, ["pr-feedback.md", "revision-plan.json", "revision-plan.md", "metadata.json"]),
+        dispositions: revisionFeedbackDispositions(plan),
       });
       return { outcome: "needs-human", context, planStatus };
     }
 
-    const artifactFilenames = ["pr-feedback.md", "revision-plan.json", "revision-plan.md"];
-
     let execution = await runRevisionExecutionPhase(context, runner, {
+      plan,
       phaseId: "revision-implementation",
       label: "Revision implementation",
       artifact: "revision-log.json",
@@ -166,7 +158,6 @@ export async function runPrRevision(
       thinkingStage: "revisionImplementation",
       prompt: revisionImplementationPrompt(context, 0),
     });
-    artifactFilenames.push("revision-log.json", "revision-log.md");
 
     let review = await runRevisionReviewAgent(context, runner, {
       phaseId: "revision-review",
@@ -174,7 +165,6 @@ export async function runPrRevision(
       artifact: "revision-review.json",
       prompt: revisionReviewPrompt(context, 0),
     });
-    artifactFilenames.push("revision-review.json", "revision-review.md");
     let reviewVerdict = revisionReviewVerdict(review);
     let fixPassesUsed = 0;
     let verification: VerificationResult | undefined;
@@ -187,11 +177,8 @@ export async function runPrRevision(
           await postSummary({
             context,
             outcome: "review-blocked",
-            planStatus,
             reviewVerdict,
-            feedbackConsidered: plan.classifiedFeedback,
-            skipped: revisionReviewBlockingFindings(review),
-            artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+            dispositions: revisionFeedbackDispositions(plan, execution),
           });
           return { outcome: "review-blocked", context, planStatus, reviewVerdict };
         }
@@ -199,6 +186,7 @@ export async function runPrRevision(
         const pass = ++fixPassesUsed;
         const logArtifact = `revision-log-fix-pass-${pass}.json`;
         execution = await runRevisionExecutionPhase(context, runner, {
+          plan,
           phaseId: `revision-fix-${pass}`,
           pass,
           label: `Revision fix pass ${pass}`,
@@ -207,7 +195,6 @@ export async function runPrRevision(
           thinkingStage: "revisionFix",
           prompt: revisionImplementationPrompt(context, pass),
         });
-        artifactFilenames.push(logArtifact, logArtifact.replace(/\.json$/, ".md"));
 
         const reviewArtifact = `revision-review-pass-${pass}.json`;
         review = await runRevisionReviewAgent(context, runner, {
@@ -217,7 +204,6 @@ export async function runPrRevision(
           artifact: reviewArtifact,
           prompt: revisionReviewPrompt(context, pass),
         });
-        artifactFilenames.push(reviewArtifact, reviewArtifact.replace(/\.json$/, ".md"));
         reviewVerdict = revisionReviewVerdict(review);
         continue;
       }
@@ -228,11 +214,8 @@ export async function runPrRevision(
         await postSummary({
           context,
           outcome: "review-blocked",
-          planStatus,
           reviewVerdict,
-          feedbackConsidered: plan.classifiedFeedback,
-          skipped: revisionReviewBlockingFindings(review),
-          artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+          dispositions: revisionFeedbackDispositions(plan, execution),
         });
         return { outcome: "review-blocked", context, planStatus, reviewVerdict };
       }
@@ -251,7 +234,6 @@ export async function runPrRevision(
       });
       await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
       await writePrRevisionArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
-      addArtifactFilename(artifactFilenames, "verification.md");
       presenter().artifact(prRevisionArtifactRelativePath(context, "verification.md"));
 
       if (verification.ok) break;
@@ -276,13 +258,9 @@ export async function runPrRevision(
         await postSummary({
           context,
           outcome: "verification-failed",
-          planStatus,
           reviewVerdict,
           verification,
-          feedbackConsidered: plan.classifiedFeedback,
-          addressed: addressedRevisionItems(execution),
-          skipped: [failedReason, ...skippedRevisionItems(execution)],
-          artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+          dispositions: revisionFeedbackDispositions(plan, execution),
         });
         return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
       }
@@ -292,11 +270,11 @@ export async function runPrRevision(
       const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
       await writePrRevisionArtifact(context, verificationBeforeFixArtifact, formatVerificationArtifact(verification));
       await writePrRevisionArtifact(context, `verification-before-fix-${pass}-full.md`, formatCompleteVerificationArtifact(verification));
-      artifactFilenames.push(verificationBeforeFixArtifact);
       presenter().artifact(prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact));
 
       const logArtifact = `revision-log-fix-pass-${pass}.json`;
       execution = await runRevisionExecutionPhase(context, runner, {
+        plan,
         phaseId: `revision-fix-${pass}`,
         pass,
         label: `Revision fix pass ${pass}`,
@@ -305,7 +283,6 @@ export async function runPrRevision(
         thinkingStage: "revisionFix",
         prompt: revisionImplementationPrompt(context, pass),
       });
-      artifactFilenames.push(logArtifact, logArtifact.replace(/\.json$/, ".md"));
 
       const reviewArtifact = `revision-review-pass-${pass}.json`;
       review = await runRevisionReviewAgent(context, runner, {
@@ -315,7 +292,6 @@ export async function runPrRevision(
         artifact: reviewArtifact,
         prompt: revisionReviewPrompt(context, pass),
       });
-      artifactFilenames.push(reviewArtifact, reviewArtifact.replace(/\.json$/, ".md"));
       reviewVerdict = revisionReviewVerdict(review);
     }
 
@@ -325,12 +301,9 @@ export async function runPrRevision(
       await postSummary({
         context,
         outcome: "no-code-changes",
-        planStatus,
         reviewVerdict,
         verification,
-        feedbackConsidered: plan.classifiedFeedback,
-        skipped: ["Planner requested a revision, but no non-.roark code changes were present after implementation."],
-        artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
+        dispositions: revisionFeedbackDispositions(plan, execution),
       });
       return { outcome: "no-code-changes", context, planStatus, reviewVerdict, verification };
     }
@@ -354,15 +327,11 @@ export async function runPrRevision(
     await postSummary({
       context,
       outcome: "published",
-      planStatus,
       reviewVerdict,
       verification,
-      feedbackConsidered: plan.classifiedFeedback,
-      addressed: addressedRevisionItems(execution),
-      skipped: skippedRevisionItems(execution),
+      dispositions: revisionFeedbackDispositions(plan, execution),
       changedFiles,
       commitSha,
-      artifactPaths: collectArtifactPaths(context, [...artifactFilenames, "metadata.json"]),
     });
 
     return { outcome: "published", context, planStatus, reviewVerdict, verification };
@@ -417,6 +386,7 @@ async function runRevisionExecutionPhase(
   runner: AgentRunner,
   input: {
     phaseId: string;
+    plan: RevisionPlanResult;
     label: string;
     artifact: string;
     title: string;
@@ -434,14 +404,18 @@ async function runRevisionExecutionPhase(
       prompt: input.prompt,
       fileEditingToolsEnabled: true,
       display,
-    }, runner, revisionExecutionArtifactDefinition(input.title), {
+    }, runner, revisionExecutionArtifactDefinition(input.title, input.plan), {
       writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
       writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
     }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
   return artifact.value;
 }
 
-async function runRevisionPlanPhase(context: PrRevisionContext, runner: AgentRunner): Promise<RevisionPlanResult> {
+async function runRevisionPlanPhase(
+  context: PrRevisionContext,
+  runner: AgentRunner,
+  feedbackSources: readonly RevisionFeedbackSource[],
+): Promise<RevisionPlanResult> {
   const input = { phaseId: "revision-plan", label: "Revision plan", artifact: "revision-plan.json" };
   const display = revisionDisplay(context, input, "inspect");
   const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
@@ -452,7 +426,7 @@ async function runRevisionPlanPhase(context: PrRevisionContext, runner: AgentRun
       prompt: revisionPlanPrompt(context),
       fileEditingToolsEnabled: false,
       display,
-    }, runner, revisionPlanArtifactDefinition, {
+    }, runner, revisionPlanArtifactDefinition(new Set(feedbackSources.map((source) => source.id))), {
       writeJson: (content) => writePrRevisionArtifact(context, "revision-plan.json", content),
       writeMarkdown: (content) => writePrRevisionArtifact(context, "revision-plan.md", content),
     }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
@@ -508,11 +482,42 @@ async function writeInitialArtifacts(context: PrRevisionContext, feedback: PullR
   await updateMetadata(context, feedback, { outcome: "started" });
 }
 
-function plannerFacingFeedback(feedback: PullRequestFeedback): PullRequestFeedback {
+interface RevisionFeedbackSource {
+  id: string;
+  kind: "pr-description" | "review-thread" | "pr-comment" | "closing-issue" | "closing-issue-comment";
+  url?: string | undefined;
+}
+
+function plannerFacingFeedback(feedback: PullRequestFeedback): PullRequestFeedback & { feedbackSources: RevisionFeedbackSource[] } {
   return {
     ...feedback,
     comments: feedback.plannerComments,
+    feedbackSources: revisionFeedbackSources(feedback),
   };
+}
+
+function revisionFeedbackSources(feedback: PullRequestFeedback): RevisionFeedbackSource[] {
+  return [
+    { id: `pr:${feedback.pr.number}`, kind: "pr-description" as const, url: feedback.pr.url },
+    ...feedback.reviewThreads.map((thread, index) => ({
+      id: `thread:${thread.id || index + 1}`,
+      kind: "review-thread" as const,
+      url: thread.comments.find((comment) => comment.url)?.url,
+    })),
+    ...feedback.plannerComments.map((comment, index) => ({
+      id: `comment:${comment.databaseId ?? comment.id ?? index + 1}`,
+      kind: "pr-comment" as const,
+      url: comment.url,
+    })),
+    ...(feedback.closingIssues ?? []).flatMap((issue) => [
+      { id: `issue:${issue.number}`, kind: "closing-issue" as const, url: issue.url },
+      ...(issue.comments ?? []).map((comment, index) => ({
+        id: `issue-comment:${issue.number}:${comment.databaseId ?? comment.id ?? index + 1}`,
+        kind: "closing-issue-comment" as const,
+        url: comment.url,
+      })),
+    ]),
+  ];
 }
 
 async function updateMetadata(
@@ -577,15 +582,6 @@ function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
   return disposition;
 }
 
-function revisionReviewBlockingFindings(review: ReviewResult): string[] {
-  return [
-    ...normalizeReviewFindings(review, "revision-review")
-      .filter((finding) => finding.classification === "must-fix-current"),
-    ...normalizeReviewBlockers(review, "revision-review"),
-  ]
-    .map((finding) => `${finding.sourceLocalId}: ${finding.title} — ${finding.recommendedHandling}`);
-}
-
 async function dirtyLinesOutsideRoark(cwd: string): Promise<string[]> {
   return (await gitDirtyLines(cwd)).filter((line) => !statusLinePaths(line).every(isRoarkPath));
 }
@@ -646,12 +642,4 @@ async function ensurePushRemote(context: PrRevisionContext): Promise<void> {
   if (pushUrl && (agentPushUrl.exitCode !== 0 || agentPushUrl.stdout.trim() !== pushUrl)) {
     await runProcessOrThrow(["git", "remote", "set-url", "--push", context.remote, pushUrl], { cwd: context.agentCwd, label: `git remote set-url --push ${context.remote}` });
   }
-}
-
-function collectArtifactPaths(context: PrRevisionContext, filenames: string[]): string[] {
-  return [...new Set(filenames)].map((filename) => prRevisionArtifactRelativePath(context, filename));
-}
-
-function addArtifactFilename(filenames: string[], filename: string): void {
-  if (!filenames.includes(filename)) filenames.push(filename);
 }

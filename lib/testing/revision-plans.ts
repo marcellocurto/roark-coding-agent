@@ -8,22 +8,28 @@ export function revisionPlanResult(
   const defaults: RevisionPlanResult = status === "needs-human"
     ? {
         status,
-        classifiedFeedback: ["[needs-human] Feedback requires a human decision."],
-        mustFixCurrent: [],
-        humanNeeds: ["Please decide how this feedback should be handled."],
+        feedbackItems: [{
+          id: "pr:12",
+          sourceIds: ["pr:12"],
+          summary: "Feedback requires a human decision.",
+          classification: "needs-human",
+          rationale: "Please decide how this feedback should be handled.",
+        }],
       }
     : status === "revise"
       ? {
           status,
-          classifiedFeedback: ["[must-fix-current] Feedback requires a code revision."],
-          mustFixCurrent: ["Address the current PR feedback."],
-          humanNeeds: [],
+          feedbackItems: [{
+            id: "pr:12",
+            sourceIds: ["pr:12"],
+            summary: "Address the current PR feedback.",
+            classification: "must-fix-current",
+            rationale: "The feedback identifies a current defect.",
+          }],
         }
       : {
           status,
-          classifiedFeedback: [],
-          mustFixCurrent: [],
-          humanNeeds: [],
+          feedbackItems: [],
         };
   return { ...defaults, ...overrides };
 }

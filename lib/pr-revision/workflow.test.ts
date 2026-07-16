@@ -5,13 +5,10 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
-import type { PrReviewContext } from "../pr-review/artifacts.ts";
-import { formatPrReviewComment } from "../pr-review/comments.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
 import { revisionPlanResult, submitRevisionPlan } from "../testing/revision-plans.ts";
 import { revisionExecutionResult, submitRevisionExecution } from "../testing/revision-executions.ts";
 import { noopAsync } from "../utils/async.ts";
-import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
@@ -105,48 +102,18 @@ function feedback(): PullRequestFeedback {
   };
 }
 
-function freshReviewComment(controlCwd: string, agentCwd: string): string {
-  const context: PrReviewContext = {
-    controlCwd,
-    agentCwd,
-    outDir: path.join(controlCwd, ".roark", "runs"),
-    repo: "owner/repo",
-    prNumber: 12,
-    generation: 1,
-    reviewDir: path.join(controlCwd, ".roark", "runs", "pr", "12", "review-1"),
-    reviewDirRelative: ".roark/runs/pr/12/review-1",
-    agentReviewDir: path.join(agentCwd, ".git", "roark", "pr-review", "12", "review-1"),
-    agentReviewDirRelative: ".git/roark/pr-review/12/review-1",
-    thinkingConfig: getWorkflowThinkingConfig(),
-    comment: true,
-  };
-  return formatPrReviewComment({
-    context,
-    headOid: "head123",
-    decision: {
-      outcome: "changes-requested",
-      requiredFixes: [{
-        source: "review-a",
-        sourceLocalId: "finding-1",
-        workflowId: "review-a:finding-1",
-        title: "Preserve the public response contract",
-        classification: "must-fix-current",
-        severity: "high",
-        confidence: "high",
-        evidence: ["The changed handler omits the required field."],
-        currentIssueImpact: "Clients cannot parse successful responses.",
-        recommendedHandling: "Restore the field before merging.",
-        blockedBy: [],
-      }],
-      externalBlockers: [],
-      followUps: [],
-      suggestions: [],
-      reasons: [],
-    },
-    verificationStatus: "not configured",
-    reviewA: reviewResult([], { summary: "Changes required." }),
-    reviewB: reviewResult([], { summary: "Approved." }),
-  });
+function freshReviewComment(): string {
+  return [
+    "<!-- roark:pr=12 phase=pr-review reviewer=a -->",
+    "## Review A: Spec and Correctness",
+    "",
+    "**Changes requested.**",
+    "",
+    "### Preserve the public response contract",
+    "",
+    "The changed handler omits the required field, so clients cannot parse successful responses. Restore the field before merging.",
+    "",
+  ].join("\n");
 }
 
 describe("runPrRevision", () => {
@@ -269,8 +236,8 @@ describe("runPrRevision", () => {
   test("passes a published fresh-review finding into revision planning", async () => {
     await noopAsync();
     const control = await tempGitRepo();
-    const { workspace, prepareWorkspace } = await isolatedWorkspace();
-    const reviewComment = freshReviewComment(control, workspace);
+    const { prepareWorkspace } = await isolatedWorkspace();
+    const reviewComment = freshReviewComment();
     let plannerSawFinding = false;
 
     const result = await runPrRevision(options(control, { comment: false }), {
@@ -284,6 +251,7 @@ describe("runPrRevision", () => {
       agentRunner: async (request) => {
         const artifact = await readFile(path.join(request.cwd, ".roark", "runs", "pr", "12", "revision-1", "pr-feedback.json"), "utf8");
         plannerSawFinding = artifact.includes("Preserve the public response contract")
+          && artifact.includes('"id": "comment:1"')
           && request.prompt.includes("pr-feedback.json as the canonical PR feedback artifact")
           && !request.prompt.includes("- pr-feedback.md");
         return submitRevisionPlan(request, revisionPlanResult("no-action-needed"));
@@ -324,8 +292,7 @@ describe("runPrRevision", () => {
     const { prepareWorkspace } = await isolatedWorkspace();
     const fileEditingToolCalls: boolean[] = [];
     let commentCalled = false;
-    let feedbackConsidered: string[] | undefined;
-    let skipped: string[] | undefined;
+    let dispositionDetails: string[] | undefined;
 
     const result = await runPrRevision(options(control), {
       fetchFeedback: async () => (await noopAsync(), feedback()),
@@ -334,23 +301,26 @@ describe("runPrRevision", () => {
         await noopAsync();
         fileEditingToolCalls.push(request.fileEditingToolsEnabled);
         return submitRevisionPlan(request, revisionPlanResult("needs-human", {
-          classifiedFeedback: ["Feedback needs an explicit product decision."],
-          humanNeeds: ["Please decide."],
+          feedbackItems: [{
+            id: "pr:12",
+            sourceIds: ["pr:12"],
+            summary: "Feedback needs an explicit product decision.",
+            classification: "needs-human",
+            rationale: "Please decide.",
+          }],
         }));
       },
       postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalled = true;
-        feedbackConsidered = summary.feedbackConsidered;
-        skipped = summary.skipped;
+        dispositionDetails = summary.dispositions.map((item) => item.details);
       },
     });
 
     expect(result.outcome).toBe("needs-human");
     expect(fileEditingToolCalls).toEqual([false]);
     expect(commentCalled).toBe(true);
-    expect(feedbackConsidered).toEqual(["Feedback needs an explicit product decision."]);
-    expect(skipped).toEqual(["Please decide."]);
+    expect(dispositionDetails).toEqual(["Please decide."]);
   });
 
   test("honors an explicit thinking override across revision agents", async () => {
@@ -461,7 +431,7 @@ describe("runPrRevision", () => {
     let calls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
-    let addressedSummary: string[] | undefined;
+    let finalDispositions: { feedbackId: string; details: string }[] | undefined;
     const writableArtifacts: string[] = [];
 
     const result = await runPrRevision(options(control, { maxFixPasses: 3 }), {
@@ -474,9 +444,10 @@ describe("runPrRevision", () => {
           writableArtifacts.push(request.prompt);
           await Bun.write(path.join(request.cwd, "fixed.txt"), `fixed ${writableArtifacts.length}\n`);
           return submitRevisionExecution(request, revisionExecutionResult({
-            addressedItems: [{
-              item: `Fix pass ${writableArtifacts.length}`,
-              resolution: `Fixed pass ${writableArtifacts.length}.`,
+            feedbackDispositions: [{
+              feedbackId: "pr:12",
+              status: "addressed",
+              details: `Fixed pass ${writableArtifacts.length}.`,
             }],
           }));
         }
@@ -493,7 +464,7 @@ describe("runPrRevision", () => {
       postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalls++;
-        addressedSummary = summary.addressed;
+        finalDispositions = summary.dispositions.map(({ feedbackId, details }) => ({ feedbackId, details }));
       },
     });
 
@@ -504,12 +475,11 @@ describe("runPrRevision", () => {
     expect(writableArtifacts[1]).not.toContain("revision-review.md");
     expect(writableArtifacts[1]).not.toContain("Markdown companion");
     expect(commentCalls).toBe(1);
-    expect(addressedSummary).toEqual(["Fix pass 2 — Fixed pass 2."]);
-    expect(addressedSummary).not.toContain("Malicious Markdown override.");
+    expect(finalDispositions).toEqual([{ feedbackId: "pr:12", details: "Fixed pass 2." }]);
     const canonicalExecution = parseRevisionExecutionResultJson(
       await readFile(path.join(result.context.revisionDir, "revision-log-fix-pass-1.json"), "utf8"),
     );
-    expect(canonicalExecution.addressedItems[0]?.resolution).toBe("Fixed pass 2.");
+    expect(canonicalExecution.feedbackDispositions[0]?.details).toBe("Fixed pass 2.");
     expect(existsSync(path.join(result.context.revisionDir, "revision-log-fix-pass-1.md"))).toBe(true);
     const archivedFailure = path.join(result.context.revisionDir, "verification-before-fix-1.md");
     expect(existsSync(archivedFailure)).toBe(true);

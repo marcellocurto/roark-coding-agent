@@ -582,10 +582,7 @@ async function authorAndPublishPullRequest(
   display: AgentDisplayContext,
 ): Promise<PublishedPullRequest> {
   const renderingContext = prDraftRenderingContext({
-    workflowContext: input.workflowContext,
     issueNumber: input.issue.number,
-    verification: input.verification,
-    attemptMetadata: input.attemptMetadata,
   });
   const artifact = await runStructuredArtifact({
     cwd: input.workflowContext.controlCwd,
@@ -653,11 +650,8 @@ export async function updatePrBody(input: {
   await runPresentedPhase(display, async () => {
     const draft = parsePrDraftJson(readFileSync(artifactPath(input.workflowContext, "prDraft"), "utf8"));
     const body = sanitizePublicMarkdown(formatPrDraftMarkdown(draft, prDraftRenderingContext({
-      workflowContext: input.workflowContext,
       issueNumber: input.issueNumber,
       followUpIssues: input.followUpIssues,
-      verification: input.verification,
-      attemptMetadata: input.attemptMetadata,
     })), { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
     const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
     await writeArtifact(input.workflowContext, "prDraftMarkdown", body);
@@ -682,23 +676,12 @@ export function buildPrCreateArgv(input: { repo?: string | undefined; baseBranch
 }
 
 function prDraftRenderingContext(input: {
-  workflowContext: WorkflowContext;
   issueNumber: number;
   followUpIssues?: readonly FormatPrBodyFollowUpIssue[] | undefined;
-  verification?: VerificationResult | undefined;
-  attemptMetadata?: AttemptMetadata | undefined;
 }): PrDraftRenderingContext {
   return {
     sourceIssueNumber: input.issueNumber,
     followUpIssues: input.followUpIssues,
-    runDirectory: input.workflowContext.runDirRelative,
-    artifactPaths: collectPrBodyArtifactPaths(input.workflowContext),
-    ...(input.attemptMetadata ? {
-      attemptSummary: `${input.attemptMetadata.attempt}; branch ${input.attemptMetadata.branch}`,
-    } : {}),
-    ...(input.verification ? {
-      verificationSummary: `${input.verification.ok ? "passed" : "failed"}: ${input.verification.command} (exit ${input.verification.exitCode})`,
-    } : {}),
   };
 }
 

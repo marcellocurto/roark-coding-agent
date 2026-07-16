@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-  addressedRevisionItems,
   formatRevisionExecutionMarkdown,
   parseRevisionExecutionResultJson,
   RevisionExecutionOutputContractError,
-  skippedRevisionItems,
+  revisionFeedbackDispositions,
+  validateRevisionExecutionResult,
 } from "./execution.ts";
 import { revisionExecutionResult } from "../testing/revision-executions.ts";
+import { revisionPlanResult } from "../testing/revision-plans.ts";
 
 describe("structured PR revision execution", () => {
   test("rejects Markdown and repository-escaping changed-file paths", () => {
@@ -16,21 +17,40 @@ describe("structured PR revision execution", () => {
     })))).toThrow("must not escape the repository");
   });
 
-  test("derives comment items and Markdown from validated fields", () => {
+  test("derives one linked disposition list and Markdown from validated fields", () => {
+    const plan = revisionPlanResult("revise");
     const result = revisionExecutionResult({
-      addressedItems: [{ item: "Required feedback", resolution: "Corrected the public behavior." }],
-      skippedItems: [{ item: "Optional cleanup", reason: "Outside this PR revision." }],
+      feedbackDispositions: [{ feedbackId: "pr:12", status: "addressed", details: "Corrected the public behavior." }],
       additionalSections: [{
         heading: "Discovery during validation",
         items: ["The same command also exercises the compatibility path."],
       }],
     });
 
-    expect(addressedRevisionItems(result)).toEqual(["Required feedback — Corrected the public behavior."]);
-    expect(skippedRevisionItems(result)).toEqual(["Optional cleanup — Outside this PR revision."]);
+    expect(revisionFeedbackDispositions(plan, result)).toEqual([{
+      feedbackId: "pr:12",
+      sourceIds: ["pr:12"],
+      summary: "Address the current PR feedback.",
+      classification: "must-fix-current",
+      status: "addressed",
+      details: "Corrected the public behavior.",
+    }]);
     const markdown = formatRevisionExecutionMarkdown(result, "Revision Log");
-    expect(markdown).toContain("- Required feedback — Corrected the public behavior.");
-    expect(markdown).toContain("- Optional cleanup — Outside this PR revision.");
+    expect(markdown).toContain("`pr:12` [addressed] Corrected the public behavior.");
     expect(markdown).toContain("## Discovery during validation");
+  });
+
+  test("requires every planned feedback id exactly once and rejects unknown ids", () => {
+    const plan = revisionPlanResult("revise");
+    expect(() => validateRevisionExecutionResult(revisionExecutionResult({ feedbackDispositions: [] }), plan)).toThrow("missing: pr:12");
+    expect(() => validateRevisionExecutionResult(revisionExecutionResult({
+      feedbackDispositions: [{ feedbackId: "other", status: "addressed", details: "Wrong item." }],
+    }), plan)).toThrow("unknown: other");
+    expect(() => validateRevisionExecutionResult(revisionExecutionResult({
+      feedbackDispositions: [
+        { feedbackId: "pr:12", status: "addressed", details: "First." },
+        { feedbackId: "pr:12", status: "addressed", details: "Second." },
+      ],
+    }), plan)).toThrow("ids must be unique");
   });
 });

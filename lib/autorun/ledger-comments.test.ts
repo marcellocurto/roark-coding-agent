@@ -85,7 +85,6 @@ ${evidence}
       issue: { number: 24, title: "Ledger comments" },
       workflowContext,
       attemptMetadata,
-      attemptMetadataPath: ".roark/runs/issue/24/attempts/2/attempt.json",
     }, {
       publishIssueLedgerComment: async (input) => {
         await noopAsync();

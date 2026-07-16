@@ -17,18 +17,16 @@ import {
   type PreparedPrReviewWorkspace,
   type WorkspaceConfig,
 } from "../autorun/workspace.ts";
+import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { fetchPullRequestFeedback, isRoarkGeneratedPrSummaryComment, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
+import { postIssueComment, truncateGitHubIssueComment } from "../github/comments.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { correctnessReviewLens, maintainabilityReviewLens, type ReviewLensDefinition } from "../review/contract.ts";
-import type { ReviewResult } from "../review/result.ts";
-import { reviewArtifactDefinition } from "../review/artifact.ts";
-import { runStructuredArtifact } from "../structured-output/runner.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
-import { artifactOutcome } from "../workflow/markdown-token.ts";
 import {
   createPrReviewContext,
   removeAgentPrReviewArtifacts,
@@ -38,15 +36,12 @@ import {
   writePrReviewInputJson,
   writePrReviewJson,
 } from "./artifacts.ts";
-import { publishPrReviewComment } from "./comments.ts";
-import { blockedPrReviewDecision, decidePrReview, type PrReviewDecision, type PrReviewOutcome } from "./outcome.ts";
 import { prReviewPrompt } from "./prompts.ts";
 import { resolvePrReviewVerification } from "./verification.ts";
 
 export interface PrReviewResult {
-  outcome: PrReviewOutcome;
+  outcome: "completed" | "blocked";
   context: PrReviewContext;
-  decision: PrReviewDecision;
   verification?: VerificationResult | undefined;
   published: boolean;
   stale: boolean;
@@ -58,7 +53,7 @@ export interface RunPrReviewDependencies {
   runLifecycleHook?: typeof runLifecycleHook | undefined;
   agentRunner?: AgentRunner | undefined;
   verificationRunner?: VerificationRunner | undefined;
-  publishComment?: typeof publishPrReviewComment | undefined;
+  postComment?: typeof postIssueComment | undefined;
   assertWorkspace?: typeof assertPinnedPrReviewWorkspace | undefined;
 }
 
@@ -105,8 +100,6 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     });
 
     let verification: VerificationResult | undefined;
-    let verificationUnavailable: string | undefined;
-    let verificationStatus = resolvedVerification.reason ?? "not configured";
     if (resolvedVerification.command) {
       await hookRunner("beforeVerify", hooks, context.agentCwd);
       try {
@@ -122,13 +115,10 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
         const classification = classifyVerificationFailure(verification);
         if (!verification.ok) {
           presenter().line(`ACTION user action required for verification: ${classification.recoveryGuidance ?? classification.reason}`);
-          if (!classification.repairable) verificationUnavailable = classification.recoveryGuidance ?? classification.reason;
         }
-        verificationStatus = `${verification.ok ? "passed" : "failed"} (${resolvedVerification.source}, \`${resolvedVerification.command}\`, exit ${verification.exitCode})`;
       } catch (error) {
-        verificationUnavailable = `Verification could not run: ${errorMessage(error)}`;
-        verificationStatus = verificationUnavailable;
-        await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${verificationUnavailable}\n`);
+        const reason = `Verification could not run: ${errorMessage(error)}`;
+        await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`);
       }
       await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
     } else {
@@ -167,19 +157,20 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     const reviewB = reviewBResult.value;
     await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
-    let decision: PrReviewDecision = decidePrReview({ reviewA, reviewB, verification, verificationUnavailable });
-    await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus });
-
     const latest = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
     const staleReasons = prIdentityChanges(initial, latest);
     if (staleReasons.length > 0) {
-      decision = blockedPrReviewDecision(`PR changed during review (${staleReasons.join("; ")}); findings were retained but not published as current.`);
-      await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus, stale: true });
-      await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestPr: latest.pr, endedAt: new Date().toISOString() }));
-      return { outcome: "blocked", context, decision, verification, published: false, stale: true };
+      await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
+        outcome: "blocked",
+        stale: true,
+        staleReason: `PR changed during review (${staleReasons.join("; ")}); review comments were not published.`,
+        latestPr: latest.pr,
+        endedAt: new Date().toISOString(),
+      }));
+      return { outcome: "blocked", context, verification, published: false, stale: true };
     }
 
-    await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: decision.outcome, stale: false, endedAt: new Date().toISOString() }));
+    await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "completed", stale: false, endedAt: new Date().toISOString() }));
     let published = false;
     if (context.comment) {
       const publishDisplay: AgentDisplayContext = {
@@ -193,33 +184,34 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
       };
       presenter().phaseStarted(publishDisplay);
       try {
-        const publish = deps.publishComment ?? publishPrReviewComment;
-        await publish({ context, headOid: initial.pr.headRefOid, decision, verificationStatus, reviewA, reviewB });
+        const postComment = deps.postComment ?? postIssueComment;
+        await postComment({
+          cwd: context.controlCwd,
+          repo: context.repo,
+          issueNumber: context.prNumber,
+          body: publicReviewComment(context, "a", reviewA),
+        });
+        await postComment({
+          cwd: context.controlCwd,
+          repo: context.repo,
+          issueNumber: context.prNumber,
+          body: publicReviewComment(context, "b", reviewB),
+        });
         published = true;
-        const afterPublish = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
-        const afterPublishStaleReasons = prIdentityChanges(initial, afterPublish);
-        if (afterPublishStaleReasons.length > 0) {
-          decision = blockedPrReviewDecision(`PR changed while the review comment was being published (${afterPublishStaleReasons.join("; ")}); this comment is stale and must not be treated as current.`);
-          await writePrReviewJson(context, "summary.json", { ...decision, verificationStatus, stale: true });
-          await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, { outcome: "blocked", stale: true, latestPr: afterPublish.pr, endedAt: new Date().toISOString() }));
-          await publish({ context, headOid: initial.pr.headRefOid, decision, verificationStatus, reviewA, reviewB });
-          presenter().phaseCompleted(publishDisplay, { outcome: "published stale review" });
-          return { outcome: "blocked", context, decision, verification, published: true, stale: true };
-        }
-        presenter().phaseCompleted(publishDisplay, { outcome: "published" });
+        presenter().phaseCompleted(publishDisplay, { outcome: "published 2 reviewer comments" });
       } catch (error) {
         await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
-          outcome: decision.outcome,
+          outcome: "completed",
           publication: "failed",
           publicationError: errorMessage(error),
           endedAt: new Date().toISOString(),
         }));
-        const publicationError = new Error(`PR review completed and artifacts were preserved, but comment publishing failed: ${errorMessage(error)}`);
+        const publicationError = new Error(`PR review completed, but reviewer comment publishing failed: ${errorMessage(error)}`);
         presenter().phaseCompleted(publishDisplay, { outcome: publicationError.message, failed: true });
         throw publicationError;
       }
     }
-    return { outcome: decision.outcome, context, decision, verification, published, stale: false };
+    return { outcome: "completed", context, verification, published, stale: false };
   } finally {
     try {
       if (context) await removeAgentPrReviewArtifacts(context);
@@ -258,7 +250,7 @@ async function runReviewer(
   runner: AgentRunner,
   lens: ReviewLensDefinition,
   stage: "reviewA" | "reviewB",
-): Promise<ReviewResult> {
+): Promise<string> {
   const artifactName = stage === "reviewA" ? "review-a" : "review-b";
   const display: AgentDisplayContext = {
     command: "review-pr",
@@ -271,7 +263,7 @@ async function runReviewer(
     operation: "review",
   };
   return runPresentedPhase(display, async () => {
-    const artifact = await runStructuredArtifact({
+    const markdown = (await runner({
       cwd: context.agentCwd,
       model: effectiveModelForStage(context.model, stage),
       thinkingLevel: context.thinkingConfig[stage],
@@ -279,17 +271,19 @@ async function runReviewer(
       prompt: prReviewPrompt({ context, comparison: prepared.comparison, lens }),
       fileEditingToolsEnabled: false,
       display,
-    }, runner, reviewArtifactDefinition({
-      allowRestart: false,
-      title: stage === "reviewA" ? "Review A: Spec and Correctness" : "Review B: Standards and Maintainability",
-      source: stage === "reviewA" ? "review-a" : "review-b",
-    }), {
-      writeJson: (content) => writePrReviewArtifact(context, `${artifactName}.json`, content),
-      writeMarkdown: (content) => writePrReviewArtifact(context, `${artifactName}.md`, content),
-    });
-    return artifact;
-  }, (artifact) => ({ outcome: artifactOutcome(artifact.markdown), artifact: display.expectedArtifact }), { manageTitle: false })
-    .then((artifact) => artifact.value);
+    })).trim();
+    if (!markdown) throw new Error(`${lens.role} returned an empty PR review comment.`);
+    await writePrReviewArtifact(context, `${artifactName}.md`, markdown);
+    return markdown;
+  }, () => ({ outcome: "completed", artifact: display.expectedArtifact }), { manageTitle: false });
+}
+
+function publicReviewComment(context: PrReviewContext, reviewer: "a" | "b", markdown: string): string {
+  const marker = `<!-- roark:pr=${context.prNumber} phase=pr-review reviewer=${reviewer} -->`;
+  const body = sanitizePublicMarkdown(markdown, {
+    localRoots: [context.controlCwd, context.agentCwd, context.outDir, context.reviewDir],
+  });
+  return truncateGitHubIssueComment(`${marker}\n${body.trim()}\n`);
 }
 
 export function sameRepositoryClosingIssues(feedback: PullRequestFeedback): PullRequestClosingIssue[] {

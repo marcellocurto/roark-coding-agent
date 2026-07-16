@@ -6,11 +6,8 @@ import { defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { noopAsync } from "../utils/async.ts";
-import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
-import type { ReviewResult } from "../review/result.ts";
 import { runPrReview } from "./workflow.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatPrReviewComment } from "./comments.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 
@@ -53,12 +50,11 @@ describe("runPrReview", () => {
     }
   });
 
-  test("publishes every structured required fix from both reviewers", async () => {
+  test("posts each reviewer's exact Markdown as its own comment", async () => {
     const control = await mkdtemp(path.join(tmpdir(), "roark-pr-review-control-"));
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
     await initAgentRepo(agent);
-    let publications = 0;
-    let publishedComment = "";
+    const publishedComments: string[] = [];
     const feedback = reviewFeedback();
 
     const result = await runPrReview({
@@ -94,31 +90,28 @@ describe("runPrReview", () => {
       },
       agentRunner: async (request) => {
         await noopAsync();
-        return submitReview(request, request.display.phaseId.endsWith("a")
-          ? reviewResult([
-            reviewFinding("must-fix-current", "Malformed IDs"),
-            reviewFinding("must-fix-current", "Unseeded auth test"),
-          ])
-          : reviewResult([
-            reviewFinding("must-fix-current", "Self-contained tests"),
-            reviewFinding("suggestion", "Avoid wall-clock assertions"),
-          ]));
+        return request.display.phaseId.endsWith("a")
+          ? "## Review A: Spec and Correctness\n\n**Changes requested.**\n\nFix malformed IDs."
+          : "## Review B: Standards and Maintainability\n\n**Approved.**";
       },
-      publishComment: async (input) => {
+      postComment: async (input) => {
         await noopAsync();
-        publications++;
-        publishedComment = formatPrReviewComment(input);
+        publishedComments.push(input.body);
+        return { id: publishedComments.length, marker: "" };
       },
     });
 
-    expect(result.outcome).toBe("changes-requested");
+    expect(result.outcome).toBe("completed");
     expect(result.published).toBe(true);
-    expect(publications).toBe(1);
-    expect(publishedComment).toContain("### Required fixes\n- **Malformed IDs**");
-    expect(publishedComment).toContain("- **Unseeded auth test**");
-    expect(publishedComment).toContain("- **Self-contained tests**");
-    expect(publishedComment).toContain("### Suggestions\n- **Avoid wall-clock assertions**");
-    expect(publishedComment).not.toContain("### Required fixes\n- None.");
+    expect(publishedComments).toEqual([
+      "<!-- roark:pr=12 phase=pr-review reviewer=a -->\n## Review A: Spec and Correctness\n\n**Changes requested.**\n\nFix malformed IDs.\n",
+      "<!-- roark:pr=12 phase=pr-review reviewer=b -->\n## Review B: Standards and Maintainability\n\n**Approved.**\n",
+    ]);
+    expect(await readFile(path.join(result.context.reviewDir, "review-a.md"), "utf8")).toBe(
+      "## Review A: Spec and Correctness\n\n**Changes requested.**\n\nFix malformed IDs.\n",
+    );
+    expect(Bun.file(path.join(result.context.reviewDir, "review-a.json")).exists()).resolves.toBe(false);
+    expect(Bun.file(path.join(result.context.reviewDir, "summary.json")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
@@ -166,8 +159,9 @@ describe("runPrReview", () => {
       assertWorkspace: async () => { await noopAsync(); },
       verificationRunner: async ({ command }) => (await noopAsync(), { ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
       agentRunner: async (request) => {
+        await noopAsync();
         agentCalls.push(request);
-        return submitReview(request, approvedReview(request.display.phaseId));
+        return approvedReview(request.display.phaseId);
       },
     });
 
@@ -175,7 +169,9 @@ describe("runPrReview", () => {
     expect(preparedRepositoryUrl).toBe("https://github.com/owner/repo");
     expect(agentCalls).toHaveLength(2);
     expect(agentCalls.every((call) => !call.fileEditingToolsEnabled)).toBe(true);
+    expect(agentCalls.every((call) => call.customTools === undefined)).toBe(true);
     expect(agentCalls.every((call) => call.prompt.includes(`git diff merge123..${feedback.pr.headRefOid} --`))).toBe(true);
+    expect(agentCalls.every((call) => call.prompt.includes("Return only the final Markdown review"))).toBe(true);
     expect(Bun.file(path.join(agent, ".roark/runs/pr/12/review-1")).exists()).resolves.toBe(false);
     expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });
@@ -189,7 +185,7 @@ describe("runPrReview", () => {
     const feedback = reviewFeedback();
     feedback.comments = [
       { author: "reviewer", body: "Human context" },
-      { author: "roark", body: "<!-- roark:pr=12 phase=pr-review -->\nStale generated review" },
+      { author: "roark", body: "<!-- roark:pr=12 phase=pr-review reviewer=a -->\nStale generated review" },
       { author: "roark", body: "<!-- roark:pr=12 revision=1 phase=revision-summary -->\nStale revision summary" },
     ];
     feedback.reviewThreadsTruncated = true;
@@ -236,7 +232,7 @@ describe("runPrReview", () => {
       }),
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      agentRunner: async (request) => submitReview(request, approvedReview(request.display.phaseId)),
+      agentRunner: async (request) => (await noopAsync(), approvedReview(request.display.phaseId)),
     });
 
     const reviewContext = await readFile(path.join(result.context.reviewDir, "pr-context.md"), "utf8");
@@ -287,7 +283,7 @@ describe("runPrReview", () => {
         stdout: `diagnostic-at-start\n${"x".repeat(5_000)}\ndiagnostic-at-end`,
         stderr: "",
       }),
-      agentRunner: async (request) => submitReview(request, approvedReview(request.display.phaseId)),
+      agentRunner: async (request) => (await noopAsync(), approvedReview(request.display.phaseId)),
     });
 
     const reviewerVerification = await readFile(path.join(result.context.reviewDir, "verification.md"), "utf8");
@@ -330,15 +326,15 @@ describe("runPrReview", () => {
       }); },
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      agentRunner: async (request) => { await noopAsync(); return submitReview(request, approvedReview("R1")); },
-      publishComment: async () => { await noopAsync(); publications++; },
+      agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
+      postComment: async () => { await noopAsync(); publications++; return { id: publications, marker: "" }; },
     });
     expect(result.outcome).toBe("blocked");
     expect(result.stale).toBe(true);
-    expect(result.decision.reasons[0]).toContain("title changed");
-    expect(result.decision.reasons[0]).toContain("description changed");
     expect(publications).toBe(0);
-    expect(Bun.file(path.join(result.context.reviewDir, "review-a.json")).exists()).resolves.toBe(true);
+    expect(Bun.file(path.join(result.context.reviewDir, "review-a.md")).exists()).resolves.toBe(true);
+    expect(await readFile(path.join(result.context.reviewDir, "metadata.json"), "utf8")).toContain("title changed");
+    expect(await readFile(path.join(result.context.reviewDir, "metadata.json"), "utf8")).toContain("description changed");
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
@@ -367,14 +363,14 @@ describe("runPrReview", () => {
       }; },
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      agentRunner: async (request) => { await noopAsync(); return submitReview(request, approvedReview("R1")); },
-      publishComment: async () => { await noopAsync(); throw new Error("GitHub unavailable"); },
+      agentRunner: async () => { await noopAsync(); return approvedReview("R1"); },
+      postComment: async () => { await noopAsync(); throw new Error("GitHub unavailable"); },
     });
 
-    expect(run).rejects.toThrow("artifacts were preserved");
+    expect(run).rejects.toThrow("reviewer comment publishing failed");
     await run.catch(() => undefined);
     const reviewDir = path.join(control, ".roark/runs/pr/12/review-1");
-    expect(Bun.file(path.join(reviewDir, "review-a.json")).exists()).resolves.toBe(true);
+    expect(Bun.file(path.join(reviewDir, "review-a.md")).exists()).resolves.toBe(true);
     expect(await readFile(path.join(reviewDir, "metadata.json"), "utf8")).toContain('"publication": "failed"');
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
@@ -414,7 +410,7 @@ describe("runPrReview", () => {
         if (request.display.phaseId === "pr-review-a") throw new Error("review A unavailable");
         await new Promise((resolve) => setTimeout(resolve, 20));
         secondReviewerFinished = true;
-        return submitReview(request, approvedReview("B1"));
+        return approvedReview("B1");
       },
     });
 
@@ -422,7 +418,7 @@ describe("runPrReview", () => {
     await run.catch(() => undefined);
     expect(secondReviewerFinished).toBe(true);
     expect(lockReleasedEarly).toBe(false);
-    expect(Bun.file(path.join(control, ".roark/runs/pr/12/review-1/review-b.json")).exists()).resolves.toBe(true);
+    expect(Bun.file(path.join(control, ".roark/runs/pr/12/review-1/review-b.md")).exists()).resolves.toBe(true);
     expect(Bun.file(path.join(agent, ".git/roark/pr-review/12/review-1")).exists()).resolves.toBe(false);
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
@@ -454,8 +450,8 @@ function reviewFeedback(): PullRequestFeedback {
   };
 }
 
-function approvedReview(id: string): ReviewResult {
-  return reviewResult([], { summary: "Approved.", evidenceReviewed: [id] });
+function approvedReview(id: string): string {
+  return `## Review\n\n**Approved.**\n\n${id}`;
 }
 
 async function initAgentRepo(cwd: string): Promise<void> {

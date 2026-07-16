@@ -199,7 +199,6 @@ async function markWorkflowError(
     issue,
     workflowContext: input.workflowContext,
     attemptMetadata,
-    attemptMetadataPath,
   });
 
   await publishLedger({
@@ -221,9 +220,7 @@ async function markWorkflowError(
     branchName: attemptMetadata.branch,
     worktreePath: attemptMetadata.worktreePath,
     workspacePath: attemptMetadata.workspace?.path,
-    artifactPath: errorArtifact?.path,
     artifactContent: errorArtifact?.content,
-    attemptMetadataPath,
     recoveryCommand: publicRecoveryCommand(input, shouldRecoverWithYes(error)),
   });
 

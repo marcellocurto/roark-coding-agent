@@ -15,11 +15,11 @@ roark revise-pr 123 --repo owner/repo
 2. Exclude prior Roark revision summary comments from planner input.
 3. Prepare an isolated managed clone workspace and check out the existing PR head branch there. The caller/control checkout stays on its current branch.
 4. Allocate canonical artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/` in the control checkout and mirror them into the revision workspace for agent prompts.
-5. Plan feedback handling in the revision workspace.
-6. Apply only feedback classified as `must-fix-current` in the revision workspace.
+5. Build a deterministic catalog of PR descriptions, comments, review threads, and closing-issue sources, then plan each relevant feedback item with a stable source-derived ID.
+6. Apply only feedback classified as `must-fix-current` in the revision workspace. The execution report must give every planned feedback ID exactly one final disposition; missing, duplicate, or unknown IDs are rejected.
 7. Run one revision reviewer and optional fix/review passes in the revision workspace.
 8. Run verification in the revision workspace.
-9. On success, create one revision commit from the revision workspace while excluding `.roark` control-plane artifacts, push to the PR head branch, and post one summary comment from the control checkout.
+9. On success, create one revision commit from the revision workspace while excluding `.roark` control-plane artifacts, push to the PR head branch, and post one concise summary comment from the control checkout. The comment renders the single linked disposition list plus objective outcome, review, verification, commit, and changed-file metadata. Internal plans, logs, reviews, and local artifact paths are not embedded.
 
 ## Feedback classifications
 
@@ -27,7 +27,7 @@ roark revise-pr 123 --repo owner/repo
 - `already-addressed`: feedback already satisfied.
 - `needs-human`: requires maintainer decision or unavailable context.
 - `non-blocking`: valid follow-up, not required for this PR.
-- `invalid/stale`: no longer applicable.
+- `invalid-stale`: no longer applicable.
 
 ## Safety boundaries
 

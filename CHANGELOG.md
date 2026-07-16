@@ -6,6 +6,12 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ## Unreleased
 
+### Changed
+
+- `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.
+- `revise-pr` now assigns every planned feedback item a stable source-derived identity and requires execution and fix passes to provide exactly one final disposition for every identity. Summary comments render that single linked list with objective outcome, review, verification, changed-file, and commit metadata; internal plans, logs, reviews, feedback snapshots, and local artifact paths stay local.
+- Public GitHub comments, pull request bodies, and generated issues no longer expose machine-local `.roark` run or artifact paths. PR bodies also omit the redundant Roark automation details block. Internal paths and run metadata remain available in local artifacts, status output, observability, prompts, and terminal recovery guidance.
+
 ## [0.2.0] - 2026-07-14
 
 ### Added

@@ -40,7 +40,7 @@ owner/repo#123
 | `roark continue <issue>` | Resume a stopped issue workflow and publish after all gates pass. |
 | `roark status [issue]` | View workflow status and recovery information. Use `--all` for every known issue run. |
 | `roark remove [issue ...]` | Interactively select managed workspaces to remove, or remove the listed issue workspaces. Use `--pr <n>` for PR workspaces and `--force` for dirty workspaces. |
-| `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts or updates one review comment by default. |
+| `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts each review directly as its own comment by default. |
 | `roark revise-pr <number>` | Address required review feedback on an existing open PR and push verified fixes when needed. |
 | `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
 | `roark create-issues <issue>` | Create approved GitHub issues from the curation plan. Dry-run unless `--yes`. |

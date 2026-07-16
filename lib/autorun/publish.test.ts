@@ -443,7 +443,8 @@ describe("publishAutorunResult", () => {
     const publishedBody = await readFile(ghBody, "utf8");
     expect(publishedBody).toContain("## Simple summary");
     expect(publishedBody).toContain("Closes #9");
-    expect(publishedBody).toContain("<summary>Roark automation details</summary>");
+    expect(publishedBody).not.toContain("Roark automation details");
+    expect(publishedBody).not.toContain(".roark/runs/");
   });
 
   test("creates one commit for target changes and excludes .roark/runs artifacts", async () => {

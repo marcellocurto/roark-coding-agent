@@ -12,16 +12,15 @@ describe("autorun failure", () => {
       issueNumber: 8,
       phase: "verification",
       reason: "verification command exited 1",
-      artifactPath: ".roark/runs/issue/8/attempts/1/verification.md",
       artifactContent: "# Verification\n\n## Stdout (tail)\n```\nSECRET_OUTPUT\n```\n\n## Stderr (tail)\n```\nTOKEN=leaked\n```\n",
     });
 
-    expect(comment).toContain("Artifact: `.roark/runs/issue/8/attempts/1/verification.md`");
+    expect(comment).not.toContain(".roark/runs/");
     expect(comment).not.toContain("SECRET_OUTPUT");
     expect(comment).not.toContain("TOKEN=leaked");
   });
 
-  test("formatFailureComment includes branch, attempt path, redacted artifact contents, and safe recovery command", () => {
+  test("formatFailureComment includes useful failure details without local artifact paths", () => {
     const comment = formatFailureComment({
       issueNumber: 10,
       issueUrl: "https://github.com/owner/repo/issues/10",
@@ -29,9 +28,7 @@ describe("autorun failure", () => {
       reason: 'readiness status is "not-ready" at path:/Users/alice/repo',
       branchName: "roark/issue-10",
       worktreePath: "/repo/.roark/worktrees/issue-10",
-      artifactPath: ".roark/runs/issue/10/attempts/2/readiness.md",
       artifactContent: `# PR Readiness\n\n## Status\nnot-ready\nlog: [/Users/alice/repo]\n${"x".repeat(70_000)}`,
-      attemptMetadataPath: ".roark/runs/issue/10/attempts/2/attempt.json",
       recoveryCommand: "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
     });
     expect(comment).toContain(
@@ -40,8 +37,7 @@ describe("autorun failure", () => {
     expect(comment).toContain("Branch: `roark/issue-10`");
     expect(comment).not.toContain("Worktree:");
     expect(comment).not.toContain("Workspace:");
-    expect(comment).toContain("Artifact: `.roark/runs/issue/10/attempts/2/readiness.md`");
-    expect(comment).toContain("Attempt: `.roark/runs/issue/10/attempts/2/attempt.json`");
+    expect(comment).not.toContain(".roark/runs/");
     expect(comment).toContain("## Status\nnot-ready");
     expect(comment).toContain("log: [[local path redacted]]");
     expect(comment).toContain("## Recovery");

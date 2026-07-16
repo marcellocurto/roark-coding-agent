@@ -32,9 +32,7 @@ export interface IssueDraftRenderingContext {
   classification: string;
   sourceFindingIds: readonly string[];
   reviewerSources: readonly string[];
-  runDirectory: string;
   attempt?: number | undefined;
-  artifactPaths: readonly string[];
 }
 
 export function validateIssueDraftCollection(value: unknown, expectedPlanItemIds: readonly string[]): IssueDraftCollection {
@@ -107,17 +105,7 @@ export function formatIssueDraftMarkdown(draft: IssueDraft, context: IssueDraftR
     `- Classification: ${context.classification}`,
     `- Source finding IDs: ${context.sourceFindingIds.join(", ") || "none recorded"}`,
     `- Reviewer sources: ${context.reviewerSources.join(", ") || "none recorded"}`,
-    "",
-    "<details>",
-    "<summary>Roark run artifacts</summary>",
-    "",
-    `- Run directory: \`${context.runDirectory}\``,
     ...(context.attempt === undefined ? [] : [`- Attempt: ${context.attempt}`]),
-    ...(context.artifactPaths.length === 0
-      ? ["- Artifacts: none recorded"]
-      : ["- Artifacts:", ...context.artifactPaths.map((artifactPath) => `  - \`${artifactPath}\``)]),
-    "",
-    "</details>",
     "",
   ].join("\n");
 }

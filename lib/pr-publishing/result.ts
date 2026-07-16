@@ -30,10 +30,6 @@ export interface PrDraftFollowUpIssue {
 export interface PrDraftRenderingContext {
   sourceIssueNumber: number;
   followUpIssues?: readonly PrDraftFollowUpIssue[] | undefined;
-  runDirectory: string;
-  artifactPaths: readonly string[];
-  attemptSummary?: string | undefined;
-  verificationSummary?: string | undefined;
 }
 
 export function validatePrDraft(value: unknown): PrDraft {
@@ -97,18 +93,6 @@ export function formatPrDraftMarkdown(draft: PrDraft, context: PrDraftRenderingC
     ...renderFollowUps(context.followUpIssues),
     "",
     ...closingIssues.flatMap((number) => [`Closes #${number}`, ""]),
-    "<details>",
-    "<summary>Roark automation details</summary>",
-    "",
-    `- Run directory: \`${context.runDirectory}\``,
-    ...(context.attemptSummary ? [`- Attempt: ${context.attemptSummary}`] : []),
-    ...(context.verificationSummary ? [`- Verification: ${context.verificationSummary}`] : []),
-    ...(context.artifactPaths.length === 0
-      ? ["- Workflow artifacts: none recorded"]
-      : ["- Workflow artifacts:", ...context.artifactPaths.map((artifactPath) => `  - \`${artifactPath}\``)]),
-    "",
-    "</details>",
-    "",
   ];
   return lines.join("\n");
 }

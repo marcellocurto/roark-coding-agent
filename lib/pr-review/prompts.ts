@@ -1,7 +1,7 @@
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewComparison } from "../autorun/workspace.ts";
 import { escapePromptXmlAttribute, escapePromptXmlText } from "../prompts/xml.ts";
-import { renderStructuredReviewContract, type ReviewLensDefinition } from "../review/contract.ts";
+import type { ReviewLensDefinition } from "../review/contract.ts";
 
 export function prReviewPrompt(input: {
   context: PrReviewContext;
@@ -42,7 +42,6 @@ export function prReviewPrompt(input: {
   <required_fixes_policy>
     <instruction>${lens.requiredFixesPolicy}</instruction>
   </required_fixes_policy>
-${renderStructuredReviewContract("the current PR", false)}
   <constraints>
     <instruction>Use shell commands for static inspection only. Do not execute repository code, package scripts, tests, builds, installers, hooks, generated binaries, or the verification command; use the persisted verification artifact as the sole verification result.</instruction>
     <instruction>Do not edit or write repository files, change HEAD, commit, push, publish comments, or alter git configuration.</instruction>
@@ -50,7 +49,11 @@ ${renderStructuredReviewContract("the current PR", false)}
     ${lens.extraConstraints.map((constraint) => `<instruction>${escapePromptXmlText(constraint)}</instruction>`).join("\n    ")}
   </constraints>
   <output_contract>
-Call submit_review with the final structured result. Do not return Markdown.
+    <instruction>Return only the final Markdown review that should be posted directly as your PR comment.</instruction>
+    <instruction>Start with a short heading naming your review axis and state one clear verdict: Approved, Changes requested, or Blocked.</instruction>
+    <instruction>Include only information useful to the PR author. For each actionable finding, explain the concrete evidence, current impact, and smallest credible fix together in one place.</instruction>
+    <instruction>Do not add an evidence inventory, repeat findings in a separate summary, include machine-oriented fields or identifiers, wrap the review in a details block, or discuss this output contract.</instruction>
+    <instruction>If there are no findings, say so concisely. If inspection was materially limited, state the limitation where it affects the verdict.</instruction>
   </output_contract>
 </pr_review>`;
 }

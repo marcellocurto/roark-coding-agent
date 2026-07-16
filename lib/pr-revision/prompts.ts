@@ -22,13 +22,12 @@ Otherwise set status revise.
 
 Complete planning only by calling submit_revision_plan with:
 - status: revise, needs-human, or no-action-needed
-- classifiedFeedback: every relevant feedback item with its classification, source, and rationale
-- mustFixCurrent: concrete fixes required in this revision
-- humanNeeds: decisions, information, or access required from a human
+- feedbackItems: every relevant feedback item exactly once, with a stable id, all sourceIds from pr-feedback.json, a concise summary, exactly one classification, and its rationale
 - additionalSections: material problem-specific reasoning, interactions, risks, validation strategy, alternatives, or discoveries that do not fit the standard fields; choose each heading freely
 
-The status and arrays must agree: humanNeeds implies needs-human; otherwise non-empty mustFixCurrent implies revise; otherwise use no-action-needed.
-Additional sections are non-routing context. Every required fix or human need must still appear in the corresponding standard field.
+Derive each feedback item id from its source identity (for example thread:T1 or comment:123); when one source contains multiple independent concerns, add a stable suffix. Merge duplicate sources into one item and retain every source id.
+The status and classifications must agree: any needs-human item implies needs-human; otherwise any must-fix-current item implies revise; otherwise use no-action-needed.
+Additional sections are non-routing context. Every considered feedback item must still appear exactly once in feedbackItems.
 Do not return Markdown or prose after calling submit_revision_plan.
 </pr_revision_planning>`;
 }
@@ -46,13 +45,13 @@ Keep scope minimal and inspect the current diff before editing.
 
 Complete this phase only by calling submit_revision_execution with:
 - summary: a concise account of the completed work
-- addressedItems: each must-fix plan item or review finding addressed, paired with its concrete resolution
-- skippedItems: each item intentionally not changed, paired with its concrete reason
+- feedbackDispositions: exactly one final disposition for every feedbackItems id in revision-plan.json, using addressed or skipped for must-fix-current items and the classification-compatible status for all other items, paired with concrete details
 - changedFiles: repository-relative paths paired with what changed
 - validation: exact commands with passed, failed, or not-run status and observed details
 - additionalSections: material problem-specific discoveries, tradeoffs, or context that do not fit the standard fields; choose each heading freely
 
-Additional sections are non-routing context. Every addressed or skipped item must still appear in the corresponding standard field.
+On fix passes, carry forward the disposition for every planned feedback id; do not report only the work performed in the latest pass.
+Additional sections are non-routing context. Every planned feedback item must still appear exactly once in feedbackDispositions.
 The tool schema is authoritative. Do not return Markdown or prose after calling submit_revision_execution.
 </pr_revision_implementation>`;
 }

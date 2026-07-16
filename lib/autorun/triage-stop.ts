@@ -11,9 +11,7 @@ export interface FormatTriageStoppedCommentInput {
   issueNumber: number;
   issueUrl?: string | undefined  ;
   triageVerdict: TriageStoppedVerdict;
-  triageArtifactPath?: string | undefined;
   triageArtifactContent?: string | undefined;
-  attemptMetadataPath?: string | undefined;
 }
 
 export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {

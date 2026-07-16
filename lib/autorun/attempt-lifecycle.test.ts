@@ -215,9 +215,8 @@ describe("runAutorunAttemptLifecycle", () => {
     const comment = comments[0] ?? "";
     expect(comment).toContain("phase **output-contract**");
     expect(comment).toContain("Implementation failed: missing Summary section");
-    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.json`");
+    expect(comment).not.toContain(".roark/runs/");
     expect(comment).toContain("invalid output");
-    expect(comment).toContain("Attempt: `.roark/runs/issue/44/attempts/1/attempt.json`");
     expect(comment).toContain("roark continue 44 --repo owner/repo --attempt 1");
     expect(comment).not.toContain("--cwd");
     expect(comment).not.toContain(fixture.gateOptions.cwd);
@@ -256,7 +255,7 @@ describe("runAutorunAttemptLifecycle", () => {
 
     const comment = comments[0] ?? "";
     expect(comment).toContain("phase **output-contract**");
-    expect(comment).toContain("Artifact: `.roark/runs/issue/44/attempts/1/implementation-log.json`");
+    expect(comment).not.toContain(".roark/runs/");
     expect(comment).toContain("invalid direct validation output");
   });
 

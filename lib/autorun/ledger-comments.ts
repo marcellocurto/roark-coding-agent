@@ -1,6 +1,6 @@
-import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
+import { artifactExists, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { buildRoarkMarker, formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
@@ -12,9 +12,7 @@ export type LedgerCommentPhase = string;
 export interface LedgerCommentArtifactInput {
   issueNumber: number;
   attempt: number;
-  artifactPath: string;
   artifactContent: string;
-  attemptMetadataPath?: string | undefined;
 }
 
 export type ReadinessLedgerCommentInput = Pick<LedgerCommentArtifactInput, "issueNumber" | "attempt" | "artifactContent"> & {
@@ -26,7 +24,6 @@ export function formatAttemptStartComment(input: {
   attempt: number;
   branchName: string;
   assignee?: string | undefined  ;
-  attemptMetadataPath?: string | undefined;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "attempt-start" });
   const actor = input.assignee ? `@${input.assignee}` : "Roark";
@@ -36,7 +33,6 @@ export function formatAttemptStartComment(input: {
     "",
     `${actor} is attempting this issue in branch \`${input.branchName}\`.`,
   ];
-  if (input.attemptMetadataPath) lines.push("", formatArtifactDetails([`Attempt: \`${input.attemptMetadataPath}\``]));
   return `${lines.join("\n")}\n`;
 }
 
@@ -48,7 +44,6 @@ export async function publishPlanningLedgerComments(input: {
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
-  attemptMetadataPath?: string | undefined;
 }, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}): Promise<void> {
   const publishLedgerComment = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   await publishArtifactLedgerComment({
@@ -56,12 +51,10 @@ export async function publishPlanningLedgerComments(input: {
     artifact: "triage",
     renderedArtifact: "triageMarkdown",
     phase: "triage",
-    formatBody: (artifactPath, artifactContent) => formatTriageLedgerComment({
+    formatBody: (artifactContent) => formatTriageLedgerComment({
       issueNumber: input.issue.number,
       attempt: input.attemptMetadata.attempt,
-      artifactPath,
       artifactContent,
-      attemptMetadataPath: input.attemptMetadataPath,
     }),
     publishLedgerComment,
   });
@@ -70,12 +63,10 @@ export async function publishPlanningLedgerComments(input: {
     artifact: "implementationPlan",
     renderedArtifact: "implementationPlanMarkdown",
     phase: "implementation-plan",
-    formatBody: (artifactPath, artifactContent) => formatImplementationPlanLedgerComment({
+    formatBody: (artifactContent) => formatImplementationPlanLedgerComment({
       issueNumber: input.issue.number,
       attempt: input.attemptMetadata.attempt,
-      artifactPath,
       artifactContent,
-      attemptMetadataPath: input.attemptMetadataPath,
     }),
     publishLedgerComment,
   });
@@ -139,32 +130,14 @@ export async function publishIssueLedgerComment(input: {
 
 export function formatTriageLedgerComment(input: LedgerCommentArtifactInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "triage" });
-  const lines = [
-    marker,
-    "",
-    sanitizePublicMarkdown(input.artifactContent).trimEnd(),
-    "",
-    formatArtifactDetails([
-      `Triage artifact: \`${input.artifactPath}\``,
-      ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
-    ]),
-  ];
+  const lines = [marker, "", sanitizePublicMarkdown(input.artifactContent).trimEnd()];
   return `${lines.join("\n")}\n`;
 }
 
 export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifactInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "implementation-plan" });
   const content = sanitizePublicMarkdown(input.artifactContent);
-  const lines = [
-    marker,
-    "",
-    content.trimEnd(),
-    "",
-    formatArtifactDetails([
-      `Implementation plan: \`${input.artifactPath}\``,
-      ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
-    ]),
-  ];
+  const lines = [marker, "", content.trimEnd()];
   return `${lines.join("\n")}\n`;
 }
 
@@ -185,27 +158,19 @@ export function formatReviewLedgerComment(input: {
   phase: string;
   markerPhase?: "review-a" | "review-b" | undefined;
   title: string;
-  artifactPath: string;
   artifactContent: string;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: input.markerPhase ?? input.phase });
   const source: ReviewFindingSource = (input.markerPhase ?? input.phase).startsWith("review-a") ? "review-a" : "review-b";
   const review = parseReviewResultJson(input.artifactContent, { allowRestart: true });
   const content = sanitizePublicMarkdown(formatReviewResultMarkdown(review, { title: input.title, source }));
-  return [
-    marker,
-    "",
-    content.trimEnd(),
-    "",
-    formatArtifactDetails([`${input.title}: \`${input.artifactPath}\``]),
-  ].join("\n") + "\n";
+  return [marker, "", content.trimEnd()].join("\n") + "\n";
 }
 
 export function formatPrCreatedComment(input: {
   issueNumber: number;
   attempt: number;
   prUrl: string;
-  attemptMetadataPath?: string | undefined;
 }): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "pr-created" });
   const lines = [
@@ -214,7 +179,6 @@ export function formatPrCreatedComment(input: {
     "",
     `PR: ${input.prUrl}`,
   ];
-  if (input.attemptMetadataPath) lines.push("", formatArtifactDetails([`Attempt: \`${input.attemptMetadataPath}\``]));
   return `${lines.join("\n")}\n`;
 }
 
@@ -228,7 +192,7 @@ async function publishArtifactLedgerComment(input: {
   renderedArtifact: ArtifactRef;
   phase: string;
   attemptMetadataPath?: string | undefined;
-  formatBody: (artifactPath: string, artifactContent: string) => string;
+  formatBody: (artifactContent: string) => string;
   publishLedgerComment: PublishIssueLedgerCommentFn;
 }): Promise<void> {
   if (!artifactExists(input.workflowContext, input.artifact)) return;
@@ -243,7 +207,7 @@ async function publishArtifactLedgerComment(input: {
     issueNumber: input.issue.number,
     attemptMetadata: input.attemptMetadata,
     phase: input.phase,
-    body: input.formatBody(artifactRelativePath(input.workflowContext, input.artifact), renderedContent),
+    body: input.formatBody(renderedContent),
   });
 }
 
@@ -269,7 +233,6 @@ async function publishReviewLedgerComment(input: {
     phase: input.phase,
     markerPhase: input.markerPhase,
     title: input.title,
-    artifactPath: artifactRelativePath(input.workflowContext, input.artifact),
     artifactContent,
   });
   await input.publishLedgerComment({

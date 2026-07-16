@@ -6,8 +6,7 @@ export function revisionExecutionResult(
 ): RevisionExecutionResult {
   return {
     summary: "Completed the requested PR revision.",
-    addressedItems: [{ item: "Required revision", resolution: "Implemented the requested change." }],
-    skippedItems: [],
+    feedbackDispositions: [{ feedbackId: "pr:12", status: "addressed", details: "Implemented the requested change." }],
     changedFiles: [{ path: "fixed.txt", description: "Applied the requested revision." }],
     validation: [{ command: "bun test", status: "passed", details: "Relevant tests passed." }],
     ...overrides,

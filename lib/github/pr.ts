@@ -78,7 +78,7 @@ export interface PullRequestGraphQLResult {
 }
 
 export const roarkPrRevisionSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+revision=\d+\s+phase=revision-summary\s*-->/;
-export const roarkPrReviewSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+phase=pr-review\s*-->/;
+export const roarkPrReviewSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+phase=pr-review(?:\s+reviewer=[ab])?\s*-->/;
 
 export function isRoarkGeneratedPrSummaryComment(body: string): boolean {
   return roarkPrRevisionSummaryMarkerPattern.test(body) || roarkPrReviewSummaryMarkerPattern.test(body);

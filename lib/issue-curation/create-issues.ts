@@ -543,9 +543,7 @@ function parseIssueDraftRenderingContext(value: Record<string, unknown>, kind: I
     classification: classificationForKind(kind),
     sourceFindingIds: value["sourceFindingIds"],
     reviewerSources: value["reviewerSources"],
-    runDirectory: runContext["runDirRelative"],
     ...(attempt !== undefined ? { attempt } : {}),
-    artifactPaths: runContext["artifactPaths"],
   };
 }
 

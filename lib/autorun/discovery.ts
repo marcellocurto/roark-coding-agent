@@ -18,7 +18,6 @@ import { assertCleanAutorunGit } from "../workflow/git.ts";
 import { type runFullWorkflow } from "../workflow/phases.ts";
 import {
   allocateNextAttempt,
-  attemptMetadataRelativePath,
   defaultClock,
   formatAttemptMetadata,
   type AttemptMetadata,
@@ -362,7 +361,6 @@ async function runManagedIssueAttempt(
           attempt,
           branchName: branchPlan.branchName,
           assignee,
-          attemptMetadataPath: attemptMetadataRelativePath(metadata),
         }),
       });
     },

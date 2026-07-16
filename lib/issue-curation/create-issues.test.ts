@@ -187,6 +187,8 @@ describe("createIssuesFromCurationPlan", () => {
     expect(publishRequests[0]?.body).toContain("## Simple summary");
     expect(publishRequests[0]?.body).toContain("- Source issue: #12 Source title");
     expect(publishRequests[0]?.body).toContain("- Source finding IDs: review-a:external-blocker-1");
+    expect(publishRequests[0]?.body).not.toContain(".roark/runs/");
+    expect(publishRequests[0]?.body).not.toContain("Roark run artifacts");
     expect(publishRequests[0]?.body).not.toContain("## Source\n");
     expect(JSON.parse(await readArtifact(context, "issueDrafts"))).toHaveProperty("issues.0.planItemId", "external-blocker-1");
     expect(await readArtifact(context, "issueDraftsMarkdown")).toContain("# Clear blocker title");

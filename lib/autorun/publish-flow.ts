@@ -117,7 +117,6 @@ export async function runPublishGate(input: {
           issueNumber: issue.number,
           attempt: attemptMetadata.attempt,
           prUrl,
-          attemptMetadataPath,
         }),
       });
       let issueCreationResults: IssueCreationResults | undefined;
@@ -268,9 +267,7 @@ export async function handleNonPublish(input: {
       branchName: attemptMetadata.branch,
       worktreePath: attemptMetadata.worktreePath,
       workspacePath: attemptMetadata.workspace?.path,
-      artifactPath,
       artifactContent,
-      attemptMetadataPath,
       recoveryCommand,
     });
 
