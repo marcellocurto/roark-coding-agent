@@ -22,6 +22,8 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
+import { runPrReview } from "../pr-review/workflow.ts";
+import type { ReviewPrCliOptions } from "../cli/args.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
@@ -33,6 +35,11 @@ export type PublishGateOutcome =
   | { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null }
   | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
 
+type AutomaticPrReviewRunner = (options: ReviewPrCliOptions) => Promise<{
+  outcome: "completed" | "blocked";
+  context: { reviewDirRelative: string };
+}>;
+
 export interface RunPublishGateInjected {
   refreshCopyToWorktree?: typeof refreshCopyToWorktree | undefined;
   runLifecycleHook?: typeof runLifecycleHook | undefined;
@@ -43,6 +50,7 @@ export interface RunPublishGateInjected {
   postPrIssueCreation?: ((input: { workflowContext: WorkflowContext; prUrl: string }) => Promise<IssueCreationResults | undefined>) | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
   updatePrBody?: typeof updatePublishedPrBody | undefined;
+  runPrReview?: AutomaticPrReviewRunner | undefined;
 }
 
 export async function runPublishGate(input: {
@@ -64,6 +72,7 @@ export async function runPublishGate(input: {
   const postPrIssueCreation = injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
   const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   const editPrBody = injected.updatePrBody ?? updatePublishedPrBody;
+  const reviewPr = injected.runPrReview ?? runPrReview;
 
   const readinessResult = await readReadinessResult(workflowContext);
   const readinessStatus = readinessResult?.decision.status;
@@ -85,7 +94,7 @@ export async function runPublishGate(input: {
   let decision = decidePublish({ readinessStatus, verification });
 
   if (decision.publish) {
-    const prUrl = await publishResult({
+    const publishedPr = await publishResult({
       options,
       issue,
       branchPlan,
@@ -94,51 +103,71 @@ export async function runPublishGate(input: {
       attemptMetadata,
       attemptMetadataPath,
     });
-    if (prUrl) {
-      await publishLedger({
+    await publishLedger({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: issue.number,
+      attemptMetadata,
+      phase: "readiness",
+      body: formatReadinessLedgerComment({
+        issueNumber: issue.number,
+        attempt: attemptMetadata.attempt,
+        artifactContent: readinessMarkdown ?? "",
+      }),
+    });
+    await publishLedger({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: issue.number,
+      attemptMetadata,
+      phase: "pr-created",
+      body: formatPrCreatedComment({
+        issueNumber: issue.number,
+        attempt: attemptMetadata.attempt,
+        prUrl: publishedPr.url,
+      }),
+    });
+    let issueCreationResults: IssueCreationResults | undefined;
+    try {
+      issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl: publishedPr.url }) ?? undefined;
+    } catch (error) {
+      presenter().warning(`reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      await editPrBody({
         cwd: options.cwd,
         repo: options.repo,
+        pr: publishedPr.url,
         issueNumber: issue.number,
+        workflowContext,
+        verification,
         attemptMetadata,
-        phase: "readiness",
-        body: formatReadinessLedgerComment({
-          issueNumber: issue.number,
-          attempt: attemptMetadata.attempt,
-          artifactContent: readinessMarkdown ?? "",
-        }),
+        followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
       });
-      await publishLedger({
+    } catch (error) {
+      presenter().warning(`failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      const review = await reviewPr({
+        command: "review-pr",
+        prNumber: publishedPr.number,
         cwd: options.cwd,
-        repo: options.repo,
-        issueNumber: issue.number,
-        attemptMetadata,
-        phase: "pr-created",
-        body: formatPrCreatedComment({
-          issueNumber: issue.number,
-          attempt: attemptMetadata.attempt,
-          prUrl,
-        }),
+        outDir: workflowContext.outDir,
+        repo: options.repo ?? workflowContext.repo,
+        model: workflowContext.model,
+        thinkingLevel: workflowContext.thinkingLevel,
+        thinkingProfile: workflowContext.thinkingProfile,
+        verifyCommand: options.verifyCommand,
+        comment: true,
+        workspace: options.workspace,
+        hooks: options.hooks,
       });
-      let issueCreationResults: IssueCreationResults | undefined;
-      try {
-        issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl }) ?? undefined;
-      } catch (error) {
-        presenter().warning(`reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
+      presenter().artifact(review.context.reviewDirRelative);
+      if (review.outcome === "blocked") {
+        presenter().warning(`automatic PR review for #${publishedPr.number} was blocked because the PR changed during review; review artifacts were preserved`);
       }
-      try {
-        await editPrBody({
-          cwd: options.cwd,
-          repo: options.repo,
-          pr: prUrl,
-          issueNumber: issue.number,
-          workflowContext,
-          verification,
-          attemptMetadata,
-          followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
-        });
-      } catch (error) {
-        presenter().warning(`failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
-      }
+    } catch (error) {
+      presenter().warning(`automatic PR review failed after PR #${publishedPr.number} was published: ${error instanceof Error ? error.message : String(error)}`);
     }
     return { outcome: "published", outcomeDetail: null };
   }

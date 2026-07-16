@@ -107,7 +107,7 @@ See [Label semantics](label-semantics.md).
 
 ## Pull Requests
 
-Roark opens pull requests only after readiness and verification pass.
+Roark opens pull requests only after readiness and verification pass. After finalizing the opened PR body, autorun invokes the same pinned, read-only workflow as `review-pr` and posts its two independent reviews. An operational or stale review result does not undo or misclassify the already successful PR publication.
 
 Roark does not:
 

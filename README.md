@@ -76,7 +76,7 @@ For each issue, Roark:
 4. Runs independent correctness and maintainability reviews.
 5. Applies bounded repair passes when reviews or verification find problems.
 6. Records phase outputs and decisions under `.roark/runs`.
-7. In autorun mode, opens a pull request only after readiness and verification pass.
+7. In autorun mode, opens a pull request only after readiness and verification pass, finalizes its body, and automatically runs the read-only PR review workflow.
 
 ## Safety boundaries
 

@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
 - `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
 - PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.
 - `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.

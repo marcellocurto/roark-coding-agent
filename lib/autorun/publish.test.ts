@@ -357,7 +357,7 @@ describe("publishAutorunResult", () => {
     process.env["ROARK_GH_BODY"] = ghBody;
     try {
       const agentRequests: { cwd: string; prompt: string; command: string; skillPaths?: string[] | undefined }[] = [];
-      const prUrl = await publishAutorunResult({
+      const publishedPr = await publishAutorunResult({
         options: {
           cwd: controlCwd,
           repo: "owner/repo",
@@ -391,7 +391,7 @@ describe("publishAutorunResult", () => {
         },
       });
 
-      expect(prUrl).toBe("https://github.com/owner/repo/pull/1");
+      expect(publishedPr).toEqual({ url: "https://github.com/owner/repo/pull/1", number: 1 });
       expect(agentRequests).toHaveLength(1);
       expect(agentRequests[0]?.cwd).toBe(controlCwd);
       expect(agentRequests[0]?.command).toBe("continue");

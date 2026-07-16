@@ -13,6 +13,7 @@ import { readinessResult } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
+import type { ReviewPrCliOptions } from "../cli/args.ts";
 
 const tempDirs: string[] = [];
 
@@ -53,10 +54,16 @@ describe("verification repair planning", () => {
 
   test("canonical readiness JSON drives publication even when rendered Markdown disagrees", async () => {
     const context = await tempContext(1);
+    context.model = "provider/reviewer";
+    context.thinkingProfile = "deep";
     await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
     await writeArtifact(context, "readinessMarkdown", "# PR Readiness\n\n## Status\nnot-ready\n");
     const postPrCalls: string[] = [];
     const prBodyUpdates: { pr: string; followUpCount: number }[] = [];
+    const postPublicationOrder: string[] = [];
+    const reviewCalls: ReviewPrCliOptions[] = [];
+    const workspace = { root: "/tmp/roark-workspaces", strategy: "clone" as const, cloneRemote: "origin", clone: {}, copyToWorktree: ["local.env"] };
+    const hooks = { beforeRun: "bun install", timeoutMs: 1234 };
 
     const outcome = await runPublishGate({
       options: {
@@ -68,6 +75,8 @@ describe("verification repair planning", () => {
         inProgressLabel: "in-progress",
         remote: "origin",
         baseBranch: "main",
+        workspace,
+        hooks,
       },
       issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
       branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
@@ -79,21 +88,99 @@ describe("verification repair planning", () => {
       runLifecycleHook: async () => { await noopAsync(); },
       runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       writeVerificationArtifact: async () => { await noopAsync(); },
-      publishAutorunResult: async () => (await noopAsync(), "https://github.com/owner/repo/pull/10"),
+      publishAutorunResult: async () => (await noopAsync(), { url: "https://github.com/owner/repo/pull/10", number: 10 }),
       publishIssueLedgerComment: async () => { await noopAsync(); return undefined; },
       postPrIssueCreation: async ({ prUrl }) => { await noopAsync(); postPrCalls.push(prUrl); return undefined; },
-      updatePrBody: async ({ pr, followUpIssues }) => { await noopAsync(); prBodyUpdates.push({ pr, followUpCount: followUpIssues?.length ?? 0 }); },
+      updatePrBody: async ({ pr, followUpIssues }) => {
+        await noopAsync();
+        postPublicationOrder.push("body-update");
+        prBodyUpdates.push({ pr, followUpCount: followUpIssues?.length ?? 0 });
+      },
+      runPrReview: async (options) => {
+        await noopAsync();
+        postPublicationOrder.push("pr-review");
+        reviewCalls.push(options);
+        return { outcome: "completed", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } };
+      },
     });
 
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
     expect(prBodyUpdates).toEqual([{ pr: "https://github.com/owner/repo/pull/10", followUpCount: 0 }]);
+    expect(postPublicationOrder).toEqual(["body-update", "pr-review"]);
+    expect(reviewCalls).toEqual([{
+      command: "review-pr",
+      prNumber: 10,
+      cwd: context.controlCwd,
+      outDir: context.outDir,
+      repo: "owner/repo",
+      model: "provider/reviewer",
+      thinkingLevel: undefined,
+      thinkingProfile: "deep",
+      verifyCommand: "bun run typecheck",
+      comment: true,
+      workspace,
+      hooks,
+    }]);
+  });
+
+  test("automatic PR review failures do not turn an opened PR into a failed attempt", async () => {
+    const context = await tempContext(1);
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
+    let warningOutput = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { warningOutput += chunk; } };
+    configurePresenter({ stream, errorStream: stream, roots: [context.controlCwd] });
+
+    const outcome = await runPublishGate({
+      options: publishGateOptions(context),
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, successfulPublicationDependencies({
+      runPrReview: async () => {
+        await noopAsync();
+        throw new Error("review service unavailable");
+      },
+    }));
+
+    expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
+    expect(warningOutput).toContain("automatic PR review failed after PR #10 was published");
+    expect(warningOutput).toContain("review service unavailable");
+  });
+
+  test("a stale automatic PR review preserves the published outcome and review artifact", async () => {
+    const context = await tempContext(1);
+    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
+    let warningOutput = "";
+    const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { warningOutput += chunk; } };
+    configurePresenter({ stream, errorStream: stream, roots: [context.controlCwd] });
+
+    const outcome = await runPublishGate({
+      options: publishGateOptions(context),
+      issue: { number: 1, title: "Issue", url: "https://github.com/owner/repo/issues/1" },
+      branchPlan: { issueNumber: 1, branchName: "roark/issue-1", baseBranch: "main" },
+      workflowContext: context,
+      attemptMetadata: attemptMetadata(context),
+      attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+    }, successfulPublicationDependencies({
+      runPrReview: async () => {
+        await noopAsync();
+        return { outcome: "blocked", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } };
+      },
+    }));
+
+    expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
+    expect(warningOutput).toContain("automatic PR review for #10 was blocked");
+    expect(warningOutput).toContain("artifact: .roark/runs/pr/10/review-1");
   });
 
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(1);
     await writeJsonArtifact(context, "readiness", readinessResult("not-ready"));
     let postPrCalled = false;
+    let reviewPrCalled = false;
 
     const outcome = await runPublishGate({
       options: {
@@ -114,16 +201,23 @@ describe("verification repair planning", () => {
     }, {
       handleNonPublish: async () => { await noopAsync(); },
       postPrIssueCreation: async () => { await noopAsync(); postPrCalled = true; return undefined; },
+      runPrReview: async () => {
+        await noopAsync();
+        reviewPrCalled = true;
+        return { outcome: "completed", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } };
+      },
     });
 
     expect(outcome.outcome).toBe("failed-readiness");
     expect(postPrCalled).toBe(false);
+    expect(reviewPrCalled).toBe(false);
   });
 
   test("failed verification does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(0);
     await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
     let postPrCalled = false;
+    let reviewPrCalled = false;
 
     const outcome = await runPublishGate({
       options: {
@@ -148,10 +242,16 @@ describe("verification repair planning", () => {
       writeVerificationArtifact: async () => { await noopAsync(); },
       handleNonPublish: async () => { await noopAsync(); },
       postPrIssueCreation: async () => { await noopAsync(); postPrCalled = true; return undefined; },
+      runPrReview: async () => {
+        await noopAsync();
+        reviewPrCalled = true;
+        return { outcome: "completed", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } };
+      },
     });
 
     expect(outcome.outcome).toBe("failed-verification");
     expect(postPrCalled).toBe(false);
+    expect(reviewPrCalled).toBe(false);
   });
 
   test("verification runner exceptions propagate through the publish gate", async () => {
@@ -294,6 +394,34 @@ function attemptMetadata(context: WorkflowContext) {
     endedAt: null,
     outcome: "in-progress" as const,
     outcomeDetail: null,
+  };
+}
+
+function publishGateOptions(context: WorkflowContext) {
+  return {
+    cwd: context.controlCwd,
+    repo: "owner/repo",
+    verifyCommand: "bun run typecheck",
+    failureLabel: "failed",
+    successLabel: "done",
+    inProgressLabel: "in-progress",
+    remote: "origin",
+    baseBranch: "main",
+  };
+}
+
+function successfulPublicationDependencies(overrides: Parameters<typeof runPublishGate>[1] = {}): Parameters<typeof runPublishGate>[1] {
+  return {
+    refreshCopyToWorktree: async () => { await noopAsync(); },
+    runLifecycleHook: async () => { await noopAsync(); },
+    runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+    writeVerificationArtifact: async () => { await noopAsync(); },
+    publishAutorunResult: async () => (await noopAsync(), ({ url: "https://github.com/owner/repo/pull/10", number: 10 })),
+    publishIssueLedgerComment: async () => { await noopAsync(); return undefined; },
+    postPrIssueCreation: async () => { await noopAsync(); return undefined; },
+    updatePrBody: async () => { await noopAsync(); },
+    runPrReview: async () => (await noopAsync(), ({ outcome: "completed", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } })),
+    ...overrides,
   };
 }
 

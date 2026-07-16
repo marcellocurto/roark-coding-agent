@@ -139,7 +139,7 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
   return result.stdout.trim() !== "";
 }
 
-export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<string | undefined> {
+export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<PublishedPullRequest> {
   const display: AgentDisplayContext = {
     command: input.workflowContext.displayCommand ?? "auto",
     repository: input.options.repo,
@@ -152,11 +152,11 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   return runPresentedPhase(
     display,
     () => performAutorunPublication(input, display),
-    (prUrl) => ({ outcome: prUrl ? `published ${prUrl}` : "published" }),
+    (pr) => ({ outcome: `published ${pr.url}` }),
   );
 }
 
-async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext): Promise<string | undefined> {
+async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext): Promise<PublishedPullRequest> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath, agentRunner = runPiAgent } = input;
   const agentCwd = workflowContext.agentCwd;
   const controlCwd = workflowContext.controlCwd;
@@ -217,20 +217,23 @@ async function performAutorunPublication(input: PublishAutorunResultInput, displ
     );
   }
 
-  return prUrl === "" ? undefined : prUrl;
+  return { url: publishedPr.url, number: publishedPr.number };
 }
 
-interface PublishedPullRequest {
+export interface PublishedPullRequest {
   url: string;
+  number: number;
+}
+
+interface AuthoredPullRequest extends PublishedPullRequest {
   title?: string | undefined;
-  number?: number | undefined;
   stdout?: string | undefined;
 }
 
 async function authorAndPublishPullRequest(
   input: PublishAutorunResultInput & { agentRunner: AgentRunner },
   display: AgentDisplayContext,
-): Promise<PublishedPullRequest> {
+): Promise<AuthoredPullRequest> {
   const renderingContext = prDraftRenderingContext({
     issueNumber: input.issue.number,
   });
@@ -281,7 +284,9 @@ async function authorAndPublishPullRequest(
   });
   const url = extractPrUrl(stdout);
   if (!url) throw new Error("gh pr create succeeded but did not return a pull request URL.");
-  return { url, title, ...(extractIssueNumber(url) !== undefined ? { number: extractIssueNumber(url) } : {}), stdout };
+  const number = extractIssueNumber(url);
+  if (number === undefined) throw new Error("gh pr create succeeded but its pull request URL did not include a valid pull request number.");
+  return { url, number, title, stdout };
 }
 
 export async function updatePrBody(input: {
@@ -346,5 +351,5 @@ function extractPrUrl(stdout: string): string | undefined {
 
 function extractIssueNumber(url: string): number | undefined {
   const value = Number.parseInt(/\/pull\/(\d+)/.exec(url)?.[1] ?? "", 10);
-  return Number.isInteger(value) ? value : undefined;
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }

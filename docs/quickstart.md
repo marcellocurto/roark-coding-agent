@@ -122,7 +122,7 @@ When the dry run and manual run are understood, run a single autorun attempt:
 roark auto --repo owner/repo --limit 1
 ```
 
-On success, Roark opens a pull request only after readiness and verification pass.
+On success, Roark opens a pull request only after readiness and verification pass, finalizes its body, and automatically posts a fresh correctness and maintainability review. If that post-publication review fails or becomes stale, the PR remains published and Roark preserves the review artifacts for inspection or retry.
 
 On failure, Roark leaves the managed workspace and artifacts for inspection. It does not merge, close issues, or mark PRs ready for review.
 

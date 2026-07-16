@@ -23,7 +23,10 @@ roark auto --repo owner/repo --limit 1
 10. On success, commit code changes and push the branch.
 11. A PR authoring agent submits a schema-validated draft from canonical workflow artifacts, the Git-derived changed-file list, and the authoritative verification result. Roark persists `pr-draft.json`, deterministically renders the Markdown, and opens the PR with `gh`.
 12. Reviewer-generated follow-up issue drafts are submitted as structured data. Roark renders and publishes them, then rerenders the PR body from `pr-draft.json` with their links and updates it directly.
-13. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
+13. After the PR body is final, Roark automatically runs the pinned, read-only `review-pr` workflow and posts its correctness and maintainability reviews to the opened PR.
+14. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
+
+The PR is already published before its automatic review begins. A review that fails operationally or becomes stale preserves its local review artifacts and reports a warning, but does not misreport the successful PR publication as a failed attempt. Run `roark review-pr <number>` to retry a fresh review.
 
 ## Recommended posture
 
