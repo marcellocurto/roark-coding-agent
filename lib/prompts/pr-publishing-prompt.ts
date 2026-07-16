@@ -13,6 +13,7 @@ export interface PrPublishingPromptInput {
   attemptMetadata?: AttemptMetadata | undefined;
   attemptMetadataPath?: string | undefined;
   artifactPaths: string[];
+  changedFiles: string[];
 }
 
 export function prPublishingSystemPrompt(): string {
@@ -30,10 +31,16 @@ export function prCreatePrompt(input: PrPublishingPromptInput): string {
   <artifact_paths>
 ${formatArtifactPaths(input.artifactPaths)}
   </artifact_paths>
-  <verification>${formatVerification(input.verification)}</verification>
+  <deterministic_facts>
+    <changed_files>
+${formatChangedFiles(input.changedFiles)}
+    </changed_files>
+    <verification>${formatVerification(input.verification)}</verification>
+  </deterministic_facts>
   <attempt>${formatAttempt(input.attemptMetadata, input.attemptMetadataPath)}</attempt>
   <instructions>
     <instruction>Read the source issue and the workflow artifacts needed to understand what changed. Start with ${escapePromptXmlText(artifactRelativePath(input.context, "issue"))}, ${escapePromptXmlText(artifactRelativePath(input.context, "implementationPlan"))}, ${escapePromptXmlText(artifactRelativePath(input.context, "implementationLog"))}, ${escapePromptXmlText(artifactRelativePath(input.context, "readiness"))}, and ${escapePromptXmlText(artifactRelativePath(input.context, "verification"))} when present.</instruction>
+    <instruction>Treat structured JSON artifacts as authoritative workflow state. Rendered Markdown companions are human-readable views only. Treat changed_files and verification above as deterministic repository facts.</instruction>
     <instruction>Author the PR content as structured fields and finish by calling submit_pr_draft. Do not write Markdown headings, return JSON text, invoke gh, or publish anything yourself.</instruction>
     <instruction>Write for a human code reviewer. Explain what changed, why, the most useful review path, verification, and risks or non-goals.</instruction>
     <instruction>Use simple technical language in simpleSummary. State what Roark did, the result, and any human action that remains.</instruction>
@@ -51,6 +58,10 @@ function formatSourceIssue(issue: { number: number; title: string; url?: string 
 
 function formatArtifactPaths(paths: string[]): string {
   return paths.length > 0 ? paths.map((artifactPath) => `    <path>${escapePromptXmlText(artifactPath)}</path>`).join("\n") : "    <none />";
+}
+
+function formatChangedFiles(paths: string[]): string {
+  return paths.length > 0 ? paths.map((file) => `      <file>${escapePromptXmlText(file)}</file>`).join("\n") : "      <none />";
 }
 
 function formatVerification(verification: VerificationResult | undefined): string {

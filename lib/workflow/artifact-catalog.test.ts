@@ -26,7 +26,6 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   preImplementationBaseline: "pre-implementation-baseline.json",
   implementationLog: "implementation-log.json",
   implementationLogMarkdown: "implementation-log.md",
-      prNarrative: "pr-narrative.md",
       prDraft: "pr-draft.json",
       prDraftMarkdown: "pr-draft.md",
   readiness: "readiness.json",

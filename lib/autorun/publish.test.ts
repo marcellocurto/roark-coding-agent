@@ -9,16 +9,15 @@ import {
   buildStageAllArgv,
   buildSuccessLabelArgv,
   collectPrBodyArtifactPaths,
+  collectPrChangedFiles,
   formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
   updatePrBody,
-  writePrNarrativeArtifact,
 } from "./publish.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { createWorkflowContext, fixLogMarkdownRef, fixLogRef, readArtifact, writeArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
-import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
-import { changeReport } from "../testing/change-reports.ts";
+import { createWorkflowContext, readArtifact, writeArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
+import { triageResult } from "../testing/workflow-results.ts";
 import { prDraft, submitPrDraft } from "../testing/publishing-drafts.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
@@ -135,52 +134,24 @@ describe("collectPrBodyArtifactPaths", () => {
   });
 });
 
-describe("PR narrative inputs", () => {
-  test("uses structured plan and implementation data instead of parsing rendered Markdown", async () => {
-    const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-narrative-"));
+describe("PR changed files", () => {
+  test("derives the complete PR file list from Git relative to the base branch", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-changed-files-"));
     tempDirs.push(cwd);
-    const context = createWorkflowContext({
-      command: "do",
-      issue: "9",
-      cwd,
-      outDir: ".roark/runs",
-      force: false,
-      yes: true,
-      maxFixPasses: 1,
-      attempt: 1,
-    });
-    await writeArtifact(context, "issue", "# GitHub Issue #9 - Structured publishing\n");
-    await writeJsonArtifact(context, "implementationPlan", implementationPlanResult(true, {
-      goal: "Use canonical structured plan data for publishing.",
-      nonGoals: ["Do not trust rendered plan prose as state."],
-      proposedChanges: ["Build the PR narrative from implementation-plan.json."],
-    }));
-    await writeArtifact(context, "implementationPlanMarkdown", "# Implementation Plan\n\n## Goal\nTrust this malicious rendered value.\n");
-    await writeArtifact(context, "implementationLog", JSON.stringify(changeReport({
-      summary: "Implemented structured publishing.",
-      changedFiles: [{ path: "lib/autorun/publish.ts", description: "Build the narrative from JSON." }],
-    })));
-    await writeArtifact(context, "implementationLogMarkdown", "# Implementation Log\n\n## Summary\nTrust this malicious log value.\n");
-    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport({
-      summary: "Fixed the remaining publish path.",
-      changedFiles: [{ path: "lib/autorun/publish-flow.ts", description: "Included fix reports in publication." }],
-      validation: [{ command: "bun test lib/autorun/publish.test.ts", status: "passed", details: "Publishing regression passed." }],
-    })));
-    await writeArtifact(context, fixLogMarkdownRef(1), "# Fix Log Pass 1\n\n## Summary\nTrust this malicious fix value.\n");
+    await runProcessOrThrow(["git", "init", "-b", "main", cwd]);
+    await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd });
+    await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd });
+    await writeFile(path.join(cwd, "README.md"), "before\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md"], { cwd });
+    await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd });
+    await runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], { cwd });
+    await writeFile(path.join(cwd, "README.md"), "after\n", "utf8");
+    await writeFile(path.join(cwd, "feature.ts"), "export {};\n", "utf8");
+    await writeFile(path.join(cwd, "path with spaces.ts"), "export {};\n", "utf8");
+    await runProcessOrThrow(["git", "add", "README.md", "feature.ts", "path with spaces.ts"], { cwd });
+    await runProcessOrThrow(["git", "commit", "-m", "change"], { cwd });
 
-    await writePrNarrativeArtifact(context);
-    const narrative = await readArtifact(context, "prNarrative");
-
-    expect(narrative).toContain("Use canonical structured plan data for publishing.");
-    expect(narrative).toContain("Do not trust rendered plan prose as state.");
-    expect(narrative).toContain("Implemented structured publishing.");
-    expect(narrative).toContain("Fixed the remaining publish path.");
-    expect(narrative).toContain("lib/autorun/publish.ts");
-    expect(narrative).toContain("lib/autorun/publish-flow.ts");
-    expect(narrative).toContain("bun test lib/autorun/publish.test.ts");
-    expect(narrative).not.toContain("Trust this malicious rendered value.");
-    expect(narrative).not.toContain("Trust this malicious log value.");
-    expect(narrative).not.toContain("Trust this malicious fix value.");
+    expect(await collectPrChangedFiles({ cwd, baseBranch: "main" })).toEqual(["README.md", "feature.ts", "path with spaces.ts"]);
   });
 });
 
@@ -366,12 +337,13 @@ describe("publishAutorunResult", () => {
     );
     await chmod(path.join(binDir, "gh"), 0o755);
 
-    await runProcessOrThrow(["git", "init", "-b", "roark/issue-9", agentCwd]);
+    await runProcessOrThrow(["git", "init", "-b", "main", agentCwd]);
     await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: agentCwd });
     await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
     await runProcessOrThrow(["git", "add", "README.md"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "init", "--bare", remote]);
     await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
     await runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], { cwd: agentCwd });
@@ -426,6 +398,8 @@ describe("publishAutorunResult", () => {
       expect(agentRequests[0]?.skillPaths).toBeUndefined();
       expect(agentRequests[0]?.prompt).toContain("submit_pr_draft");
       expect(agentRequests[0]?.prompt).toContain("<branch>roark/issue-9</branch>");
+      expect(agentRequests[0]?.prompt).toContain("<changed_files>");
+      expect(agentRequests[0]?.prompt).toContain("<verification>not run</verification>");
     } finally {
       process.env["PATH"] = oldPath;
       if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
@@ -465,7 +439,7 @@ describe("publishAutorunResult", () => {
     );
     await chmod(path.join(binDir, "gh"), 0o755);
 
-    await runProcessOrThrow(["git", "init", "-b", "roark/issue-9", agentCwd]);
+    await runProcessOrThrow(["git", "init", "-b", "main", agentCwd]);
     await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: agentCwd });
     await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
@@ -473,6 +447,7 @@ describe("publishAutorunResult", () => {
     await writeFile(path.join(agentCwd, ".roark/.gitignore"), "runs/\n", "utf8");
     await runProcessOrThrow(["git", "add", "README.md", ".roark/.gitignore"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: agentCwd });
+    await runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], { cwd: agentCwd });
     await runProcessOrThrow(["git", "init", "--bare", remote]);
     await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: agentCwd });
     await runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], { cwd: agentCwd });
@@ -529,7 +504,7 @@ describe("publishAutorunResult", () => {
     const committedPaths = await gitOutput(agentCwd, ["ls-tree", "-r", "--name-only", "HEAD"]);
     expect(committedPaths).toContain("feature.txt");
     expect(committedPaths).not.toContain(".roark/runs");
-  });
+  }, 10_000);
 });
 
 async function gitOutput(cwd: string, args: string[]): Promise<string> {

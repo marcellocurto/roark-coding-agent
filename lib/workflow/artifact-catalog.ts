@@ -9,7 +9,6 @@ export type StaticArtifactName =
   | "preImplementationBaseline"
   | "implementationLog"
   | "implementationLogMarkdown"
-  | "prNarrative"
   | "prDraft"
   | "prDraftMarkdown"
   | "readiness"
@@ -75,7 +74,6 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   { name: "preImplementationBaseline", filename: "pre-implementation-baseline.json", displayName: "Pre-implementation Baseline" },
   { name: "implementationLog", filename: "implementation-log.json", displayName: "Implementation Log" },
   { name: "implementationLogMarkdown", filename: "implementation-log.md", displayName: "Implementation Log Markdown" },
-  { name: "prNarrative", filename: "pr-narrative.md", displayName: "PR Narrative" },
   { name: "prDraft", filename: "pr-draft.json", displayName: "PR Draft" },
   { name: "prDraftMarkdown", filename: "pr-draft.md", displayName: "PR Draft Markdown" },
   { name: "readiness", filename: "readiness.json", displayName: "Readiness" },

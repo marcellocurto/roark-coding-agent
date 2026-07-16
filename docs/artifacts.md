@@ -2,7 +2,7 @@
 title: Artifacts
 summary: Layout, purpose, and inspection path for Roark run, attempt, phase, curation, PR review, and PR revision artifacts.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-14T00:00:00Z
+lastUpdated: 2026-07-16T00:00:00Z
 ---
 
 Artifacts are useful for:
@@ -90,7 +90,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 | `verification-full.md` | Complete stdout and stderr from the latest verification command. |
 | `verification-before-fix-<n>.md` | Archived failed verification output tail that triggered fix pass `n`. |
 | `verification-before-fix-<n>-full.md` | Complete stdout and stderr for the archived failed verification. |
-| `pr-draft.json`, `pr-draft.md` | Schema-validated PR authoring result and the deterministic GitHub body rendered from it. Follow-up issue links rerender the Markdown from the JSON source. |
+| `pr-draft.json`, `pr-draft.md` | Schema-validated PR authoring result and the deterministic GitHub body rendered from it. PR authoring reads canonical workflow artifacts plus Git-derived changed files and authoritative verification; follow-up issue links rerender the Markdown from the accepted JSON source. |
 | `issue-drafts.json`, `issue-drafts.md` | Schema-validated reviewer-generated issue drafts and their deterministic GitHub bodies. |
 | `attempt.json` | Branch, workspace, and lifecycle metadata. |
 | `summary.json` | Artifact index and run summary. |

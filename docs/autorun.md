@@ -2,7 +2,7 @@
 title: Autorun
 summary: End-to-end behavior of `roark auto`, including issue selection, claiming, gates, and PR publishing.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-13T00:00:00Z
+lastUpdated: 2026-07-16T00:00:00Z
 ---
 
 ```bash
@@ -21,7 +21,7 @@ roark auto --repo owner/repo --limit 1
 8. Run the verification gate.
 9. If verification fails and `maxFixPasses` has budget, repair through a fix pass, code refinement, numbered Review A/B, and readiness, then rerun verification.
 10. On success, commit code changes and push the branch.
-11. A PR authoring agent submits a schema-validated draft from the source issue, workflow artifacts, and verification result. Roark renders the Markdown and opens the PR with `gh`.
+11. A PR authoring agent submits a schema-validated draft from canonical workflow artifacts, the Git-derived changed-file list, and the authoritative verification result. Roark persists `pr-draft.json`, deterministically renders the Markdown, and opens the PR with `gh`.
 12. Reviewer-generated follow-up issue drafts are submitted as structured data. Roark renders and publishes them, then rerenders the PR body from `pr-draft.json` with their links and updates it directly.
 13. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
 

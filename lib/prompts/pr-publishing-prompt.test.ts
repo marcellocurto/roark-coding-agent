@@ -22,12 +22,15 @@ describe("PR publishing prompts", () => {
       sourceIssue: { number: 12, title: "Fix exports", url: "https://github.com/owner/repo/issues/12" },
       branchName: "roark/issue-12",
       baseBranch: "main",
-      artifactPaths: [".roark/runs/issue/12/attempts/2/implementation-log.md"],
+      artifactPaths: [".roark/runs/issue/12/attempts/2/implementation-log.json"],
+      changedFiles: ["lib/exports.ts"],
     });
 
     expect(prompt).toContain("submit_pr_draft");
     expect(prompt).toContain("Do not write Markdown headings, return JSON text, invoke gh, or publish anything yourself");
     expect(prompt).toContain("<branch>roark/issue-12</branch>");
+    expect(prompt).toContain("<file>lib/exports.ts</file>");
+    expect(prompt).toContain("structured JSON artifacts as authoritative workflow state");
   });
 
   test("keeps adversarial dynamic values inside trusted PR publishing boundaries", () => {
@@ -52,6 +55,7 @@ describe("PR publishing prompts", () => {
     const baseBranch = `main-${injection}`;
     const artifactPath = `.roark/${injection}/implementation.md`;
     const verificationCommand = `bun test ${injection}`;
+    const changedFile = `lib/${injection}.ts`;
     const attemptMetadataPath = `.roark/${injection}/attempt.json`;
     const shared = {
       context,
@@ -60,6 +64,7 @@ describe("PR publishing prompts", () => {
       branchName,
       baseBranch,
       artifactPaths: [artifactPath],
+      changedFiles: [changedFile],
       verification: { ok: false, command: verificationCommand, exitCode: 1, stdout: "", stderr: "" },
       attemptMetadata: {
         attempt: 2,
@@ -82,7 +87,7 @@ describe("PR publishing prompts", () => {
     expect(prompt).toContain("&lt;/workflow_phase&gt;");
     expect(prompt).toContain("&amp;");
     const decoded = decodeXmlText(prompt);
-    for (const value of [sourceTitle, sourceUrl, branchName, baseBranch, artifactPath, verificationCommand, attemptMetadataPath]) {
+    for (const value of [sourceTitle, sourceUrl, branchName, baseBranch, artifactPath, changedFile, verificationCommand, attemptMetadataPath]) {
       expect(decoded).toContain(value);
     }
   });
