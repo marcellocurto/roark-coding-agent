@@ -1,6 +1,6 @@
 import { artifactExists, artifactRelativePath, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
-import { buildRoarkMarker, formatArtifactDetails, formatBoundedMarkdownDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
+import { buildRoarkMarker, formatArtifactDetails, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
@@ -16,13 +16,7 @@ export interface LedgerCommentArtifactInput {
   attemptMetadataPath?: string | undefined;
 }
 
-export interface ReadinessLedgerCommentInput extends LedgerCommentArtifactInput {
-  outcome?: string | undefined;
-  outcomeDetail?: string | null | undefined;
-  verification?: { ok: boolean; command: string; exitCode: number } | undefined;
-  prUrl?: string | undefined;
-  recoveryCommand?: string | undefined;
-}
+export type ReadinessLedgerCommentInput = Pick<LedgerCommentArtifactInput, "issueNumber" | "attempt" | "artifactContent">;
 
 export function formatAttemptStartComment(input: {
   issueNumber: number;
@@ -170,25 +164,8 @@ export function formatImplementationPlanLedgerComment(input: LedgerCommentArtifa
 
 export function formatReadinessLedgerComment(input: ReadinessLedgerCommentInput): string {
   const marker = buildRoarkMarker({ issueNumber: input.issueNumber, attempt: input.attempt, phase: "readiness" });
-  const lines = [marker];
-  const outcome: string[] = [];
-  if (input.outcome) outcome.push(`Outcome: ${input.outcome}`);
-  if (input.outcomeDetail) outcome.push(`Detail: ${sanitizePublicMarkdown(input.outcomeDetail)}`);
-  if (input.verification) {
-    outcome.push(`Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`);
-  }
-  if (input.prUrl) outcome.push(`PR: ${input.prUrl}`);
-  if (outcome.length > 0) lines.push("", "## Run outcome", "", ...outcome);
-  if (input.recoveryCommand) {
-    lines.push("", "## Recovery", "", formatFencedBlock(sanitizePublicMarkdown(input.recoveryCommand), "bash"));
-  }
-  lines.push("", formatArtifactDetails([
-    `Readiness artifact: \`${input.artifactPath}\``,
-    ...(input.attemptMetadataPath ? [`Attempt: \`${input.attemptMetadataPath}\``] : []),
-  ]));
   const readiness = sanitizePublicMarkdown(input.artifactContent).trimEnd();
-  if (readiness) lines.push("", formatBoundedMarkdownDetails("Readiness details", readiness));
-  return `${lines.join("\n")}\n`;
+  return readiness ? `${marker}\n\n${readiness}\n` : `${marker}\n`;
 }
 
 export function formatReviewLedgerComment(input: {
@@ -285,25 +262,6 @@ async function publishReviewLedgerComment(input: {
     phase: input.phase,
     body,
   });
-}
-
-function formatFencedBlock(value: string, language: string): string {
-  const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
-  return `${fence}${language}\n${value}\n${fence}`;
-}
-
-function longestBacktickRun(value: string): number {
-  let longest = 0;
-  let current = 0;
-  for (const char of value) {
-    if (char === "`") {
-      current += 1;
-      longest = Math.max(longest, current);
-    } else {
-      current = 0;
-    }
-  }
-  return longest;
 }
 
 function formatError(error: unknown): string {

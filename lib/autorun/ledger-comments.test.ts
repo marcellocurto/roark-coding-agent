@@ -16,23 +16,15 @@ afterEach(async () => {
 });
 
 describe("autorun ledger comment publishing", () => {
-  test("keeps readiness outcome and recovery before bounded artifact details", () => {
+  test("uses the complete sanitized readiness artifact as the comment body", () => {
+    const evidence = "r".repeat(10_001);
     const body = formatReadinessLedgerComment({
       issueNumber: 24,
       attempt: 2,
-      artifactPath: ".roark/runs/issue/24/attempts/2/readiness.md",
-      artifactContent: `# PR Readiness\n\n${"r".repeat(70_000)}\nend-of-readiness`,
-      outcome: "failed-readiness",
-      outcomeDetail: "Reviews require fixes.",
-      prUrl: "https://github.com/owner/repo/pull/99",
-      recoveryCommand: "roark continue 24",
+      artifactContent: `# PR Readiness\n\nTOKEN=secret\n/Users/alice/private\n${evidence}`,
     });
 
-    expect(body.indexOf("Outcome: failed-readiness")).toBeLessThan(body.indexOf("Readiness details"));
-    expect(body.indexOf("PR: https://github.com/owner/repo/pull/99")).toBeLessThan(body.indexOf("Readiness details"));
-    expect(body.indexOf("roark continue 24")).toBeLessThan(body.indexOf("Readiness details"));
-    expect(body).toContain("details truncated; full output is retained in the run artifacts");
-    expect(body).not.toContain("end-of-readiness");
+    expect(body).toBe(`<!-- roark:issue=24 attempt=2 phase=readiness -->\n\n# PR Readiness\n\nTOKEN=[redacted]\n[local path redacted]\n${evidence}\n`);
   });
 
   test("publishes existing triage and implementation plan artifacts through the injected ledger publisher", async () => {

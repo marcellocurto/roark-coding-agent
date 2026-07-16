@@ -102,12 +102,7 @@ export async function runPublishGate(input: {
         body: formatReadinessLedgerComment({
           issueNumber: issue.number,
           attempt: attemptMetadata.attempt,
-          artifactPath: artifactRelativePath(workflowContext, "readiness"),
           artifactContent: readinessMarkdown ?? "",
-          attemptMetadataPath,
-          outcome: "published",
-          verification,
-          prUrl,
         }),
       });
       await publishLedger({
@@ -181,13 +176,7 @@ export async function runPublishGate(input: {
       body: formatReadinessLedgerComment({
         issueNumber: issue.number,
         attempt: attemptMetadata.attempt,
-        artifactPath: artifactRelativePath(workflowContext, "readiness"),
         artifactContent: readinessMarkdown ?? "",
-        attemptMetadataPath,
-        outcome: "failed-verification",
-        outcomeDetail: decision.reason,
-        verification,
-        recoveryCommand,
       }),
     });
   }
@@ -268,12 +257,7 @@ export async function handleNonPublish(input: {
     ? formatReadinessLedgerComment({
       issueNumber: issue.number,
       attempt: attemptMetadata.attempt,
-      artifactPath,
       artifactContent: artifactContent ?? "",
-      attemptMetadataPath,
-      outcome: "failed-readiness",
-      outcomeDetail: decision.reason,
-      recoveryCommand,
     })
     : formatFailureComment({
       issueNumber: issue.number,
