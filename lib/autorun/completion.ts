@@ -6,7 +6,8 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import { runPublishGate, type AutorunGateOptions, type PublishGateOutcome } from "./publish-flow.ts";
 import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
+import { mapTriageVerdictToLabel, markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export type AutorunCompletionOutcome =
   | PublishGateOutcome
@@ -49,7 +50,12 @@ export async function completeAutorunWorkflow(
       triageArtifactPath: artifactRelativePath(input.workflowContext, "triage"),
       triageArtifactContent: await readArtifactIfExists(input.workflowContext, "triage"),
       attemptMetadataPath: input.attemptMetadataPath,
-      removeLabels: [input.options.inProgressLabel, input.options.failureLabel],
+      removeLabels: labelsToRemoveForAutorunTransition({
+        issueLabels: input.issue.labels,
+        workflow: input.options,
+        nextLabel: mapTriageVerdictToLabel(input.workflowResult.triageVerdict),
+        knownPresent: [input.options.inProgressLabel, input.options.failureLabel],
+      }),
       marker,
       existingCommentId: input.attemptMetadata.githubComments?.issue?.[phase]?.id,
     });

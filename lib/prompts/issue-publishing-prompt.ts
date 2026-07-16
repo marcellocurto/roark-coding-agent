@@ -50,7 +50,7 @@ ${allowedItemsJson}
   <publishing_instructions>
     <instruction>Preflight gh, authentication, and target repository before creating issues.</instruction>
     <instruction>Before creating each issue, search likely duplicates using 2-4 distinctive nouns from the final title. If a likely duplicate exists, do not create a duplicate; report that plan item as failed with the duplicate URL in the message.</instruction>
-    <instruction>Create each issue with the final title, the authored body, and the allowed labels for that plan item. Preserve the human-review labels (\`needs-triage\`, \`needs-human\`) and classification labels (\`external-blocker\`, \`follow-up\`, \`suggestion\`).</instruction>
+    <instruction>Create each issue with the final title, the authored body, and the allowed labels for that plan item. Preserve the triage label (\`needs-triage\`) and reviewer classification labels (\`review:external-blocker\`, \`review:follow-up\`, \`review:suggestion\`).</instruction>
     <instruction>Use body files or safe shell quoting for long issue bodies.</instruction>
     <instruction>Create native GitHub parent/sub-issue or blocked-by relationships only if the curation plan explicitly approves them. Body links are not a substitute for native relationships.</instruction>
     <instruction>Do not edit files outside temporary body files needed for publishing, and do not edit workflow artifacts. Roark will write \`${escapedResultPath}\` from your response.</instruction>

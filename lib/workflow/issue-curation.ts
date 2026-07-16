@@ -1,5 +1,5 @@
 import path from "node:path";
-import { reviewerIssueClassificationLabels, reviewerIssueHumanLabels, type ReviewerIssueClassificationLabel } from "../issue-curation/labels.ts";
+import { reviewerIssueClassificationLabels, reviewerIssueLabelForClassification, reviewerIssueTriageLabels, type ReviewerIssueClassificationLabel } from "../issue-curation/labels.ts";
 import { ISSUE_CURATION_STATIC_ARTIFACT_REFS } from "./artifact-catalog.ts";
 import type { AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
@@ -279,7 +279,7 @@ function buildIssuePlanItems(input: {
         artifactPaths: input.artifactPaths,
         ...(input.prUrl ? { prUrl: input.prUrl } : {}),
       },
-      proposedLabels: unique([...reviewerIssueHumanLabels, input.classification]),
+      proposedLabels: unique([...reviewerIssueTriageLabels, reviewerIssueLabelForClassification(input.classification)]),
     };
     item.proposedBody = buildProposedIssueBody({ item });
 

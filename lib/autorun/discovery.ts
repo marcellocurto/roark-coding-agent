@@ -26,7 +26,7 @@ import {
 } from "./attempts.ts";
 import { createBranchPlan } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
-import { ensureAutorunLabelContract } from "./labels.ts";
+import { ensureAutorunLabelContract, labelsToRemoveForAutorunTransition } from "./labels.ts";
 import { type completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptStartComment, publishIssueLedgerComment } from "./ledger-comments.ts";
 import { runAutorunAttemptLifecycle, type AutorunAttemptResult } from "./attempt-lifecycle.ts";
@@ -282,7 +282,7 @@ async function runManagedIssueAttempt(
   const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
   await preflight({ cwd: options.cwd });
 
-  const claimPlan = createClaimPlan(issue, { inProgressLabel: options.inProgressLabel, assignee });
+  let claimPlan = createClaimPlan(issue, { inProgressLabel: options.inProgressLabel, assignee });
   const branchPlan = createBranchPlan({
     issueNumber: claimPlan.issueNumber,
     branchName: claimPlan.branchName,
@@ -307,6 +307,16 @@ async function runManagedIssueAttempt(
     return;
   }
   assertDependencyClearForIssue(rechecked.issue, rechecked.relationships);
+
+  claimPlan = createClaimPlan(rechecked.issue, {
+    inProgressLabel: options.inProgressLabel,
+    assignee,
+    removeLabels: labelsToRemoveForAutorunTransition({
+      issueLabels: rechecked.issue.labels,
+      workflow: options,
+      nextLabel: options.inProgressLabel,
+    }),
+  });
 
   const issueDir = path.resolve(options.cwd, ".roark/runs", "issue", String(issue.number));
   const attempt = await allocateNextAttempt(issueDir);

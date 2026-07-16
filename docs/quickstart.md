@@ -65,12 +65,12 @@ See [Configuration](configuration.md) for the full config reference.
 
 ## Confirm Labels
 
-Roark's autorun mode is label-gated. The default ready label is `afk`.
+Roark's autorun mode is label-gated. The default ready label is `ready-for-agent`.
 
 For a first dry run, make sure the target issue has the ready label and none of the skip labels:
 
 ```bash
-gh issue edit 123 --repo owner/repo --add-label afk
+gh issue edit 123 --repo owner/repo --add-label ready-for-agent
 ```
 
 Roark creates required lifecycle labels during normal autorun when they are missing. A dry run reports missing required labels without creating them.

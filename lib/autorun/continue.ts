@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ContinueCliOptions, IssueCliOptions } from "../cli/args.ts";
-import { fetchGitHubIssue, parseIssueRef, type GitHubIssue } from "../github/issue.ts";
+import { fetchGitHubIssue, parseIssueRef, transitionGitHubIssueLabels, type GitHubIssue } from "../github/issue.ts";
 import { createWorkflowContext, ensureRunDir, readArtifact } from "../workflow/artifacts.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { runPiAgent } from "../pi/agent.ts";
@@ -19,7 +19,7 @@ import { formatContinuationPlan, planContinuation, type ContinuePlanStep } from 
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { runAutorunAttemptLifecycle, type AutorunAttemptResult } from "./attempt-lifecycle.ts";
-import { ensureAutorunLabelContract } from "./labels.ts";
+import { ensureAutorunLabelContract, labelsToRemoveForAutorunTransition } from "./labels.ts";
 import { withAutorunIssueLock } from "./lock.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, prepareCloneWorkspace, refreshCopyToWorktree, runLifecycleHook, type PreparedWorkspace } from "./workspace.ts";
@@ -31,6 +31,8 @@ export async function runAutoContinue(
     runner?: AgentRunner | undefined  ;
     prepareCloneWorkspace?: typeof prepareCloneWorkspace | undefined;
     ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
+    fetchGitHubIssue?: typeof fetchGitHubIssue | undefined;
+    transitionGitHubIssueLabels?: typeof transitionGitHubIssueLabels | undefined;
   } = {},
 ): Promise<AutorunAttemptResult> {
   const clock = injected.clock ?? defaultClock;
@@ -66,6 +68,7 @@ export async function runAutoContinue(
     await ensureLabels({
       cwd,
       repo: parsed.repo ?? options.repo,
+      readyLabel: options.readyLabel,
       inProgressLabel: options.inProgressLabel,
       failureLabel: options.failureLabel,
       successLabel: options.successLabel,
@@ -129,6 +132,22 @@ export async function runAutoContinue(
       return attemptResult(attemptMetadata);
     }
 
+    const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
+    const fetched = await fetchIssue(options.issue, { cwd, repo: parsed.repo ?? options.repo });
+    const currentIssue = toIssueCandidate(fetched.issue);
+    const transitionLabels = injected.transitionGitHubIssueLabels ?? transitionGitHubIssueLabels;
+    await transitionLabels({
+      cwd,
+      repo: parsed.repo ?? options.repo,
+      issueNumber: attemptMetadata.issueNumber,
+      nextLabel: options.inProgressLabel,
+      removeLabels: labelsToRemoveForAutorunTransition({
+        issueLabels: currentIssue.labels,
+        workflow: options,
+        nextLabel: options.inProgressLabel,
+      }),
+    });
+
     const result = await runAutorunAttemptLifecycle({
       issueDir,
       workflowContext,
@@ -190,6 +209,7 @@ function createGateOptions(
     cwd,
     repo,
     verifyCommand: options.verifyCommand,
+    readyLabel: options.readyLabel,
     failureLabel: options.failureLabel,
     successLabel: options.successLabel,
     inProgressLabel: options.inProgressLabel,

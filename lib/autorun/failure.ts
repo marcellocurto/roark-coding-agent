@@ -3,7 +3,7 @@ import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, 
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 import { presenter } from "../presentation/presenter.ts";
 
-export const defaultAutorunFailureLabel = "roark-failed";
+export const defaultAutorunFailureLabel = "agent-failed";
 
 export interface FailureCommentInput {
   issueNumber: number;

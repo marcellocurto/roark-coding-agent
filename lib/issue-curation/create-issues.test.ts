@@ -39,7 +39,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(artifactExists(context, "issueCreationResults")).toBe(false);
     expect(result.dryRun).toBe(true);
     expect(result.wouldCreate.map((item) => item.planItemId)).toEqual(["external-blocker-1", "follow-up-1"]);
-    expect(result.wouldCreate[0]?.labels).toEqual(["needs-triage", "needs-human", "external-blocker"]);
+    expect(result.wouldCreate[0]?.labels).toEqual(["needs-triage", "review:external-blocker"]);
     expect(result.counts.skippedRejectedCandidates).toBe(1);
     expect(result.counts.skippedDuplicateGroups).toBe(1);
     expect(result.counts.skippedDuplicateSourceFindings).toBe(2);
@@ -56,7 +56,7 @@ describe("createIssuesFromCurationPlan", () => {
 
     const result = await createIssuesFromCurationPlan({ context, clock });
 
-    expect(result.wouldCreate[0]?.labels).toEqual(["needs-triage", "needs-human", "external-blocker"]);
+    expect(result.wouldCreate[0]?.labels).toEqual(["needs-triage", "review:external-blocker"]);
   });
 
   test("empty normalized plan does not fall back to legacy arrays", async () => {

@@ -20,7 +20,7 @@ afterEach(async () => {
 
 describe("GitHub labels", () => {
   test("builds label list and create argv", () => {
-    const label = requiredLabel("roark-in-progress");
+    const label = requiredLabel("agent-in-progress");
     expect(buildListGitHubLabelsArgv({ repo: "owner/repo" })).toEqual([
       "gh",
       "api",
@@ -33,7 +33,7 @@ describe("GitHub labels", () => {
       "gh",
       "label",
       "create",
-      "roark-in-progress",
+      "agent-in-progress",
       "--repo",
       "owner/repo",
       "--color",
@@ -44,22 +44,22 @@ describe("GitHub labels", () => {
   });
 
   test("parses newline label output", () => {
-    expect(parseGitHubLabelNames("bug\nafk\n")).toEqual(["bug", "afk"]);
+    expect(parseGitHubLabelNames("bug\nready-for-agent\n")).toEqual(["bug", "ready-for-agent"]);
     expect(parseGitHubLabelNames("\n")).toEqual([]);
   });
 
   test("creates missing required labels and treats existing names case-insensitively", async () => {
-    const cwd = await installFakeGh("AFK\n");
+    const cwd = await installFakeGh("READY-FOR-AGENT\n");
 
     const result = await ensureGitHubLabels({
       cwd,
       repo: "owner/repo",
-      labels: [requiredLabel("afk"), requiredLabel("roark-in-progress")],
+      labels: [requiredLabel("ready-for-agent"), requiredLabel("agent-in-progress")],
     });
 
-    expect(result.missing.map((label) => label.name)).toEqual(["roark-in-progress"]);
-    expect(result.created.map((label) => label.name)).toEqual(["roark-in-progress"]);
-    expect(await readFile(path.join(cwd, "created.log"), "utf8")).toContain("roark-in-progress");
+    expect(result.missing.map((label) => label.name)).toEqual(["agent-in-progress"]);
+    expect(result.created.map((label) => label.name)).toEqual(["agent-in-progress"]);
+    expect(await readFile(path.join(cwd, "created.log"), "utf8")).toContain("agent-in-progress");
   });
 
   test("dry-run reports missing labels without creating them", async () => {
@@ -69,10 +69,10 @@ describe("GitHub labels", () => {
       cwd,
       repo: "owner/repo",
       dryRun: true,
-      labels: [requiredLabel("roark-in-progress")],
+      labels: [requiredLabel("agent-in-progress")],
     });
 
-    expect(result.missing.map((label) => label.name)).toEqual(["roark-in-progress"]);
+    expect(result.missing.map((label) => label.name)).toEqual(["agent-in-progress"]);
     expect(result.created).toEqual([]);
     expect(await readFile(path.join(cwd, "created.log"), "utf8")).toBe("");
   });

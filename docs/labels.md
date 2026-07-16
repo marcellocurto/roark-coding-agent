@@ -9,18 +9,19 @@ See [Label semantics](label-semantics.md) for the full reference.
 
 Common defaults:
 
-- `afk`: ready for autorun.
-- `roark-in-progress`: claimed by Roark.
-- `roark-failed`: stopped at readiness or verification.
-- `roark-pr-opened`: PR opened.
-- `blocked`, `needs-human`, `triage-rejected`, `wontfix`: skip/status labels.
+- `ready-for-agent`: approved for autorun.
+- `needs-triage`: awaiting maintainer triage.
+- `agent-in-progress`: actively claimed or resumed by an agent.
+- `agent-failed`: stopped at readiness or verification.
+- `agent-pr-opened`: PR opened.
+- `blocked`, `needs-human`, `triage-rejected`, `wont-fix`: terminal or paused skip/status labels.
 
 Common lifecycle:
 
 ```text
-afk -> roark-in-progress -> roark-pr-opened
-                       \-> roark-failed
-                       \-> blocked, needs-human, or triage-rejected
+needs-triage -> ready-for-agent -> agent-in-progress -> agent-pr-opened
+                                      \-> agent-failed -> agent-in-progress
+                                      \-> blocked, needs-human, or triage-rejected
 ```
 
 Use [Troubleshooting](troubleshooting.md#no-eligible-issues) when autorun does not select the expected issue.

@@ -31,6 +31,7 @@ const continueOptions = {
   maxFixPasses: 3,
   attempt: 2,
   verifyCommand: "bun test",
+  readyLabel: "ready-for-agent",
   failureLabel: "failed",
   successLabel: "opened",
   inProgressLabel: "busy",
@@ -110,6 +111,18 @@ describe("runAutoContinue", () => {
           metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
         };
       },
+      fetchGitHubIssue: async () => (await noopAsync(), {
+        issue: { number: 24, title: "Issue 24", labels: [{ name: "failed" }, { name: "ready-for-agent" }] },
+        issueNumber: "24",
+        repo: "owner/repo",
+        relationships: { fetchedAt: "now", nativeDependenciesAvailable: true, blockedBy: [], blocking: [], bodyDeclaredBlockers: [] },
+      }),
+      transitionGitHubIssueLabels: async (input) => {
+        await noopAsync();
+        calls.push("transition");
+        expect(input.nextLabel).toBe("busy");
+        expect(input.removeLabels).toEqual(["failed", "ready-for-agent"]);
+      },
       runner: async () => {
         await noopAsync();
         calls.push("runner");
@@ -117,7 +130,7 @@ describe("runAutoContinue", () => {
       },
     })).rejects.toThrow("Triage failed: triage failed");
 
-    expect(calls).toEqual([`prepare:${workspacePath}`, "runner"]);
+    expect(calls).toEqual([`prepare:${workspacePath}`, "transition", "runner"]);
     expect(await Bun.file(path.join(workspacePath, "before-run.txt")).text()).toBe("before");
     const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
     expect(metadata.worktreePath).toBe(workspacePath);
@@ -298,6 +311,10 @@ async function installFakeGh(cwd: string): Promise<void> {
   const binDir = path.join(cwd, "bin");
   await mkdir(binDir, { recursive: true });
   await writeFile(path.join(binDir, "gh"), `#!/usr/bin/env bash
+if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
+  printf '{"number":24,"title":"Issue 24","body":"","state":"OPEN","labels":[{"name":"failed"},{"name":"ready-for-agent"}],"assignees":[],"milestone":null,"url":"https://github.com/owner/repo/issues/24","comments":[]}\n'
+  exit 0
+fi
 if [ "$1" = "api" ]; then
   if [ "$3" = "--paginate" ]; then
     printf '[]\\n'

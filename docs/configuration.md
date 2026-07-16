@@ -47,19 +47,19 @@ It infers:
   "repo": "owner/repo",
   "baseBranch": "main",
   "verify": "bun run check",
-  "readyLabel": "afk",
-  "inProgressLabel": "roark-in-progress",
-  "successLabel": "roark-pr-opened",
-  "failureLabel": "roark-failed",
+  "readyLabel": "ready-for-agent",
+  "inProgressLabel": "agent-in-progress",
+  "successLabel": "agent-pr-opened",
+  "failureLabel": "agent-failed",
   "skipLabels": [
+    "needs-triage",
     "blocked",
     "needs-human",
     "triage-rejected",
-    "wontfix",
-    "roark-in-progress",
-    "roark-failed",
-    "roark-ready-for-review",
-    "roark-pr-opened"
+    "wont-fix",
+    "agent-in-progress",
+    "agent-failed",
+    "agent-pr-opened"
   ],
   "maxFixPasses": 3,
   "workspace": {
@@ -90,10 +90,10 @@ It infers:
 | `repo` | string | inferred when possible | `--repo` | GitHub repository as `owner/repo`. |
 | `baseBranch` | string | `main` | `--base-branch` | Base branch for issue branches and PRs. |
 | `verify` | string | inferred for some repos | `--verify` | Shell command run by the verification gate through `sh -c`. |
-| `readyLabel` | string | `afk` | `--label` | Label that opts an issue into autorun eligibility. |
-| `inProgressLabel` | string | `roark-in-progress` | `--in-progress-label` | Label applied when Roark claims an issue. |
-| `successLabel` | string | `roark-pr-opened` | `--success-label` | Label applied after PR creation. |
-| `failureLabel` | string | `roark-failed` | `--failure-label` | Label applied when readiness or verification fails. |
+| `readyLabel` | string | `ready-for-agent` | `--label` | Label that opts an issue into autorun eligibility. |
+| `inProgressLabel` | string | `agent-in-progress` | `--in-progress-label` | Label applied when Roark claims an issue. |
+| `successLabel` | string | `agent-pr-opened` | `--success-label` | Label applied after PR creation. |
+| `failureLabel` | string | `agent-failed` | `--failure-label` | Label applied when readiness or verification fails. |
 | `skipLabels` | string[] | default skip set | `--skip-label`, `--skip-labels` | Labels that prevent autorun selection. |
 | `maxFixPasses` | number | `3` | `--max-fix-passes` | Maximum shared fix/review cycles, including review-driven fixes and verification repair. |
 | `workspace` | object | clone strategy defaults | none | Managed workspace configuration. |
@@ -157,7 +157,7 @@ Hooks must be non-interactive. See [Lifecycle hooks](lifecycle-hooks.md).
 
 ## Label Configuration
 
-When changing lifecycle labels, Roark appends those lifecycle labels to the effective skip set automatically. This prevents already-claimed, failed, or successful issues from being selected again.
+Roark always appends configured lifecycle labels plus required workflow states such as `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, and `wont-fix` to the effective skip set. This prevents issues in non-ready states from being selected again.
 
 Read [Label semantics](label-semantics.md) before changing label names on a live repository.
 

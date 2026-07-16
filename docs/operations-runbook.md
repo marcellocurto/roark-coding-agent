@@ -95,7 +95,7 @@ Review:
 
 - scheduler logs
 - issue comments posted by Roark
-- labels such as `roark-failed` and `roark-pr-opened`
+- labels such as `agent-failed` and `agent-pr-opened`
 - `.roark/runs/issue/<n>/attempts/<k>/summary.json`
 - `.roark/runs/issue/<n>/attempts/<k>/verification.md`
 - disk usage under `~/.roark/workspaces`

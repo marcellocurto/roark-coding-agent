@@ -20,6 +20,7 @@ import { formatPrCreatedComment, formatReadinessLedgerComment, publishIssueLedge
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
@@ -295,7 +296,12 @@ export async function handleNonPublish(input: {
     issueNumber: issue.number,
     label: options.failureLabel,
     comment,
-    removeLabels: [options.inProgressLabel],
+    removeLabels: labelsToRemoveForAutorunTransition({
+      issueLabels: issue.labels,
+      workflow: options,
+      nextLabel: options.failureLabel,
+      knownPresent: [options.inProgressLabel],
+    }),
     marker,
     existingCommentId: attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
   });

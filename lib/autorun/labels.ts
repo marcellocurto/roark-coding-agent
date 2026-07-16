@@ -15,7 +15,16 @@ export type EnsureAutorunLabelContractOptions = AutorunLabelContractInput & {
 
 export const autorunBlockedLabel = "blocked";
 export const autorunNeedsHumanLabel = "needs-human";
+export const autorunNeedsTriageLabel = "needs-triage";
 export const autorunTriageRejectedLabel = "triage-rejected";
+export const autorunWontFixLabel = "wont-fix";
+
+export interface AutorunWorkflowLabelInput {
+  readyLabel?: string | undefined;
+  inProgressLabel: string;
+  failureLabel: string;
+  successLabel: string;
+}
 
 export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): RequiredGitHubLabel[] {
   return uniqueLabels([
@@ -24,26 +33,26 @@ export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): Re
         role: "ready",
         name: input.readyLabel,
         color: "0E8A16",
-        description: "Roark autorun eligibility label. Issues with this label may be selected for autorun.",
+        description: "Agent-ready ticket with clear scope, blockers, and acceptance criteria.",
       }
       : undefined,
     {
       role: "in-progress",
       name: input.inProgressLabel,
       color: "5319E7",
-      description: "Roark lifecycle label. Applied when Roark claims an issue and is actively working it.",
+      description: "Agent lifecycle label. Applied when an agent claims an issue and is actively working it.",
     },
     {
       role: "failure",
       name: input.failureLabel,
       color: "B60205",
-      description: "Roark lifecycle label. Applied when readiness or verification fails.",
+      description: "Agent lifecycle label. Applied when readiness, execution, or verification fails.",
     },
     {
       role: "success",
       name: input.successLabel,
       color: "1D76DB",
-      description: "Roark lifecycle label. Applied after Roark opens a pull request.",
+      description: "Agent lifecycle label. Applied after an agent opens a pull request.",
     },
     {
       role: "triage-blocked",
@@ -61,9 +70,36 @@ export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): Re
       role: "triage-rejected",
       name: autorunTriageRejectedLabel,
       color: "B60205",
-      description: "Status label for issues rejected during Roark triage.",
+      description: "Status label for issues rejected during agent triage.",
     },
   ]);
+}
+
+export function autorunWorkflowLabels(input: AutorunWorkflowLabelInput): string[] {
+  return uniqueLabelNames([
+    input.readyLabel ?? "",
+    autorunNeedsTriageLabel,
+    input.inProgressLabel,
+    input.failureLabel,
+    input.successLabel,
+    autorunBlockedLabel,
+    autorunNeedsHumanLabel,
+    autorunTriageRejectedLabel,
+    autorunWontFixLabel,
+  ]);
+}
+
+export function labelsToRemoveForAutorunTransition(input: {
+  issueLabels?: readonly { name: string }[] | undefined;
+  workflow: AutorunWorkflowLabelInput;
+  nextLabel: string;
+  knownPresent?: readonly string[] | undefined;
+}): string[] {
+  const workflowLabels = new Set(autorunWorkflowLabels(input.workflow).map(normalizeLabel));
+  return uniqueLabelNames([
+    ...(input.issueLabels ?? []).map((label) => label.name).filter((label) => workflowLabels.has(normalizeLabel(label))),
+    ...(input.knownPresent ?? []),
+  ]).filter((label) => normalizeLabel(label) !== normalizeLabel(input.nextLabel));
 }
 
 export async function ensureAutorunLabelContract(options: EnsureAutorunLabelContractOptions): Promise<EnsureGitHubLabelsResult> {
@@ -86,9 +122,11 @@ export function mergeLifecycleSkipLabels(input: {
     input.inProgressLabel,
     input.failureLabel,
     input.successLabel,
+    autorunNeedsTriageLabel,
     autorunBlockedLabel,
     autorunNeedsHumanLabel,
     autorunTriageRejectedLabel,
+    autorunWontFixLabel,
   ]);
 }
 

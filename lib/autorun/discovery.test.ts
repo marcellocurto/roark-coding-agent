@@ -37,7 +37,7 @@ describe("runAutoDiscovery", () => {
             issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
             issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
             issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-            issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
+            issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "agent-in-progress"]),
           ];
         },
         fetchGitHubIssueRelationships: async (input) => (await noopAsync(), dependencyClearRelationships(Number(input.issueNumber))),
@@ -291,7 +291,7 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["roark-in-progress"])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["agent-in-progress"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         preflighted = true;
@@ -300,7 +300,7 @@ describe("runAutoDiscovery", () => {
         await noopAsync();
         claimed = true;
       },
-    })).rejects.toThrow("Issue #29 has skip label roark-in-progress");
+    })).rejects.toThrow("Issue #29 has skip label agent-in-progress");
 
     expect(preflighted).toBe(false);
     expect(claimed).toBe(false);
@@ -312,7 +312,7 @@ describe("runAutoDiscovery", () => {
 
     expect(runAutoDiscovery({ ...baseOptions(), issue: "29" }, {
       ...noOpLabelContract,
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["ready-for-agent"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         order.push("preflight");
@@ -347,7 +347,7 @@ describe("runAutoDiscovery", () => {
         fetchCount += 1;
         return fetchCount === 1
           ? fetchedGitHubIssue(29, [])
-          : fetchedGitHubIssue(29, ["roark-in-progress"]);
+          : fetchedGitHubIssue(29, ["agent-in-progress"]);
       },
       assertCleanAutorunGit: async () => {
         await noopAsync();
@@ -391,7 +391,7 @@ describe("runAutoDiscovery", () => {
     }, {
       ...noOpLabelContract,
       clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, [])),
+      fetchGitHubIssue: async () => (await noopAsync(), fetchedGitHubIssue(29, ["ready-for-agent"])),
       assertCleanAutorunGit: async () => {
         await noopAsync();
         calls.push("preflight");
@@ -400,6 +400,7 @@ describe("runAutoDiscovery", () => {
         await noopAsync();
         calls.push(`claim:${input.plan.branchName}`);
         expect(input.repo).toBe("owner/repo");
+        expect(input.plan.removeLabels).toEqual(["ready-for-agent"]);
       },
       prepareCloneWorkspace: async (input) => {
   await noopAsync();

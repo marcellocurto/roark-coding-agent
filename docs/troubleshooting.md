@@ -21,7 +21,7 @@ gh issue view 123 --repo owner/repo --json labels,state,assignees
 Common causes:
 
 - issue is closed
-- missing ready label, default `afk`
+- missing ready label, default `ready-for-agent`
 - issue has a skip label
 - custom `--label`, `--skip-label`, or `--skip-labels` does not match the repository label policy
 

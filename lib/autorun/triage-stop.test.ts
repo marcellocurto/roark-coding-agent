@@ -30,13 +30,13 @@ describe("triage stop handling", () => {
       "--repo",
       "owner/repo",
     ]);
-    expect(buildTriageStopRemoveLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "roark-in-progress" })).toEqual([
+    expect(buildTriageStopRemoveLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "agent-in-progress" })).toEqual([
       "gh",
       "issue",
       "edit",
       "12",
       "--remove-label",
-      "roark-in-progress",
+      "agent-in-progress",
       "--repo",
       "owner/repo",
     ]);

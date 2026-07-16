@@ -39,7 +39,7 @@ describe("parseArgs", () => {
       "--skip-label",
       "blocked",
       "--skip-labels",
-      "needs-human,wontfix",
+      "needs-human,wont-fix",
       "--limit",
       "2",
       "--in-progress-label",
@@ -72,7 +72,7 @@ describe("parseArgs", () => {
 
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.readyLabel).toBe("roark-ready");
-    expect(parsed.skipLabels).toEqual(["blocked", "needs-human", "wontfix"]);
+    expect(parsed.skipLabels).toEqual(["blocked", "needs-human", "wont-fix"]);
     expect(parsed.limit).toBe(2);
     expect(parsed.inProgressLabel).toBe("custom-in-progress");
     expect(parsed.assignee).toBe("roark-codes");

@@ -98,18 +98,18 @@ Paths in normal status output are repository/run relative when possible, and lon
 
 | Option | Purpose |
 | --- | --- |
-| `--label <label>` | Auto eligibility label. Defaults to `afk`. |
-| `--skip-label <label>` | Auto skip label. Repeatable. Lifecycle labels are still appended. |
-| `--skip-labels <labels>` | Auto skip labels as a comma-separated list. Lifecycle labels are still appended. |
+| `--label <label>` | Auto eligibility label. Defaults to `ready-for-agent`. |
+| `--skip-label <label>` | Auto skip label. Repeatable. Required workflow skip labels are still appended. |
+| `--skip-labels <labels>` | Auto skip labels as a comma-separated list. Required workflow skip labels are still appended. |
 | `--limit <n>` | Maximum number of eligible auto issues to claim. Defaults to `1`. |
-| `--in-progress-label <label>` | Auto claim label and terminal continue cleanup label. Defaults to `roark-in-progress`. |
+| `--in-progress-label <label>` | Auto claim label and terminal continue cleanup label. Defaults to `agent-in-progress`. |
 | `--assignee <login>` | GitHub user to assign when claiming. Defaults to the authenticated `gh` user. |
 | `--no-assign` | Claim without assigning a user. |
 | `--dry-run` | Print selected issues without claiming, switching branches, or running agents. |
 | `--base-branch <branch>` | Auto issue branch base branch. Defaults to `main`. |
 | `--verify <cmd>` | Verification command to run before publishing. Runs through `sh -c`. |
-| `--failure-label <label>` | Label applied when readiness or verification fails. Defaults to `roark-failed`. |
-| `--success-label <label>` | Label applied when a PR is opened. Defaults to `roark-pr-opened`. |
+| `--failure-label <label>` | Label applied when readiness or verification fails. Defaults to `agent-failed`. |
+| `--success-label <label>` | Label applied when a PR is opened. Defaults to `agent-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
 ## PR Review Options

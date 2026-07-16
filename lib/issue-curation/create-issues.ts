@@ -13,7 +13,13 @@ import {
   writeJsonArtifact,
 } from "../workflow/artifacts.ts";
 import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
-import { ensureReviewerIssueLabels, reviewerIssueClassificationLabels, reviewerIssueHumanLabels } from "./labels.ts";
+import {
+  ensureReviewerIssueLabels,
+  reviewerIssueClassificationLabels,
+  reviewerIssueLabelForClassification,
+  reviewerIssueManagedLabels,
+  reviewerIssueTriageLabels,
+} from "./labels.ts";
 
 export interface IssueCreationCreatedEntry {
   planItemId: string;
@@ -604,10 +610,16 @@ function buildResult(input: {
 }
 
 function labelsForPlanItem(item: Pick<ValidPlanItem, "kind" | "labels">): string[] {
-  return normalizeLabels([...reviewerIssueHumanLabels, classificationLabelForKind(item.kind), ...item.labels]);
+  const managedLabels = new Set<string>(reviewerIssueManagedLabels.map((label) => label.toLowerCase()));
+  const additionalLabels = item.labels.filter((label) => !managedLabels.has(label.trim().toLowerCase()));
+  return normalizeLabels([
+    ...reviewerIssueTriageLabels,
+    reviewerIssueLabelForClassification(classificationForKind(item.kind)),
+    ...additionalLabels,
+  ]);
 }
 
-function classificationLabelForKind(kind: IssuePlanKind): IssuePlanClassification {
+function classificationForKind(kind: IssuePlanKind): IssuePlanClassification {
   return kind === "blocking" ? "external-blocker" : kind;
 }
 

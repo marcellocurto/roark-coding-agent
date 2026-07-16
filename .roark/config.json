@@ -2,18 +2,19 @@
   "repo": "marcellocurto/roark-coding-agent",
   "baseBranch": "main",
   "verify": "bun run check",
-  "readyLabel": "afk",
-  "inProgressLabel": "roark-in-progress",
-  "successLabel": "roark-pr-opened",
-  "failureLabel": "roark-failed",
+  "readyLabel": "ready-for-agent",
+  "inProgressLabel": "agent-in-progress",
+  "successLabel": "agent-pr-opened",
+  "failureLabel": "agent-failed",
   "skipLabels": [
+    "needs-triage",
     "blocked",
     "needs-human",
-    "wontfix",
-    "roark-in-progress",
-    "roark-failed",
-    "roark-ready-for-review",
-    "roark-pr-opened"
+    "triage-rejected",
+    "wont-fix",
+    "agent-in-progress",
+    "agent-failed",
+    "agent-pr-opened"
   ],
   "maxFixPasses": 3,
   "workspace": {

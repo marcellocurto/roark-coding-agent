@@ -47,10 +47,11 @@ Generated issues use:
 | Label | Meaning |
 | --- | --- |
 | `needs-triage` | Newly generated issue awaiting maintainer triage |
-| `needs-human` | Human review is expected before implementation |
-| `external-blocker` | Work blocked by outside information, access, dependency resolution, or human decision |
-| `follow-up` | Valid non-blocking work to handle separately |
-| `suggestion` | Optional improvement work that should be triaged before implementation |
+| `review:external-blocker` | Generated from outside information, access, dependency, or decision blocker findings |
+| `review:follow-up` | Valid non-blocking work discovered during review |
+| `review:suggestion` | Optional improvement work discovered during review |
+
+`needs-human` is added only when a concrete decision, clarification, or approval is required; it is not applied to every generated issue.
 
 See [Label semantics](label-semantics.md).
 

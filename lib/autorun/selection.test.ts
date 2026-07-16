@@ -60,7 +60,7 @@ describe("autorun issue selection", () => {
         issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
         issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
         issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-        issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "roark-in-progress"]),
+        issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "agent-in-progress"]),
       ],
       {
         readyLabel: defaultAutorunReadyLabel,
@@ -108,8 +108,8 @@ describe("autorun issue selection", () => {
 
   test("matches labels case-insensitively", () => {
     expect(
-      isEligibleIssue(issue(1, "2026-01-01T00:00:00Z", ["AFK"]), {
-        readyLabel: "afk",
+      isEligibleIssue(issue(1, "2026-01-01T00:00:00Z", ["READY-FOR-AGENT"]), {
+        readyLabel: "ready-for-agent",
         skipLabels: defaultAutorunSkipLabels,
         limit: 1,
       }),
@@ -117,8 +117,8 @@ describe("autorun issue selection", () => {
   });
 
   test("finds targeted auto skip labels without requiring the ready label", () => {
-    expect(findMatchingSkipLabel(issue(1, "2026-01-01T00:00:00Z", ["Roark-In-Progress"]), defaultAutorunSkipLabels)).toBe(
-      "Roark-In-Progress",
+    expect(findMatchingSkipLabel(issue(1, "2026-01-01T00:00:00Z", ["Agent-In-Progress"]), defaultAutorunSkipLabels)).toBe(
+      "Agent-In-Progress",
     );
     expect(findMatchingSkipLabel(issue(2, "2026-01-01T00:00:00Z", ["enhancement"]), defaultAutorunSkipLabels)).toBeUndefined();
   });

@@ -57,7 +57,7 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.repo).toBe("cli/repo");
     expect(hydrated.verifyCommand).toBe("bun run cli-check");
     expect(hydrated.readyLabel).toBe("cli-ready");
-    expect(hydrated.skipLabels).toEqual(["cli-skip", "config-progress", "config-failed", "config-success", "blocked", "needs-human", "triage-rejected"]);
+    expect(hydrated.skipLabels).toEqual(["cli-skip", "config-progress", "config-failed", "config-success", "needs-triage", "blocked", "needs-human", "triage-rejected", "wont-fix"]);
     expect(hydrated.baseBranch).toBe("cli-main");
     expect(hydrated.maxFixPasses).toBe(5);
     expect(hydrated.inProgressLabel).toBe("config-progress");
@@ -316,10 +316,10 @@ describe("hydrateCliOptions", () => {
     if (hydrated.command !== "auto") throw new Error("expected auto options");
     expect(hydrated.repo).toBe("owner/inferred");
     expect(hydrated.verifyCommand).toBe("bun run typecheck");
-    expect(hydrated.readyLabel).toBe("afk");
-    expect(hydrated.inProgressLabel).toBe("roark-in-progress");
-    expect(hydrated.failureLabel).toBe("roark-failed");
-    expect(hydrated.successLabel).toBe("roark-pr-opened");
+    expect(hydrated.readyLabel).toBe("ready-for-agent");
+    expect(hydrated.inProgressLabel).toBe("agent-in-progress");
+    expect(hydrated.failureLabel).toBe("agent-failed");
+    expect(hydrated.successLabel).toBe("agent-pr-opened");
     expect(hydrated.baseBranch).toBe("main");
     expect(hydrated.remote).toBe("origin");
   });

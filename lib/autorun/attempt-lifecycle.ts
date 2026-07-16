@@ -24,6 +24,7 @@ import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { presenter } from "../presentation/presenter.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export interface RunAutorunAttemptLifecycleInput {
   issueDir: string;
@@ -232,7 +233,12 @@ async function markWorkflowError(
     issueNumber: issue.number,
     label: input.gateOptions.failureLabel,
     comment,
-    removeLabels: [input.gateOptions.inProgressLabel],
+    removeLabels: labelsToRemoveForAutorunTransition({
+      issueLabels: issue.labels,
+      workflow: input.gateOptions,
+      nextLabel: input.gateOptions.failureLabel,
+      knownPresent: [input.gateOptions.inProgressLabel],
+    }),
   });
 }
 

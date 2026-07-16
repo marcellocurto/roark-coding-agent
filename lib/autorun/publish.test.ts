@@ -49,27 +49,51 @@ describe("autorun publish argv builders", () => {
 
   test("buildSuccessLabelArgv composes a gh issue edit command", () => {
     expect(
-      buildSuccessLabelArgv({ issueNumber: 9, label: "roark-pr-opened", repo: "owner/repo" }),
+      buildSuccessLabelArgv({ issueNumber: 9, label: "agent-pr-opened", repo: "owner/repo" }),
     ).toEqual([
       "gh",
       "issue",
       "edit",
       "9",
       "--add-label",
-      "roark-pr-opened",
+      "agent-pr-opened",
       "--repo",
       "owner/repo",
     ]);
   });
 
   test("buildSuccessLabelArgv omits --repo when not provided", () => {
-    expect(buildSuccessLabelArgv({ issueNumber: 9, label: "roark-pr-opened" })).toEqual([
+    expect(buildSuccessLabelArgv({ issueNumber: 9, label: "agent-pr-opened" })).toEqual([
       "gh",
       "issue",
       "edit",
       "9",
       "--add-label",
-      "roark-pr-opened",
+      "agent-pr-opened",
+    ]);
+  });
+
+  test("buildSuccessLabelArgv applies the terminal state in one label transition", () => {
+    expect(buildSuccessLabelArgv({
+      issueNumber: 9,
+      label: "agent-pr-opened",
+      removeLabels: ["ready-for-agent", "agent-in-progress", "agent-failed"],
+      repo: "owner/repo",
+    })).toEqual([
+      "gh",
+      "issue",
+      "edit",
+      "9",
+      "--add-label",
+      "agent-pr-opened",
+      "--remove-label",
+      "ready-for-agent",
+      "--remove-label",
+      "agent-in-progress",
+      "--remove-label",
+      "agent-failed",
+      "--repo",
+      "owner/repo",
     ]);
   });
 });
@@ -171,9 +195,9 @@ describe("publishAutorunResult", () => {
         options: {
           cwd: missingCwd,
           repo: "owner/repo",
-          failureLabel: "roark-failed",
-          successLabel: "roark-pr-opened",
-          inProgressLabel: "roark-in-progress",
+          failureLabel: "agent-failed",
+          successLabel: "agent-pr-opened",
+          inProgressLabel: "agent-in-progress",
           remote: "origin",
           baseBranch: "main",
         },
@@ -238,13 +262,14 @@ describe("publishAutorunResult", () => {
         options: {
           cwd: controlCwd,
           repo: "owner/repo",
-          failureLabel: "roark-failed",
-          successLabel: "roark-pr-opened",
-          inProgressLabel: "roark-in-progress",
+          readyLabel: "ready-for-agent",
+          failureLabel: "agent-failed",
+          successLabel: "agent-pr-opened",
+          inProgressLabel: "agent-in-progress",
           remote: "origin",
           baseBranch: "main",
         },
-        issue: { number: 9, title: "Fix bug" },
+        issue: { number: 9, title: "Fix bug", labels: [{ name: "ready-for-agent" }] },
         branchPlan: { issueNumber: 9, branchName: "roark/issue-9", baseBranch: "main" },
         workflowContext: {
           controlCwd,
@@ -282,9 +307,10 @@ describe("publishAutorunResult", () => {
 
     const ghCalls = await readFile(ghLog, "utf8");
     expect(ghCalls).not.toContain(`${controlCwd}\tpr create`);
-    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label roark-pr-opened`);
-    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-in-progress`);
-    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --remove-label roark-failed`);
+    expect(ghCalls).toContain(`${controlCwd}\tissue edit 9 --add-label agent-pr-opened`);
+    expect(ghCalls).toContain("--remove-label ready-for-agent");
+    expect(ghCalls).toContain("--remove-label agent-in-progress");
+    expect(ghCalls).toContain("--remove-label agent-failed");
   });
 
   test("creates one commit for target changes and excludes .roark/runs artifacts", async () => {
@@ -331,9 +357,9 @@ describe("publishAutorunResult", () => {
         options: {
           cwd: controlCwd,
           repo: "owner/repo",
-          failureLabel: "roark-failed",
-          successLabel: "roark-pr-opened",
-          inProgressLabel: "roark-in-progress",
+          failureLabel: "agent-failed",
+          successLabel: "agent-pr-opened",
+          inProgressLabel: "agent-in-progress",
           remote: "origin",
           baseBranch: "main",
         },

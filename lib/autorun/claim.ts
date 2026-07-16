@@ -4,19 +4,21 @@ export interface AutorunClaimPlan {
   issueNumber: number;
   branchName: string;
   inProgressLabel: string;
+  removeLabels: string[];
   assignee?: string | undefined  ;
   commentBody: string;
 }
 
 export function createClaimPlan(
   issue: AutorunIssueCandidate,
-  options: { inProgressLabel: string; assignee?: string  | undefined},
+  options: { inProgressLabel: string; removeLabels?: readonly string[] | undefined; assignee?: string  | undefined},
 ): AutorunClaimPlan {
   const branchName = plannedIssueBranchName(issue.number);
   return {
     issueNumber: issue.number,
     branchName,
     inProgressLabel: options.inProgressLabel,
+    removeLabels: [...(options.removeLabels ?? [])],
     assignee: options.assignee,
     commentBody: buildClaimComment({ issueNumber: issue.number, branchName, assignee: options.assignee }),
   };

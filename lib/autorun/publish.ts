@@ -7,7 +7,6 @@ import type { AgentRunner } from "../workflow/agent-runner.ts";
 import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
-import { buildRemoveLabelArgv } from "./failure.ts";
 import {
   artifactExists,
   artifactPath,
@@ -25,8 +24,9 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
+import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
-export const defaultAutorunSuccessLabel = "roark-pr-opened";
+export const defaultAutorunSuccessLabel = "agent-pr-opened";
 export const defaultAutorunRemote = "origin";
 
 export interface CommitArgvOptions { message: string }
@@ -35,6 +35,7 @@ export interface SuccessLabelArgvOptions {
   repo?: string | undefined  ;
   issueNumber: number;
   label: string;
+  removeLabels?: readonly string[] | undefined;
 }
 
 export interface FormatPrBodyFollowUpIssue {
@@ -73,7 +74,7 @@ export interface FormatPrBodyNarrative {
 export type AutorunPublishOptions = Pick<
   AutoCliOptions,
   "cwd" | "repo" | "failureLabel" | "successLabel" | "inProgressLabel" | "remote" | "baseBranch"
->;
+> & Partial<Pick<AutoCliOptions, "readyLabel">>;
 
 export interface PublishAutorunResultInput {
   options: AutorunPublishOptions;
@@ -100,7 +101,10 @@ export function buildPushArgv(options: PushArgvOptions): string[] {
 
 export function buildSuccessLabelArgv(options: SuccessLabelArgvOptions): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
+  const removeLabelArgs = (options.removeLabels ?? [])
+    .filter((label) => label !== options.label)
+    .flatMap((label) => ["--remove-label", label]);
+  return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...removeLabelArgs, ...repoArgs];
 }
 
 export function formatCommitMessage(input: { issueNumber: number }): string {
@@ -539,28 +543,26 @@ async function performAutorunPublication(input: PublishAutorunResultInput, displ
   const prUrl = publishedPr.url;
   if (prUrl) presenter().line(`PR: ${prUrl}`);
 
+  const removeLabels = labelsToRemoveForAutorunTransition({
+    issueLabels: issue.labels,
+    workflow: options,
+    nextLabel: options.successLabel,
+    knownPresent: [options.inProgressLabel, options.failureLabel],
+  });
   try {
     await runProcessOrThrow(
-      buildSuccessLabelArgv({ repo: options.repo, issueNumber: issue.number, label: options.successLabel }),
-      { cwd: controlCwd, label: "gh issue edit --add-label (success)" },
+      buildSuccessLabelArgv({
+        repo: options.repo,
+        issueNumber: issue.number,
+        label: options.successLabel,
+        removeLabels,
+      }),
+      { cwd: controlCwd, label: "gh issue edit --transition-label (success)" },
     );
   } catch (error) {
     presenter().warning(
       `WARNING failed to apply success label '${options.successLabel}': ${error instanceof Error ? error.message : String(error)}`,
     );
-  }
-
-  for (const label of [options.inProgressLabel, options.failureLabel].filter((label) => label !== options.successLabel)) {
-    try {
-      await runProcessOrThrow(
-        buildRemoveLabelArgv({ repo: options.repo, issueNumber: issue.number, label }),
-        { cwd: controlCwd, label: "gh issue edit --remove-label (success cleanup)" },
-      );
-    } catch (error) {
-      presenter().warning(
-        `WARNING failed to remove label '${label}': ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   return prUrl === "" ? undefined : prUrl;
