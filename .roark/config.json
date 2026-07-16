@@ -27,7 +27,6 @@
     }
   },
   "hooks": {
-    "afterCreate": "bun install --frozen-lockfile",
     "beforeRun": "bun install --frozen-lockfile",
     "beforeVerify": "bun install --frozen-lockfile",
     "timeoutMs": 600000

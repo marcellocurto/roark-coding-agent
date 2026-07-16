@@ -8,7 +8,6 @@ lastUpdated: 2026-05-08T07:00:00Z
 ```json
 {
   "hooks": {
-    "afterCreate": "bun install --frozen-lockfile",
     "beforeRun": "bun install --frozen-lockfile",
     "beforeVerify": "bun install --frozen-lockfile",
     "timeoutMs": 600000
@@ -23,6 +22,8 @@ lastUpdated: 2026-05-08T07:00:00Z
 - `beforeVerify`: runs immediately before verification.
 - `afterRun`: runs after workflow completion; failures warn instead of stopping the run.
 - `beforeRemove`: runs before workspace removal; failures warn instead of stopping removal.
+
+For dependency installation, prefer `beforeRun` and `beforeVerify`. A fresh workspace runs `beforeRun` immediately after creation, so configuring the same install command in both `afterCreate` and `beforeRun` only repeats setup. Reserve `afterCreate` for setup that must run exactly once when the workspace is first created.
 
 `review-pr` does not load repository configuration or run lifecycle hooks. Use an explicit `--verify` command when a PR review genuinely requires authorized execution.
 

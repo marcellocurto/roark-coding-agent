@@ -73,7 +73,6 @@ It infers:
     "copyToWorktree": [".secrets/env"]
   },
   "hooks": {
-    "afterCreate": "bun install --frozen-lockfile",
     "beforeRun": "bun install --frozen-lockfile",
     "beforeVerify": "bun install --frozen-lockfile",
     "timeoutMs": 600000
@@ -154,6 +153,7 @@ See [Managed workspaces](managed-workspaces.md).
 | `timeoutMs` | number | n/a | Hook timeout. Defaults to `600000`. |
 
 Hooks must be non-interactive. See [Lifecycle hooks](lifecycle-hooks.md).
+When `roark init` detects a supported package-manager lockfile, it assigns the inferred install command to `beforeRun` and `beforeVerify`. It does not also assign it to `afterCreate`, because a newly created workspace proceeds directly to `beforeRun` without changing dependency inputs.
 
 ## Label Configuration
 

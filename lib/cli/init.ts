@@ -109,7 +109,7 @@ function buildInitConfig(input: { repo: string; verify?: string | undefined; set
     maxFixPasses: defaultMaxFixPasses,
     workspace: workspaceDefaults,
     hooks: {
-      ...(input.setupHook ? { afterCreate: input.setupHook, beforeRun: input.setupHook, beforeVerify: input.setupHook } : {}),
+      ...(input.setupHook ? { beforeRun: input.setupHook, beforeVerify: input.setupHook } : {}),
       timeoutMs: defaultLifecycleHooks.timeoutMs,
     },
     sandbox: { provider: "host" },

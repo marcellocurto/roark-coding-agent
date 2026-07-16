@@ -99,6 +99,20 @@ describe("runInit", () => {
     expect(config["verify"]).toBe("bun run test");
   });
 
+  test("configures inferred dependency setup before runs and verification without duplicating it after creation", async () => {
+    const repo = await tempGitRepo();
+    await writeFile(path.join(repo, "bun.lock"), "", "utf8");
+
+    await initFromArgv(["init", "--cwd", repo, "--repo", "owner/repo"]);
+
+    const config = await readConfig(repo);
+    expect(config["hooks"]).toEqual({
+      beforeRun: "bun install --frozen-lockfile",
+      beforeVerify: "bun install --frozen-lockfile",
+      timeoutMs: defaultLifecycleHooks.timeoutMs,
+    });
+  });
+
   test("--repo overrides origin and Makefile test target is inferred", async () => {
     const repo = await tempGitRepo();
     await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: repo });
