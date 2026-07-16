@@ -121,10 +121,10 @@ export interface ReviewPrCliOptions {
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   thinkingProfile?: ThinkingProfileName | undefined;
-  verifyCommand?: string | undefined;
-  verificationSource: "explicit" | "unresolved";
+  verifyCommand: string;
   comment: boolean;
   workspace?: WorkspaceConfig | undefined;
+  hooks?: LifecycleHooksConfig | undefined;
 }
 
 export interface StatusCliOptions {

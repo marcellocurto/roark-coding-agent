@@ -116,10 +116,10 @@ Paths in normal status output are repository/run relative when possible, and lon
 
 | Option | Purpose |
 | --- | --- |
-| `--verify <cmd>` | Explicitly authorize this verification command. `review-pr` does not load repository config and never infers a command for execution. |
+| `--verify <cmd>` | Override the verification command run before review. Uses `.roark/config.json` and then `bun run typecheck` when omitted, matching `revise-pr`. |
 | `--no-comment` | Complete the local review without publishing a PR comment. |
 
-`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes. It does not load `.roark/config.json`, run lifecycle hooks, or copy host-only workspace files. Pass `--repo` when Git origin does not identify the base repository.
+`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes. It uses the configured workspace, lifecycle hooks, and verification environment, matching `revise-pr`; invoking it therefore authorizes those configured commands against the pinned PR checkout. Pass `--repo` when Git origin does not identify the base repository.
 
 ## PR Revision Options
 

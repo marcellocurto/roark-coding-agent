@@ -88,7 +88,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
     } satisfies InitCliOptions;
   }
 
-  const config = raw.command === "review-pr" ? {} : await loadRoarkConfig(workspace);
+  const config = await loadRoarkConfig(workspace);
   const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo);
   const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
   const hooks = config.hooks ?? defaultLifecycleHooks;
@@ -201,10 +201,10 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
       model: raw.model,
       thinkingLevel: raw.thinkingLevel,
       thinkingProfile: raw.thinkingProfile,
-      verifyCommand: raw.verifyCommand,
-      verificationSource: raw.verifyCommand ? "explicit" : "unresolved",
+      verifyCommand: raw.verifyCommand ?? config.verify ?? defaultAutorunVerifyCommand,
       comment: raw.comment ?? true,
-      workspace: { ...workspaceConfig, copyToWorktree: [] },
+      workspace: workspaceConfig,
+      hooks,
     } satisfies ReviewPrCliOptions;
   }
 

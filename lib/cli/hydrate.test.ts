@@ -242,7 +242,7 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.hooks?.timeoutMs).toBe(2222);
   });
 
-  test("review-pr ignores repository config and accepts only explicit verification", async () => {
+  test("review-pr uses the same configured verification environment as revise-pr", async () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, {
       repo: "attacker/repo",
@@ -254,18 +254,18 @@ describe("hydrateCliOptions", () => {
     if ("help" in configuredRaw) throw new Error("expected options");
     const configured = await hydrateCliOptions(configuredRaw);
     if (configured.command !== "review-pr") throw new Error("expected review-pr options");
-    expect(configured.verifyCommand).toBeUndefined();
-    expect(configured.verificationSource).toBe("unresolved");
+    expect(configured.verifyCommand).toBe("bun run configured-check");
     expect(configured.repo).toBe("owner/repo");
-    expect(configured.workspace?.copyToWorktree).toEqual([]);
+    expect(configured.workspace?.copyToWorktree).toEqual(["local.env"]);
+    expect(configured.hooks?.beforeRun).toBe("bun install");
+    expect(configured.hooks?.timeoutMs).toBe(2222);
 
     const explicitRaw = parseArgs(["review-pr", "12", "--cwd", repo, "--repo", "owner/repo", "--verify", "bun test"]);
     if ("help" in explicitRaw) throw new Error("expected options");
     const explicit = await hydrateCliOptions(explicitRaw);
     if (explicit.command !== "review-pr") throw new Error("expected review-pr options");
     expect(explicit.verifyCommand).toBe("bun test");
-    expect(explicit.verificationSource).toBe("explicit");
-    expect(explicit.workspace?.copyToWorktree).toEqual([]);
+    expect(explicit.workspace?.copyToWorktree).toEqual(["local.env"]);
   });
 
   test("preserves fully-qualified issue refs over config repo unless --repo is explicit", async () => {

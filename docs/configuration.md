@@ -127,7 +127,7 @@ Roark can use this opt-in only after locating and parsing a valid repository `.r
 | `cloneRemote` | string | `origin` | Remote used for clone and fetch behavior. |
 | `clone.filter` | string or null | `blob:none` | Partial clone filter. |
 | `clone.depth` | number or null | `null` | Clone depth. `null` means full history. |
-| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from control checkout into managed workspaces. `review-pr` always ignores this setting. |
+| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from the control checkout into managed workspaces, including PR review and revision workspaces. |
 
 Use `copyToWorktree` for path names only, not secret values:
 
@@ -165,7 +165,7 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 
 For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference. Failed verification consumes the same `maxFixPasses` budget as reviewer-requested fixes.
 
-`review-pr` treats the current checkout as untrusted and does not hydrate behavior from `.roark/config.json`. It uses explicit CLI values, Git origin inference, and built-in workspace defaults; only an explicit `--verify` command may execute against the PR checkout. At the invocation boundary, Roark may separately validate the config and read only `notifications.onExit`; this does not hydrate hooks, verification, or workspace-copy settings.
+`review-pr` and `revise-pr` use CLI `--verify`, then the configured `verify` command, then `bun run typecheck`. Both use the configured managed workspace and lifecycle hooks. The verification command runs against the PR checkout, so invoke these commands only for PR code you trust to execute in that environment.
 
 Good examples:
 

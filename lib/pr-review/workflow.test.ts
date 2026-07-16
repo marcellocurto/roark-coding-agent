@@ -27,7 +27,7 @@ describe("runPrReview", () => {
       cwd: "/tmp/control",
       outDir: ".roark/runs",
       repo: "owner/repo",
-      verificationSource: "unresolved",
+      verifyCommand: "true",
       comment: false,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -64,7 +64,6 @@ describe("runPrReview", () => {
       outDir: ".roark/runs",
       repo: "owner/repo",
       verifyCommand: "bun test",
-      verificationSource: "explicit",
       comment: true,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -124,6 +123,8 @@ describe("runPrReview", () => {
     const agentCalls: AgentRunRequest[] = [];
     let preparedCopyToWorktree: string[] | undefined;
     let preparedRepositoryUrl: string | undefined;
+    let preparedBeforeVerifyHook: string | undefined;
+    const lifecycleCalls: string[] = [];
 
     await runPrReview({
       command: "review-pr",
@@ -132,15 +133,16 @@ describe("runPrReview", () => {
       outDir: ".roark/runs",
       repo: "owner/repo",
       verifyCommand: "bun test",
-      verificationSource: "explicit",
       comment: false,
       workspace: { ...defaultWorkspaceConfig, copyToWorktree: ["local.env"] },
+      hooks: { beforeRun: "bun install", beforeVerify: "bun run setup-tests", afterRun: "echo done", timeoutMs: 1234 },
     }, {
       fetchFeedback: async () => (await noopAsync(), feedback),
       prepareWorkspace: async (input) => {
         await noopAsync();
         preparedCopyToWorktree = input.workspace.copyToWorktree;
         preparedRepositoryUrl = input.repositoryUrl;
+        preparedBeforeVerifyHook = input.hooks.beforeVerify;
         return {
           path: agent,
           metadata: { path: agent, strategy: "clone", cloneRemote: "origin", createdNow: false },
@@ -155,7 +157,10 @@ describe("runPrReview", () => {
           releaseLock: async () => { await noopAsync(); },
         };
       },
-      runLifecycleHook: async () => { await noopAsync(); },
+      runLifecycleHook: async (name, hooks) => {
+        await noopAsync();
+        lifecycleCalls.push(`${name}:${String(hooks?.timeoutMs)}`);
+      },
       assertWorkspace: async () => { await noopAsync(); },
       verificationRunner: async ({ command }) => (await noopAsync(), { ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
       agentRunner: async (request) => {
@@ -165,8 +170,10 @@ describe("runPrReview", () => {
       },
     });
 
-    expect(preparedCopyToWorktree).toEqual([]);
+    expect(preparedCopyToWorktree).toEqual(["local.env"]);
     expect(preparedRepositoryUrl).toBe("https://github.com/owner/repo");
+    expect(preparedBeforeVerifyHook).toBe("bun run setup-tests");
+    expect(lifecycleCalls).toEqual(["beforeRun:1234", "beforeVerify:1234", "afterRun:1234"]);
     expect(agentCalls).toHaveLength(2);
     expect(agentCalls.every((call) => !call.fileEditingToolsEnabled)).toBe(true);
     expect(agentCalls.every((call) => call.customTools === undefined)).toBe(true);
@@ -219,7 +226,7 @@ describe("runPrReview", () => {
       cwd: control,
       outDir: ".roark/runs",
       repo: "owner/repo",
-      verificationSource: "unresolved",
+      verifyCommand: "true",
       comment: false,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -263,7 +270,6 @@ describe("runPrReview", () => {
       outDir: ".roark/runs",
       repo: "owner/repo",
       verifyCommand: "bun test",
-      verificationSource: "explicit",
       comment: false,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -309,7 +315,7 @@ describe("runPrReview", () => {
       cwd: control,
       outDir: ".roark/runs",
       repo: "owner/repo",
-      verificationSource: "unresolved",
+      verifyCommand: "true",
       comment: true,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -350,7 +356,7 @@ describe("runPrReview", () => {
       cwd: control,
       outDir: ".roark/runs",
       repo: "owner/repo",
-      verificationSource: "unresolved",
+      verifyCommand: "true",
       comment: true,
       workspace: defaultWorkspaceConfig,
     }, {
@@ -390,7 +396,7 @@ describe("runPrReview", () => {
       cwd: control,
       outDir: ".roark/runs",
       repo: "owner/repo",
-      verificationSource: "unresolved",
+      verifyCommand: "true",
       comment: false,
       workspace: defaultWorkspaceConfig,
     }, {

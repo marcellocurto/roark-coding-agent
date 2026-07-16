@@ -15,7 +15,6 @@ import {
   preparePrReviewWorkspace,
   runLifecycleHook,
   type PreparedPrReviewWorkspace,
-  type WorkspaceConfig,
 } from "../autorun/workspace.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { fetchPullRequestFeedback, isRoarkGeneratedPrSummaryComment, type PullRequestClosingIssue, type PullRequestFeedback } from "../github/pr.ts";
@@ -37,7 +36,6 @@ import {
   writePrReviewJson,
 } from "./artifacts.ts";
 import { prReviewPrompt } from "./prompts.ts";
-import { resolvePrReviewVerification } from "./verification.ts";
 
 export interface PrReviewResult {
   outcome: "completed" | "blocked";
@@ -62,9 +60,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber });
   validateReviewablePr(initial);
   presenter().transition("Review preparation", `PR #${initial.pr.number}`, { operation: "inspect" });
-  const hooks = defaultLifecycleHooks;
+  const hooks = options.hooks ?? defaultLifecycleHooks;
   const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
-  const workspace = prReviewWorkspaceConfig(options.workspace ?? defaultWorkspaceConfig);
+  const workspace = options.workspace ?? defaultWorkspaceConfig;
   const prepared = await prepareWorkspace({
     controlCwd: options.cwd,
     repo: initial.repo,
@@ -93,53 +91,31 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     await writePrReviewInputArtifact(context, "pr-context.md", formatPrContext(initial, closingIssues));
     await writePrReviewInputJson(context, "comparison.json", prepared.comparison);
 
-    const resolvedVerification = await resolvePrReviewVerification({
-      cwd: context.agentCwd,
-      command: options.verifyCommand,
-      source: options.verificationSource,
-    });
-
     let verification: VerificationResult | undefined;
-    if (resolvedVerification.command) {
-      await hookRunner("beforeVerify", hooks, context.agentCwd);
-      try {
-        verification = await runVerification({
-          command: resolvedVerification.command,
-          cwd: context.agentCwd,
-          runner: deps.verificationRunner,
-          display: { target: `PR #${context.prNumber}`, repository: context.repo, pass: context.generation },
-        });
-        await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
-        await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
-        presenter().artifact(path.join(context.reviewDirRelative, "verification.md"));
-        const classification = classifyVerificationFailure(verification);
-        if (!verification.ok) {
-          presenter().line(`ACTION user action required for verification: ${classification.recoveryGuidance ?? classification.reason}`);
-        }
-      } catch (error) {
-        const reason = `Verification could not run: ${errorMessage(error)}`;
-        await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`);
+    await hookRunner("beforeVerify", hooks, context.agentCwd);
+    try {
+      verification = await runVerification({
+        command: options.verifyCommand,
+        cwd: context.agentCwd,
+        runner: deps.verificationRunner,
+        display: { target: `PR #${context.prNumber}`, repository: context.repo, pass: context.generation },
+      });
+      await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
+      await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
+      presenter().artifact(path.join(context.reviewDirRelative, "verification.md"));
+      const classification = classifyVerificationFailure(verification);
+      if (!verification.ok) {
+        presenter().line(`ACTION user action required for verification: ${classification.recoveryGuidance ?? classification.reason}`);
       }
-      await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
-    } else {
-      await writePrReviewInputArtifact(context, "verification.md", [
-        "# Verification",
-        "",
-        "## Status",
-        "Not configured",
-        "",
-        "## Reason",
-        resolvedVerification.reason ?? "No verification command was configured.",
-        ...(resolvedVerification.suggestedCommand ? ["", "## Suggested Explicit Command", `\`${resolvedVerification.suggestedCommand}\``] : []),
-        "",
-      ].join("\n"));
+    } catch (error) {
+      const reason = `Verification could not run: ${errorMessage(error)}`;
+      await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`);
     }
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
 
     await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
       outcome: "reviewing",
-      verificationSource: resolvedVerification.source,
-      verificationCommand: resolvedVerification.command,
-      suggestedVerificationCommand: resolvedVerification.suggestedCommand,
+      verificationCommand: options.verifyCommand,
     }));
 
     const runner = deps.agentRunner ?? runPiAgent;
@@ -318,12 +294,6 @@ function formatPrContext(feedback: PullRequestFeedback, closingIssues: PullReque
     })),
   ];
   return `${lines.join("\n")}\n`;
-}
-
-function prReviewWorkspaceConfig(workspace: WorkspaceConfig): WorkspaceConfig {
-  if (workspace.copyToWorktree.length === 0) return workspace;
-  presenter().warning("skipping workspace.copyToWorktree: review-pr never copies host-only files into a PR checkout");
-  return { ...workspace, copyToWorktree: [] };
 }
 
 function listOrNone(values: string[]): string[] {

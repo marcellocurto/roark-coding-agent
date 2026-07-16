@@ -25,7 +25,7 @@ lastUpdated: 2026-05-08T07:00:00Z
 
 For dependency installation, prefer `beforeRun` and `beforeVerify`. A fresh workspace runs `beforeRun` immediately after creation, so configuring the same install command in both `afterCreate` and `beforeRun` only repeats setup. Reserve `afterCreate` for setup that must run exactly once when the workspace is first created.
 
-`review-pr` does not load repository configuration or run lifecycle hooks. Use an explicit `--verify` command when a PR review genuinely requires authorized execution.
+`review-pr` uses the same configured lifecycle hooks and verification setup as `revise-pr`. Hooks and verification run against the pinned PR checkout.
 
 ## Timeout
 
