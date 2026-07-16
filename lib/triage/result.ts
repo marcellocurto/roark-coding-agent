@@ -4,6 +4,15 @@ import type { StructuredArtifactDefinition } from "../structured-output/runner.t
 
 const nonEmptyString = (description: string) => Type.String({ minLength: 1, description });
 
+const triageClaimVerification = {
+  confirmed: "confirmed",
+  notReproduced: "not-reproduced",
+  insufficientDetail: "insufficient-detail",
+  notApplicable: "not-applicable",
+} as const;
+
+export const triageClaimVerificationValues = Object.values(triageClaimVerification);
+
 export const triageResultSchema = Type.Object({
   verdict: Type.Union([
     Type.Literal("proceed"),
@@ -12,12 +21,7 @@ export const triageResultSchema = Type.Object({
     Type.Literal("needs-human-decision"),
   ]),
   reasoning: nonEmptyString("Concise reasoning for the triage verdict."),
-  claimVerification: Type.Union([
-    Type.Literal("confirmed"),
-    Type.Literal("not-reproduced"),
-    Type.Literal("insufficient-detail"),
-    Type.Literal("not-applicable"),
-  ]),
+  claimVerification: Type.Enum(triageClaimVerification),
   evidence: Type.Array(nonEmptyString("Concrete repository or issue evidence supporting the verdict."), { minItems: 1 }),
   establishedFacts: Type.Array(nonEmptyString("Fact established by the issue or repository inspection.")),
   blockingQuestions: Type.Array(nonEmptyString("Specific question that must be answered before proceeding.")),
