@@ -53,7 +53,7 @@ describe("operational presentation", () => {
     expect(captured.output().split("\n").filter(Boolean).every((line) => Array.from(line).length <= 40)).toBe(true);
   });
 
-  test("keeps failures textual and separates wall time from verbose aggregate tool time", () => {
+  test("scopes tool errors to the activity and reserves FAILED for the phase outcome", () => {
     const captured = capture();
     const times = [0, 1_000];
     const presenter = new Presenter({ stream: captured.stream, verbose: true, now: () => times.shift() ?? 1_000 });
@@ -61,7 +61,8 @@ describe("operational presentation", () => {
     presenter.activity(display, "bash bun test", { failed: true, durationMs: 300 });
     presenter.phaseCompleted(display, { outcome: "tests failed", failed: true });
 
-    expect(captured.output()).toContain("FAILED Implementation · bash bun test");
+    expect(captured.output()).toContain("Implementation · tool error: bash bun test");
+    expect(captured.output()).not.toContain("FAILED Implementation · bash bun test");
     expect(captured.output()).toContain("FAILED #140 · Implementation · tests failed · 1 tool · 1s");
     expect(captured.output()).toContain("aggregate tool execution 300ms");
   });

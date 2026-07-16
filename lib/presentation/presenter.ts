@@ -133,7 +133,8 @@ export class Presenter {
       phase.toolCount++;
       phase.aggregateToolMs += Math.max(0, input.durationMs);
     }
-    this.subline("", `${input.failed ? `FAILED ${context.phaseLabel}` : context.phaseLabel} · ${summary} (${formatToolDuration(input.durationMs)})`);
+    const activity = input.failed ? `tool error: ${summary}` : summary;
+    this.subline("", `${context.phaseLabel} · ${activity} (${formatToolDuration(input.durationMs)})`);
   }
 
   phaseCompleted(context: AgentDisplayContext, input: { outcome?: string | undefined; artifact?: string | undefined; failed?: boolean | undefined; manageTitle?: boolean | undefined } = {}): void {
