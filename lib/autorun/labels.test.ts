@@ -17,6 +17,7 @@ describe("autorun label contract", () => {
       ["success", "roark-pr-opened"],
       ["triage-blocked", "blocked"],
       ["triage-needs-human", "needs-human"],
+      ["triage-rejected", "triage-rejected"],
     ]);
   });
 
@@ -26,6 +27,6 @@ describe("autorun label contract", () => {
       inProgressLabel: "busy",
       failureLabel: "failed",
       successLabel: "opened",
-    })).toEqual(["custom-skip", "busy", "failed", "opened", "blocked", "needs-human"]);
+    })).toEqual(["custom-skip", "busy", "failed", "opened", "blocked", "needs-human", "triage-rejected"]);
   });
 });

@@ -20,16 +20,17 @@ Autorun is label-gated. An open issue is eligible only when both are true:
 | --- | --- | --- | --- |
 | `afk` | Ready label | Opts an issue into autorun eligibility when no skip label is present. | `--label` |
 | `blocked` | Skip/status label | Prevents autorun from selecting the issue; also used for terminal blocked triage outcomes. | `--skip-label` / `--skip-labels` |
-| `needs-human` | Skip/status label | Prevents autorun from selecting the issue; also used for terminal human-decision/reject outcomes. | `--skip-label` / `--skip-labels` |
+| `needs-human` | Skip/status label | Prevents autorun from selecting the issue; also used for terminal human-decision outcomes. | `--skip-label` / `--skip-labels` |
+| `triage-rejected` | Skip/status label | Prevents autorun from selecting the issue; applied when triage rejects the issue. | `--skip-label` / `--skip-labels` |
 | `wontfix` | Skip label | Prevents autorun from selecting the issue. | `--skip-label` / `--skip-labels` |
 | `roark-in-progress` | Claim label and skip label | Applied when Roark claims an issue so concurrent runs skip it. | `--in-progress-label`; replacements are always added to the effective skip set |
 | `roark-failed` | Failure label and skip label | Applied when readiness or verification fails. | `--failure-label`; replacements are always added to the effective skip set |
 | `roark-pr-opened` | Success label and skip label | Applied after Roark opens a PR. | `--success-label`; replacements are always added to the effective skip set |
 | `roark-ready-for-review` | Skip label | Prevents autorun from selecting issues already awaiting human review. | `--skip-label` / `--skip-labels` |
 
-Default skip set: `blocked`, `needs-human`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened`.
+Default skip set: `blocked`, `needs-human`, `triage-rejected`, `wontfix`, `roark-in-progress`, `roark-failed`, `roark-ready-for-review`, `roark-pr-opened`.
 
-Before `auto` performs discovery, targeted issue fetch, claim, branch setup, or agent work, Roark verifies that the required repository labels exist: ready, in-progress, failure, success, `blocked`, and `needs-human`. Missing required labels are created with Roark-owned default colors/descriptions. Existing labels are not modified. `--dry-run` reports missing required labels without creating them. Custom skip-only labels are observed for selection but are not auto-created unless they are also one of the required lifecycle/status labels.
+Before `auto` performs discovery, targeted issue fetch, claim, branch setup, or agent work, Roark verifies that the required repository labels exist: ready, in-progress, failure, success, `blocked`, `needs-human`, and `triage-rejected`. Missing required labels are created with Roark-owned default colors/descriptions. Existing labels are not modified. `--dry-run` reports missing required labels without creating them. Custom skip-only labels are observed for selection but are not auto-created unless they are also one of the required lifecycle/status labels.
 
 ## Generated issue labels
 
@@ -62,6 +63,7 @@ When changing in-progress, success, or failure labels, Roark appends those lifec
 | Failed readiness or verification | `roark-failed` | Operator should inspect artifacts and use `roark continue`. |
 | Blocked by triage or external condition | `blocked` | Autorun skips it until a human changes labels or scope. |
 | Needs human decision | `needs-human` | Autorun skips it until a human resolves the decision. |
+| Rejected by triage | `triage-rejected` | Autorun skips it unless the issue is revised and the label is removed. |
 
 ## Operational checks
 

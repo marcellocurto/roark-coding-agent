@@ -19,6 +19,7 @@ export const defaultAutorunInProgressLabel = "roark-in-progress";
 export const defaultAutorunSkipLabels = [
   "blocked",
   "needs-human",
+  "triage-rejected",
   "wontfix",
   "roark-in-progress",
   "roark-failed",

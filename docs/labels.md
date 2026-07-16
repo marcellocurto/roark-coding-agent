@@ -13,14 +13,14 @@ Common defaults:
 - `roark-in-progress`: claimed by Roark.
 - `roark-failed`: stopped at readiness or verification.
 - `roark-pr-opened`: PR opened.
-- `blocked`, `needs-human`, `wontfix`: skip/status labels.
+- `blocked`, `needs-human`, `triage-rejected`, `wontfix`: skip/status labels.
 
 Common lifecycle:
 
 ```text
 afk -> roark-in-progress -> roark-pr-opened
                        \-> roark-failed
-                       \-> blocked or needs-human
+                       \-> blocked, needs-human, or triage-rejected
 ```
 
 Use [Troubleshooting](troubleshooting.md#no-eligible-issues) when autorun does not select the expected issue.

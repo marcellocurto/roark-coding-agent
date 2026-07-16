@@ -1,5 +1,5 @@
 import { runProcessOrThrow } from "../cli/process.ts";
-import { formatArtifactDetails, formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseVerdict } from "../workflow/verdicts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
@@ -32,29 +32,15 @@ export function parseTriageStoppedVerdict(markdown: string): TriageStoppedVerdic
   return parseVerdict(markdown) ?? "unknown";
 }
 
-export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" {
+export function mapTriageVerdictToLabel(verdict: TriageStoppedVerdict): "blocked" | "needs-human" | "triage-rejected" {
   if (verdict === "blocked") return "blocked";
+  if (verdict === "reject") return "triage-rejected";
   return "needs-human";
 }
 
 export function formatTriageStoppedComment(input: FormatTriageStoppedCommentInput): string {
-  const issueDisplay = input.issueUrl ?? `#${input.issueNumber}`;
-  const lines: string[] = [];
-  lines.push(
-    `Roark stopped issue ${issueDisplay} during triage with verdict **${input.triageVerdict}**.`,
-    "",
-    "This is a clean terminal triage outcome, so Roark did not run verification, push the branch, or create a PR.",
-  );
-
-  const artifacts: string[] = [];
-  if (input.triageArtifactPath) artifacts.push(`Triage artifact: \`${input.triageArtifactPath}\``);
-  if (input.attemptMetadataPath) artifacts.push(`Attempt: \`${input.attemptMetadataPath}\``);
-  if (artifacts.length > 0) lines.push("", formatArtifactDetails(artifacts));
-  if (input.triageArtifactContent) {
-    lines.push("", formatBoundedMarkdownDetails("Triage artifact excerpt", sanitizePublicMarkdown(input.triageArtifactContent)));
-  }
-
-  return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
+  if (!input.triageArtifactContent?.trim()) return "";
+  return truncateGitHubIssueComment(`${sanitizePublicMarkdown(input.triageArtifactContent).trimEnd()}\n`);
 }
 
 export function buildTriageStopAddLabelArgv(options: { repo?: string | undefined; issueNumber: number; label: string }): string[] {

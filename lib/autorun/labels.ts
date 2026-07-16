@@ -15,6 +15,7 @@ export type EnsureAutorunLabelContractOptions = AutorunLabelContractInput & {
 
 export const autorunBlockedLabel = "blocked";
 export const autorunNeedsHumanLabel = "needs-human";
+export const autorunTriageRejectedLabel = "triage-rejected";
 
 export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): RequiredGitHubLabel[] {
   return uniqueLabels([
@@ -56,6 +57,12 @@ export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): Re
       color: "FBCA04",
       description: "Status label for issues requiring human review, decision, or clarification.",
     },
+    {
+      role: "triage-rejected",
+      name: autorunTriageRejectedLabel,
+      color: "B60205",
+      description: "Status label for issues rejected during Roark triage.",
+    },
   ]);
 }
 
@@ -81,6 +88,7 @@ export function mergeLifecycleSkipLabels(input: {
     input.successLabel,
     autorunBlockedLabel,
     autorunNeedsHumanLabel,
+    autorunTriageRejectedLabel,
   ]);
 }
 

@@ -54,6 +54,7 @@ It infers:
   "skipLabels": [
     "blocked",
     "needs-human",
+    "triage-rejected",
     "wontfix",
     "roark-in-progress",
     "roark-failed",
