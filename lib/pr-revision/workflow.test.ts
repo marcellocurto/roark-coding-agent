@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
@@ -14,8 +14,20 @@ import type { TerminalStream } from "../presentation/terminal.ts";
 import { runPrRevision, type RunPrRevisionDependencies } from "./workflow.ts";
 import { parseRevisionExecutionResultJson } from "./execution.ts";
 
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+async function trackedTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(path.join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
 async function tempGitRepo(): Promise<string> {
-  const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-workflow-"));
+  const cwd = await trackedTempDir("roark-pr-workflow-");
   await Bun.spawn(["git", "init"], { cwd }).exited;
   await Bun.spawn(["git", "config", "user.email", "roark@example.invalid"], { cwd }).exited;
   await Bun.spawn(["git", "config", "user.name", "Roark Test"], { cwd }).exited;
@@ -422,7 +434,7 @@ describe("runPrRevision", () => {
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
     await noopAsync();
     const control = await tempGitRepo();
-    const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
+    const remote = await trackedTempDir("roark-pr-remote-");
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
     await run(["git", "remote", "add", "origin", remote], control);
     const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
@@ -535,7 +547,7 @@ describe("runPrRevision", () => {
   });
 
   test("successful isolated revision preserves the control checkout, uses configured remote, and excludes ignored run artifacts", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "roark-pr-isolated-"));
+    const root = await trackedTempDir("roark-pr-isolated-");
     const seed = path.join(root, "seed");
     const remote = path.join(root, "remote.git");
     const control = path.join(root, "control");
@@ -606,7 +618,7 @@ describe("runPrRevision", () => {
   test("successful verification commits, pushes, and comments once", async () => {
     await noopAsync();
     const control = await tempGitRepo();
-    const remote = await mkdtemp(path.join(tmpdir(), "roark-pr-remote-"));
+    const remote = await trackedTempDir("roark-pr-remote-");
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
     await run(["git", "remote", "add", "origin", remote], control);
     const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
