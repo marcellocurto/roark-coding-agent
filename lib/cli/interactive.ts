@@ -17,18 +17,27 @@ type WritableOutput = NodeJS.WriteStream | { write(text: string): unknown };
 
 const menu = `Issue workflows
 1. Work on next ready issue
+   → roark auto
 2. Work on a specific issue
+   → roark auto <issue>
 3. Resume an issue workflow
+   → roark continue <issue>
 4. Run issue workflow in current checkout
+   → roark do <issue>
 
 Pull requests
 5. Review an existing PR
+   → roark review-pr <number>
 6. Address PR review feedback
+   → roark revise-pr <number>
 
 Management
 7. View workflow status
+   → roark status <issue>
 8. Remove a managed workspace
+   → roark remove
 9. Help and command reference
+   → roark --help
 `;
 
 export async function resolveInteractiveArgv(options: {

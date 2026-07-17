@@ -29,7 +29,7 @@ describe("promptForInteractiveArgv", () => {
     const { prompt, output } = scriptedPrompt(["1", "yes"]);
 
     expect(promptForInteractiveArgv(prompt)).resolves.toEqual(["auto"]);
-    expect(output.join("")).toContain("1. Work on next ready issue");
+    expect(output.join("")).toContain("1. Work on next ready issue\n   → roark auto");
   });
 
   test("maps confirmed auto issue to argv and retries empty issue input", async () => {
