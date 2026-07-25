@@ -1,27 +1,26 @@
 # roark-coding-agent
 
-Roark turns GitHub issues into reviewed, verified pull requests using coding-agent workflows.
+Roark is a CLI for running coding agents against GitHub issues and pull requests.
 
-It is a CLI runner around the Pi coding-agent SDK. Roark plans and implements changes, runs independent reviews and repair passes, records durable artifacts, and publishes only after readiness and repository verification pass.
+It can:
 
-## Key guarantees
+- work on one issue in your current checkout with `roark do`
+- claim a ready issue, work in an isolated checkout, and open a pull request with `roark auto`
+- review an existing pull request without changing it with `roark review-pr`
+- apply existing review feedback with `roark revise-pr`
 
-- Automated publishing work runs in managed clone workspaces, isolated from the control checkout.
-- Independent reviewers check correctness and maintainability before publishing.
-- Review findings and verification failures can trigger bounded repair passes.
-- Durable artifacts under `.roark/runs` explain decisions and support recovery.
-- Roark never merges pull requests or closes issues; humans retain final control.
+Roark writes each run to `.roark/runs`. Autorun opens a pull request only when `readiness.json` reports `ready-for-pr` and the repository's verification command passes. Roark does not merge pull requests or close issues.
 
-Roark is one-shot automation, not a daemon. Use a scheduler when you want repeated autoruns.
+Roark runs once and exits. Use cron, `launchd`, or GitHub Actions to run it on a schedule.
 
 ## Install
 
-Prerequisites:
+You need:
 
 - Bun
 - Git
-- GitHub CLI authenticated with `gh auth status`
-- GitHub permissions to read and comment on issues, manage workflow labels, push branches, and open pull requests
+- an authenticated GitHub CLI
+- permission to read issues, manage labels, push branches, and open pull requests
 
 ```bash
 git clone https://github.com/marcellocurto/roark-coding-agent.git
@@ -34,9 +33,9 @@ roark --version
 
 For servers, pin a tag or commit before installing globally.
 
-## First run
+## Try it on one issue
 
-From the target repository checkout, initialize Roark and run one explicit issue locally:
+Run this from the repository you want to change:
 
 ```bash
 cd /path/to/target-repo
@@ -44,63 +43,77 @@ roark init
 roark do 123 --repo owner/repo
 ```
 
-`roark do` edits the current target checkout and writes run artifacts locally. It does not claim the issue, push a branch, or open a pull request, so it is a useful first run before enabling automation.
+`roark do` edits the current checkout. It does not assign the issue, push a branch, or open a pull request.
 
-For the complete setup, dry-run, autorun, inspection, and recovery path, read the [Quickstart](docs/quickstart.md).
-
-## Choose a command
-
-Running `roark` without arguments opens an interactive menu with the same task names shown below.
-
-| Command name | Command | Description |
-| --- | --- | --- |
-| Initialize Roark | `roark init` | Create the repository-local `.roark` configuration. |
-| Work on next ready issue | `roark auto --repo owner/repo` | Select and claim the next eligible issue, run the workflow in a managed workspace, and open a PR after all gates pass. |
-| Work on a specific issue | `roark auto 123 --repo owner/repo` | Claim a specific issue, run the workflow in a managed workspace, and open a PR after all gates pass. |
-| Preview ready issues | `roark auto --repo owner/repo --dry-run` | Show eligible issues without claiming them or changing code. |
-| Resume an issue workflow | `roark continue 123 --repo owner/repo` | Resume a stopped autorun attempt in its managed workspace and publish after all gates pass. |
-| Run issue workflow in current checkout | `roark do 123 --repo owner/repo` | Run the complete issue workflow locally without claiming the issue, pushing a branch, or opening a PR. |
-| Review an existing PR | `roark review-pr 456 --repo owner/repo` | Inspect the complete PR with independent correctness and maintainability reviewers without changing code. Posts each review directly as its own comment by default. |
-| Address PR review feedback | `roark revise-pr 456 --repo owner/repo` | Classify existing PR feedback, apply required fixes in a managed workspace, verify them, and push a revision commit when needed. |
-| View workflow status | `roark status 123 --repo owner/repo` | Show persisted status and recovery information for an issue workflow. Use `--all` to show every known issue run. |
-| Remove managed workspaces | `roark remove` | List this repository's managed workspaces and select one or more to delete. Use `roark remove 123` for issue 123 or `--pr 456` for a PR workspace; dirty workspaces require `--force`. |
-| Help and command reference | `roark --help` | Show every command and option available in the installed version. |
-
-## How it works
-
-For each issue, Roark:
-
-1. Fetches the issue and verifies whether it is actionable.
-2. Creates and refines an implementation plan grounded in the repository.
-3. Applies the change and runs relevant validation.
-4. Runs independent correctness and maintainability reviews.
-5. Applies bounded repair passes when reviews or verification find problems.
-6. Records phase outputs and decisions under `.roark/runs`.
-7. In autorun mode, opens a pull request only after readiness and verification pass, finalizes its body, and automatically runs the read-only PR review workflow.
-
-## Safety boundaries
-
-- GitHub issue text, PR feedback, repository files, and tool output are treated as untrusted input.
-- Lifecycle hooks and verification commands execute shell commands locally; review repository configuration before running Roark.
-- Autorun uses isolated managed workspaces and does not merge pull requests or close issues.
-- Use the least-privileged GitHub account that can perform the required workflow.
-
-Read [Security and secrets](docs/security-and-secrets.md) before running Roark on public repositories, shared hosts, or unattended schedules.
-
-## Essential documentation
-
-- [Quickstart](docs/quickstart.md) — install, initialize, run one issue, inspect results, and recover.
-- [Concepts](docs/concepts.md) — control checkouts, managed workspaces, attempts, gates, and artifacts.
-- [Usage](docs/usage.md) — choose between local runs, autorun, recovery, PR revision, and issue curation.
-- [Configuration](docs/configuration.md) — `.roark/config.json`, verification, hooks, labels, and workspaces.
-- [Operations runbook](docs/operations-runbook.md) — scheduled and shared-host operation.
-- [Troubleshooting](docs/troubleshooting.md) — diagnose stopped or failed runs.
-- [Documentation index](docs/README.md) — complete user, operator, reference, and contributor documentation.
-
-## Local development
+Before using autorun, preview the next eligible issue:
 
 ```bash
+roark auto --repo owner/repo --limit 1 --dry-run
+```
+
+The [Quickstart](docs/quickstart.md) covers repository setup, labels, verification, autorun, and recovery.
+
+## Commands
+
+Run `roark` without arguments to open an interactive menu.
+
+| Command | What it does |
+| --- | --- |
+| `roark init` | Create `.roark/config.json` in the current repository. |
+| `roark do 123 --repo owner/repo` | Work on issue 123 in the current checkout without publishing. |
+| `roark auto --repo owner/repo` | Claim and run the next eligible issue. |
+| `roark auto 123 --repo owner/repo` | Run a specific issue with autorun's labels and publishing behavior. |
+| `roark auto --repo owner/repo --dry-run` | Show eligible issues without claiming or running them. |
+| `roark continue 123 --repo owner/repo` | Resume a stopped autorun attempt. |
+| `roark review-pr 456 --repo owner/repo` | Post separate correctness and maintainability reviews on a PR. |
+| `roark revise-pr 456 --repo owner/repo` | Apply required PR feedback, verify the changes, and push one revision commit. |
+| `roark status 123 --repo owner/repo` | Show the saved status for an issue run. |
+| `roark remove` | List and remove managed workspaces. |
+| `roark --help` | List all commands and options. |
+
+See [Usage](docs/usage.md) and the [CLI reference](docs/cli-reference.md) for flags and detailed behavior.
+
+## Autorun
+
+When you run `roark auto`, Roark:
+
+1. selects an issue using repository labels
+2. claims it and creates an issue branch in a managed checkout
+3. plans and implements the change
+4. runs correctness and maintainability reviews
+5. fixes review or verification failures while attempts remain
+6. opens a pull request after readiness and verification pass
+7. posts a read-only review of the new pull request
+
+If a run stops before publishing, inspect `.roark/runs` and resume it with:
+
+```bash
+roark continue 123 --repo owner/repo
+```
+
+Roark is not a scheduler. See [Scheduling](docs/scheduling.md) to run autorun repeatedly.
+
+## Security
+
+Issue text, PR feedback, and checked-out code are untrusted input. Lifecycle hooks and verification commands run shell commands on the host. They may execute code from the repository or pull request.
+
+Review `.roark/config.json` before running Roark, especially on a shared machine or against an unfamiliar pull request. Do not put secret values in the config or publish `.roark/runs` without checking their contents.
+
+Read [Security and secrets](docs/security-and-secrets.md) before using Roark on a shared host or an unfamiliar repository.
+
+## Documentation
+
+- [Quickstart](docs/quickstart.md): set up a repository and run the first issue
+- [Configuration](docs/configuration.md): configure verification, labels, hooks, and workspaces
+- [Managed workspaces](docs/managed-workspaces.md): understand where Roark checks out and edits code
+- [Artifacts](docs/artifacts.md): inspect run results and recovery state
+- [Troubleshooting](docs/troubleshooting.md): diagnose failed or stopped runs
+- [Documentation index](docs/README.md): browse all documentation
+
+## Development
+
+```bash
+bun install
 bun run roark.ts --help
-bun run roark.ts do 123 --repo owner/repo
 bun run check
 ```
