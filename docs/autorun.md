@@ -1,8 +1,8 @@
 ---
 title: Autorun
-summary: End-to-end behavior of `roark auto`, including issue selection, claiming, gates, and PR publishing.
+summary: How `roark auto` selects issues and opens pull requests.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-16T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ```bash
@@ -21,16 +21,16 @@ roark auto --repo owner/repo --limit 1
 8. Run the verification gate.
 9. If verification fails and `maxFixPasses` has budget, repair through a fix pass, code refinement, numbered Review A/B, and readiness, then rerun verification.
 10. On success, commit code changes and push the branch.
-11. A PR authoring agent submits a schema-validated draft from canonical workflow artifacts, the Git-derived changed-file list, and the authoritative verification result. Roark persists `pr-draft.json`, deterministically renders the Markdown, and opens the PR with `gh`.
-12. Reviewer-generated follow-up issue drafts are submitted as structured data. Roark renders and publishes them, then rerenders the PR body from `pr-draft.json` with their links and updates it directly.
-13. After the PR body is final, Roark automatically runs the pinned, read-only `review-pr` workflow and posts its correctness and maintainability reviews to the opened PR.
-14. On exhausted-budget or non-repairable failure, leave work uncommitted and post recovery information.
+11. Draft the PR from the run artifacts, changed-file list, and verification result. Save it as `pr-draft.json` and `pr-draft.md`, then open the PR with `gh`.
+12. Publish any follow-up issues and add their links to the PR body.
+13. Run `review-pr` against the opened PR and post the correctness and maintainability reviews.
+14. If the run cannot be repaired within the fix budget, leave the work uncommitted and post recovery information.
 
-The PR is already published before its automatic review begins. A review that fails operationally or becomes stale preserves its local review artifacts and reports a warning, but does not misreport the successful PR publication as a failed attempt. Run `roark review-pr <number>` to retry a fresh review.
+The automatic review happens after publication. If it fails or the PR changes while it is running, the PR stays open and the review artifacts remain local. Retry with `roark review-pr <number>`.
 
-## Recommended posture
+## Running safely
 
-Keep `--limit 1` while building trust. Roark is intentionally one-shot; use an external scheduler if you want periodic execution.
+Start with `--limit 1`. Each invocation runs once; use cron, launchd, GitHub Actions, or another scheduler for repeated runs.
 
 ## Selection labels
 
@@ -38,11 +38,11 @@ The default ready label is `ready-for-agent`. The default skip set includes inta
 
 See [Label semantics](label-semantics.md) for the full label reference.
 
-## Safety boundaries
+## What autorun does not do
 
-Autorun never merges PRs or closes issues. A human reviewer remains responsible for reviewing PRs and merging them.
+Autorun does not merge PRs or close issues.
 
-## Useful commands
+## Commands
 
 Preview selection:
 
@@ -61,9 +61,3 @@ Inspect status after a background run:
 ```bash
 roark status 123 --repo owner/repo
 ```
-
-## Next steps
-
-- Use [Quickstart](quickstart.md) before the first autorun.
-- Use [Scheduling](scheduling.md) and [Operations runbook](operations-runbook.md) before repeated runs.
-- Use [Troubleshooting](troubleshooting.md#no-eligible-issues) when selection is surprising.

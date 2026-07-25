@@ -1,11 +1,11 @@
 ---
 title: Roark documentation
-summary: Start page and navigation map for Roark user, operator, reference, and contributor documentation.
+summary: Install, configure, run, and operate Roark.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 roark init
@@ -15,7 +15,7 @@ roark do 123 --repo owner/repo
 
 For the full first-run path, read [Quickstart](quickstart.md).
 
-## Start Here
+## Start here
 
 - [Quickstart](quickstart.md) - install, initialize a target repository, run one issue, inspect results, and recover.
 - [Concepts](concepts.md) - control checkout, managed workspace, attempt, readiness gate, verification gate, and artifacts.
@@ -52,21 +52,3 @@ For the full first-run path, read [Quickstart](quickstart.md).
 - [Architecture](architecture.md) - contributor-level module and workflow overview.
 - [Versioning](versioning.md) - SemVer policy, changelog expectations, and release checklist.
 - [Docs maintenance](docs-maintenance.md) - checks to keep docs aligned with CLI behavior.
-
-## By role
-
-### Repository user
-
-Read [Quickstart](quickstart.md), [Concepts](concepts.md), [Configuration](configuration.md), [Managed workspaces](managed-workspaces.md), and [Verification](verification.md).
-
-### Operator
-
-Read [Operations runbook](operations-runbook.md), [Autorun](autorun.md), [Recovery](recovery.md), [Scheduling](scheduling.md), [Security and secrets](security-and-secrets.md), and [Troubleshooting](troubleshooting.md).
-
-### Contributor
-
-Read [Architecture](architecture.md), [Artifacts](artifacts.md), [CLI reference](cli-reference.md), [PR revisions](pr-revisions.md), [Labels](labels.md), [Versioning](versioning.md), and [Docs maintenance](docs-maintenance.md).
-
-## Navigation Metadata
-
-`docs/docs.json` contains the same top-level navigation groups for future docs-site generation or link checks.

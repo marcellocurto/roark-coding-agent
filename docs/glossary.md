@@ -2,7 +2,7 @@
 title: Glossary
 summary: Definitions for common Roark terms.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:08:01Z
 ---
 
 ## Agent Phase
@@ -47,7 +47,7 @@ An isolated clone where Roark runs the agent and verification away from the cont
 
 ## Readiness Gate
 
-The gate that validates `readiness.json` and requires its structured decision status to be `ready-for-pr`.
+The gate that checks whether `readiness.json` has `"status": "ready-for-pr"`.
 
 ## PR Review Generation
 

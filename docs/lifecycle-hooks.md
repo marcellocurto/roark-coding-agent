@@ -1,8 +1,8 @@
 ---
 title: Lifecycle hooks
-summary: Reference for workspace lifecycle hooks such as dependency installation and pre-verification setup.
+summary: Run setup commands at specific points in a Roark workflow.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ```json
@@ -23,7 +23,7 @@ lastUpdated: 2026-05-08T07:00:00Z
 - `afterRun`: runs after workflow completion; failures warn instead of stopping the run.
 - `beforeRemove`: runs before workspace removal; failures warn instead of stopping removal.
 
-For dependency installation, prefer `beforeRun` and `beforeVerify`. A fresh workspace runs `beforeRun` immediately after creation, so configuring the same install command in both `afterCreate` and `beforeRun` only repeats setup. Reserve `afterCreate` for setup that must run exactly once when the workspace is first created.
+Put dependency installation in `beforeRun` and `beforeVerify`. A new workspace runs `beforeRun` immediately after creation, so putting the same command in `afterCreate` only runs it twice. Use `afterCreate` for one-time setup.
 
 `review-pr` uses the same configured lifecycle hooks and verification setup as `revise-pr`. Hooks and verification run against the pinned PR checkout.
 
@@ -31,13 +31,13 @@ For dependency installation, prefer `beforeRun` and `beforeVerify`. A fresh work
 
 `timeoutMs` controls hook timeout. The default is `600000` milliseconds.
 
-## Good uses
+## Use hooks for
 
 - Install dependencies.
 - Generate local build artifacts required by verification.
 - Run lightweight setup checks.
 
-## Avoid
+## Do not use hooks for
 
 - Writing secrets into Git-tracked files.
 - Long-running daemons.
@@ -45,9 +45,3 @@ For dependency installation, prefer `beforeRun` and `beforeVerify`. A fresh work
 - Commands that mutate unrelated host state.
 
 For ignored local file copying, prefer `workspace.copyToWorktree`. See [Managed workspaces](managed-workspaces.md).
-
-## Next steps
-
-- Use [Configuration](configuration.md#hook-keys) for the hook reference table.
-- Use [Verification](verification.md#hooks-before-verification) for pre-verification setup.
-- Use [Security and secrets](security-and-secrets.md#threat-boundaries) before adding hooks on shared hosts.

@@ -1,8 +1,8 @@
 ---
 title: Quickstart
-summary: First-run path from installation to a successful Roark issue workflow.
+summary: Install Roark and use it on your first issue.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ## Prerequisites
@@ -37,7 +37,7 @@ roark --help
 
 For persistent servers, pin the checkout to a tag or commit before installing globally.
 
-## Initialize a Target Repository
+## Initialize the target repository
 
 Run `roark init` from the target repository checkout:
 
@@ -63,7 +63,7 @@ Open `.roark/config.json` and confirm:
 
 See [Configuration](configuration.md) for the full config reference.
 
-## Confirm Labels
+## Add the ready label
 
 Roark's autorun mode is label-gated. The default ready label is `ready-for-agent`.
 
@@ -77,7 +77,7 @@ Roark creates required lifecycle labels during normal autorun when they are miss
 
 See [Labels](labels.md) and [Label semantics](label-semantics.md).
 
-## Preview Autorun Selection
+## Preview autorun
 
 Before letting Roark claim work, preview selection:
 
@@ -85,16 +85,11 @@ Before letting Roark claim work, preview selection:
 roark auto --repo owner/repo --limit 1 --dry-run
 ```
 
-Expected result:
-
-- Roark lists an eligible issue.
-- No issue is assigned.
-- No branch is created.
-- No workspace is changed.
+The command should list an eligible issue without assigning it, creating a branch, or changing a workspace.
 
 If nothing is selected, use [Troubleshooting](troubleshooting.md#no-eligible-issues).
 
-## Run One Issue Manually
+## Run one issue without publishing
 
 For a controlled first run, use `do` with one issue:
 
@@ -102,7 +97,7 @@ For a controlled first run, use `do` with one issue:
 roark do 123 --repo owner/repo
 ```
 
-Roark will:
+Roark:
 
 1. fetch the issue
 2. triage it
@@ -114,19 +109,19 @@ Roark will:
 
 `do` is useful for local validation. Use `auto` when you want claiming, labels, publishing, and scheduler-friendly behavior.
 
-## Run One Autorun Attempt
+## Run autorun
 
-When the dry run and manual run are understood, run a single autorun attempt:
+After the dry run and `do` command succeed, run one autorun attempt:
 
 ```bash
 roark auto --repo owner/repo --limit 1
 ```
 
-On success, Roark opens a pull request only after readiness and verification pass, finalizes its body, and automatically posts a fresh correctness and maintainability review. If that post-publication review fails or becomes stale, the PR remains published and Roark preserves the review artifacts for inspection or retry.
+Roark opens the pull request only after readiness and verification pass. It then posts separate correctness and maintainability reviews. If either review fails or the PR changes while the review is running, the PR stays open and Roark keeps the local review artifacts.
 
 On failure, Roark leaves the managed workspace and artifacts for inspection. It does not merge, close issues, or mark PRs ready for review.
 
-## Inspect Results
+## Inspect the run
 
 Issue run artifacts are written under:
 
@@ -138,13 +133,13 @@ Open these files first:
 
 - `summary.json` for the artifact index and final status
 - `verification.md` for the verification command result
-- `readiness.json` for the publish gate decision and `readiness.md` for its human-readable rendering
-- `implementation-log.json` for the authoritative implementation report and `implementation-log.md` for its human-readable rendering
-- `review-a-<n>.json` and `review-b-<n>.json` for schema-validated reviewer findings
+- `readiness.md` for the publish decision; use `readiness.json` for exact field values
+- `implementation-log.md` for the implementation report
+- `review-a-<n>.md` and `review-b-<n>.md` for reviewer findings
 
 See [Artifacts](artifacts.md) for the complete layout.
 
-## Recover a Failed Attempt
+## Resume a failed attempt
 
 If an autorun attempt stops before publishing:
 
@@ -155,10 +150,3 @@ roark continue 123 --repo owner/repo --attempt 1
 If `--attempt` is omitted, Roark uses the latest recorded attempt.
 
 Continue reuses valid existing artifacts, regenerates missing or invalid phase outputs, reruns readiness and verification, and publishes only when both gates pass. See [Recovery](recovery.md).
-
-## Next Steps
-
-- Read [Concepts](concepts.md) for the mental model.
-- Read [Usage](usage.md) for day-to-day commands.
-- Read [Managed workspaces](managed-workspaces.md) before enabling scheduled runs.
-- Read [Operations runbook](operations-runbook.md) before cron, launchd, or GitHub Actions.

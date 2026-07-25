@@ -1,11 +1,11 @@
 ---
 title: Verification
-summary: How Roark chooses and runs verification commands, and how readiness and verification gates differ.
+summary: Configure verification and recover when it fails.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:08:01Z
 ---
 
-## Gate Order
+## Gate order
 
 ```mermaid
 flowchart LR
@@ -18,7 +18,7 @@ flowchart LR
   verify --> fail
 ```
 
-## Configure Verification
+## Configure verification
 
 Use `--verify`:
 
@@ -36,23 +36,17 @@ Or set top-level `verify` in `.roark/config.json`:
 
 For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, then config, then inference from `package.json` or `Makefile`.
 
-## Readiness Gate
+## Readiness gate
 
-The workflow's validated `readiness.json` decision must have status exactly:
-
-```text
-ready-for-pr
-```
-
-Anything else—or invalid/missing JSON—fails the readiness gate. `readiness.md` is the human-readable rendering and is not gate input.
+The readiness gate passes only when `readiness.json` has `"status": "ready-for-pr"`. Missing or invalid JSON fails the gate. `readiness.md` is the readable copy.
 
 Readiness answers whether the workflow believes the change is ready to publish.
 
-## Verification Gate
+## Verification gate
 
 Roark runs the verification command through `sh -c` in the issue workspace. Exit code `0` passes.
 
-Verification answers whether the repository checks actually pass. A non-zero exit code is repairable while `maxFixPasses` has remaining budget: Roark archives the failure, runs the next fix pass, refines the result, runs the corresponding numbered Review A/B cycle, recomputes readiness, and then reruns verification. It does not rerun the initial implementation phase solely for verification repair.
+If verification fails and the fix budget is not exhausted, Roark saves the failure, runs another fix and review pass, checks readiness again, and reruns verification. It does not rerun the initial implementation phase.
 
 The command, exit code, stdout tail, and stderr tail are written to:
 
@@ -60,22 +54,22 @@ The command, exit code, stdout tail, and stderr tail are written to:
 .roark/runs/issue/<n>/attempts/<k>/verification.md
 ```
 
-The complete stdout and stderr are retained separately at:
+Full stdout and stderr are stored at:
 
 ```text
 .roark/runs/issue/<n>/attempts/<k>/verification-full.md
 ```
 
-Before each verification-driven fix pass, the failed output tail and its complete companion are archived as:
+Before a verification-driven fix pass, Roark archives both the output tail and full output:
 
 ```text
 .roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>.md
 .roark/runs/issue/<n>/attempts/<k>/verification-before-fix-<pass>-full.md
 ```
 
-PR revision generations use the same bounded and full companion filenames in their revision artifact directory.
+PR revisions use the same filenames in their revision directory.
 
-## Common Commands
+## Example commands
 
 | Stack | Example |
 | --- | --- |
@@ -91,7 +85,7 @@ PR revision generations use the same bounded and full companion filenames in the
 
 Prefer a command that is deterministic and non-interactive. A fast repository check is usually better than an expensive full deployment pipeline for local Roark publishing.
 
-## Hooks Before Verification
+## Hooks before verification
 
 If verification needs setup immediately before running, use `hooks.beforeVerify`:
 
@@ -105,7 +99,7 @@ If verification needs setup immediately before running, use `hooks.beforeVerify`
 
 See [Lifecycle hooks](lifecycle-hooks.md).
 
-## Ignored Local Files
+## Ignored local files
 
 If verification needs ignored local files, configure `workspace.copyToWorktree`:
 
@@ -119,9 +113,9 @@ If verification needs ignored local files, configure `workspace.copyToWorktree`:
 
 Store path names in config, not secret values. See [Managed workspaces](managed-workspaces.md) and [Security and secrets](security-and-secrets.md).
 
-## Failure Recovery
+## Recover from failure
 
-When verification fails and fix budget remains, Roark normally repairs it automatically through the fix/refinement/Review A/B loop. If it stops, then either the fix budget is exhausted or the failure looks like setup/tooling rather than a local code issue.
+If automatic repair stops, the fix budget is exhausted or the failure needs a setup change.
 
 1. Open `verification.md` and any `verification-before-fix-*.md` artifacts.
 2. Fix missing host setup, ignored files, hooks, or code issues.
@@ -130,9 +124,3 @@ When verification fails and fix budget remains, Roark normally repairs it automa
 ```bash
 roark continue 123 --repo owner/repo
 ```
-
-## Next Steps
-
-- Use [Troubleshooting](troubleshooting.md#verification-command-missing) for common verification failures.
-- Use [Configuration](configuration.md) for the `verify` key.
-- Use [Operations runbook](operations-runbook.md) before scheduling verification-heavy runs.

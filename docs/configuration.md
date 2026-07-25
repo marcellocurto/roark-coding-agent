@@ -1,8 +1,8 @@
 ---
 title: Configuration
-summary: Reference for `.roark/config.json`, precedence, supported keys, defaults, and examples.
+summary: Keys and defaults for `.roark/config.json`.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-13T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ## Precedence
@@ -13,11 +13,11 @@ For most options, Roark uses this order:
 2. `.roark/config.json`
 3. inferred value or built-in default
 
-CLI-only values such as `model` and `thinking` are intentionally not supported in config v1.
+`model` and `thinking` are CLI-only in config v1.
 
 Unknown keys fail fast so misspellings do not silently change behavior.
 
-## Generated Config
+## Generated config
 
 Run:
 
@@ -82,7 +82,7 @@ It infers:
 }
 ```
 
-## Top-Level Keys
+## Top-level keys
 
 | Key | Type | Default | CLI equivalent | Notes |
 | --- | --- | --- | --- | --- |
@@ -100,9 +100,9 @@ It infers:
 | `sandbox` | object | `{ "provider": "host" }` | none | Currently host execution only. |
 | `notifications` | object | exit notifications disabled | none | Opt-in macOS exit notification configuration. |
 
-## Exit Notifications
+## Exit notifications
 
-Set `notifications.onExit` to `true` to request one silent macOS system notification when a Roark invocation finishes successfully or with a caught top-level error:
+Set `notifications.onExit` to `true` to receive a macOS notification when a Roark command finishes:
 
 ```json
 {
@@ -112,13 +112,17 @@ Set `notifications.onExit` to `true` to request one silent macOS system notifica
 }
 ```
 
-`notifications.onExit` defaults to `false` and must be a boolean when set. Unknown keys under `notifications` fail validation. The opt-in applies to every command, including quick commands such as `status` and workspace operations, with no minimum duration.
+The default is `false`. When enabled, notifications apply to every command, including `status` and workspace commands.
 
-Delivery uses the system-provided `/usr/bin/osascript` and is macOS-only and best-effort. Non-macOS hosts silently do nothing. Notifications contain only the command, normalized issue or PR number when available, and repository directory name; they do not include raw errors or arbitrary arguments. Roark waits at most two seconds for delivery. A launch failure, timeout, or nonzero notifier exit writes one warning but does not change the command's result.
+Roark sends notifications through `/usr/bin/osascript` and waits up to two seconds. A notification contains the command, repository directory, and issue or PR number when available. It does not include raw errors or arbitrary arguments.
 
-Roark can use this opt-in only after locating and parsing a valid repository `.roark/config.json`. It does not notify outside a Git repository, without config, or when config is invalid. Abrupt termination—including `SIGINT`, `SIGTERM`, `SIGKILL`, runtime crashes, and power loss—is not covered.
+Notification failures produce a warning but do not change the command's result. Non-macOS hosts do nothing. Roark also skips notification when:
 
-## Workspace Keys
+- the current directory is not in a Git repository
+- `.roark/config.json` is missing or invalid
+- the process exits through a signal, runtime crash, forced termination, or power loss
+
+## Workspace keys
 
 | Key | Type | Default | Notes |
 | --- | --- | --- | --- |
@@ -141,7 +145,7 @@ Use `copyToWorktree` for path names only, not secret values:
 
 See [Managed workspaces](managed-workspaces.md).
 
-## Hook Keys
+## Hook keys
 
 | Key | Type | Failure behavior | Notes |
 | --- | --- | --- | --- |
@@ -153,19 +157,20 @@ See [Managed workspaces](managed-workspaces.md).
 | `timeoutMs` | number | n/a | Hook timeout. Defaults to `600000`. |
 
 Hooks must be non-interactive. See [Lifecycle hooks](lifecycle-hooks.md).
-When `roark init` detects a supported package-manager lockfile, it assigns the inferred install command to `beforeRun` and `beforeVerify`. It does not also assign it to `afterCreate`, because a newly created workspace proceeds directly to `beforeRun` without changing dependency inputs.
 
-## Label Configuration
+When `roark init` recognizes a package-manager lockfile, it puts the install command in `beforeRun` and `beforeVerify`. It leaves `afterCreate` empty because a new workspace runs `beforeRun` immediately afterward.
 
-Roark always appends configured lifecycle labels plus required workflow states such as `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, and `wont-fix` to the effective skip set. This prevents issues in non-ready states from being selected again.
+## Label configuration
+
+Roark adds configured lifecycle labels and the required workflow-state labels to the skip set. This prevents a non-ready issue from being selected again.
 
 Read [Label semantics](label-semantics.md) before changing label names on a live repository.
 
-## Verification Configuration
+## Verification configuration
 
-For `auto` and `continue`, Roark requires a verification command. It uses CLI flag, config, then inference. Failed verification consumes the same `maxFixPasses` budget as reviewer-requested fixes.
+`auto` and `continue` choose verification from the CLI flag, config, then repository inference. A failed command uses the same `maxFixPasses` budget as a reviewer-requested fix.
 
-`review-pr` and `revise-pr` use CLI `--verify`, then the configured `verify` command, then `bun run typecheck`. Both use the configured managed workspace and lifecycle hooks. The verification command runs against the PR checkout, so invoke these commands only for PR code you trust to execute in that environment.
+`review-pr` and `revise-pr` use `--verify`, then configured `verify`, then `bun run typecheck`. They run configured workspace hooks and verification against the PR checkout. Only use them for PR code you trust to execute in that environment.
 
 Good examples:
 
@@ -178,9 +183,3 @@ Good examples:
 ```
 
 See [Verification](verification.md).
-
-## Next Steps
-
-- Use [Quickstart](quickstart.md) to validate a new config.
-- Use [Operations runbook](operations-runbook.md) before scheduling.
-- Use [Troubleshooting](troubleshooting.md) for common config failures.

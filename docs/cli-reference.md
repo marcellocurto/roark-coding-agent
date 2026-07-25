@@ -1,8 +1,8 @@
 ---
 title: CLI reference
-summary: Complete command and option reference for Roark.
+summary: Roark commands, flags, and examples.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 Use the installed binary:
@@ -18,7 +18,7 @@ Or run from a source checkout:
 bun run roark.ts --help
 ```
 
-## Issue Argument
+## Issue argument
 
 Commands that accept an issue support:
 
@@ -30,7 +30,7 @@ owner/repo#123
 
 `auto` without an issue discovers eligible issues. `auto` with an issue targets that issue directly.
 
-## Core Commands
+## Core commands
 
 | Command | Purpose |
 | --- | --- |
@@ -42,17 +42,17 @@ owner/repo#123
 | `roark remove [issue ...]` | Interactively select managed workspaces to remove, or remove the listed issue workspaces. Use `--pr <n>` for PR workspaces and `--force` for dirty workspaces. |
 | `roark review-pr <number>` | Review an existing open or draft PR without changing code; posts each review directly as its own comment by default. |
 | `roark revise-pr <number>` | Address required review feedback on an existing open PR and push verified fixes when needed. |
-| `roark curate-issues <issue>` | Write a deterministic issue creation plan from reviewer findings. |
+| `roark curate-issues <issue>` | Write an issue creation plan from reviewer findings. |
 | `roark create-issues <issue>` | Create approved GitHub issues from the curation plan. Dry-run unless `--yes`. |
 
-## Workspace Commands
+## Workspace commands
 
 | Command | Purpose |
 | --- | --- |
 | `roark workspace list` | List managed clone workspaces. |
 | `roark workspace prune --older-than <duration>` | Remove old clean workspaces, for example `--older-than 30d`. |
 
-## Phase Commands
+## Phase commands
 
 | Command | Purpose |
 | --- | --- |
@@ -62,11 +62,11 @@ owner/repo#123
 | `roark implement <issue>` | Run only the implementation agent. |
 | `roark review <issue>` | Run both review agents. |
 | `roark fix <issue>` | Run only the fix agent. |
-| `roark readiness <issue>` | Write deterministic PR readiness markdown. |
+| `roark readiness <issue>` | Write the PR readiness result. |
 
 Phase commands are most useful for debugging. For normal work, prefer `do`, `auto`, or `continue`.
 
-## Common Options
+## Common options
 
 | Option | Applies to | Purpose |
 | --- | --- | --- |
@@ -81,20 +81,20 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--all` | `status` | Summarize all known issue runs. |
 | `--force` | phase, implementation, fix, PR revision | Re-run phases or continue past supported dirty-tree preflights. |
 | `--yes` | supported mutation paths | Continue past supported prompts or approve `create-issues` mutations. |
-| `--verbose` | long-running agent commands | Show each completed agent response as readable plain text plus detailed, explicitly labelled aggregate tool statistics. Raw prompts, events, tool results, and debug payloads remain hidden. |
+| `--verbose` | long-running agent commands | Show completed agent responses and detailed tool statistics. |
 | `--no-title` | long-running agent commands | Disable Roark terminal-title management. |
 | `-v`, `--version` | top-level only | Print the installed Roark version. |
 | `-h`, `--help` | all commands | Show help. |
 
-## Live output and terminal titles
+## Live output
 
-Long-running commands print an operational stream by default: run identity, phase and pass, compact tool activity, phase wall time, verification status, artifact path, and final outcome. Complete generated Markdown is validated and saved in the run artifacts but is not copied to normal terminal output. Use `--verbose` when you also want the completed response rendered as plain readable text; `-v` remains the version flag.
+Long-running commands show the target, current phase and pass, tool activity, elapsed time, verification status, artifact path, and final result. Full agent responses stay in the artifacts unless you pass `--verbose`. The short `-v` flag still means `--version`.
 
-On supported interactive terminals, Roark updates the window title with the issue or PR, current phase, pass, and short repository name. Titles are sanitized and length-bounded. Pass `--no-title` when your shell or terminal owns its title. Redirected/piped output, CI, and `TERM=dumb` never receive title or ANSI control sequences, and their lines are not width-truncated. Operational warnings continue to use stderr.
+In an interactive terminal, Roark updates the window title with the issue or PR, phase, pass, and repository. Pass `--no-title` to disable it. Redirected output, piped output, CI, and `TERM=dumb` receive no title or ANSI sequences and are not width-truncated. Warnings go to stderr.
 
-Paths in normal status output are repository/run relative when possible, and long lines are shortened only for an interactive terminal's detected width. Phase duration is wall-clock elapsed time. Verbose `aggregate tool execution` is the sum of individual tool durations and is not elapsed runtime (tools may run concurrently).
+Paths are relative to the repository or run directory when possible. Interactive output shortens long lines to fit the terminal. In verbose output, `aggregate tool execution` adds the duration of each tool call, so it can exceed elapsed time when tools run concurrently.
 
-## Autorun Options
+## Autorun options
 
 | Option | Purpose |
 | --- | --- |
@@ -112,16 +112,16 @@ Paths in normal status output are repository/run relative when possible, and lon
 | `--success-label <label>` | Label applied when a PR is opened. Defaults to `agent-pr-opened`. |
 | `--remote <name>` | Git remote for pushing issue or PR branches. Defaults to `origin`. |
 
-## PR Review Options
+## PR review options
 
 | Option | Purpose |
 | --- | --- |
 | `--verify <cmd>` | Override the verification command run before review. Uses `.roark/config.json` and then `bun run typecheck` when omitted, matching `revise-pr`. |
 | `--no-comment` | Complete the local review without publishing a PR comment. |
 
-`review-pr` accepts a PR number, supports fork PRs through GitHub's pull ref, and never edits, commits, or pushes. It uses the configured workspace, lifecycle hooks, and verification environment, matching `revise-pr`; invoking it therefore authorizes those configured commands against the pinned PR checkout. Pass `--repo` when Git origin does not identify the base repository.
+`review-pr` supports fork PRs through GitHub's pull ref and never edits, commits, or pushes. It runs configured lifecycle hooks and verification against the pinned PR checkout, so invoking it authorizes those commands. Pass `--repo` when Git origin does not identify the base repository.
 
-## PR Revision Options
+## PR revision options
 
 | Option | Purpose |
 | --- | --- |
@@ -129,7 +129,7 @@ Paths in normal status output are repository/run relative when possible, and lon
 | `--no-comment` | Do not post the terminal PR summary comment. |
 | `--force` | Continue past supported dirty git preflight. |
 
-## Workspace Options
+## Workspace options
 
 | Option | Purpose |
 | --- | --- |
@@ -154,9 +154,3 @@ roark workspace prune --older-than 30d
 roark curate-issues 123 --repo owner/repo
 roark create-issues 123 --repo owner/repo --yes
 ```
-
-## Next Steps
-
-- Use [Usage](usage.md) to choose the right command.
-- Use [Configuration](configuration.md) for config equivalents and defaults.
-- Use [Troubleshooting](troubleshooting.md) when a command stops unexpectedly.

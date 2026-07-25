@@ -1,8 +1,8 @@
 ---
 title: Managed workspaces
-summary: How Roark prepares clone-backed workspaces and copies ignored host-local files into them.
+summary: How Roark creates workspaces and copies ignored local files.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ## Workspace layout
@@ -14,7 +14,7 @@ By default, workspaces live under:
 ~/.roark/workspaces/<owner>-<repo>/pr-<number>
 ```
 
-Issue workflow runs use `issue-<number>` workspaces. `review-pr` and `revise-pr` use `pr-<number>` workspaces under different non-mutating and mutating preparation contracts.
+Issue runs use `issue-<number>` workspaces. `review-pr` checks out a pinned PR commit in `pr-<number>`; `revise-pr` checks out the writable PR branch there.
 
 Each issue gets a persistent workspace and a branch named:
 
@@ -45,7 +45,7 @@ add the ignored path to `.roark/config.json`:
 
 `copyToWorktree` is nested under `workspace`. The same relative path is used as the source in the control checkout and the destination in the managed workspace.
 
-## Safety rules
+## Path restrictions
 
 Roark rejects entries that are:
 
@@ -85,10 +85,6 @@ roark remove --pr 98
 roark workspace prune --older-than 30d
 ```
 
-`roark remove` lists the current repository's managed workspaces and accepts multiple selections. `list`, interactive removal, and `prune` include both issue and PR workspaces. Dirty workspaces require `--force`. Use it only after confirming that recoverable work is disposable.
+`roark remove` lists the current repository's workspaces and accepts multiple selections. Listing, interactive removal, and pruning include both issue and PR workspaces.
 
-## Next steps
-
-- Use [Recovery](recovery.md) before deleting a failed issue workspace.
-- Use [Security and secrets](security-and-secrets.md) for copied ignored files.
-- Use [Operations runbook](operations-runbook.md#workspace-cleanup) for cleanup procedures.
+Removing a dirty workspace requires `--force`. Inspect it first: removal discards recoverable work.

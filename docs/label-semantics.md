@@ -1,8 +1,8 @@
 ---
 title: Roark label semantics
-summary: Full reference for GitHub labels Roark reads, applies, or assigns during autorun and issue-curation workflows.
+summary: Labels Roark reads, creates, and applies.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ## Autorun eligibility
@@ -30,11 +30,16 @@ Autorun is label-gated. An open issue is eligible only when both are true:
 
 Default skip set: `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, `wont-fix`, `agent-in-progress`, `agent-failed`, `agent-pr-opened`.
 
-Before `auto` performs discovery, targeted issue fetch, claim, branch setup, or agent work, Roark verifies that the required repository labels exist: ready, in-progress, failure, success, `blocked`, `needs-human`, and `triage-rejected`. Missing required labels are created with Roark-owned default colors/descriptions. Existing labels are not modified. `--dry-run` reports missing required labels without creating them. Custom skip-only labels are observed for selection but are not auto-created unless they are also one of the required lifecycle/status labels.
+Before doing any issue work, `auto` checks for the ready, in-progress, failure, success, `blocked`, `needs-human`, and `triage-rejected` labels.
+
+- Missing required labels are created with Roark's default color and description.
+- Existing labels are not changed.
+- `--dry-run` reports missing labels without creating them.
+- Custom skip-only labels are not created unless they also serve one of the required roles.
 
 ## Generated issue labels
 
-The issue-curation and `create-issues` flow assigns labels to new GitHub issues generated from reviewer findings:
+`create-issues` assigns these labels to issues generated from review findings:
 
 | Label | Applied to | Meaning |
 | --- | --- | --- |
@@ -54,8 +59,6 @@ Generated issues do not receive `needs-human` by default. That status is reserve
 - `--success-label <label>` — label applied after opening a PR. Defaults to `agent-pr-opened`.
 - `--failure-label <label>` — label applied when readiness or verification fails. Defaults to `agent-failed`.
 
-Roark appends configured lifecycle labels and the required workflow states `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, and `wont-fix` to the effective skip set automatically.
-
 ## Lifecycle transitions
 
 | State | Typical labels | What Roark does next |
@@ -68,15 +71,15 @@ Roark appends configured lifecycle labels and the required workflow states `need
 | Needs human decision | `needs-human` | Autorun skips it until a human resolves the decision. |
 | Rejected by triage | `triage-rejected` | Autorun skips it unless the issue is revised and the label is removed. |
 
-Workflow-state labels are mutually exclusive. Claim, continuation, failure, triage-stop, and publish transitions remove the previous workflow state before leaving the new state in place. Topic labels such as `bug`, `auth`, or `storage` are unaffected.
+An issue has at most one workflow-state label. Each transition removes the old state before applying the new one. Topic labels such as `bug`, `auth`, or `storage` are unaffected.
 
 Native GitHub dependency relationships are the source of truth for issue-to-issue blocking. The `blocked` label is intended for external conditions that cannot be represented by a native dependency relationship.
 
-Passing an issue explicitly to `roark auto` is an operator override: the ready label is not required, but skip labels and active native dependencies are still enforced.
+Passing an issue directly to `roark auto` skips the ready-label requirement. Skip labels and active GitHub dependencies still apply.
 
 ## Migrating older repositories
 
-Existing `.roark/config.json` files remain authoritative and are not silently rewritten. Migrate an older repository as one coordinated change:
+Roark does not rewrite an existing `.roark/config.json`. Migrate an older repository in one pass:
 
 1. Add `ready-for-agent` to issues that currently use `afk`, then remove the `afk` label.
 2. Rename `roark-in-progress`, `roark-failed`, and `roark-pr-opened` to their `agent-*` equivalents.
@@ -87,7 +90,7 @@ Existing `.roark/config.json` files remain authoritative and are not silently re
 
 GitHub cannot rename `afk` directly when `ready-for-agent` already exists, so those issue assignments must be merged before deleting `afk`.
 
-## Operational checks
+## Check labels
 
 Preview selection:
 
@@ -100,9 +103,3 @@ Inspect one issue:
 ```bash
 gh issue view 123 --repo owner/repo --json labels,state,assignees
 ```
-
-## Next steps
-
-- Use [Autorun](autorun.md) for the full label-gated workflow.
-- Use [Troubleshooting](troubleshooting.md#no-eligible-issues) when selection is surprising.
-- Use [Configuration](configuration.md#label-configuration) before changing label names.

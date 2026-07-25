@@ -1,11 +1,11 @@
 ---
 title: Troubleshooting
-summary: Common Roark failures, symptoms, and recovery steps.
+summary: Diagnose and recover from common failures.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-13T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-## No Eligible Issues
+## No eligible issues
 
 Symptoms:
 
@@ -27,7 +27,7 @@ Common causes:
 
 Read [Label semantics](label-semantics.md).
 
-## Missing Required Labels
+## Missing required labels
 
 Symptoms:
 
@@ -38,7 +38,7 @@ Normal autorun can create required lifecycle labels. Dry run reports missing lab
 
 Use a non-dry autorun when you are ready for Roark to create missing required labels, or create labels manually with `gh label create`.
 
-## GitHub Authentication Fails
+## GitHub authentication fails
 
 Symptoms:
 
@@ -55,7 +55,7 @@ gh repo view owner/repo
 
 For launchd, run under the user's login session so keychain credentials are available. For GitHub Actions, set `GH_TOKEN` and repository permissions.
 
-## Verification Command Missing
+## Verification command missing
 
 Symptoms:
 
@@ -77,7 +77,7 @@ roark auto --repo owner/repo --verify "bun run check"
 
 See [Verification](verification.md).
 
-## Verification Fails Because Ignored Files Are Missing
+## Verification cannot find ignored files
 
 Symptoms:
 
@@ -95,7 +95,7 @@ Fix by copying path names, not secret values:
 
 The destination must be ignored by Git. See [Managed workspaces](managed-workspaces.md) and [Security and secrets](security-and-secrets.md).
 
-## Dirty Managed Workspace
+## Dirty managed workspace
 
 Symptoms:
 
@@ -116,7 +116,7 @@ roark remove 123 --force
 
 Do not remove a workspace if it may contain recoverable uncommitted work.
 
-## Branch Already Exists
+## Branch already exists
 
 Symptoms:
 
@@ -138,7 +138,7 @@ git ls-remote --heads origin 'roark/issue-*'
 
 If the branch belongs to a previous attempt, prefer `roark continue`. If it is unrelated, rename or remove it deliberately.
 
-## Readiness Fails
+## Readiness fails
 
 Symptoms:
 
@@ -151,9 +151,9 @@ Open:
 .roark/runs/issue/<n>/attempts/<k>/readiness.md
 ```
 
-Use that Markdown for the explanation, and inspect `readiness.json` for the exact machine decision. Then inspect the latest review and fix logs. Use `continue` after addressing local setup issues.
+Read `readiness.md` for the explanation and `readiness.json` for exact field values. Then inspect the latest review and fix logs. After fixing any local setup problem, run `roark continue`.
 
-## PR Not Opened
+## PR not opened
 
 Common causes:
 
@@ -165,7 +165,7 @@ Common causes:
 
 Inspect `summary.json`, `verification.md`, command output, and GitHub auth state.
 
-## PR Revision Makes No Commit
+## PR revision makes no commit
 
 `revise-pr` does not commit when:
 
@@ -176,7 +176,7 @@ Inspect `summary.json`, `verification.md`, command output, and GitHub auth state
 
 See [PR revisions](pr-revisions.md).
 
-## Scheduler Runs Overlap
+## Scheduler runs overlap
 
 Symptoms:
 
@@ -191,7 +191,7 @@ Use scheduler-level serialization:
 
 See [Scheduling](scheduling.md) and [Operations runbook](operations-runbook.md).
 
-## macOS Exit Notification Does Not Appear
+## macOS exit notification does not appear
 
 Exit notifications require a valid repository `.roark/config.json` with:
 
@@ -201,18 +201,25 @@ Exit notifications require a valid repository `.roark/config.json` with:
 }
 ```
 
-They are macOS-only and best-effort. Check **System Settings → Notifications** for the application that presents `osascript` notifications, and check the active Focus mode. macOS may suppress presentation even when delivery succeeds.
+Check **System Settings → Notifications** for the application that presents `osascript` notifications, then check the active Focus mode.
 
-Roark waits up to two seconds for `/usr/bin/osascript`. A timeout, launch failure, or nonzero exit prints one non-fatal warning and preserves the original Roark exit code. No notification is attempted outside a Git repository, when config is missing or invalid, or on non-macOS hosts. Signals such as `SIGINT`, `SIGTERM`, and `SIGKILL`, runtime crashes, forced termination, and power loss are unsupported because they do not pass through Roark's controlled exit boundary.
+Roark does not send a notification:
 
-## Model and Provider Failures
+- on non-macOS hosts
+- outside a Git repository
+- when `.roark/config.json` is missing or invalid
+- after a signal, runtime crash, forced termination, or power loss
+
+Roark waits up to two seconds for `/usr/bin/osascript`. A launch failure, timeout, or nonzero exit prints a warning without changing the original command's exit code.
+
+## Model and provider failures
 
 - `Model not found` or request-shape errors: run `bun install --frozen-lockfile` to restore the supported Pi version.
 - Authentication errors: run Pi interactively and use `/login` for `openai-codex`, then retry as the same OS user.
 - Unsupported thinking levels: Roark reports the requested and effective levels when Pi clamps the selection; unsupported `max` falls back to the highest supported level.
 - To roll back, rerun or continue with `--model openai-codex/gpt-5.5`.
 
-## Useful First Files
+## Files to inspect
 
 For issue attempts:
 

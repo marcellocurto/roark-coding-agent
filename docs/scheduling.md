@@ -1,11 +1,11 @@
 ---
 title: Scheduling
-summary: How to run Roark periodically using external schedulers with safe concurrency.
+summary: Run Roark from cron, launchd, or GitHub Actions.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-## Principles
+## Rules
 
 - Keep `--limit 1` unless you intentionally want multiple issues per invocation.
 - Serialize runs so two Roark processes do not race.
@@ -55,9 +55,3 @@ jobs:
 ## Failure handling
 
 When a scheduled run fails a gate, Roark posts recovery information on the issue. Use `roark continue` from the same control checkout to inspect and resume.
-
-## Next steps
-
-- Use [Operations runbook](operations-runbook.md) for host setup, monitoring, cleanup, and upgrades.
-- Use [Troubleshooting](troubleshooting.md#scheduler-runs-overlap) for scheduler race symptoms.
-- Use [Security and secrets](security-and-secrets.md) before running on shared hosts.

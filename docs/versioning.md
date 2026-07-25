@@ -1,13 +1,13 @@
 ---
 title: Versioning and releases
-summary: SemVer policy, changelog expectations, and release checklist for Roark.
+summary: Version and release Roark.
 dateCreated: 2026-05-11T00:00:00Z
-lastUpdated: 2026-05-11T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 Roark uses the `version` field in `package.json` as the source of truth.
 
-## Version Policy
+## Version policy
 
 Roark follows Semantic Versioning:
 
@@ -17,7 +17,7 @@ Roark follows Semantic Versioning:
 
 While Roark is `0.x`, breaking changes may use a minor bump. Move to `1.0.0` when the CLI and config contract are stable enough that breaking changes should be rare.
 
-## Changelog Policy
+## Changelog policy
 
 Keep `CHANGELOG.md` updated with one section per release:
 
@@ -36,7 +36,7 @@ Keep `CHANGELOG.md` updated with one section per release:
 
 Use `Unreleased` for changes that have landed but are not tagged yet.
 
-## Release Checklist
+## Release checklist
 
 1. Confirm the working tree contains only intended changes.
 2. Move relevant `CHANGELOG.md` entries from `Unreleased` to the target version and date.
@@ -65,7 +65,7 @@ git push origin main --follow-tags
 
 7. For operator installs, pin deployments to the pushed tag.
 
-## Inspecting Versions
+## Inspect versions
 
 ```bash
 roark --version

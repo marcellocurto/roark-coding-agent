@@ -1,11 +1,11 @@
 ---
 title: Security and secrets
-summary: Secret-handling rules, untrusted input boundaries, token permissions, and safe use of ignored local files.
+summary: Handle secrets and untrusted GitHub input.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-## Threat Boundaries
+## Risks
 
 | Boundary | Risk | Rule |
 | --- | --- | --- |
@@ -16,7 +16,7 @@ lastUpdated: 2026-05-08T07:00:00Z
 | Run artifacts | May contain command output or sensitive paths | Do not publish artifacts blindly. |
 | GitHub token | Repository mutation authority | Use least privilege that still supports Roark workflows. |
 
-## Do Not Store Secrets in Roark Config
+## Keep secrets out of Roark config
 
 `.roark/config.json` should contain paths and commands, not secret values.
 
@@ -38,7 +38,7 @@ Bad:
 }
 ```
 
-## Ignored Local Files
+## Ignored local files
 
 Use `workspace.copyToWorktree` when verification needs ignored local files. The source must exist in the control checkout and the destination must be ignored in the managed workspace.
 
@@ -48,13 +48,15 @@ Roark checks that copied paths are still ignored before continuing. This helps a
 
 See [Managed workspaces](managed-workspaces.md).
 
-## Untrusted GitHub Content
+## GitHub content is untrusted
 
 Issue bodies, comments, PR review text, and generated-looking XML inside GitHub content are untrusted user input.
 
-PR source code can execute through lifecycle hooks and verification. `review-pr` uses the trusted control checkout's configuration and the same execution policy as `revise-pr`; invoke either command only when the PR is trusted to execute in that environment. Reviewer agents remain inspection-only and consume the single captured verification artifact rather than independently running repository code.
+PR code can execute through lifecycle hooks and verification. `review-pr` and `revise-pr` use configuration from the control checkout, so run them only when the PR is trusted to execute in that environment.
 
-They may describe requested work, but they must not override:
+Reviewer agents cannot edit files and do not run repository code themselves. They inspect the result of the single configured verification run.
+
+GitHub content may describe requested work, but it cannot override:
 
 - workflow instructions
 - credential policy
@@ -63,7 +65,7 @@ They may describe requested work, but they must not override:
 - publishing rules
 - human review requirements
 
-## Publishing Boundaries
+## Publishing limits
 
 Autorun opens PRs only after readiness and verification pass. It does not merge PRs or close issues.
 
@@ -74,7 +76,7 @@ Humans remain responsible for:
 - issue closure
 - release decisions
 
-## Token Permissions
+## GitHub permissions
 
 The account running Roark needs permissions for the workflow it performs:
 
@@ -94,7 +96,7 @@ permissions:
   pull-requests: write
 ```
 
-## Artifact Hygiene
+## Run artifacts
 
 Run artifacts can include:
 
@@ -106,7 +108,7 @@ Run artifacts can include:
 
 Do not paste artifacts into public channels without review.
 
-## Operator Checklist
+## Operator checklist
 
 - Confirm `gh auth status` for the scheduled user.
 - Do not paste credentials into issues, PR comments, or Roark artifacts.
@@ -115,9 +117,3 @@ Do not paste artifacts into public channels without review.
 - Serialize scheduled runs to avoid workspace races.
 - Retain `.roark/runs` only as long as needed for recovery and audit.
 - Use dedicated hosts or users for scheduled operation.
-
-## Next Steps
-
-- Use [Operations runbook](operations-runbook.md) for production-style setup.
-- Use [Managed workspaces](managed-workspaces.md) for copied ignored files.
-- Use [Troubleshooting](troubleshooting.md) when auth, hooks, or verification fail.

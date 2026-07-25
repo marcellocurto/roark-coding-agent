@@ -1,11 +1,11 @@
 ---
 title: Concepts
-summary: Core Roark terms and workflow model.
+summary: Workspaces, attempts, phases, gates, and other Roark concepts.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-12T04:37:37Z
+lastUpdated: 2026-07-25T07:08:01Z
 ---
 
-## Mental Model
+## How a run works
 
 ```mermaid
 flowchart TD
@@ -20,7 +20,7 @@ flowchart TD
   verify --> artifacts
 ```
 
-## Control Checkout
+## Control checkout
 
 The control checkout is the repository directory where you invoke `roark`.
 
@@ -28,7 +28,7 @@ Roark reads `.roark/config.json` from this checkout, writes run artifacts under 
 
 The control checkout should stay clean and should not be shared by humans while scheduled Roark jobs are running.
 
-## Managed Workspace
+## Managed workspace
 
 A managed workspace is an isolated clone where Roark lets the agent modify files.
 
@@ -40,7 +40,7 @@ Default layout:
 
 Each issue gets a persistent workspace so failed uncommitted work can be inspected and recovered.
 
-## Issue Branch
+## Issue branch
 
 Roark creates or reuses an issue branch named:
 
@@ -68,30 +68,24 @@ A phase is one workflow step, such as `fetch`, `triage`, `plan`, `implement`, `r
 
 Standalone phase commands are useful for debugging, but most users should prefer `roark do`, `roark auto`, or `roark continue`.
 
-## Independent Review Axes
+## The two reviews
 
-Roark reviews changes on two independent axes:
+Roark runs two reviews:
 
 - Spec and Correctness: did we build the right behavior correctly?
 - Standards and Maintainability: did we build it in a way that fits the repository?
 
-A change must pass both. Success on one axis never compensates for failure on the other.
+A change must pass both.
 
-Review findings separate routing from constraints. `handling` says whether work belongs in the current fix pass, a follow-up, or an optional suggestion. `blockedBy` independently records outside access, information, dependencies, or human decisions. Roark fixes unblocked current work before stopping on unresolved external constraints.
+Each finding has a `handling` value: fix it now, create a follow-up, or treat it as an optional suggestion. A separate `blockedBy` field records missing access, information, dependencies, or human decisions. Roark still fixes any unblocked current work before it stops.
 
-Every review records concrete inspected evidence, a completeness status, and structured limitations. A limitation can block approval without being disguised as a code finding. Finding IDs are semantic and remain stable across review passes while the same concern persists.
+Reviews also record what was inspected and anything that prevented a complete review. Finding IDs stay the same across passes while the underlying problem remains.
 
-## Readiness Gate
+## Readiness gate
 
-The readiness gate validates Roark's final `readiness.json` artifact. The run can publish only when its structured decision status is:
+The readiness gate passes only when `readiness.json` has `"status": "ready-for-pr"`. `readiness.md` is the readable copy.
 
-```text
-ready-for-pr
-```
-
-`readiness.md` is a deterministic human rendering of the same decision; it is never parsed to decide whether to publish.
-
-## Verification Gate
+## Verification gate
 
 The verification gate runs the configured shell command, such as `bun run check`.
 
@@ -105,9 +99,9 @@ The default ready label is `ready-for-agent`. Default workflow skip labels inclu
 
 See [Label semantics](label-semantics.md).
 
-## Pull Requests
+## Pull requests
 
-Roark opens pull requests only after readiness and verification pass. After finalizing the opened PR body, autorun invokes the same pinned, read-only workflow as `review-pr` and posts its two independent reviews. An operational or stale review result does not undo or misclassify the already successful PR publication.
+Roark opens a pull request only after readiness and verification pass. Autorun then runs `review-pr` against that PR and posts both reviews. A failed or stale review does not undo the published PR.
 
 Roark does not:
 
@@ -115,14 +109,8 @@ Roark does not:
 - close issues
 - make final review decisions
 
-## Run Artifacts
+## Run artifacts
 
 Artifacts are durable files that explain what happened and support recovery. They are also the easiest place to debug failed runs.
 
 Start with [Artifacts](artifacts.md), then use [Troubleshooting](troubleshooting.md) for common failures.
-
-## Next Steps
-
-- Use [Quickstart](quickstart.md) for the first successful run.
-- Use [Usage](usage.md) for command selection.
-- Use [Architecture](architecture.md) for contributor-level internals.

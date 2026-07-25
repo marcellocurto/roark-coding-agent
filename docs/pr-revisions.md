@@ -1,8 +1,8 @@
 ---
 title: PR revisions
-summary: How `roark revise-pr` responds to feedback on an existing pull request.
+summary: Apply review feedback to an existing PR.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-12T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 ```bash
@@ -13,13 +13,13 @@ roark revise-pr 123 --repo owner/repo
 
 1. Fetch PR metadata, unresolved review threads, and relevant PR comments with GitHub GraphQL.
 2. Exclude prior Roark revision summary comments from planner input.
-3. Prepare an isolated managed clone workspace and check out the existing PR head branch there. The caller/control checkout stays on its current branch.
-4. Allocate canonical artifacts under `.roark/runs/pr/<pr-number>/revision-<n>/` in the control checkout and mirror them into the revision workspace for agent prompts.
-5. Build a deterministic catalog of PR descriptions, comments, review threads, and closing-issue sources, then plan each relevant feedback item with a stable source-derived ID.
-6. Apply only feedback classified as `must-fix-current` in the revision workspace. The execution report must give every planned feedback ID exactly one final disposition; missing, duplicate, or unknown IDs are rejected.
+3. Check out the PR head branch in an isolated managed workspace. The control checkout stays on its current branch.
+4. Create a numbered run directory at `.roark/runs/pr/<pr-number>/revision-<n>/`.
+5. Collect the PR description, comments, review threads, and linked issues. Give each feedback item a stable ID and decide how to handle it.
+6. Apply only items classified as `must-fix-current`. The execution report must account for every planned item once.
 7. Run one revision reviewer and optional fix/review passes in the revision workspace.
 8. Run verification in the revision workspace.
-9. On success, create one revision commit from the revision workspace while excluding `.roark` control-plane artifacts, push to the PR head branch, and post one concise summary comment from the control checkout. The comment renders the single linked disposition list plus objective outcome, review, verification, commit, and changed-file metadata. Internal plans, logs, reviews, and local artifact paths are not embedded.
+9. On success, create one commit without `.roark` artifacts, push it to the PR branch, and post a summary comment. Internal plans, logs, reviews, and local paths stay local.
 
 ## Feedback classifications
 
@@ -29,13 +29,13 @@ roark revise-pr 123 --repo owner/repo
 - `non-blocking`: valid follow-up, not required for this PR.
 - `invalid-stale`: no longer applicable.
 
-## Safety boundaries
+## Limits
 
-Roark refuses closed PRs, fork PR heads in v1, base/shared branch heads, and dirty control working trees unless `--yes` is passed. PR checkout, agent edits, review, verification, commit, and push happen in an isolated managed clone workspace under the configured workspace root. `needs-human`, no-op, and verification-failure outcomes do not commit or push.
+Roark refuses closed PRs, fork PR heads in v1, base or shared branch heads, and dirty control checkouts unless `--yes` is passed. Checkout, edits, review, verification, commit, and push happen in the managed workspace. A `needs-human`, no-op, or verification-failure result does not commit or push.
 
-Revision workspaces reuse the managed workspace configuration (`workspace.root`, `workspace.cloneRemote`, `workspace.copyToWorktree`) and lifecycle hooks. Clean workspaces may be reused; dirty revision workspaces are rejected so local edits are not overwritten.
+Revision workspaces use the configured workspace settings and lifecycle hooks. Roark may reuse a clean workspace but rejects a dirty one.
 
-## Useful commands
+## Commands
 
 Run with an explicit verification command:
 
@@ -48,9 +48,3 @@ Skip the terminal summary comment:
 ```bash
 roark revise-pr 123 --repo owner/repo --no-comment
 ```
-
-## Next steps
-
-- Use [Troubleshooting](troubleshooting.md#pr-revision-makes-no-commit) for no-op revisions.
-- Use [Artifacts](artifacts.md#pr-revision-layout) to inspect revision outputs.
-- Use [CLI reference](cli-reference.md#pr-revision-options) for options.

@@ -1,8 +1,8 @@
 ---
 title: Labels
-summary: Short entry point for GitHub labels used by Roark, linking to the full label semantics reference.
+summary: Default Roark labels at a glance.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
 See [Label semantics](label-semantics.md) for the full reference.

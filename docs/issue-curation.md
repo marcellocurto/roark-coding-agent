@@ -1,11 +1,11 @@
 ---
 title: Issue curation
-summary: How Roark turns reviewer findings into approved GitHub follow-up issues.
+summary: Turn review findings into GitHub issues.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-13T00:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-Use it when Roark found valid work that should not be folded into the current issue.
+Use issue curation when a review finds real work that does not belong in the current PR.
 
 ## Commands
 
@@ -23,7 +23,7 @@ roark create-issues 123 --repo owner/repo --yes
 
 Without `--yes`, `create-issues` is a dry run.
 
-## When to Create Follow-up Issues
+## What belongs in a follow-up issue
 
 Good candidates:
 
@@ -68,15 +68,15 @@ Issue curation writes:
 
 Review the plan before publishing.
 
-## Publishing Behavior
+## Publishing
 
-The curation plan is structured context, not the final prose contract for GitHub.
+The curation plan decides which findings may become issues. It is not the issue body.
 
-On approved `create-issues --yes` runs, Roark calls an issue-authoring agent with the curation plan and approved plan item IDs. The agent must call `submit_issue_drafts` with one schema-validated draft per approved item. It cannot publish, return raw JSON, or supply labels and provenance as unvalidated prose.
+With `create-issues --yes`, Roark asks an issue-authoring agent to draft each approved item. The agent can draft content but cannot publish issues or choose their labels.
 
-Roark constructs each Markdown body from the accepted draft plus authoritative plan provenance, applies the plan's labels, checks GitHub for an exact normalized-title duplicate, and creates the issue with `gh`. `issue-creation-results.json` records the actual GitHub outcomes. Native issue relationships are not inferred from prose or created unless a future structured plan explicitly models them.
+Roark adds the source finding, applies labels from the plan, checks GitHub for an issue with the same normalized title, and creates the issue with `gh`. Results go in `issue-creation-results.json`. It does not infer GitHub issue relationships from prose.
 
-## Approval Flow
+## Approve and publish
 
 1. Run the issue workflow.
 2. Inspect reviewer findings and generated plan.
@@ -84,8 +84,3 @@ Roark constructs each Markdown body from the accepted draft plus authoritative p
 4. Run `create-issues` without `--yes` to preview approved plan items.
 5. Run `create-issues --yes` only when the plan is approved.
 6. Triage generated issues in GitHub.
-
-## Next Steps
-
-- Use [Artifacts](artifacts.md) to locate curation files.
-- Use [CLI reference](cli-reference.md) for command options.

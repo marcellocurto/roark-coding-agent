@@ -1,11 +1,11 @@
 ---
 title: Usage
-summary: Day-to-day Roark commands and when to use each workflow.
+summary: Choose the right Roark command for a task.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-05-08T07:00:00Z
+lastUpdated: 2026-07-25T07:06:45Z
 ---
 
-## Choose a Workflow
+## Choose a command
 
 | Goal | Command |
 | --- | --- |
@@ -21,37 +21,35 @@ lastUpdated: 2026-05-08T07:00:00Z
 | Manage workspaces | `roark workspace list` |
 | Create follow-up issues from findings | `roark create-issues 123 --repo owner/repo --yes` |
 
-## Manual Issue Run
+## Run one issue locally
 
-Use `do` when you want the complete issue workflow without scheduler-style discovery.
+`do` runs one issue without label-based discovery:
 
 ```bash
 roark do 123 --repo owner/repo
 ```
 
-This is the best first workflow for a new repository because it makes the target issue explicit.
+Start here when trying Roark in a new repository.
 
-## Autorun Discovery
+## Discover issues with autorun
 
-Use `auto` without an issue when Roark should discover eligible issues by label:
+`auto` without an issue discovers eligible issues by label:
 
 ```bash
 roark auto --repo owner/repo --limit 1
 ```
 
-Keep `--limit 1` unless you intentionally want multiple issues per process. Roark is one-shot, so repeated execution should be handled by cron, launchd, GitHub Actions, or another scheduler.
+Start with `--limit 1`. Use cron, launchd, GitHub Actions, or another scheduler for repeated runs.
 
-## Autorun Targeted Issue
+## Target an issue with autorun
 
-Use `auto <issue>` when you want autorun behavior for one known issue:
+Pass an issue number to skip discovery while keeping autorun's publishing and label behavior:
 
 ```bash
 roark auto 123 --repo owner/repo
 ```
 
-This bypasses discovery but still uses the autorun publishing and lifecycle path.
-
-## Dry Run
+## Dry run
 
 Use `--dry-run` before scheduled runs or label changes:
 
@@ -63,14 +61,12 @@ Dry run reports what would be selected. It does not claim issues, create branche
 
 ## Status
 
-Use `status` to inspect persisted run state:
+`status` reads the saved run artifacts:
 
 ```bash
 roark status 123 --repo owner/repo
 roark status --all --repo owner/repo
 ```
-
-Status reads artifacts. It is useful when a scheduler has run Roark in the background.
 
 ## Continue
 
@@ -82,17 +78,17 @@ roark continue 123 --repo owner/repo --attempt 1
 
 Continue should run from the same control checkout when possible. It depends on local artifacts and the persistent managed workspace.
 
-## PR Reviews and Revisions
+## Review and revise PRs
 
-Use `review-pr` for a fresh, non-mutating review of an agent-authored open or draft PR. It inspects the complete pinned PR contribution, runs configured verification once, runs independent correctness and maintainability reviewers, and posts each review directly as its own PR comment. It never edits, commits, or pushes:
+`review-pr` verifies and reviews the full diff of an open or draft PR. It posts separate correctness and maintainability comments and does not edit, commit, or push:
 
 ```bash
 roark review-pr 456 --repo owner/repo
 ```
 
-Use `--no-comment` to keep the complete review local. Verification runs only from `--verify` or trusted `.roark/config.json` configuration. On an unrestricted host, Roark may suggest an inferred package command but does not execute contributor-controlled PR code without that explicit authorization.
+Use `--no-comment` to keep the reviews local. Verification uses `--verify`, then `.roark/config.json`, then the built-in `bun run typecheck` default.
 
-Use `revise-pr` when a PR exists and you want Roark to respond to PR-scoped review feedback:
+`revise-pr` applies existing PR feedback:
 
 ```bash
 roark revise-pr 456 --repo owner/repo
@@ -100,9 +96,9 @@ roark revise-pr 456 --repo owner/repo
 
 Roark classifies feedback, applies only `must-fix-current` items, verifies, pushes one revision commit, and posts one summary comment.
 
-These commands are intentionally separate. `review-pr` produces feedback; `revise-pr` consumes existing feedback and is the mutation-authorized step. Review never starts revision automatically.
+`review-pr` only produces feedback. `revise-pr` is the command that changes code.
 
-## Workspace Commands
+## Workspace commands
 
 List managed workspaces:
 
@@ -138,9 +134,9 @@ roark workspace prune --older-than 30d
 
 Use [Managed workspaces](managed-workspaces.md) before deleting workspaces that may contain recoverable work.
 
-## Issue Curation
+## Issue curation
 
-Use `curate-issues` to turn reviewer findings into a deterministic issue creation plan:
+`curate-issues` turns reviewer findings into an issue creation plan:
 
 ```bash
 roark curate-issues 123 --repo owner/repo
@@ -154,13 +150,13 @@ roark create-issues 123 --repo owner/repo --yes
 
 See [Issue curation](issue-curation.md).
 
-## Following long-running work
+## Long-running commands
 
-Normal output is an operational view rather than a copy of generated Markdown: it identifies the target and current phase, keeps successful tool activity compact, reports phase wall time and verification status, then points to the complete artifact. Add `--verbose` to render completed agent responses and detailed tool statistics. Raw event, prompt, and tool-result debug output is not part of verbose mode.
+Normal output shows the target, current phase, elapsed time, verification status, and artifact path. Add `--verbose` to show completed agent responses and detailed tool statistics.
 
-Interactive terminals receive a target-first title that follows phase and outcome transitions. Use `--no-title` to opt out. Roark emits no title or ANSI sequences when output is redirected or piped, preserves complete redirected lines, and only shortens paths and lines for interactive terminal widths. Operational warnings remain on stderr.
+In an interactive terminal, Roark updates the window title as the phase changes. Disable this with `--no-title`. Redirected output contains no title or ANSI sequences; warnings remain on stderr.
 
-## Common Options
+## Common options
 
 | Option | Use |
 | --- | --- |
@@ -177,9 +173,3 @@ Interactive terminals receive a target-first title that follows phase and outcom
 | `--no-title` | Disable interactive terminal-title updates |
 
 See [CLI reference](cli-reference.md) for the full command and option reference.
-
-## Next Steps
-
-- Use [Troubleshooting](troubleshooting.md) when a command stops unexpectedly.
-- Use [Operations runbook](operations-runbook.md) before scheduling.
-- Use [PR revisions](pr-revisions.md) for review feedback handling.
