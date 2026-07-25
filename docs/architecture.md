@@ -2,12 +2,12 @@
 title: Architecture
 summary: How Roark's CLI, workflows, artifacts, and integrations fit together.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Distribution boundary
 
-Roark is a versioned CLI package intended to run across developer machines, CI runners, and servers. Its installation directory, the target repository's control checkout, and a managed workspace are three distinct locations.
+Roark is a versioned CLI package that runs on developer machines, CI runners, and servers. Keep three locations separate: the Roark installation, the target repository's control checkout, and each managed workspace.
 
 Anything required for Roark's built-in behavior must:
 
@@ -16,7 +16,7 @@ Anything required for Roark's built-in behavior must:
 - be resolved relative to the installed Roark package
 - behave consistently without relying on a particular user's home directory or sibling repositories
 
-Do not make normal behavior depend on absolute paths such as `~/.agents/skills` or `/Users/<name>/Code/...`. Machine-local resources may be supported only as explicit optional user configuration; they cannot define Roark's defaults or required capabilities.
+Built-in behavior cannot depend on paths such as `~/.agents/skills` or `/Users/<name>/Code/...`. Machine-local resources must be optional and explicitly configured.
 
 ## Overview
 
@@ -39,17 +39,15 @@ flowchart LR
 
 `roark.ts` is the executable entry point. It parses commands and delegates to library modules.
 
-Use:
-
 ```bash
 bun run roark.ts --help
 ```
 
-for the complete runtime command list.
+This lists every command.
 
 ## CLI layer
 
-The CLI layer is responsible for:
+The CLI layer handles:
 
 - argument parsing
 - config hydration
@@ -81,13 +79,13 @@ Phase artifacts and their validation live under:
 lib/workflow/
 ```
 
-Each agent-produced result has a validated JSON source and a readable Markdown copy. Workflow decisions and PR-body updates use the JSON, never the Markdown.
+Each agent result has validated JSON and a readable Markdown copy. Roark uses the JSON for workflow decisions and PR bodies.
 
-One shared runner handles these pairs. A phase provides its submission tool, validator, and Markdown formatter; the caller provides the output paths. The runner accepts one submission and writes the JSON last, so a partially written pair does not look complete.
+A shared runner validates and writes each pair. Each phase provides its submission tool, validator, and Markdown formatter; the caller provides the output paths. The runner writes JSON last so an interrupted write cannot appear complete.
 
 Numbered artifacts include fix logs, refinements, and Review A/B cycles.
 
-Review findings keep `handling` (`must-fix-current`, `follow-up`, or `suggestion`) separate from external blockers and review-wide limitations. Validators require inspected evidence and stable finding IDs, enforce size limits, and reject empty fields. Markdown renderers treat submitted strings as text.
+Review findings store routing in `handling`: `must-fix-current`, `follow-up`, or `suggestion`. External blockers and review-wide limitations use separate fields. Validators require evidence and stable finding IDs, enforce size limits, and reject empty fields.
 
 ## Terminal output
 
@@ -97,7 +95,7 @@ Terminal output and title handling live under:
 lib/presentation/
 ```
 
-Workflow code reports the target, phase, pass, artifact, and operation. The presentation layer formats that information for the terminal, including timing, tool activity, verification, final status, and interactive terminal titles.
+Workflow code reports the target, phase, pass, artifact, and operation. The presentation layer turns those fields into terminal output, timing, verification summaries, final status, and window titles.
 
 ## Pi integration
 
@@ -111,7 +109,7 @@ lib/pi/
 
 Workflow agents do not load skills from the host machine.
 
-The React, Next.js, UI, and Convex skills under `skills/` ship with Roark. Roark loads them relative to the installed package, not the target repository, the user's home directory, or another checkout.
+The React, Next.js, UI, and Convex skills under `skills/` ship with Roark. Roark loads them from the installed package.
 
 The bundled skills are `next-best-practices`, `vercel-react-best-practices`, `vercel-composition-patterns`, `design-system-ui`, `convex-migration-helper`, and `convex-performance-audit`.
 

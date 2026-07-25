@@ -2,7 +2,7 @@
 title: Lifecycle hooks
 summary: Run setup commands at specific points in a Roark workflow.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ```json
@@ -23,9 +23,9 @@ lastUpdated: 2026-07-25T07:06:45Z
 - `afterRun`: runs after workflow completion; failures warn instead of stopping the run.
 - `beforeRemove`: runs before workspace removal; failures warn instead of stopping removal.
 
-Put dependency installation in `beforeRun` and `beforeVerify`. A new workspace runs `beforeRun` immediately after creation, so putting the same command in `afterCreate` only runs it twice. Use `afterCreate` for one-time setup.
+Put dependency installation in `beforeRun` and `beforeVerify`. A new workspace runs `beforeRun` immediately after creation; adding the same command to `afterCreate` runs it twice. Reserve `afterCreate` for one-time setup.
 
-`review-pr` uses the same configured lifecycle hooks and verification setup as `revise-pr`. Hooks and verification run against the pinned PR checkout.
+`review-pr` and `revise-pr` use the same hooks and verification setup. Both run them against the PR checkout.
 
 ## Timeout
 

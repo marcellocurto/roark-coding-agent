@@ -2,7 +2,7 @@
 title: Recovery
 summary: Inspect and resume a stopped run.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Continue an attempt
@@ -19,7 +19,7 @@ If `--attempt` is omitted, Roark uses the latest attempt recorded in:
 
 ## What `continue` does
 
-`continue` reuses valid existing artifacts, regenerates missing or malformed phase outputs, rewrites readiness, reruns verification, and publishes only if readiness and verification both pass.
+`continue` keeps valid artifacts, rebuilds missing or malformed outputs, reruns readiness and verification, and publishes if both pass.
 
 If verification failed and fix budget remains, `continue` starts the next fix and review pass before running verification again.
 

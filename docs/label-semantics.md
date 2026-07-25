@@ -2,7 +2,7 @@
 title: Roark label semantics
 summary: Labels Roark reads, creates, and applies.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Autorun eligibility
@@ -73,7 +73,7 @@ Generated issues do not receive `needs-human` by default. That status is reserve
 
 An issue has at most one workflow-state label. Each transition removes the old state before applying the new one. Topic labels such as `bug`, `auth`, or `storage` are unaffected.
 
-Native GitHub dependency relationships are the source of truth for issue-to-issue blocking. The `blocked` label is intended for external conditions that cannot be represented by a native dependency relationship.
+Use native GitHub dependency links for issue-to-issue blocking. Reserve the `blocked` label for external conditions that cannot be represented by a dependency link.
 
 Passing an issue directly to `roark auto` skips the ready-label requirement. Skip labels and active GitHub dependencies still apply.
 

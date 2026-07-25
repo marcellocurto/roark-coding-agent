@@ -2,7 +2,7 @@
 title: CLI reference
 summary: Roark commands, flags, and examples.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 Use the installed binary:
@@ -88,11 +88,11 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 
 ## Live output
 
-Long-running commands show the target, current phase and pass, tool activity, elapsed time, verification status, artifact path, and final result. Full agent responses stay in the artifacts unless you pass `--verbose`. The short `-v` flag still means `--version`.
+Long-running commands show the target, phase, pass, tool activity, elapsed time, verification status, artifact path, and result. Pass `--verbose` to print completed agent responses too. The short `-v` flag means `--version`.
 
-In an interactive terminal, Roark updates the window title with the issue or PR, phase, pass, and repository. Pass `--no-title` to disable it. Redirected output, piped output, CI, and `TERM=dumb` receive no title or ANSI sequences and are not width-truncated. Warnings go to stderr.
+In an interactive terminal, Roark updates the window title with the issue or PR, phase, pass, and repository. Pass `--no-title` to disable it. Redirected or piped output, CI, and `TERM=dumb` omit the title and ANSI sequences. Roark does not truncate this output to the terminal width. Warnings go to stderr.
 
-Paths are relative to the repository or run directory when possible. Interactive output shortens long lines to fit the terminal. In verbose output, `aggregate tool execution` adds the duration of each tool call, so it can exceed elapsed time when tools run concurrently.
+Paths are relative to the repository or run directory when possible. Interactive output shortens long lines to fit the terminal. `aggregate tool execution` totals individual tool durations, so concurrent calls can make it larger than elapsed time.
 
 ## Autorun options
 
@@ -119,7 +119,7 @@ Paths are relative to the repository or run directory when possible. Interactive
 | `--verify <cmd>` | Override the verification command run before review. Uses `.roark/config.json` and then `bun run typecheck` when omitted, matching `revise-pr`. |
 | `--no-comment` | Complete the local review without publishing a PR comment. |
 
-`review-pr` supports fork PRs through GitHub's pull ref and never edits, commits, or pushes. It runs configured lifecycle hooks and verification against the pinned PR checkout, so invoking it authorizes those commands. Pass `--repo` when Git origin does not identify the base repository.
+`review-pr` supports fork PRs through GitHub's pull ref and never edits, commits, or pushes. Configured hooks and verification run against the pinned PR checkout and may execute its code. Pass `--repo` when the Git origin does not identify the base repository.
 
 ## PR revision options
 

@@ -2,7 +2,7 @@
 title: Troubleshooting
 summary: Diagnose and recover from common failures.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## No eligible issues
@@ -142,7 +142,7 @@ If the branch belongs to a previous attempt, prefer `roark continue`. If it is u
 
 Symptoms:
 
-- `readiness.json` is missing, invalid, or has a decision status other than `ready-for-pr`
+- `readiness.json` is missing, invalid, or its status is not `ready-for-pr`
 - no PR is opened
 
 Open:
@@ -151,7 +151,7 @@ Open:
 .roark/runs/issue/<n>/attempts/<k>/readiness.md
 ```
 
-Read `readiness.md` for the explanation and `readiness.json` for exact field values. Then inspect the latest review and fix logs. After fixing any local setup problem, run `roark continue`.
+Read `readiness.md` for the explanation and `readiness.json` for the decision. Then inspect the latest review and fix logs. Fix any local setup problems and run `roark continue`.
 
 ## PR not opened
 

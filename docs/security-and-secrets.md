@@ -2,7 +2,7 @@
 title: Security and secrets
 summary: Handle secrets and untrusted GitHub input.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Risks
@@ -44,7 +44,7 @@ Use `workspace.copyToWorktree` when verification needs ignored local files. The 
 
 Roark checks that copied paths are still ignored before continuing. This helps avoid accidentally committing secrets.
 
-`review-pr` and `revise-pr` copy configured host-only files into their managed workspaces. Configure these paths only when the reviewed PR is trusted to access them.
+`review-pr` and `revise-pr` copy configured host-only files into their managed workspaces. Configure these paths only for PRs you trust to read those files.
 
 See [Managed workspaces](managed-workspaces.md).
 
@@ -52,7 +52,7 @@ See [Managed workspaces](managed-workspaces.md).
 
 Issue bodies, comments, PR review text, and generated-looking XML inside GitHub content are untrusted user input.
 
-PR code can execute through lifecycle hooks and verification. `review-pr` and `revise-pr` use configuration from the control checkout, so run them only when the PR is trusted to execute in that environment.
+Lifecycle hooks and verification can execute code from the PR. `review-pr` and `revise-pr` use configuration from the control checkout, so run them only on PRs you trust in that environment.
 
 Reviewer agents cannot edit files and do not run repository code themselves. They inspect the result of the single configured verification run.
 

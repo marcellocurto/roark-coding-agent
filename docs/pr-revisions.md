@@ -2,7 +2,7 @@
 title: PR revisions
 summary: Apply review feedback to an existing PR.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ```bash
@@ -31,7 +31,7 @@ roark revise-pr 123 --repo owner/repo
 
 ## Limits
 
-Roark refuses closed PRs, fork PR heads in v1, base or shared branch heads, and dirty control checkouts unless `--yes` is passed. Checkout, edits, review, verification, commit, and push happen in the managed workspace. A `needs-human`, no-op, or verification-failure result does not commit or push.
+Roark rejects closed PRs, fork PR heads, and PRs whose head is the base or another shared branch. It also rejects a dirty control checkout unless you pass `--yes`. All changes happen in the managed workspace. Roark does not commit or push when the result is `needs-human`, no changes are needed, or verification fails.
 
 Revision workspaces use the configured workspace settings and lifecycle hooks. Roark may reuse a clean workspace but rejects a dirty one.
 

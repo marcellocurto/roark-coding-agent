@@ -2,7 +2,7 @@
 title: Verification
 summary: Configure verification and recover when it fails.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:08:01Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Gate order
@@ -40,13 +40,13 @@ For `auto` and `continue`, Roark requires a verification command. It uses CLI fl
 
 The readiness gate passes only when `readiness.json` has `"status": "ready-for-pr"`. Missing or invalid JSON fails the gate. `readiness.md` is the readable copy.
 
-Readiness answers whether the workflow believes the change is ready to publish.
+`readiness.json` records whether the change is ready to publish.
 
 ## Verification gate
 
 Roark runs the verification command through `sh -c` in the issue workspace. Exit code `0` passes.
 
-If verification fails and the fix budget is not exhausted, Roark saves the failure, runs another fix and review pass, checks readiness again, and reruns verification. It does not rerun the initial implementation phase.
+If verification fails and fix attempts remain, Roark saves the failure, runs another fix and review pass, and checks both gates again. It does not repeat the initial implementation phase.
 
 The command, exit code, stdout tail, and stderr tail are written to:
 
@@ -83,7 +83,7 @@ PR revisions use the same filenames in their revision directory.
 | Rust | `{ "verify": "cargo test" }` |
 | TypeScript | `{ "verify": "npx tsc --noEmit" }` |
 
-Prefer a command that is deterministic and non-interactive. A fast repository check is usually better than an expensive full deployment pipeline for local Roark publishing.
+Choose a deterministic, non-interactive command that finishes quickly. A repository check is usually more useful here than a full deployment pipeline.
 
 ## Hooks before verification
 

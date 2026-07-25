@@ -44,7 +44,7 @@ roark init
 roark do 123 --repo owner/repo
 ```
 
-`roark do` edits the current target checkout, writes run artifacts locally, and does not claim the issue, push a branch, or open a pull request. It provides a controlled way to understand the workflow before enabling automation.
+`roark do` edits the current target checkout and writes run artifacts locally. It does not claim the issue, push a branch, or open a pull request, so it is a useful first run before enabling automation.
 
 For the complete setup, dry-run, autorun, inspection, and recovery path, read the [Quickstart](docs/quickstart.md).
 

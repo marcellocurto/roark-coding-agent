@@ -2,7 +2,7 @@
 title: Artifacts
 summary: Where Roark stores run data and what each file contains.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 Roark writes artifacts so you can:
@@ -56,7 +56,7 @@ Roark writes artifacts so you can:
                 └── issue-creation-results.json
 ```
 
-Not every file exists for every run. For example, fix logs exist only when fix passes run.
+Runs write only the files they need. Fix logs, for example, appear only after a fix pass.
 
 ## Start here
 
@@ -102,7 +102,7 @@ Not every file exists for every run. For example, fix logs exist only when fix p
 .roark/runs/issue/<issue-number>/attempts.json
 ```
 
-This records attempts for an issue and is used by `roark continue` when no explicit attempt is supplied.
+`roark continue` reads this index when no attempt number is given.
 
 ## PR run layout
 
@@ -114,22 +114,24 @@ This records attempts for an issue and is used by `roark continue` when no expli
         └── revision-<n>/
 ```
 
-Each `review-<n>` directory stores the pinned base and head, PR context, optional linked-issue context, verification output, metadata, and the two reviews in `review-a.md` and `review-b.md`. Those Markdown files become the PR comments after redaction and the addition of hidden ownership markers. Rerunning the command creates another numbered directory and another pair of comments.
+Each `review-<n>` directory contains the pinned base and head, PR context, verification output, metadata, and `review-a.md` and `review-b.md`. Linked-issue context is included when available.
 
-Each `revision-<n>` directory stores the fetched feedback, revision plan, execution logs, reviews, verification output, and run metadata. Structured results use JSON, with matching Markdown files for reading. Full verification output uses `verification-full.md` and `verification-before-fix-<n>-full.md`.
+Roark redacts the two reviews, adds hidden ownership markers, and posts them as PR comments. A rerun creates a new numbered directory and two new comments.
 
-Roark makes workflow decisions from the validated JSON files, not from the Markdown copies. The same rule applies to PR and follow-up issue content: the structured data is the source, and Roark renders the public Markdown from it.
+Each `revision-<n>` directory contains the fetched feedback, plan, execution logs, reviews, verification output, and run metadata. JSON holds the structured results; matching Markdown files make them easier to read.
+
+Roark reads workflow state from validated JSON, not from the Markdown copies. It also renders PR and follow-up issue bodies from JSON.
 
 ## Git behavior
 
-Issue run artifacts are useful for inspection and recovery. Publishing flows generally avoid including issue run artifacts in the PR commit.
+Roark normally keeps issue run artifacts out of PR commits.
 
-PR revision workflows keep revision artifacts local and exclude `.roark` control-plane state from successful revision commits.
+PR revision artifacts stay local. Successful revision commits exclude `.roark`.
 
 ## Retention and deletion
 
-Artifacts are local files. If the control checkout is removed, artifact history is removed with it. If a managed workspace is removed, uncommitted recoverable work may be lost even if artifacts remain.
+Artifacts live in the control checkout and disappear with it. Deleting a managed workspace also deletes any uncommitted work inside it.
 
-Because these paths are meaningful only in the control checkout, Roark does not include local run or artifact paths in public GitHub comments, pull request bodies, or generated issues.
+Roark removes local artifact paths from GitHub comments, PR bodies, and generated issues.
 
 For scheduled operation, back up or retain `.roark/runs` according to your repository's audit needs.

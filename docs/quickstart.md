@@ -2,7 +2,7 @@
 title: Quickstart
 summary: Install Roark and use it on your first issue.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Prerequisites
@@ -23,7 +23,7 @@ You need:
 - a verification command that can run non-interactively
 - any required ignored local files available in the control checkout
 
-Roark uses GitHub CLI for repository operations and runs shell commands in local workspaces. Review [Security and secrets](security-and-secrets.md) before running on public or shared repositories.
+Roark uses `gh` for GitHub operations and runs shell commands in local workspaces. Read [Security and secrets](security-and-secrets.md) before using it on a public repository or shared machine.
 
 ## Install Roark
 
@@ -117,7 +117,7 @@ After the dry run and `do` command succeed, run one autorun attempt:
 roark auto --repo owner/repo --limit 1
 ```
 
-Roark opens the pull request only after readiness and verification pass. It then posts separate correctness and maintainability reviews. If either review fails or the PR changes while the review is running, the PR stays open and Roark keeps the local review artifacts.
+After readiness and verification pass, Roark opens the pull request and posts separate correctness and maintainability reviews. If a review fails or the PR changes during review, the PR stays open and the local review artifacts remain.
 
 On failure, Roark leaves the managed workspace and artifacts for inspection. It does not merge, close issues, or mark PRs ready for review.
 
@@ -149,4 +149,4 @@ roark continue 123 --repo owner/repo --attempt 1
 
 If `--attempt` is omitted, Roark uses the latest recorded attempt.
 
-Continue reuses valid existing artifacts, regenerates missing or invalid phase outputs, reruns readiness and verification, and publishes only when both gates pass. See [Recovery](recovery.md).
+`continue` keeps valid artifacts, rebuilds missing or invalid outputs, reruns both gates, and publishes if they pass. See [Recovery](recovery.md).

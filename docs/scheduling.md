@@ -2,7 +2,7 @@
 title: Scheduling
 summary: Run Roark from cron, launchd, or GitHub Actions.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Rules
@@ -21,7 +21,7 @@ lastUpdated: 2026-07-25T07:06:45Z
 
 ## launchd
 
-Use a `launchd` job under the user's login session so GitHub CLI keychain credentials are available. Set the working directory to the control checkout and pass `--cwd` explicitly.
+Run the `launchd` job in the user's login session so `gh` can access keychain credentials. Set the control checkout as the working directory and pass `--cwd` explicitly.
 
 ## GitHub Actions
 
@@ -54,4 +54,4 @@ jobs:
 
 ## Failure handling
 
-When a scheduled run fails a gate, Roark posts recovery information on the issue. Use `roark continue` from the same control checkout to inspect and resume.
+If a scheduled run fails a gate, Roark posts recovery instructions on the issue. Inspect and resume it with `roark continue` from the same control checkout.

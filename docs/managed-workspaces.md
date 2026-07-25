@@ -2,7 +2,7 @@
 title: Managed workspaces
 summary: How Roark creates workspaces and copies ignored local files.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Workspace layout
@@ -43,7 +43,7 @@ add the ignored path to `.roark/config.json`:
 }
 ```
 
-`copyToWorktree` is nested under `workspace`. The same relative path is used as the source in the control checkout and the destination in the managed workspace.
+Set `copyToWorktree` under `workspace`. Each entry uses the same relative path in the control checkout and managed workspace.
 
 ## Path restrictions
 

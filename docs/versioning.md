@@ -2,7 +2,7 @@
 title: Versioning and releases
 summary: Version and release Roark.
 dateCreated: 2026-05-11T00:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 Roark uses the `version` field in `package.json` as the source of truth.
@@ -15,7 +15,7 @@ Roark follows Semantic Versioning:
 - `MINOR` for new commands, flags, or backward-compatible behavior.
 - `MAJOR` for breaking CLI, config, artifact, or workflow behavior.
 
-While Roark is `0.x`, breaking changes may use a minor bump. Move to `1.0.0` when the CLI and config contract are stable enough that breaking changes should be rare.
+While Roark is `0.x`, minor releases may break compatibility. Release `1.0.0` once the CLI and config contracts are expected to remain stable.
 
 ## Changelog policy
 

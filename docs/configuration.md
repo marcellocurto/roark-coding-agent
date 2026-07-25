@@ -2,7 +2,7 @@
 title: Configuration
 summary: Keys and defaults for `.roark/config.json`.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Precedence
@@ -114,7 +114,7 @@ Set `notifications.onExit` to `true` to receive a macOS notification when a Roar
 
 The default is `false`. When enabled, notifications apply to every command, including `status` and workspace commands.
 
-Roark sends notifications through `/usr/bin/osascript` and waits up to two seconds. A notification contains the command, repository directory, and issue or PR number when available. It does not include raw errors or arbitrary arguments.
+Roark sends notifications through `/usr/bin/osascript` and waits up to two seconds. Notifications include the command, repository directory, and issue or PR number. They exclude raw errors and arbitrary arguments.
 
 Notification failures produce a warning but do not change the command's result. Non-macOS hosts do nothing. Roark also skips notification when:
 
@@ -168,9 +168,9 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 
 ## Verification configuration
 
-`auto` and `continue` choose verification from the CLI flag, config, then repository inference. A failed command uses the same `maxFixPasses` budget as a reviewer-requested fix.
+For `auto` and `continue`, Roark gets the verification command from the CLI flag first, then config, then repository inference. Verification failures and reviewer findings share the `maxFixPasses` limit.
 
-`review-pr` and `revise-pr` use `--verify`, then configured `verify`, then `bun run typecheck`. They run configured workspace hooks and verification against the PR checkout. Only use them for PR code you trust to execute in that environment.
+For `review-pr` and `revise-pr`, Roark uses `--verify`, then configured `verify`, then `bun run typecheck`. Workspace hooks and verification run against the PR checkout, so use these commands only on PRs you trust.
 
 Good examples:
 

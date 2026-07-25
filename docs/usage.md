@@ -2,7 +2,7 @@
 title: Usage
 summary: Choose the right Roark command for a task.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## Choose a command
@@ -76,11 +76,11 @@ Use `continue` after readiness or verification fails:
 roark continue 123 --repo owner/repo --attempt 1
 ```
 
-Continue should run from the same control checkout when possible. It depends on local artifacts and the persistent managed workspace.
+Run `continue` from the same control checkout. It needs the local artifacts and managed workspace from the original attempt.
 
 ## Review and revise PRs
 
-`review-pr` verifies and reviews the full diff of an open or draft PR. It posts separate correctness and maintainability comments and does not edit, commit, or push:
+`review-pr` checks the full diff of an open or draft PR. It posts separate correctness and maintainability reviews without editing, committing, or pushing:
 
 ```bash
 roark review-pr 456 --repo owner/repo
@@ -152,9 +152,9 @@ See [Issue curation](issue-curation.md).
 
 ## Long-running commands
 
-Normal output shows the target, current phase, elapsed time, verification status, and artifact path. Add `--verbose` to show completed agent responses and detailed tool statistics.
+Output shows the target, current phase, elapsed time, verification status, and artifact path. Add `--verbose` for completed agent responses and detailed tool statistics.
 
-In an interactive terminal, Roark updates the window title as the phase changes. Disable this with `--no-title`. Redirected output contains no title or ANSI sequences; warnings remain on stderr.
+In an interactive terminal, Roark updates the window title with the current phase. Disable it with `--no-title`. Redirected output omits title and ANSI sequences; warnings still go to stderr.
 
 ## Common options
 

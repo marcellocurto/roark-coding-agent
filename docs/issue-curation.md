@@ -2,7 +2,7 @@
 title: Issue curation
 summary: Turn review findings into GitHub issues.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 Use issue curation when a review finds real work that does not belong in the current PR.
@@ -72,9 +72,9 @@ Review the plan before publishing.
 
 The curation plan decides which findings may become issues. It is not the issue body.
 
-With `create-issues --yes`, Roark asks an issue-authoring agent to draft each approved item. The agent can draft content but cannot publish issues or choose their labels.
+`create-issues --yes` asks an agent to draft each approved item. Roark, not the agent, chooses labels and publishes the issues.
 
-Roark adds the source finding, applies labels from the plan, checks GitHub for an issue with the same normalized title, and creates the issue with `gh`. Results go in `issue-creation-results.json`. It does not infer GitHub issue relationships from prose.
+Before publishing, Roark adds the source finding and checks for an issue with the same normalized title. It then applies the planned labels and creates the issue with `gh`. Results go in `issue-creation-results.json`. Writing that one issue blocks another does not create a GitHub dependency link.
 
 ## Approve and publish
 

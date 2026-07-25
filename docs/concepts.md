@@ -2,7 +2,7 @@
 title: Concepts
 summary: Workspaces, attempts, phases, gates, and other Roark concepts.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:08:01Z
+lastUpdated: 2026-07-25T07:13:47Z
 ---
 
 ## How a run works
@@ -24,7 +24,7 @@ flowchart TD
 
 The control checkout is the repository directory where you invoke `roark`.
 
-Roark reads `.roark/config.json` from this checkout, writes run artifacts under `.roark/runs`, and uses it as the source for ignored local files copied into managed workspaces.
+Roark reads `.roark/config.json` and writes `.roark/runs` in this checkout. Ignored files copied into managed workspaces also come from here.
 
 The control checkout should stay clean and should not be shared by humans while scheduled Roark jobs are running.
 
@@ -77,9 +77,9 @@ Roark runs two reviews:
 
 A change must pass both.
 
-Each finding has a `handling` value: fix it now, create a follow-up, or treat it as an optional suggestion. A separate `blockedBy` field records missing access, information, dependencies, or human decisions. Roark still fixes any unblocked current work before it stops.
+Each finding has a `handling` value: fix now, follow up later, or optional suggestion. `blockedBy` records missing access, information, dependencies, or decisions. Roark fixes unblocked current work before stopping.
 
-Reviews also record what was inspected and anything that prevented a complete review. Finding IDs stay the same across passes while the underlying problem remains.
+Reviews record what was inspected and anything that limited the review. A finding keeps the same ID until the problem is resolved.
 
 ## Readiness gate
 
@@ -101,7 +101,7 @@ See [Label semantics](label-semantics.md).
 
 ## Pull requests
 
-Roark opens a pull request only after readiness and verification pass. Autorun then runs `review-pr` against that PR and posts both reviews. A failed or stale review does not undo the published PR.
+Roark opens a pull request after readiness and verification pass. Autorun then posts correctness and maintainability reviews. If that review fails or becomes stale, the PR stays open.
 
 Roark does not:
 
