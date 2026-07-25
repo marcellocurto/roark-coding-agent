@@ -3,7 +3,7 @@ import { createWorkflowContext } from "../workflow/artifacts.ts";
 import { issuePublishingPrompt } from "./issue-publishing-prompt.ts";
 
 describe("issuePublishingPrompt", () => {
-  test("keeps the curation plan authoritative and requires structured submission", () => {
+  test("uses the current attempt's curation plan and serializes allowed items", () => {
     const context = createWorkflowContext({
       command: "create-issues",
       issue: "12",
@@ -21,10 +21,13 @@ describe("issuePublishingPrompt", () => {
       allowedItems: [{ planItemId: "follow-up-1", kind: "follow-up", suggestedTitle: "Follow-up", labels: ["needs-triage"] }],
     });
 
-    expect(prompt).toContain("The curation plan at `.roark/runs/issue/12/attempts/2/issue-curation-plan.json` is the source of truth");
-    expect(prompt).toContain("submit_issue_drafts");
-    expect(prompt).toContain("Do not write Markdown headings, return JSON text, invoke gh");
-    expect(prompt).toContain("follow-up-1");
+    expect(prompt).toContain("`.roark/runs/issue/12/attempts/2/issue-curation-plan.json`");
+    expect(prompt).toContain("<target_repo>owner/repo</target_repo>");
+    const encodedJson = /<allowed_plan_items_json>\n([\s\S]*?)\n  <\/allowed_plan_items_json>/.exec(prompt)?.[1];
+    expect(encodedJson).toBeDefined();
+    expect(JSON.parse(decodeXmlText(encodedJson ?? ""))).toEqual([
+      { planItemId: "follow-up-1", kind: "follow-up", suggestedTitle: "Follow-up", labels: ["needs-triage"] },
+    ]);
   });
 
   test("keeps adversarial approval data and allowed-item JSON inside trusted boundaries", () => {

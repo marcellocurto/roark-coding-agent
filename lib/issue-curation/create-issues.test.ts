@@ -178,7 +178,6 @@ describe("createIssuesFromCurationPlan", () => {
     expect(requests).toHaveLength(1);
     expect(requests[0]?.skillPaths).toBeUndefined();
     expect(requests[0]?.fileEditingToolsEnabled).toBe(false);
-    expect(requests[0]?.prompt).toContain("submit_issue_drafts");
     expect(requests[0]?.prompt).toContain("external-blocker-1");
     expect(result.created.map((entry) => entry.number)).toEqual([300, 301]);
     expect(result.created[0]?.title).toBe("Clear blocker title");

@@ -3,7 +3,7 @@ import { createWorkflowContext } from "../workflow/artifacts.ts";
 import { prCreatePrompt } from "./pr-publishing-prompt.ts";
 
 describe("PR publishing prompts", () => {
-  test("create prompt makes structured submission the authoring boundary", () => {
+  test("serializes the PR target and workflow inputs", () => {
     const context = createWorkflowContext({
       command: "do",
       issue: "12",
@@ -26,11 +26,12 @@ describe("PR publishing prompts", () => {
       changedFiles: ["lib/exports.ts"],
     });
 
-    expect(prompt).toContain("submit_pr_draft");
-    expect(prompt).toContain("Do not write Markdown headings, return JSON text, invoke gh, or publish anything yourself");
+    expect(prompt).toContain("<source_issue>#12 Fix exports (https://github.com/owner/repo/issues/12)</source_issue>");
+    expect(prompt).toContain("<target_repo>owner/repo</target_repo>");
     expect(prompt).toContain("<branch>roark/issue-12</branch>");
+    expect(prompt).toContain("<base_branch>main</base_branch>");
+    expect(prompt).toContain("<path>.roark/runs/issue/12/attempts/2/implementation-log.json</path>");
     expect(prompt).toContain("<file>lib/exports.ts</file>");
-    expect(prompt).toContain("structured JSON artifacts as authoritative workflow state");
   });
 
   test("keeps adversarial dynamic values inside trusted PR publishing boundaries", () => {

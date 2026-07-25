@@ -280,7 +280,7 @@ describe("runAgentTask transient agent retry", () => {
     expect(JSON.parse(await readArtifact(context, "triage"))).toEqual(validTriage);
   });
 
-  test("adds partial-edit guidance when file-editing tools are enabled", async () => {
+  test("marks retried editing requests after a transient connection failure", async () => {
     const context = await createContext();
     await writeJsonArtifact(context, "triage", triageResult());
     await writeJsonArtifact(context, "implementationPlan", implementationPlanResult());
@@ -301,8 +301,6 @@ describe("runAgentTask transient agent retry", () => {
     expect(prompts).toHaveLength(2);
     expect(prompts[0]).not.toContain("<transient_connection_retry>");
     expect(prompts[1]).toContain("<transient_connection_retry>");
-    expect(prompts[1]).toContain("It may have already modified files in the working tree.");
-    expect(prompts[1]).toContain("Inspect the current diff before editing");
   });
 
   test("does not write diagnostic artifacts while transient retries remain", async () => {

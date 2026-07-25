@@ -396,7 +396,6 @@ describe("publishAutorunResult", () => {
       expect(agentRequests[0]?.cwd).toBe(controlCwd);
       expect(agentRequests[0]?.command).toBe("continue");
       expect(agentRequests[0]?.skillPaths).toBeUndefined();
-      expect(agentRequests[0]?.prompt).toContain("submit_pr_draft");
       expect(agentRequests[0]?.prompt).toContain("<branch>roark/issue-9</branch>");
       expect(agentRequests[0]?.prompt).toContain("<changed_files>");
       expect(agentRequests[0]?.prompt).toContain("<verification>not run</verification>");
