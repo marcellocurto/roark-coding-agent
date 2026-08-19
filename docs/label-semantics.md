@@ -2,7 +2,7 @@
 title: Roark label semantics
 summary: Labels Roark reads, creates, and applies.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## Autorun eligibility
@@ -52,12 +52,14 @@ Generated issues do not receive `needs-human` by default. That status is reserve
 
 ## Configurable label flags
 
-- `--label <label>` — ready label for autorun eligibility. Defaults to `ready-for-agent`.
-- `--skip-label <label>` — autorun skip label; repeatable. Passing it replaces the default skip set on first use; Roark still appends required lifecycle/status skip labels.
-- `--skip-labels <labels>` — comma-separated autorun skip labels. Passing it replaces the default skip set on first use; Roark still appends required lifecycle/status skip labels.
-- `--in-progress-label <label>` — label applied when claiming an issue. Defaults to `agent-in-progress`.
-- `--success-label <label>` — label applied after opening a PR. Defaults to `agent-pr-opened`.
-- `--failure-label <label>` — label applied when readiness or verification fails. Defaults to `agent-failed`.
+| Flag | Effect |
+| --- | --- |
+| `--label <label>` | Sets the ready label. Defaults to `ready-for-agent`. |
+| `--skip-label <label>` | Sets one autorun skip label. Repeat the flag to set more than one. The first use replaces the default skip set. Roark still adds required lifecycle and status labels. |
+| `--skip-labels <labels>` | Sets a comma-separated list of autorun skip labels. The first use replaces the default skip set. Roark still adds required lifecycle and status labels. |
+| `--in-progress-label <label>` | Sets the label applied when Roark claims an issue. Defaults to `agent-in-progress`. |
+| `--success-label <label>` | Sets the label applied after Roark opens a pull request. Defaults to `agent-pr-opened`. |
+| `--failure-label <label>` | Sets the label applied when readiness or verification fails. Defaults to `agent-failed`. |
 
 ## Lifecycle transitions
 

@@ -2,7 +2,7 @@
 title: Configuration
 summary: Keys and defaults for `.roark/config.json`.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## Precedence
@@ -170,7 +170,9 @@ Read [Label semantics](label-semantics.md) before changing label names on a live
 
 For `auto` and `continue`, Roark gets the verification command from the CLI flag first, then config, then repository inference. Verification failures and reviewer findings share the `maxFixPasses` limit.
 
-For `review-pr` and `revise-pr`, Roark uses `--verify`, then configured `verify`, then `bun run typecheck`. Workspace hooks and verification run against the PR checkout, so use these commands only on PRs you trust.
+For `review-pr` and `revise-pr`, Roark uses `--verify`, then configured `verify`, then `bun run typecheck`.
+
+Workspace hooks and verification run against the pull request checkout. Use these commands only on pull requests you trust.
 
 Good examples:
 

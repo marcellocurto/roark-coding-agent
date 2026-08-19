@@ -2,7 +2,7 @@
 title: Autorun
 summary: How `roark auto` selects issues and opens pull requests.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ```bash
@@ -34,9 +34,9 @@ Start with `--limit 1`. Each invocation runs once; use cron, launchd, GitHub Act
 
 ## Selection labels
 
-The default ready label is `ready-for-agent`. The default skip set includes intake, paused, terminal, and lifecycle states such as `needs-triage`, `needs-human`, `agent-in-progress`, `agent-failed`, and `agent-pr-opened`.
+By default, `ready-for-agent` opts an issue into autorun. Any configured skip label excludes it.
 
-See [Label semantics](label-semantics.md) for the full label reference.
+See [Label semantics](label-semantics.md) for the default skip labels, configuration flags, and lifecycle transitions.
 
 ## What autorun does not do
 

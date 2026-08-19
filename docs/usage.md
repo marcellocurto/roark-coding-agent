@@ -2,7 +2,7 @@
 title: Usage
 summary: Choose the right Roark command for a task.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## Choose a command
@@ -86,7 +86,7 @@ Run `continue` from the same control checkout. It needs the local artifacts and 
 roark review-pr 456 --repo owner/repo
 ```
 
-Use `--no-comment` to keep the reviews local. Verification uses `--verify`, then `.roark/config.json`, then the built-in `bun run typecheck` default.
+Use `--no-comment` to keep the reviews local. See [Verification](verification.md) for the verification command precedence.
 
 `revise-pr` applies existing PR feedback:
 

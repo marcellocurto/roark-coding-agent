@@ -2,7 +2,7 @@
 title: Docs maintenance
 summary: Keep the docs in sync with Roark's CLI and behavior.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:06:45Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## Update checklist
@@ -50,4 +50,12 @@ Every user-facing page should be reachable from at least one of:
 
 ## Writing
 
-State what the command does, show the command, and document its constraints. Skip generic introductions, repeated recaps, and boilerplate "Next steps" sections.
+State what the command does, show the command, and name its limits.
+
+Use Roark terms consistently. Do not alternate between `managed workspace`, `checkout`, and `clone` when referring to the same managed workspace.
+
+Keep one idea per sentence. Name the command, file, exit code, label, or state transition responsible for the behavior. Replace a general claim with the mechanism or remove it.
+
+Use sentence-case headings and straight quotes. Do not use em dashes. Use a table when several flags or fields need parallel descriptions.
+
+Keep warnings direct. Skip generic introductions, repeated recaps, promotional language, and boilerplate conclusion sections.

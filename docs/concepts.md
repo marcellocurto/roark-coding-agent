@@ -2,7 +2,7 @@
 title: Concepts
 summary: Workspaces, attempts, phases, gates, and other Roark concepts.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## How a run works
@@ -93,11 +93,9 @@ The run can publish only when the command exits `0`. Command output is recorded 
 
 ## Labels
 
-Labels control autorun eligibility and lifecycle state.
+Labels control autorun eligibility and record the issue's workflow state. By default, `ready-for-agent` opts an issue into autorun and any configured skip label excludes it.
 
-The default ready label is `ready-for-agent`. Default workflow skip labels include `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, `wont-fix`, `agent-in-progress`, `agent-failed`, and `agent-pr-opened`.
-
-See [Label semantics](label-semantics.md).
+See [Label semantics](label-semantics.md) for the default skip labels and every lifecycle transition.
 
 ## Pull requests
 

@@ -2,7 +2,7 @@
 title: Quickstart
 summary: Install Roark and use it on your first issue.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-07-25T07:13:47Z
+lastUpdated: 2026-08-19T07:58:25Z
 ---
 
 ## Prerequisites
@@ -117,9 +117,11 @@ After the dry run and `do` command succeed, run one autorun attempt:
 roark auto --repo owner/repo --limit 1
 ```
 
-After readiness and verification pass, Roark opens the pull request and posts separate correctness and maintainability reviews. If a review fails or the PR changes during review, the PR stays open and the local review artifacts remain.
+Roark opens the pull request only after readiness and verification pass. It then posts two reviews, one for correctness and one for maintainability.
 
-On failure, Roark leaves the managed workspace and artifacts for inspection. It does not merge, close issues, or mark PRs ready for review.
+If either review fails, or the pull request changes before review finishes, Roark leaves the pull request open and saves the local review files. On any failure, Roark keeps the managed workspace and run files for inspection.
+
+Roark never merges the pull request, closes the issue, or marks the pull request ready for review.
 
 ## Inspect the run
 
