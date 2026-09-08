@@ -2,10 +2,8 @@ import type { ApplicationExecution } from "../runtime/application.ts";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
 import { inferNextFixPassPromise as inferNextFixPass } from "../workflow/artifacts-promise.ts";
 import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
-import {
-  planWorkflowProgression,
-  type WorkflowProgressionAction,
-} from "../workflow/progression.ts";
+import { type WorkflowProgressionAction } from "../workflow/progression.ts";
+import { planWorkflowProgressionPromise as planWorkflowProgression } from "../workflow/progression-promise.ts";
 import type { AttemptOutcome } from "./attempts.ts";
 import {
   classifyVerificationFailure,

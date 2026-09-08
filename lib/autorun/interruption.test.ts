@@ -1,3 +1,4 @@
+import { runApplicationPromise } from "../runtime/application.ts";
 import { readRunSummary } from "../observability/summary.ts";
 import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -59,8 +60,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       expect(metadata.outcome).toBe("errored");
       expect(metadata.outcomeDetail).toBe("Interrupted.");
       expect(typeof metadata.endedAt).toBe("string");
-      const summary = await readRunSummary(
-        path.join(issueDir, "attempts/1/summary.json"),
+      const summary = await runApplicationPromise(
+        readRunSummary(path.join(issueDir, "attempts/1/summary.json")),
       );
       expect(summary?.status).toBe("failed");
       expect(summary?.endedAt ?? null).toBe(metadata.endedAt);

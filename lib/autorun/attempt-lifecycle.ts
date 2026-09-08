@@ -1,3 +1,8 @@
+import {
+  createFileRunObserver,
+  RunObservation,
+} from "../observability/observer.ts";
+import { type finalizeAttemptObservabilityPromise } from "./observability-promise.ts";
 import { AttemptStore } from "./attempts.ts";
 import { Cause, Effect, Exit } from "effect";
 import { Presentation } from "../runtime/services.ts";
@@ -12,14 +17,14 @@ import {
 import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
+import { type WorkflowRunResult } from "../workflow/phases.ts";
 import {
-  codeRefinementPhase,
-  fixPhase,
-  readinessPhase,
-  runFullWorkflow,
-  reviewPhase,
-  type WorkflowRunResult,
-} from "../workflow/phases.ts";
+  codeRefinementPhasePromise as codeRefinementPhase,
+  fixPhasePromise as fixPhase,
+  readinessPhasePromise as readinessPhase,
+  runFullWorkflowPromise as runFullWorkflow,
+  reviewPhasePromise as reviewPhase,
+} from "../workflow/phases-promise.ts";
 import type { GitHubIssueSnapshot } from "../github/issue.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import {
@@ -105,7 +110,7 @@ export interface RunAutorunAttemptLifecycleInjected {
     | undefined;
   markIssueFailed?: typeof markIssueFailed | undefined;
   finalizeAttemptObservability?:
-    | typeof finalizeAttemptObservability
+    | typeof finalizeAttemptObservabilityPromise
     | undefined;
 }
 
@@ -115,12 +120,21 @@ export const runAutorunAttemptLifecycle = Effect.fn(
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected = {},
 ) {
+  const observer =
+    input.workflowContext.observer ??
+    (yield* createFileRunObserver(input.workflowContext));
+  input.workflowContext.observer = observer;
   const clock = injected.clock ?? defaultClock;
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
   const completeWorkflow =
     injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
-  const finalizeObservability =
-    injected.finalizeAttemptObservability ?? finalizeAttemptObservability;
+  const injectedFinalize = injected.finalizeAttemptObservability;
+  const finalizeObservability = (
+    input: Parameters<typeof finalizeAttemptObservability>[0],
+  ) =>
+    injectedFinalize
+      ? fromLegacyPromise(() => injectedFinalize(input))
+      : finalizeAttemptObservability(input);
 
   let attemptMetadata = formatAttemptMetadata({
     ...input.attemptMetadata,
@@ -219,6 +233,7 @@ export const runAutorunAttemptLifecycle = Effect.fn(
     ),
   );
   return yield* work.pipe(
+    Effect.provideService(RunObservation, observer),
     Effect.onExit((exit) =>
       Effect.gen(function* () {
         if (Exit.isFailure(exit) && outcome === "in-progress") {
@@ -263,15 +278,11 @@ export const runAutorunAttemptLifecycle = Effect.fn(
           });
           yield* attempts.persist(input.issueDir, attemptMetadata).pipe(
             Effect.ensuring(
-              Effect.tryPromise({
-                try: () =>
-                  finalizeObservability({
-                    context: input.workflowContext,
-                    outcome,
-                    outcomeDetail,
-                    endedAt,
-                  }),
-                catch: (error) => error,
+              finalizeObservability({
+                context: input.workflowContext,
+                outcome,
+                outcomeDetail,
+                endedAt,
               }).pipe(Effect.orDie),
             ),
           );

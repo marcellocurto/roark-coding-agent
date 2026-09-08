@@ -19,7 +19,7 @@ import { readAttemptMetadataPromise as readAttemptMetadata } from "./attempts-pr
 import { runAutoDiscovery } from "./discovery.ts";
 import { noopAsync } from "../utils/async.ts";
 import {} from "../presentation/presenter.ts";
-import { fetchIssuePhase } from "../workflow/phases.ts";
+import { fetchIssuePhasePromise as fetchIssuePhase } from "../workflow/phases-promise.ts";
 
 const tempDirs: string[] = [];
 const noOpLabelContract = {

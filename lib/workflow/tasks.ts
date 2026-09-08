@@ -1,11 +1,20 @@
-import { Effect } from "effect";
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { decodeArtifact } from "./validation.ts";
+import { Presentation } from "../runtime/services.ts";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Schedule,
+  Schema,
+  type PlatformError,
+} from "effect";
+import { AgentExecution } from "../runtime/services.ts";
+import { type ArtifactStore } from "./artifact-store.ts";
+import { RunObservation } from "../observability/observer.ts";
 import type { WorkflowThinkingStage } from "./thinking.ts";
 import { effectiveModelForStage } from "./model-routing.ts";
 import { phaseNameForArtifact } from "../observability/observer.ts";
-import type { AgentRunRequest, AgentRunner } from "./agent-runner.ts";
+import type { AgentRunRequest } from "./agent-runner.ts";
 import {
   artifactRelativePath,
   type ArtifactRef,
@@ -21,14 +30,8 @@ import {
   reviewBMarkdownRef,
   type WorkflowContext,
 } from "./artifacts.ts";
-import {
-  artifactExistsPromise as artifactExists,
-  requireArtifactsPromise as requireArtifacts,
-} from "./artifacts-promise.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeArtifactPromise as writeArtifact,
-} from "./artifacts-promise.ts";
+import { artifactExists, requireArtifacts } from "./artifacts.ts";
+import { readArtifact, writeArtifact } from "./artifacts.ts";
 import {
   codeRefinementPrompt,
   fixPrompt,
@@ -45,7 +48,6 @@ import {
   normalizeReviewPair,
   parseReviewResultJson,
   type ReviewFindingSource,
-  type ReviewResult,
 } from "../review/result.ts";
 import {
   ReviewOutputContractError,
@@ -55,14 +57,12 @@ import {
   parseTriageResultJson,
   triageArtifactDefinition,
   TriageOutputContractError,
-  type TriageResult,
 } from "../triage/result.ts";
 import {
   implementationPlanArtifactDefinition,
   ImplementationPlanOutputContractError,
   parseImplementationPlanResultJson,
   type ImplementationPlanKind,
-  type ImplementationPlanResult,
 } from "../implementation-plan/result.ts";
 import {
   ChangeReportOutputContractError,
@@ -76,12 +76,10 @@ import {
   type StructuredArtifactDefinition,
 } from "../structured-output/runner.ts";
 import {
-  presenter,
   type AgentDisplayContext,
   type AgentOperation,
 } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-
 export interface AgentTask {
   artifact: ArtifactRef;
   label: string;
@@ -90,72 +88,63 @@ export interface AgentTask {
   prerequisites: ArtifactRef[];
   prompt: (
     context: WorkflowContext,
-    application?: ApplicationExecution,
-  ) => string | Promise<string>;
+  ) => Effect.Effect<string, PlatformError.PlatformError, ArtifactStore>;
 }
-
 export type AgentTaskFailurePhase = "agent-error" | "output-contract";
-
 export interface AgentTaskRetryOptions {
   delaysMs?: readonly number[] | undefined;
-  sleep?: ((ms: number) => Promise<void>) | undefined;
+  sleep?: ((ms: number) => Effect.Effect<void>) | undefined;
 }
-
 export type CodeRefinementSource = "initial" | "fix" | "restart";
-
-export const transientAgentRetryDelaysMs = [0, 60_000, 180_000] as const;
-
-export class AgentTaskRunError extends Error {
-  readonly artifact: ArtifactRef;
-  readonly label: string;
-  readonly phase: AgentTaskFailurePhase;
-  readonly originalMessage: string;
-
-  constructor(input: {
-    artifact: ArtifactRef;
-    label: string;
-    phase: AgentTaskFailurePhase;
-    originalError: unknown;
-  }) {
-    const originalMessage = formatError(input.originalError);
-    super(`${input.label} failed: ${originalMessage}`);
-    this.name = "AgentTaskRunError";
-    this.artifact = input.artifact;
-    this.label = input.label;
-    this.phase = input.phase;
-    this.originalMessage = originalMessage;
+export const transientAgentRetryDelaysMs = [0, 60000, 180000] as const;
+export class AgentTaskRunError extends Schema.TaggedError<AgentTaskRunError>()(
+  "AgentTaskRunError",
+  {
+    artifact: Schema.declare(
+      (input: unknown): input is ArtifactRef =>
+        typeof input === "string" ||
+        (typeof input === "object" &&
+          input !== null &&
+          "name" in input &&
+          "pass" in input),
+    ),
+    label: Schema.String,
+    phase: Schema.Literals(["agent-error", "output-contract"]),
+    originalError: Schema.Unknown,
+  },
+) {
+  get originalMessage(): string {
+    return formatError(this.originalError);
+  }
+  override get message(): string {
+    return `${this.label} failed: ${this.originalMessage}`;
   }
 }
-
 const triageTask: AgentTask = {
   artifact: "triage",
   label: "Triage",
   fileEditingToolsEnabled: false,
   thinkingStage: "triage",
   prerequisites: ["issue"],
-  prompt: triagePrompt,
+  prompt: (context) => Effect.succeed(triagePrompt(context)),
 };
-
 const planDraftTask: AgentTask = {
   artifact: "implementationPlanDraft",
   label: "Implementation plan draft",
   fileEditingToolsEnabled: false,
   thinkingStage: "plan",
   prerequisites: ["issue", "triage"],
-  prompt: planDraftPrompt,
+  prompt: (context) => Effect.succeed(planDraftPrompt(context)),
 };
-
 const planTask: AgentTask = {
   artifact: "implementationPlan",
   label: "Implementation plan refinement",
   fileEditingToolsEnabled: false,
   thinkingStage: "plan",
   prerequisites: ["issue", "triage", "implementationPlanDraft"],
-  prompt: planPrompt,
+  prompt: (context) => Effect.succeed(planPrompt(context)),
 };
-
 export const implementationTask: AgentTask = implementationTaskForPass(0);
-
 export function implementationTaskForPass(restartPass = 0): AgentTask {
   return {
     artifact: "implementationLog",
@@ -175,10 +164,10 @@ export function implementationTaskForPass(restartPass = 0): AgentTask {
             reviewBRef(restartPass - 1),
           ]
         : ["issue", "triage", "implementationPlan"],
-    prompt: (context) => implementationPrompt(context, restartPass),
+    prompt: (context) =>
+      Effect.succeed(implementationPrompt(context, restartPass)),
   };
 }
-
 export function codeRefinementTask(
   pass: number,
   source: CodeRefinementSource = pass === 0 ? "initial" : "fix",
@@ -189,11 +178,11 @@ export function codeRefinementTask(
     fileEditingToolsEnabled: true,
     thinkingStage: "codeRefinement",
     prerequisites: codeRefinementPrerequisites(pass, source),
-    prompt: async (context, application) =>
-      await codeRefinementPrompt(context, pass, source, application),
+    prompt: Effect.fnUntraced(function* (context) {
+      return yield* codeRefinementPrompt(context, pass, source);
+    }),
   };
 }
-
 function codeRefinementPrerequisites(
   pass: number,
   source: CodeRefinementSource,
@@ -216,10 +205,8 @@ function codeRefinementPrerequisites(
     ];
   return [...shared, fixLogRef(pass)];
 }
-
 export const reviewATask: AgentTask = reviewATaskForPass(0);
 export const reviewBTask: AgentTask = reviewBTaskForPass(0);
-
 export function reviewATaskForPass(pass = 0): AgentTask {
   return {
     artifact: reviewARef(pass),
@@ -234,11 +221,11 @@ export function reviewATaskForPass(pass = 0): AgentTask {
       "implementationLog",
       refinementLogRef(pass),
     ],
-    prompt: async (context, application) =>
-      await reviewAPrompt(context, pass, application),
+    prompt: Effect.fnUntraced(function* (context) {
+      return yield* reviewAPrompt(context, pass);
+    }),
   };
 }
-
 export function reviewBTaskForPass(pass = 0): AgentTask {
   return {
     artifact: reviewBRef(pass),
@@ -253,11 +240,11 @@ export function reviewBTaskForPass(pass = 0): AgentTask {
       "implementationLog",
       refinementLogRef(pass),
     ],
-    prompt: async (context, application) =>
-      await reviewBPrompt(context, pass, application),
+    prompt: Effect.fnUntraced(function* (context) {
+      return yield* reviewBPrompt(context, pass);
+    }),
   };
 }
-
 export function fixTask(pass: number): AgentTask {
   return {
     artifact: fixLogRef(pass),
@@ -271,146 +258,72 @@ export function fixTask(pass: number): AgentTask {
       reviewARef(pass - 1),
       reviewBRef(pass - 1),
     ],
-    prompt: async (context, application) =>
-      await fixPrompt(context, pass, application),
+    prompt: Effect.fnUntraced(function* (context) {
+      return yield* fixPrompt(context, pass);
+    }),
   };
 }
-
-export async function runReviewTask(
+export const runReviewTask = Effect.fn("runReviewTask")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   task: AgentTask,
   retryOptions: AgentTaskRetryOptions = {},
-  application?: ApplicationExecution,
-): Promise<ReviewResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runReviewTask(context, runner, task, retryOptions, application),
-      ),
-      application,
-    );
-
+) {
   const presentation = reviewPresentation(task.artifact, task.label);
-  return runStructuredArtifactTask(
-    context,
-    runner,
-    task,
-    retryOptions,
-    {
-      parse: (content) =>
-        parseReviewResultJson(content, { allowRestart: true }),
-      definition: reviewArtifactDefinition({
-        allowRestart: true,
-        title: task.label,
-        source: presentation.source,
-      }),
-      markdownArtifact: presentation.markdownArtifact,
-      isOutputContractError: (error) =>
-        error instanceof ReviewOutputContractError,
-    },
-    application,
-  );
-}
-
-export function runTriageTask(
+  return yield* runStructuredArtifactTask(context, task, retryOptions, {
+    parse: (content) => parseReviewResultJson(content, { allowRestart: true }),
+    definition: reviewArtifactDefinition({
+      allowRestart: true,
+      title: task.label,
+      source: presentation.source,
+    }),
+    markdownArtifact: presentation.markdownArtifact,
+    isOutputContractError: (error) =>
+      error instanceof ReviewOutputContractError,
+  });
+});
+export const runTriageTask = Effect.fn("runTriageTask")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   retryOptions: AgentTaskRetryOptions = {},
-  application?: ApplicationExecution,
-): Promise<TriageResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runTriageTask(context, runner, retryOptions, application),
-      ),
-      application,
-    );
-
-  return runStructuredArtifactTask(
-    context,
-    runner,
-    triageTask,
-    retryOptions,
-    {
-      parse: parseTriageResultJson,
-      definition: triageArtifactDefinition,
-      markdownArtifact: "triageMarkdown",
-      isOutputContractError: (error) =>
-        error instanceof TriageOutputContractError,
-    },
-    application,
-  );
-}
-
-export function runPlanDraftTask(
+) {
+  return yield* runStructuredArtifactTask(context, triageTask, retryOptions, {
+    parse: parseTriageResultJson,
+    definition: triageArtifactDefinition,
+    markdownArtifact: "triageMarkdown",
+    isOutputContractError: (error) =>
+      error instanceof TriageOutputContractError,
+  });
+});
+export const runPlanDraftTask = Effect.fn("runPlanDraftTask")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   retryOptions: AgentTaskRetryOptions = {},
-  application?: ApplicationExecution,
-): Promise<ImplementationPlanResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runPlanDraftTask(context, runner, retryOptions, application),
-      ),
-      application,
-    );
-
-  return runImplementationPlanTask(
+) {
+  return yield* runImplementationPlanTask(
     context,
-    runner,
     planDraftTask,
     "draft",
     retryOptions,
-    application,
   );
-}
-
-export function runPlanTask(
+});
+export const runPlanTask = Effect.fn("runPlanTask")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   retryOptions: AgentTaskRetryOptions = {},
-  application?: ApplicationExecution,
-): Promise<ImplementationPlanResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runPlanTask(context, runner, retryOptions, application),
-      ),
-      application,
-    );
-
-  return runImplementationPlanTask(
+) {
+  return yield* runImplementationPlanTask(
     context,
-    runner,
     planTask,
     "final",
     retryOptions,
-    application,
   );
-}
-
-export async function runChangeReportTask(
+});
+export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   task: AgentTask,
   retryOptions: AgentTaskRetryOptions = {},
-  application?: ApplicationExecution,
-): Promise<ChangeReport> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runChangeReportTask(context, runner, task, retryOptions, application),
-      ),
-      application,
-    );
-
+) {
   const presentation = changeReportPresentation(task.artifact);
-  const expectedFindingIds = await requiredFixFindingIds(
+  const expectedFindingIds = yield* requiredFixFindingIds(
     context,
     task.artifact,
-    application,
   );
   const validateForTask = (report: ChangeReport) => {
     if (expectedFindingIds !== undefined)
@@ -422,42 +335,27 @@ export async function runChangeReportTask(
     }
     return report;
   };
-
-  return runStructuredArtifactTask(
-    context,
-    runner,
-    task,
-    retryOptions,
-    {
-      parse: (content) => validateForTask(parseChangeReportJson(content)),
-      definition: changeReportArtifactDefinition({
-        title: presentation.title,
-        validate: validateForTask,
-      }),
-      markdownArtifact: presentation.markdownArtifact,
-      isOutputContractError: (error) =>
-        error instanceof ChangeReportOutputContractError,
-      retryCompletionInstruction:
-        "finish the phase, run validation, and call submit_change_report with the complete structured report",
-    },
-    application,
-  );
-}
-
-function runImplementationPlanTask(
-  context: WorkflowContext,
-  runner: AgentRunner,
-  task: AgentTask,
-  kind: ImplementationPlanKind,
-  retryOptions: AgentTaskRetryOptions,
-  application?: ApplicationExecution,
-): Promise<ImplementationPlanResult> {
-  return runStructuredArtifactTask(
-    context,
-    runner,
-    task,
-    retryOptions,
-    {
+  return yield* runStructuredArtifactTask(context, task, retryOptions, {
+    parse: (content) => validateForTask(parseChangeReportJson(content)),
+    definition: changeReportArtifactDefinition({
+      title: presentation.title,
+      validate: validateForTask,
+    }),
+    markdownArtifact: presentation.markdownArtifact,
+    isOutputContractError: (error) =>
+      error instanceof ChangeReportOutputContractError,
+    retryCompletionInstruction:
+      "finish the phase, run validation, and call submit_change_report with the complete structured report",
+  });
+});
+const runImplementationPlanTask = Effect.fn("runImplementationPlanTask")(
+  function* (
+    context: WorkflowContext,
+    task: AgentTask,
+    kind: ImplementationPlanKind,
+    retryOptions: AgentTaskRetryOptions,
+  ) {
+    return yield* runStructuredArtifactTask(context, task, retryOptions, {
       parse: parseImplementationPlanResultJson,
       definition: implementationPlanArtifactDefinition(kind),
       markdownArtifact:
@@ -466,89 +364,76 @@ function runImplementationPlanTask(
           : "implementationPlanMarkdown",
       isOutputContractError: (error) =>
         error instanceof ImplementationPlanOutputContractError,
-    },
-    application,
-  );
-}
-
-async function runStructuredArtifactTask<T>(
-  context: WorkflowContext,
-  runner: AgentRunner,
-  task: AgentTask,
-  retryOptions: AgentTaskRetryOptions,
-  contract: {
-    parse: (content: string) => T;
-    definition: StructuredArtifactDefinition<T>;
-    markdownArtifact: ArtifactRef;
-    isOutputContractError: (error: unknown) => boolean;
-    retryCompletionInstruction?: string | undefined;
+    });
   },
-  application?: ApplicationExecution,
-): Promise<T> {
-  const prepared = await prepareTaskRun(context, task, application);
-  const existing = await reuseTaskArtifact(
-    context,
-    task,
-    prepared,
-    contract.parse,
-    application,
-  );
-  if (existing.reused) {
-    await writeArtifact(
+);
+const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
+  function* <T>(
+    context: WorkflowContext,
+    task: AgentTask,
+    retryOptions: AgentTaskRetryOptions,
+    contract: {
+      parse: (content: string) => T;
+      definition: StructuredArtifactDefinition<T>;
+      markdownArtifact: ArtifactRef;
+      isOutputContractError: (error: unknown) => boolean;
+      retryCompletionInstruction?: string | undefined;
+    },
+  ) {
+    const prepared = yield* prepareTaskRun(context, task);
+    const existing = yield* reuseTaskArtifact(
       context,
-      contract.markdownArtifact,
-      contract.definition.formatMarkdown(existing.value),
-      application,
+      task,
+      prepared,
+      contract.parse,
     );
-    return existing.value;
-  }
-
-  return executeTaskLifecycle(
-    context,
-    task,
-    prepared,
-    {
-      run: async () => {
-        const artifact = await runStructuredArtifact(
+    if (existing.reused) {
+      yield* writeArtifact(
+        context,
+        contract.markdownArtifact,
+        contract.definition.formatMarkdown(existing.value),
+      );
+      return existing.value;
+    }
+    return yield* executeTaskLifecycle(context, task, prepared, {
+      run: Effect.fnUntraced(function* () {
+        const baseAgent = yield* AgentExecution;
+        const artifact = yield* runStructuredArtifact(
           prepared.createRequest(),
-          (agentRequest) =>
-            runAgentRequestWithTransientRetries(
-              runner,
-              agentRequest,
-              task,
-              retryOptions,
-              contract.retryCompletionInstruction,
-              application,
-            ),
           contract.definition,
           {
             writeJson: (content) =>
-              writeArtifact(context, task.artifact, content, application),
+              writeArtifact(context, task.artifact, content),
             writeMarkdown: (content) =>
-              writeArtifact(
-                context,
-                contract.markdownArtifact,
-                content,
-                application,
-              ),
+              writeArtifact(context, contract.markdownArtifact, content),
           },
-          application,
+        ).pipe(
+          Effect.provideService(AgentExecution, {
+            run: (request) =>
+              runAgentRequestWithTransientRetries(
+                request,
+                task,
+                retryOptions,
+                contract.retryCompletionInstruction,
+              ).pipe(Effect.provideService(AgentExecution, baseAgent)),
+          }),
         );
         return artifact.value;
-      },
+      }),
       failurePhase: (error) =>
         contract.isOutputContractError(error)
           ? "output-contract"
           : "agent-error",
-    },
-    application,
-  );
-}
-
+    });
+  },
+);
 function reviewPresentation(
   artifact: ArtifactRef,
   title: string,
-): { markdownArtifact: ArtifactRef; source: ReviewFindingSource } {
+): {
+  markdownArtifact: ArtifactRef;
+  source: ReviewFindingSource;
+} {
   if (typeof artifact !== "string" && artifact.name === "reviewA") {
     return {
       markdownArtifact: reviewAMarkdownRef(artifact.pass),
@@ -563,7 +448,6 @@ function reviewPresentation(
   }
   throw new Error(`${title} does not target a review artifact.`);
 }
-
 function changeReportPresentation(artifact: ArtifactRef): {
   markdownArtifact: ArtifactRef;
   title: string;
@@ -590,22 +474,24 @@ function changeReportPresentation(artifact: ArtifactRef): {
     `Artifact ${typeof artifact === "string" ? artifact : `${artifact.name}-${artifact.pass}`} is not a change report.`,
   );
 }
-
-async function requiredFixFindingIds(
+const requiredFixFindingIds = Effect.fn("requiredFixFindingIds")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
-  application?: ApplicationExecution,
-): Promise<string[] | undefined> {
+) {
   if (typeof artifact === "string" || artifact.name !== "fixLog")
     return undefined;
   const previousCycle = Math.max(0, artifact.pass - 1);
-  const [reviewA, reviewB] = await Promise.all([
-    readArtifact(context, reviewARef(previousCycle), application),
-    readArtifact(context, reviewBRef(previousCycle), application),
+  const [reviewA, reviewB] = yield* Effect.all([
+    readArtifact(context, reviewARef(previousCycle)),
+    readArtifact(context, reviewBRef(previousCycle)),
   ]);
   return normalizeReviewPair({
-    reviewA: parseReviewResultJson(reviewA, { allowRestart: true }),
-    reviewB: parseReviewResultJson(reviewB, { allowRestart: true }),
+    reviewA: yield* decodeArtifact(parseReviewResultJson, reviewA, {
+      allowRestart: true,
+    }),
+    reviewB: yield* decodeArtifact(parseReviewResultJson, reviewB, {
+      allowRestart: true,
+    }),
   })
     .filter(
       (finding) =>
@@ -613,19 +499,18 @@ async function requiredFixFindingIds(
         finding.blockedBy.length === 0,
     )
     .map((finding) => finding.workflowId);
-}
-
-async function prepareTaskRun(
+});
+const prepareTaskRun = Effect.fn("prepareTaskRun")(function* (
   context: WorkflowContext,
   task: AgentTask,
-  application?: ApplicationExecution,
 ) {
-  await requireArtifacts(context, task.prerequisites, application);
+  yield* requireArtifacts(context, ...task.prerequisites);
   const phase = phaseNameForArtifact(task.artifact);
   const thinkingLevel = thinkingLevelForTask(context, task);
   const model = effectiveModelForStage(context.model, task.thinkingStage);
   const display = displayContextForTask(context, task, phase);
-  const prompt = await task.prompt(context, application);
+  const prompt = yield* task.prompt(context);
+  const observer = context.observer ?? (yield* RunObservation);
   const createRequest = (): AgentRunRequest => ({
     cwd: context.agentCwd,
     model,
@@ -633,110 +518,100 @@ async function prepareTaskRun(
     systemPrompt: sharedSystemPrompt,
     prompt,
     fileEditingToolsEnabled: task.fileEditingToolsEnabled,
-    observer: context.observer,
+    observer,
     display,
   });
-  return { phase, thinkingLevel, model, display, createRequest };
-}
-
-type PreparedTaskRun = Awaited<ReturnType<typeof prepareTaskRun>>;
-type ReusedTaskArtifact<T> = { reused: true; value: T } | { reused: false };
-
-async function reuseTaskArtifact<T>(
+  return { phase, thinkingLevel, model, display, createRequest, observer };
+});
+type PreparedTaskRun = Effect.Success<ReturnType<typeof prepareTaskRun>>;
+const reuseTaskArtifact = Effect.fn("reuseTaskArtifact")(function* <T>(
   context: WorkflowContext,
   task: AgentTask,
   prepared: PreparedTaskRun,
   parse: (content: string) => T,
-  application?: ApplicationExecution,
-): Promise<ReusedTaskArtifact<T>> {
-  if (
-    context.force ||
-    !(await artifactExists(context, task.artifact, application))
-  )
-    return { reused: false };
-  const content = await readArtifact(context, task.artifact, application);
-  try {
-    const value = parse(content);
-    return await runPresentedPhase(
-      prepared.display,
-      async () => {
-        await context.observer?.phaseCompleted({
+) {
+  if (context.force || !(yield* artifactExists(context, task.artifact)))
+    return { reused: false } as const;
+  const content = yield* readArtifact(context, task.artifact);
+  const parsed = yield* Effect.try(() => parse(content)).pipe(Effect.result);
+  if (parsed._tag === "Failure") {
+    const presentation = yield* Presentation;
+    presentation.warning(
+      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(parsed.failure.cause)}); regenerating.`,
+    );
+    return { reused: false } as const;
+  }
+  return yield* runPresentedPhase(
+    prepared.display,
+    () =>
+      prepared.observer
+        .phaseCompleted({
           phase: prepared.phase,
           label: task.label,
           artifact: task.artifact,
           model: prepared.model,
           thinkingLevel: prepared.thinkingLevel,
           reused: true,
-        });
-        return { reused: true as const, value };
-      },
-      () => ({
-        outcome: "reused",
-        artifact: artifactRelativePath(context, task.artifact),
-      }),
-      undefined,
-      application,
-    );
-  } catch (error) {
-    presenter(application).warning(
-      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(error)}); regenerating.`,
-    );
-    return { reused: false };
-  }
-}
-
-async function executeTaskLifecycle<T>(
+        })
+        .pipe(Effect.as({ reused: true as const, value: parsed.success })),
+    () => ({
+      outcome: "reused",
+      artifact: artifactRelativePath(context, task.artifact),
+    }),
+  );
+});
+const executeTaskLifecycle = Effect.fn("executeTaskLifecycle")(function* <
+  T,
+  E,
+  R,
+>(
   context: WorkflowContext,
   task: AgentTask,
   prepared: PreparedTaskRun,
   options: {
-    run: () => Promise<T>;
+    run: () => Effect.Effect<T, E, R>;
     failurePhase: (error: unknown) => AgentTaskFailurePhase;
-    persistFailure?:
-      | ((phase: AgentTaskFailurePhase, error: unknown) => Promise<void>)
-      | undefined;
   },
-  application?: ApplicationExecution,
-): Promise<T> {
-  await context.observer?.phaseStarted({
+) {
+  yield* prepared.observer.phaseStarted({
     phase: prepared.phase,
     label: task.label,
     artifact: task.artifact,
     model: prepared.model,
     thinkingLevel: prepared.thinkingLevel,
   });
-  return runPresentedPhase(
+  return yield* runPresentedPhase(
     prepared.display,
-    async () => {
-      try {
-        const result = await options.run();
-        await context.observer?.phaseCompleted({
-          phase: prepared.phase,
-          label: task.label,
-          artifact: task.artifact,
-          model: prepared.model,
-          thinkingLevel: prepared.thinkingLevel,
-        });
-        return result;
-      } catch (error) {
-        const failurePhase = options.failurePhase(error);
-        await options.persistFailure?.(failurePhase, error);
-        await context.observer?.phaseFailed({
-          phase: prepared.phase,
-          label: task.label,
-          artifact: task.artifact,
-          model: prepared.model,
-          thinkingLevel: prepared.thinkingLevel,
-          error,
-        });
-        throw new AgentTaskRunError({
-          artifact: task.artifact,
-          label: task.label,
-          phase: failurePhase,
-          originalError: error,
-        });
-      }
-    },
+    () =>
+      Effect.suspend(options.run).pipe(
+        Effect.mapError(
+          (error) =>
+            new AgentTaskRunError({
+              artifact: task.artifact,
+              label: task.label,
+              phase: options.failurePhase(error),
+              originalError: error,
+            }),
+        ),
+        Effect.onExit((exit) =>
+          Exit.isSuccess(exit)
+            ? prepared.observer.phaseCompleted({
+                phase: prepared.phase,
+                label: task.label,
+                artifact: task.artifact,
+                model: prepared.model,
+                thinkingLevel: prepared.thinkingLevel,
+              })
+            : prepared.observer.phaseFailed({
+                phase: prepared.phase,
+                label: task.label,
+                artifact: task.artifact,
+                model: prepared.model,
+                thinkingLevel: prepared.thinkingLevel,
+                error: Cause.squash(exit.cause),
+              }),
+        ),
+      ),
     () => ({
       outcome: "completed",
       artifact: artifactRelativePath(context, task.artifact),
@@ -750,53 +625,50 @@ async function executeTaskLifecycle<T>(
         artifact: artifactRelativePath(context, task.artifact),
       }),
     },
-    application,
   );
-}
-
-async function runAgentRequestWithTransientRetries(
-  runner: AgentRunner,
+});
+const runAgentRequestWithTransientRetries = Effect.fn(
+  "runAgentRequestWithTransientRetries",
+)(function* (
   request: AgentRunRequest,
   task: AgentTask,
   options: AgentTaskRetryOptions,
-  retryCompletionInstruction?: string,
-  application?: ApplicationExecution,
-): Promise<string> {
-  const delaysMs = options.delaysMs ?? transientAgentRetryDelaysMs;
-  const sleep =
-    options.sleep ??
-    ((ms: number) => runApplicationPromise(Effect.sleep(ms), application));
-
-  for (let retryIndex = 0; ; retryIndex++) {
-    application?.signal.throwIfAborted();
-    try {
-      const attemptRequest =
-        retryIndex === 0
-          ? request
-          : withTransientConnectionRetryPrompt(
-              request,
-              task,
-              retryCompletionInstruction,
-            );
-      return await runner(attemptRequest, application);
-    } catch (error) {
-      if (
-        !isTransientAgentConnectionError(error) ||
-        retryIndex >= delaysMs.length
-      )
-        throw error;
-
-      const delayMs = delaysMs[retryIndex] ?? 0;
-      const retryNumber = retryIndex + 1;
-      const retryCount = delaysMs.length;
-      presenter(application).warning(
-        `WARNING ${task.label}: transient agent connection error: ${formatError(error)}; retry ${retryNumber}/${retryCount} ${formatRetryDelay(delayMs)}.`,
-      );
-      if (delayMs > 0) await sleep(delayMs);
-    }
-  }
-}
-
+  completionInstruction?: string,
+) {
+  const agent = yield* AgentExecution;
+  const presentation = yield* Presentation;
+  const delays = options.delaysMs ?? transientAgentRetryDelaysMs;
+  let attemptIndex = 0;
+  const schedule = Schedule.recurs(delays.length).pipe(
+    Schedule.while(({ input }) =>
+      Effect.succeed(isTransientAgentConnectionError(input)),
+    ),
+    Schedule.tap(({ attempt, input }) =>
+      Effect.sync(() => {
+        presentation.warning(
+          `WARNING ${task.label}: transient agent connection error: ${formatError(input)}; retry ${attempt}/${delays.length} ${formatRetryDelay(delays[attempt - 1] ?? 0)}.`,
+        );
+      }),
+    ),
+    Schedule.addDelay(({ attempt }) => {
+      const delay = delays[attempt - 1] ?? 0;
+      return options.sleep && delay > 0
+        ? options.sleep(delay).pipe(Effect.as(0))
+        : Effect.succeed(delay);
+    }),
+  );
+  return yield* Effect.suspend(() => {
+    const next =
+      attemptIndex++ === 0
+        ? request
+        : withTransientConnectionRetryPrompt(
+            request,
+            task,
+            completionInstruction,
+          );
+    return agent.run(next);
+  }).pipe(Effect.retry(schedule));
+});
 function withTransientConnectionRetryPrompt(
   request: AgentRunRequest,
   task: AgentTask,
@@ -808,11 +680,9 @@ function withTransientConnectionRetryPrompt(
     prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, ${completionInstruction ?? "finish the phase and complete its required output contract"}.\n</transient_connection_retry>`,
   };
 }
-
 function thinkingLevelForTask(context: WorkflowContext, task: AgentTask) {
   return context.thinkingConfig[task.thinkingStage];
 }
-
 function displayContextForTask(
   context: WorkflowContext,
   task: AgentTask,
@@ -831,26 +701,23 @@ function displayContextForTask(
     operation: operationForTask(task),
   };
 }
-
 function operationForTask(task: AgentTask): AgentOperation {
   if (task.thinkingStage === "reviewA" || task.thinkingStage === "reviewB")
     return "review";
   return task.fileEditingToolsEnabled ? "edit" : "inspect";
 }
-
 function formatRetryDelay(delayMs: number): string {
   if (delayMs <= 0) return "immediately";
-  if (delayMs % 60_000 === 0) {
-    const minutes = delayMs / 60_000;
+  if (delayMs % 60000 === 0) {
+    const minutes = delayMs / 60000;
     return `in ${minutes} minute${minutes === 1 ? "" : "s"}`;
   }
-  if (delayMs % 1_000 === 0) {
-    const seconds = delayMs / 1_000;
+  if (delayMs % 1000 === 0) {
+    const seconds = delayMs / 1000;
     return `in ${seconds} second${seconds === 1 ? "" : "s"}`;
   }
   return `in ${delayMs}ms`;
 }
-
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);

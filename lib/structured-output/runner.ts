@@ -1,9 +1,8 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { Effect } from "effect";
+import { AgentExecution } from "../runtime/services.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
-import type { AgentRunRequest, AgentRunner } from "../workflow/agent-runner.ts";
+import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
 export interface StructuredArtifactDefinition<T> {
   toolName: string;
@@ -15,9 +14,9 @@ export interface StructuredArtifactDefinition<T> {
   createError: (message: string) => Error;
 }
 
-export interface StructuredArtifactWriters {
-  writeJson: (content: string) => Promise<void>;
-  writeMarkdown: (content: string) => Promise<void>;
+export interface StructuredArtifactWriters<E = never, R = never> {
+  writeJson: (content: string) => Effect.Effect<void, E, R>;
+  writeMarkdown: (content: string) => Effect.Effect<void, E, R>;
 }
 
 export interface StructuredArtifactResult<T> {
@@ -25,79 +24,65 @@ export interface StructuredArtifactResult<T> {
   markdown: string;
 }
 
-export async function runStructuredArtifact<T>(
-  request: AgentRunRequest,
-  runner: AgentRunner,
-  definition: StructuredArtifactDefinition<T>,
-  writers: StructuredArtifactWriters,
-  application?: ApplicationExecution,
-): Promise<StructuredArtifactResult<T>> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runStructuredArtifact(
-          request,
-          runner,
-          definition,
-          writers,
-          application,
-        ),
-      ),
-      application,
-    );
+export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
+  function* <T, E, R>(
+    request: AgentRunRequest,
+    definition: StructuredArtifactDefinition<T>,
+    writers: StructuredArtifactWriters<E, R>,
+  ) {
+    const agent = yield* AgentExecution;
+    let submitted: T | undefined;
+    const submit = defineTool({
+      name: definition.toolName,
+      label: `Submit ${definition.label}`,
+      description: `Submit the final structured ${definition.noun}. This is the only valid way to complete this phase.`,
+      promptSnippet: `Submit the final schema-validated ${definition.noun}`,
+      promptGuidelines: [
+        `Use ${definition.toolName} as the final action for this phase.`,
+        `Do not return the ${definition.noun} as Markdown or prose after calling ${definition.toolName}.`,
+      ],
+      parameters: definition.parameters,
+      execute(_toolCallId, params) {
+        if (submitted !== undefined) {
+          throw definition.createError(
+            `The ${definition.noun} has already been submitted.`,
+          );
+        }
+        try {
+          submitted = definition.validate(params);
+        } catch (error) {
+          throw definition.createError(
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        return Promise.resolve({
+          content: [
+            {
+              type: "text" as const,
+              text: `Structured ${definition.noun} submitted.`,
+            },
+          ],
+          details: submitted,
+          terminate: true,
+        });
+      },
+    });
 
-  let submitted: T | undefined;
-  const submit = defineTool({
-    name: definition.toolName,
-    label: `Submit ${definition.label}`,
-    description: `Submit the final structured ${definition.noun}. This is the only valid way to complete this phase.`,
-    promptSnippet: `Submit the final schema-validated ${definition.noun}`,
-    promptGuidelines: [
-      `Use ${definition.toolName} as the final action for this phase.`,
-      `Do not return the ${definition.noun} as Markdown or prose after calling ${definition.toolName}.`,
-    ],
-    parameters: definition.parameters,
-    execute(_toolCallId, params) {
-      if (submitted !== undefined) {
-        throw definition.createError(
-          `The ${definition.noun} has already been submitted.`,
-        );
-      }
-      try {
-        submitted = definition.validate(params);
-      } catch (error) {
-        throw definition.createError(
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-      return Promise.resolve({
-        content: [
-          {
-            type: "text" as const,
-            text: `Structured ${definition.noun} submitted.`,
-          },
-        ],
-        details: submitted,
-        terminate: true,
-      });
-    },
-  });
-
-  await runner(
-    {
+    yield* agent.run({
       ...request,
       customTools: [...(request.customTools ?? []), submit],
-    },
-    application,
-  );
-  if (submitted === undefined) {
-    throw definition.createError(
-      `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
-    );
-  }
-  const markdown = definition.formatMarkdown(submitted);
-  const json = JSON.stringify(submitted, null, 2);
-  await writers.writeMarkdown(markdown);
-  await writers.writeJson(json);
-  return { value: submitted, markdown };
-}
+    });
+    if (submitted === undefined) {
+      return yield* Effect.fail(
+        definition.createError(
+          `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
+        ),
+      );
+    }
+    const markdown = definition.formatMarkdown(submitted);
+    const json = JSON.stringify(submitted, null, 2);
+    yield* writers.writeMarkdown(markdown);
+    yield* writers.writeJson(json);
+    return { value: submitted, markdown };
+  },
+);

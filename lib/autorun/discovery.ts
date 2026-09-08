@@ -20,8 +20,8 @@ import {
   resolveGitHubIssueRepoPromise as resolveGitHubIssueRepo,
 } from "../github/promise.ts";
 import { ensureRunDirPromise as ensureRunDir } from "../workflow/artifacts-promise.ts";
-import { assertCleanAutorunGit } from "../workflow/git.ts";
-import { type runFullWorkflow } from "../workflow/phases.ts";
+import { assertCleanAutorunGitPromise as assertCleanAutorunGit } from "../workflow/git-promise.ts";
+import { type runFullWorkflowPromise as runFullWorkflow } from "../workflow/phases-promise.ts";
 import {
   defaultClock,
   formatAttemptMetadata,

@@ -1,3 +1,4 @@
+import { runApplicationPromise } from "./application.ts";
 import { reviewATaskForPass } from "../workflow/tasks.ts";
 import { verificationBeforeFixRef } from "../workflow/artifact-catalog.ts";
 import * as BunServices from "@effect/platform-bun/BunServices";
@@ -264,7 +265,8 @@ test("prebuilt task prompts use the storage service from their execution", async
   const checked: string[] = [];
   await Effect.runPromise(
     fromLegacyPromise(
-      async (application) => await task.prompt(context, application),
+      async (application) =>
+        await runApplicationPromise(task.prompt(context), application),
     ).pipe(
       Effect.provideService(ArtifactStore, {
         ensure: () => Effect.void,

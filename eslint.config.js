@@ -2,7 +2,14 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules", ".roark", "coverage", "dist", "repos/**", "eslint.config.js"],
+    ignores: [
+      "node_modules",
+      ".roark",
+      "coverage",
+      "dist",
+      "repos/**",
+      "eslint.config.js",
+    ],
   },
   ...tseslint.configs.recommendedTypeChecked,
   ...tseslint.configs.strictTypeChecked,
@@ -78,6 +85,44 @@ export default tseslint.config(
         },
       ],
       "@typescript-eslint/switch-exhaustiveness-check": "error",
+    },
+  },
+  {
+    files: [
+      "lib/workflow/{phases,tasks,git,readiness,progression,issue-curation}.ts",
+      "lib/prompts/workflow-prompts.ts",
+      "lib/presentation/phase.ts",
+      "lib/structured-output/runner.ts",
+      "lib/observability/{observer,events,summary}.ts",
+      "lib/issue-curation/{create-issues,labels}.ts",
+      "lib/issue-publishing/{github,service}.ts",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/*-promise.ts",
+                "**/promise-boundary.ts",
+                "**/runtime/application.ts",
+              ],
+              message:
+                "Workflow internals compose native Effects; Promise adapters belong at entry points.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='Effect'][callee.property.name=/^run(Promise|Sync|Fork|Callback)/]",
+          message:
+            "Only application entry points may execute an Effect runtime.",
+        },
+      ],
     },
   },
 );

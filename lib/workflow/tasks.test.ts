@@ -24,10 +24,12 @@ import {
   implementationTask,
   reviewATask,
   reviewBTask,
-  runChangeReportTask,
-  runReviewTask,
-  runTriageTask,
 } from "./tasks.ts";
+import {
+  runChangeReportTaskPromise as runChangeReportTask,
+  runReviewTaskPromise as runReviewTask,
+  runTriageTaskPromise as runTriageTask,
+} from "./tasks-promise.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewResult, submitReview } from "../testing/reviews.ts";
 import {

@@ -204,19 +204,10 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
           Date.now,
           [options.cwd],
         );
-        const emit = (work: () => Promise<void> | undefined) => {
+        const emit = (work: () => Effect.Effect<void> | undefined) => {
           Queue.offerUnsafe(
             observations,
-            Effect.tryPromise({
-              try: async () => {
-                await work();
-              },
-              catch: (cause) =>
-                new AgentExecutionError({
-                  operation: "Record agent observation",
-                  cause,
-                }),
-            }).pipe(Effect.ignore),
+            Effect.suspend(() => work() ?? Effect.void),
           );
         };
         emit(() =>

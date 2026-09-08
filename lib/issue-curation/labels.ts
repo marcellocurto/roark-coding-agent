@@ -1,35 +1,25 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import {
-  type EnsureGitHubLabelsResult,
-  type RequiredGitHubLabel,
-} from "../github/labels.ts";
-import { ensureGitHubLabelsPromise as ensureGitHubLabels } from "../github/promise.ts";
-
+import { GitHub } from "../github/service.ts";
+import { Effect } from "effect";
+import { type RequiredGitHubLabel } from "../github/labels.ts";
 export const reviewerIssueTriageLabels = ["needs-triage"] as const;
 export const reviewerIssueClassificationLabels = [
   "external-blocker",
   "follow-up",
   "suggestion",
 ] as const;
-
 export type ReviewerIssueClassificationLabel =
   (typeof reviewerIssueClassificationLabels)[number];
-
 export function reviewerIssueLabelForClassification(
   classification: ReviewerIssueClassificationLabel,
 ): string {
   return `review:${classification}`;
 }
-
 export const reviewerIssueManagedLabels = [
   "needs-triage",
   "needs-human",
   ...reviewerIssueClassificationLabels,
   ...reviewerIssueClassificationLabels.map(reviewerIssueLabelForClassification),
 ] as const;
-
 export const requiredReviewerIssueLabels: RequiredGitHubLabel[] = [
   {
     role: "reviewer-generated-needs-triage",
@@ -58,25 +48,12 @@ export const requiredReviewerIssueLabels: RequiredGitHubLabel[] = [
     description: "Reviewer classification for a generated optional suggestion.",
   },
 ];
-
-export async function ensureReviewerIssueLabels(
-  options: { cwd: string; repo?: string | undefined },
-  application?: ApplicationExecution,
-): Promise<EnsureGitHubLabelsResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        ensureReviewerIssueLabels(options, application),
-      ),
-      application,
-    );
-
-  return ensureGitHubLabels(
-    {
+export const ensureReviewerIssueLabels = Effect.fn("ensureReviewerIssueLabels")(
+  function* (options: { cwd: string; repo?: string | undefined }) {
+    return yield* (yield* GitHub).ensureGitHubLabels({
       cwd: options.cwd,
       repo: options.repo,
       labels: requiredReviewerIssueLabels,
-    },
-    application,
-  );
-}
+    });
+  },
+);

@@ -369,7 +369,7 @@ describe("PR body update presentation", () => {
 });
 
 describe("publishAutorunResult", () => {
-  test("announces publication before starting git operations", () => {
+  test("announces publication when the initial git operation fails", () => {
     let output = "";
     const stream: TerminalStream = {
       isTTY: true,
@@ -420,13 +420,16 @@ describe("publishAutorunResult", () => {
           },
           application,
         );
-        expect(output).toContain("PHASE #9 · Publish pull request");
         expect(
           await publication.then(
             () => false,
             () => true,
           ),
         ).toBe(true);
+        expect(output).toContain("PHASE #9 · Publish pull request");
+        expect(output.indexOf("PHASE #9")).toBeLessThan(
+          output.indexOf("FAILED #9"),
+        );
       },
     );
   });

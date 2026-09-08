@@ -1,3 +1,11 @@
+import {
+  type IssuePublishing,
+  issuePublishingLayer,
+} from "../issue-publishing/service.ts";
+import {
+  type RunObservation,
+  runObservationLayer,
+} from "../observability/observer.ts";
 import { type AttemptStore, attemptStoreLayer } from "../autorun/attempts.ts";
 import {
   type ArtifactStore,
@@ -39,6 +47,8 @@ export const applicationServicesLayer = Layer.suspend(() =>
     agentExecutionLayer,
     artifactStoreLayer,
     attemptStoreLayer,
+    runObservationLayer,
+    issuePublishingLayer.pipe(Layer.provide(gitHubLayer)),
   ),
 );
 export const applicationLayer = Layer.suspend(() =>
@@ -55,7 +65,9 @@ export type ApplicationServices =
   | GitHub
   | AgentExecution
   | ArtifactStore
-  | AttemptStore;
+  | AttemptStore
+  | RunObservation
+  | IssuePublishing;
 
 // Only internal Promise hops use this carrier. A rejection value alone cannot
 // distinguish typed failure from defect, interruption, or combined failures.

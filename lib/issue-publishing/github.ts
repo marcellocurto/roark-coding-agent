@@ -1,11 +1,5 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import {
-  runProcessPromise,
-  runProcessOrThrowPromise,
-} from "../cli/process-promise.ts";
-
+import { Effect } from "effect";
+import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 export interface IssuePublishRequest {
   cwd: string;
   repo?: string | undefined;
@@ -13,90 +7,82 @@ export interface IssuePublishRequest {
   body: string;
   labels: readonly string[];
 }
-
 export interface IssuePublishResult {
   url: string;
   number?: number | undefined;
   stdout?: string | undefined;
 }
-
-export type IssuePublisher = (
-  request: IssuePublishRequest,
-  application?: ApplicationExecution,
-) => Promise<IssuePublishResult>;
-
-export async function publishIssueWithGitHub(
-  request: IssuePublishRequest,
-  application?: ApplicationExecution,
-): Promise<IssuePublishResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        publishIssueWithGitHub(request, application),
-      ),
-      application,
+export const publishIssueWithGitHub = Effect.fn("publishIssueWithGitHub")(
+  function* (request: IssuePublishRequest) {
+    const repoArgs = request.repo ? ["--repo", request.repo] : [];
+    const duplicateSearch = yield* runProcess(
+      [
+        "gh",
+        "issue",
+        "list",
+        "--state",
+        "all",
+        "--search",
+        `\"${request.title}\" in:title`,
+        "--json",
+        "number,title,url",
+        "--limit",
+        "20",
+        ...repoArgs,
+      ],
+      { cwd: request.cwd },
     );
-
-  const repoArgs = request.repo ? ["--repo", request.repo] : [];
-  const duplicateSearch = await runProcessPromise(
-    [
-      "gh",
-      "issue",
-      "list",
-      "--state",
-      "all",
-      "--search",
-      `\"${request.title}\" in:title`,
-      "--json",
-      "number,title,url",
-      "--limit",
-      "20",
-      ...repoArgs,
-    ],
-    { cwd: request.cwd },
-    application,
-  );
-  if (duplicateSearch.exitCode !== 0) {
-    throw new Error(
-      `gh issue duplicate search failed with exit code ${duplicateSearch.exitCode}:\n${duplicateSearch.stderr || duplicateSearch.stdout}`,
+    if (duplicateSearch.exitCode !== 0) {
+      return yield* Effect.fail(
+        new Error(
+          `gh issue duplicate search failed with exit code ${duplicateSearch.exitCode}:\n${duplicateSearch.stderr || duplicateSearch.stdout}`,
+        ),
+      );
+    }
+    const duplicate = yield* Effect.try(() =>
+      exactTitleMatch(duplicateSearch.stdout, request.title),
     );
-  }
-  const duplicate = exactTitleMatch(duplicateSearch.stdout, request.title);
-  if (duplicate)
-    throw new Error(
-      `An issue with the same title already exists: ${duplicate.url ?? `#${duplicate.number ?? "unknown"}`}`,
+    if (duplicate)
+      return yield* Effect.fail(
+        new Error(
+          `An issue with the same title already exists: ${duplicate.url ?? `#${duplicate.number ?? "unknown"}`}`,
+        ),
+      );
+    const stdout = yield* runProcessOrThrow(
+      [
+        "gh",
+        "issue",
+        "create",
+        "--title",
+        request.title,
+        "--body-file",
+        "-",
+        ...request.labels.flatMap((label) => ["--label", label]),
+        ...repoArgs,
+      ],
+      { cwd: request.cwd, label: "gh issue create", input: request.body },
     );
-
-  const stdout = await runProcessOrThrowPromise(
-    [
-      "gh",
-      "issue",
-      "create",
-      "--title",
-      request.title,
-      "--body-file",
-      "-",
-      ...request.labels.flatMap((label) => ["--label", label]),
-      ...repoArgs,
-    ],
-    { cwd: request.cwd, label: "gh issue create", input: request.body },
-    application,
-  );
-  const url = /https?:\/\/\S+\/issues\/\d+/
-    .exec(stdout)?.[0]
-    ?.replace(/[),.;]+$/, "");
-  if (!url)
-    throw new Error(
-      "gh issue create succeeded but did not return an issue URL.",
-    );
-  const number = Number.parseInt(/\/issues\/(\d+)/.exec(url)?.[1] ?? "", 10);
-  return { url, ...(Number.isInteger(number) ? { number } : {}), stdout };
-}
-
+    const url = /https?:\/\/\S+\/issues\/\d+/
+      .exec(stdout)?.[0]
+      ?.replace(/[),.;]+$/, "");
+    if (!url)
+      return yield* Effect.fail(
+        new Error("gh issue create succeeded but did not return an issue URL."),
+      );
+    const number = Number.parseInt(/\/issues\/(\d+)/.exec(url)?.[1] ?? "", 10);
+    return { url, ...(Number.isInteger(number) ? { number } : {}), stdout };
+  },
+);
 function exactTitleMatch(
   output: string,
   title: string,
-): { number?: number; title?: string; url?: string } | undefined {
+):
+  | {
+      number?: number;
+      title?: string;
+      url?: string;
+    }
+  | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
@@ -130,7 +116,6 @@ function exactTitleMatch(
   }
   return undefined;
 }
-
 function normalizeTitle(title: string): string {
   return title.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }

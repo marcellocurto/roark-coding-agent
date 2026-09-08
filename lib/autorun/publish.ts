@@ -23,7 +23,7 @@ import {
   presenter,
   type AgentDisplayContext,
 } from "../presentation/presenter.ts";
-import { runPresentedPhase } from "../presentation/phase.ts";
+import { runPresentedPhasePromise as runPresentedPhase } from "../presentation/phase-promise.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
   artifactPath,
@@ -45,7 +45,7 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import type { VerificationResult } from "./verification.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
-import { runStructuredArtifact } from "../structured-output/runner.ts";
+import { runStructuredArtifactPromise as runStructuredArtifact } from "../structured-output/runner-promise.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export const defaultAutorunSuccessLabel = "agent-pr-opened";

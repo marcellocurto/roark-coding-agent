@@ -14,11 +14,9 @@ import {
   inferNextFixPassPromise as inferNextFixPass,
 } from "../workflow/artifacts-promise.ts";
 import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
-import {
-  createIssuesFromCurationPlan,
-  type IssueCreationResults,
-} from "../issue-curation/create-issues.ts";
-import { issueCurationPhase } from "../workflow/issue-curation.ts";
+import { type IssueCreationResults } from "../issue-curation/create-issues.ts";
+import { createIssuesFromCurationPlanPromise as createIssuesFromCurationPlan } from "../issue-curation/create-issues-promise.ts";
+import { issueCurationPhasePromise as issueCurationPhase } from "../workflow/issue-curation-promise.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import { formatFailureComment, markIssueFailed } from "./failure.ts";
 import {

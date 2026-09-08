@@ -31,8 +31,11 @@ import {
   presenter,
   type AgentDisplayContext,
 } from "../presentation/presenter.ts";
-import { runPresentedPhase } from "../presentation/phase.ts";
-import { assertCleanGitTree, gitDirtyLines } from "../workflow/git.ts";
+import { runPresentedPhasePromise as runPresentedPhase } from "../presentation/phase-promise.ts";
+import {
+  assertCleanGitTreePromise as assertCleanGitTree,
+  gitDirtyLinesPromise as gitDirtyLines,
+} from "../workflow/git-promise.ts";
 import {
   createPrRevisionContext,
   formatPrFeedbackMarkdown,
@@ -74,7 +77,7 @@ import {
   revisionExecutionArtifactDefinition,
   type RevisionExecutionResult,
 } from "./execution.ts";
-import { runStructuredArtifact } from "../structured-output/runner.ts";
+import { runStructuredArtifactPromise as runStructuredArtifact } from "../structured-output/runner-promise.ts";
 
 export type PrRevisionOutcome =
   | "no-action-needed"

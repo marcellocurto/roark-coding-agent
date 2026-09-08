@@ -35,7 +35,10 @@ import {
 } from "./lib/cli/local-mode.ts";
 import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
-import { runFullWorkflow, runSinglePhase } from "./lib/workflow/phases.ts";
+import {
+  runFullWorkflowPromise as runFullWorkflow,
+  runSinglePhasePromise as runSinglePhase,
+} from "./lib/workflow/phases-promise.ts";
 import { presenter, presentationLayer } from "./lib/presentation/presenter.ts";
 import type { AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
 import { displayArgvTarget, displayCommandTarget } from "./lib/cli/target.ts";

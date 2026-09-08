@@ -1,20 +1,17 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { existsSync, readdirSync } from "node:fs";
+import { decodeJson } from "./validation.ts";
+import { GitHub } from "../github/service.ts";
+import { Presentation } from "../runtime/services.ts";
+import { Cause, Effect, Exit, FileSystem } from "effect";
+import { RunObservation } from "../observability/observer.ts";
 import path from "node:path";
 import { type GitHubIssueSnapshot } from "../github/issue.ts";
-import { fetchGitHubIssuePromise as fetchGitHubIssue } from "../github/promise.ts";
 import { createFileRunObserver } from "../observability/observer.ts";
-import { runAgentPromise } from "./agent-runner.ts";
 import {
-  presenter,
   type AgentDisplayContext,
   type AgentOperation,
 } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
 import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
-import type { AgentRunner } from "./agent-runner.ts";
 import {
   baselineResetLogRef,
   fixLogRef,
@@ -23,16 +20,12 @@ import {
   type WorkflowContext,
 } from "./artifacts.ts";
 import {
-  artifactExistsPromise as artifactExists,
-  inferNextFixPassPromise as inferNextFixPass,
-  inferNextRefinementPassPromise as inferNextRefinementPass,
-  latestCompleteReviewCyclePromise as latestCompleteReviewCycle,
-} from "./artifacts-promise.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "./artifacts-promise.ts";
+  artifactExists,
+  inferNextFixPass,
+  inferNextRefinementPass,
+  latestCompleteReviewCycle,
+} from "./artifacts.ts";
+import { readArtifact, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import {
   assertCleanGit,
@@ -55,7 +48,6 @@ import type {
 } from "./phase-vocabulary.ts";
 import {
   codeRefinementTask,
-  type CodeRefinementSource,
   fixTask,
   implementationTaskForPass,
   reviewATaskForPass,
@@ -66,26 +58,12 @@ import {
   runReviewTask,
   runTriageTask,
 } from "./tasks.ts";
-import type { ReviewResult } from "../review/result.ts";
-import type { TriageResult } from "../triage/result.ts";
-import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
-import type { ChangeReport } from "../change-report/result.ts";
 
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
-
-export async function fetchIssuePhase(
+export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
   context: WorkflowContext,
   suppliedSnapshot?: GitHubIssueSnapshot,
-  application?: ApplicationExecution,
-): Promise<string> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        fetchIssuePhase(context, suppliedSnapshot, application),
-      ),
-      application,
-    );
-
+) {
   const display = deterministicDisplay(
     context,
     "fetch",
@@ -94,73 +72,71 @@ export async function fetchIssuePhase(
     "inspect",
   );
   let outcome = "fetched";
-  return runPresentedPhase(
+  return yield* runPresentedPhase(
     display,
-    async () => {
+    Effect.fnUntraced(function* () {
       if (
         !context.force &&
         suppliedSnapshot === undefined &&
-        (await artifactExists(context, "issue", application))
+        (yield* artifactExists(context, "issue"))
       ) {
-        const existingIssue = await readArtifact(context, "issue", application);
+        const existingIssue = yield* readArtifact(context, "issue");
         if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
-          await context.observer?.phaseCompleted({
-            phase: "fetch",
-            label: "Fetch issue",
-            artifact: "issue",
-            reused: true,
-          });
+          yield* (
+            context.observer?.phaseCompleted({
+              phase: "fetch",
+              label: "Fetch issue",
+              artifact: "issue",
+              reused: true,
+            }) ?? Effect.void
+          );
           outcome = "reused";
           return existingIssue;
         }
-        presenter(application).line(
+        (yield* Presentation).line(
           "Fetch issue: existing issue.md lacks GitHub relationship snapshot; refetching",
         );
       }
-
-      presenter(application).line(
+      (yield* Presentation).line(
         suppliedSnapshot
           ? `Using fresh pre-claim snapshot for issue #${context.issueNumber}`
           : `Fetching issue #${context.issueNumber}`,
       );
-      await context.observer?.phaseStarted({
-        phase: "fetch",
-        label: "Fetch issue",
-        artifact: "issue",
-      });
+      yield* (
+        context.observer?.phaseStarted({
+          phase: "fetch",
+          label: "Fetch issue",
+          artifact: "issue",
+        }) ?? Effect.void
+      );
       const result =
         suppliedSnapshot ??
-        (await fetchGitHubIssue(
-          context.issueInput,
-          { cwd: context.controlCwd, repo: context.repo },
-          application,
-        ));
+        (yield* (yield* GitHub).fetchGitHubIssue(context.issueInput, {
+          cwd: context.controlCwd,
+          repo: context.repo,
+        }));
       assertSnapshotMatchesContext(context, result);
       const issueArtifact = formatGitHubIssueArtifact(
         result.issue,
         result.relationships,
       );
-
-      await writeArtifact(context, "issue", issueArtifact, application);
-      await writeJsonArtifact(
-        context,
-        "metadata",
-        {
-          issueNumber: result.issueNumber,
-          repo: result.repo,
-          fetchedAt: result.fetchedAt,
-          issue: result.issue,
-          relationships: result.relationships,
-        },
-        application,
-      );
-      await context.observer?.phaseCompleted({
-        phase: "fetch",
-        label: "Fetch issue",
-        artifact: "issue",
+      yield* writeArtifact(context, "issue", issueArtifact);
+      yield* writeJsonArtifact(context, "metadata", {
+        issueNumber: result.issueNumber,
+        repo: result.repo,
+        fetchedAt: result.fetchedAt,
+        issue: result.issue,
+        relationships: result.relationships,
       });
+      yield* (
+        context.observer?.phaseCompleted({
+          phase: "fetch",
+          label: "Fetch issue",
+          artifact: "issue",
+        }) ?? Effect.void
+      );
       return issueArtifact;
-    },
+    }),
     () => ({ outcome, artifact: "issue.md" }),
     {
       onError: (error) =>
@@ -171,284 +147,158 @@ export async function fetchIssuePhase(
           error,
         }),
     },
-    application,
   );
-}
-
-export async function triagePhase(
+});
+export const triagePhase = Effect.fn("triagePhase")(function* (
   context: WorkflowContext,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<TriageResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        triagePhase(context, runner, application),
-      ),
-      application,
-    );
-
-  return runTriageTask(context, runner, undefined, application);
-}
-
-export async function planDraftPhase(
+) {
+  return yield* runTriageTask(context, undefined);
+});
+export const planDraftPhase = Effect.fn("planDraftPhase")(function* (
   context: WorkflowContext,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<ImplementationPlanResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        planDraftPhase(context, runner, application),
-      ),
-      application,
-    );
-
-  return runPlanDraftTask(context, runner, undefined, application);
-}
-
-export async function planPhase(
+) {
+  return yield* runPlanDraftTask(context, undefined);
+});
+export const planPhase = Effect.fn("planPhase")(function* (
   context: WorkflowContext,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<ImplementationPlanResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        planPhase(context, runner, application),
-      ),
-      application,
+) {
+  return yield* runPlanTask(context, undefined);
+});
+export const captureBaselinePhase = Effect.fn("captureBaselinePhase")(
+  function* (context: WorkflowContext) {
+    const display = deterministicDisplay(
+      context,
+      "capture-baseline",
+      "Capture baseline",
+      "pre-implementation-baseline.json",
+      "inspect",
     );
-
-  return runPlanTask(context, runner, undefined, application);
-}
-
-export async function captureBaselinePhase(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<string> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        captureBaselinePhase(context, application),
-      ),
-      application,
-    );
-
-  const display = deterministicDisplay(
-    context,
-    "capture-baseline",
-    "Capture baseline",
-    "pre-implementation-baseline.json",
-    "inspect",
-  );
-  let outcome = "captured";
-  return runPresentedPhase(
-    display,
-    async () => {
-      if (
-        !context.force &&
-        (await artifactExists(
-          context,
-          "preImplementationBaseline",
-          application,
-        ))
-      ) {
-        const existing = await readArtifact(
-          context,
-          "preImplementationBaseline",
-          application,
-        );
-        if (existing.trim()) {
-          outcome = "reused";
-          return existing;
+    let outcome = "captured";
+    return yield* runPresentedPhase(
+      display,
+      Effect.fnUntraced(function* () {
+        if (
+          !context.force &&
+          (yield* artifactExists(context, "preImplementationBaseline"))
+        ) {
+          const existing = yield* readArtifact(
+            context,
+            "preImplementationBaseline",
+          );
+          if (existing.trim()) {
+            outcome = "reused";
+            return existing;
+          }
         }
-      }
-      const baseline = await capturePreImplementationBaseline(
-        { cwd: context.agentCwd, yes: context.yes },
-        application,
-      );
-      const content = JSON.stringify(
-        {
-          ...baseline,
-          note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
-        },
-        null,
-        2,
-      );
-      await writeArtifact(
-        context,
-        "preImplementationBaseline",
-        content,
-        application,
-      );
-      return content;
-    },
-    () => ({ outcome, artifact: display.expectedArtifact }),
-    undefined,
-    application,
-  );
-}
-
-export async function implementationPhase(
-  context: WorkflowContext,
-  runner: AgentRunner = runAgentPromise,
-  restartPass = 0,
-  application?: ApplicationExecution,
-): Promise<ChangeReport> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        implementationPhase(context, runner, restartPass, application),
-      ),
-      application,
+        const baseline = yield* capturePreImplementationBaseline({
+          cwd: context.agentCwd,
+          yes: context.yes,
+        });
+        const content = JSON.stringify(
+          {
+            ...baseline,
+            note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
+          },
+          null,
+          2,
+        );
+        yield* writeArtifact(context, "preImplementationBaseline", content);
+        return content;
+      }),
+      () => ({ outcome, artifact: display.expectedArtifact }),
+      undefined,
     );
+  },
+);
+export const implementationPhase = Effect.fn("implementationPhase")(function* (
+  context: WorkflowContext,
+  restartPass?: number,
+) {
+  restartPass ??= 0;
 
   const task = implementationTaskForPass(restartPass);
   if (
-    (await shouldRegenerateArtifact(context, task.artifact, application)) ||
+    (yield* shouldRegenerateArtifact(context, task.artifact)) ||
     restartPass > 0
   ) {
-    await assertCleanGit(
-      { cwd: context.agentCwd, yes: context.yes || restartPass > 0 },
-      application,
-    );
+    yield* assertCleanGit({
+      cwd: context.agentCwd,
+      yes: context.yes || restartPass > 0,
+    });
   }
-  const content = await runChangeReportTaskWithForceOverride(
+  const content = yield* runChangeReportTaskWithForceOverride(
     context,
-    runner,
     task,
     restartPass > 0,
-    application,
   );
   if (restartPass > 0) {
-    await writeArtifact(
+    yield* writeArtifact(
       context,
       implementationRestartLogRef(restartPass),
       `# Implementation Restart Log Pass ${restartPass}\n\n## Summary\nRestart implementation completed after baseline reset. See implementation-log.json for the authoritative report and implementation-log.md for its human-readable view.\n`,
-      application,
     );
   }
   return content;
-}
-
-export async function codeRefinementPhase(
+});
+export const codeRefinementPhase = Effect.fn("codeRefinementPhase")(function* (
   context: WorkflowContext,
   pass?: number,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<ChangeReport> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        codeRefinementPhase(context, pass, runner, application),
-      ),
-      application,
-    );
-  pass ??= await inferNextRefinementPass(context, application);
-
-  return runChangeReportTask(
+) {
+  pass ??= yield* inferNextRefinementPass(context);
+  return yield* runChangeReportTask(
     context,
-    runner,
-    codeRefinementTask(
-      pass,
-      await codeRefinementSourceForPass(context, pass, application),
-    ),
+    codeRefinementTask(pass, yield* codeRefinementSourceForPass(context, pass)),
     undefined,
-    application,
   );
-}
-
-async function codeRefinementSourceForPass(
-  context: WorkflowContext,
-  pass: number,
-  application?: ApplicationExecution,
-): Promise<CodeRefinementSource> {
-  if (pass === 0) return "initial";
-  if (await artifactExists(context, fixLogRef(pass), application)) return "fix";
-  if (
-    (await artifactExists(
-      context,
-      implementationRestartLogRef(pass),
-      application,
-    )) ||
-    (await artifactExists(context, baselineResetLogRef(pass), application))
-  )
-    return "restart";
-  return "fix";
-}
-
-export async function reviewPhase(
+});
+const codeRefinementSourceForPass = Effect.fn("codeRefinementSourceForPass")(
+  function* (context: WorkflowContext, pass: number) {
+    if (pass === 0) return "initial";
+    if (yield* artifactExists(context, fixLogRef(pass))) return "fix";
+    if (
+      (yield* artifactExists(context, implementationRestartLogRef(pass))) ||
+      (yield* artifactExists(context, baselineResetLogRef(pass)))
+    )
+      return "restart";
+    return "fix";
+  },
+);
+export const reviewPhase = Effect.fn("reviewPhase")(function* (
   context: WorkflowContext,
   pass?: number,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<{ reviewA: ReviewResult; reviewB: ReviewResult }> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        reviewPhase(context, pass, runner, application),
-      ),
-      application,
+) {
+  pass ??= yield* inferNextReviewPass(context);
+  const [reviewA, reviewB] = yield* Effect.all(
+    [
+      Effect.exit(runReviewTask(context, reviewATaskForPass(pass))),
+      Effect.exit(runReviewTask(context, reviewBTaskForPass(pass))),
+    ],
+    { concurrency: "unbounded" },
+  );
+  if (Exit.isFailure(reviewA))
+    return yield* Effect.failCause(
+      Exit.isFailure(reviewB)
+        ? Cause.combine(reviewA.cause, reviewB.cause)
+        : reviewA.cause,
     );
-  pass ??= await inferNextReviewPass(context, application);
-
-  const [reviewA, reviewB] = await Promise.allSettled([
-    runReviewTask(
-      context,
-      runner,
-      reviewATaskForPass(pass),
-      undefined,
-      application,
-    ),
-    runReviewTask(
-      context,
-      runner,
-      reviewBTaskForPass(pass),
-      undefined,
-      application,
-    ),
-  ]);
-  if (reviewA.status === "rejected") throw reviewA.reason;
-  if (reviewB.status === "rejected") throw reviewB.reason;
+  if (Exit.isFailure(reviewB)) return yield* Effect.failCause(reviewB.cause);
   return { reviewA: reviewA.value, reviewB: reviewB.value };
-}
-
-export async function fixPhase(
+});
+export const fixPhase = Effect.fn("fixPhase")(function* (
   context: WorkflowContext,
   pass?: number,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<ChangeReport> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        fixPhase(context, pass, runner, application),
-      ),
-      application,
-    );
-  pass ??= await inferNextFixPass(context, application);
-
+) {
+  pass ??= yield* inferNextFixPass(context);
   const task = fixTask(pass);
-  if (await shouldRegenerateArtifact(context, task.artifact, application)) {
-    await assertCleanGit({ cwd: context.agentCwd, yes: true }, application);
+  if (yield* shouldRegenerateArtifact(context, task.artifact)) {
+    yield* assertCleanGit({ cwd: context.agentCwd, yes: true });
   }
-  return runChangeReportTask(context, runner, task, undefined, application);
-}
-
-export async function resetBaselinePhase(
+  return yield* runChangeReportTask(context, task, undefined);
+});
+export const resetBaselinePhase = Effect.fn("resetBaselinePhase")(function* (
   context: WorkflowContext,
   pass: number,
-  application?: ApplicationExecution,
-): Promise<string> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        resetBaselinePhase(context, pass, application),
-      ),
-      application,
-    );
-
+) {
   const artifact = `baseline-reset-${pass}.md`;
   const display = {
     ...deterministicDisplay(
@@ -460,41 +310,27 @@ export async function resetBaselinePhase(
     ),
     pass,
   };
-  return runPresentedPhase(
+  return yield* runPresentedPhase(
     display,
-    async () => {
-      const baseline = JSON.parse(
-        await readArtifact(context, "preImplementationBaseline", application),
-      ) as PreImplementationBaseline;
-      await resetWorktreeToPreImplementationBaseline(
-        { cwd: context.agentCwd, baseline },
-        application,
-      );
+    Effect.fnUntraced(function* () {
+      const baseline = (yield* decodeJson(
+        yield* readArtifact(context, "preImplementationBaseline"),
+      )) as PreImplementationBaseline;
+      yield* resetWorktreeToPreImplementationBaseline({
+        cwd: context.agentCwd,
+        baseline,
+      });
       const content = `# Baseline Reset Pass ${pass}\n\n## Summary\nReset non-.roark worktree state to pre-implementation baseline ${baseline.head}.\n\n## Preserved Control Plane\n.roark artifacts were preserved.\n`;
-      await writeArtifact(
-        context,
-        baselineResetLogRef(pass),
-        content,
-        application,
-      );
+      yield* writeArtifact(context, baselineResetLogRef(pass), content);
       return content;
-    },
+    }),
     () => ({ outcome: "reset", artifact }),
     undefined,
-    application,
   );
-}
-
-export async function readinessPhase(
+});
+export const readinessPhase = Effect.fn("readinessPhase")(function* (
   context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<string> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) => readinessPhase(context, application)),
-      application,
-    );
-
+) {
   const display = deterministicDisplay(
     context,
     "readiness",
@@ -502,34 +338,28 @@ export async function readinessPhase(
     "readiness.md",
     "inspect",
   );
-  await context.observer?.phaseStarted({
-    phase: "readiness",
-    label: "Readiness",
-    artifact: "readiness",
-  });
-  return runPresentedPhase(
+  yield* (
+    context.observer?.phaseStarted({
+      phase: "readiness",
+      label: "Readiness",
+      artifact: "readiness",
+    }) ?? Effect.void
+  );
+  return yield* runPresentedPhase(
     display,
-    async () => {
-      const readiness = await buildReadinessArtifacts(context, application);
-      await writeJsonArtifact(
-        context,
-        "readiness",
-        readiness.result,
-        application,
+    Effect.fnUntraced(function* () {
+      const readiness = yield* buildReadinessArtifacts(context);
+      yield* writeJsonArtifact(context, "readiness", readiness.result);
+      yield* writeArtifact(context, "readinessMarkdown", readiness.markdown);
+      yield* (
+        context.observer?.phaseCompleted({
+          phase: "readiness",
+          label: "Readiness",
+          artifact: "readiness",
+        }) ?? Effect.void
       );
-      await writeArtifact(
-        context,
-        "readinessMarkdown",
-        readiness.markdown,
-        application,
-      );
-      await context.observer?.phaseCompleted({
-        phase: "readiness",
-        label: "Readiness",
-        artifact: "readiness",
-      });
       return readiness.markdown;
-    },
+    }),
     () => ({ outcome: "generated", artifact: "readiness.md" }),
     {
       onError: (error) =>
@@ -540,77 +370,59 @@ export async function readinessPhase(
           error,
         }),
     },
-    application,
   );
-}
-
+});
 export type WorkflowRunResult =
-  | { status: "triage-stopped"; triageVerdict: string }
-  | { status: "planning-stopped" }
-  | { status: "review-blocked" }
-  | { status: "completed" };
-
+  | {
+      status: "triage-stopped";
+      triageVerdict: string;
+    }
+  | {
+      status: "planning-stopped";
+    }
+  | {
+      status: "review-blocked";
+    }
+  | {
+      status: "completed";
+    };
 export interface RunFullWorkflowOptions {
   issueSnapshot?: GitHubIssueSnapshot | undefined;
 }
-
-export async function runFullWorkflow(
+export const runFullWorkflow = Effect.fn("runFullWorkflow")(function* (
   context: WorkflowContext,
-  runner: AgentRunner = runAgentPromise,
   options: RunFullWorkflowOptions = {},
-  application?: ApplicationExecution,
-): Promise<WorkflowRunResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runFullWorkflow(context, runner, options, application),
-      ),
-      application,
-    );
-
-  context.observer ??= createFileRunObserver(context);
-  await context.observer.runStarted({ command: "do" });
-  try {
-    const result = await runFullWorkflowBody(
-      context,
-      runner,
-      options,
-      application,
-    );
-    await context.observer.runCompleted({ status: result.status });
-    return result;
-  } catch (error) {
-    await context.observer.runFailed(error);
-    throw error;
-  }
-}
-
-async function runFullWorkflowBody(
+) {
+  const observer = context.observer ?? (yield* createFileRunObserver(context));
+  yield* observer.runStarted({ command: "do" });
+  return yield* runFullWorkflowBody({ ...context, observer }, options).pipe(
+    Effect.provideService(RunObservation, observer),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? observer.runCompleted({ status: exit.value.status })
+        : observer.runFailed(Cause.squash(exit.cause)),
+    ),
+  );
+});
+const runFullWorkflowBody = Effect.fn("runFullWorkflowBody")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   options: RunFullWorkflowOptions,
-  application?: ApplicationExecution,
-): Promise<WorkflowRunResult> {
+) {
   const completedActions: WorkflowProgressionAction[] = [];
-
   for (;;) {
-    const progression = await planWorkflowProgression(
-      context,
-      {
-        force: context.force,
-        completedActions,
-      },
-      application,
-    );
+    const progression = yield* planWorkflowProgression(context, {
+      force: context.force,
+      completedActions,
+    });
     const next = progression.actions[0];
-
     if (!next) {
       if (progression.terminalStatus) return progression.terminalStatus;
-      throw new Error(
-        "Workflow progression produced no next action and no terminal status.",
+      return yield* Effect.fail(
+        new Error(
+          "Workflow progression produced no next action and no terminal status.",
+        ),
       );
     }
-
     if (next.type === "run") {
       const following = progression.actions[1];
       if (
@@ -619,101 +431,79 @@ async function runFullWorkflowBody(
         following.phase === "review-b" &&
         following.pass === next.pass
       ) {
-        await reviewPhase(context, next.pass ?? 0, runner, application);
+        yield* reviewPhase(context, next.pass ?? 0);
         completedActions.push(next, following);
         continue;
       }
-      await runWorkflowPhase(
-        context,
-        runner,
-        next.phase,
-        next.pass,
-        options,
-        application,
-      );
+      yield* runWorkflowPhase(context, next.phase, next.pass, options);
       completedActions.push(next);
       continue;
     }
-
     if (next.type === "write-readiness") {
-      await readinessPhase(context, application);
+      yield* readinessPhase(context);
       completedActions.push(next);
       if (progression.terminalStatus) return progression.terminalStatus;
       continue;
     }
-
     if (next.type === "noop") {
       if (progression.terminalStatus) return progression.terminalStatus;
-      throw new Error(
-        `Workflow progression returned a no-op without a terminal status: ${next.reason}`,
+      return yield* Effect.fail(
+        new Error(
+          `Workflow progression returned a no-op without a terminal status: ${next.reason}`,
+        ),
       );
     }
-
-    throw new Error(
-      `Workflow progression returned unsupported fresh-run action '${next.type}'.`,
+    return yield* Effect.fail(
+      new Error(
+        `Workflow progression returned unsupported fresh-run action '${next.type}'.`,
+      ),
     );
   }
-}
-
-async function runWorkflowPhase(
+});
+const runWorkflowPhase = Effect.fn("runWorkflowPhase")(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
   phase: WorkflowRunPhase,
   pass?: number,
   options: RunFullWorkflowOptions = {},
-  application?: ApplicationExecution,
-): Promise<void> {
+) {
   switch (phase) {
     case "fetch":
-      await fetchIssuePhase(context, options.issueSnapshot, application);
+      yield* fetchIssuePhase(context, options.issueSnapshot);
       return;
     case "triage":
-      await triagePhase(context, runner, application);
+      yield* triagePhase(context);
       return;
     case "plan-draft":
-      await planDraftPhase(context, runner, application);
+      yield* planDraftPhase(context);
       return;
     case "plan":
-      await planPhase(context, runner, application);
+      yield* planPhase(context);
       return;
     case "capture-baseline":
-      await captureBaselinePhase(context, application);
+      yield* captureBaselinePhase(context);
       return;
     case "implement":
-      await implementationPhase(context, runner, pass ?? 0, application);
+      yield* implementationPhase(context, pass ?? 0);
       return;
     case "refine-code":
-      await codeRefinementPhase(context, pass, runner, application);
+      yield* codeRefinementPhase(context, pass);
       return;
     case "review-a":
-      await runReviewTask(
-        context,
-        runner,
-        reviewATaskForPass(pass ?? 0),
-        undefined,
-        application,
-      );
+      yield* runReviewTask(context, reviewATaskForPass(pass ?? 0), undefined);
       return;
     case "review-b":
-      await runReviewTask(
-        context,
-        runner,
-        reviewBTaskForPass(pass ?? 0),
-        undefined,
-        application,
-      );
+      yield* runReviewTask(context, reviewBTaskForPass(pass ?? 0), undefined);
       return;
     case "fix":
-      await fixPhase(context, pass, runner, application);
+      yield* fixPhase(context, pass);
       return;
     case "reset-baseline":
-      await resetBaselinePhase(context, pass ?? 1, application);
+      yield* resetBaselinePhase(context, pass ?? 1);
       return;
     default:
       return assertNever(phase);
   }
-}
-
+});
 function assertSnapshotMatchesContext(
   context: WorkflowContext,
   snapshot: GitHubIssueSnapshot,
@@ -727,139 +517,112 @@ function assertSnapshotMatchesContext(
     );
   }
 }
-
 function assertNever(value: never): never {
   throw new Error(`Unsupported workflow phase '${String(value)}'.`);
 }
-
-async function inferNextReviewPass(
+const inferNextReviewPass = Effect.fn("inferNextReviewPass")(function* (
   context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<number> {
-  return ((await latestCompleteReviewCycle(context, application)) ?? -1) + 1;
-}
-
-async function runChangeReportTaskWithForceOverride(
+) {
+  return ((yield* latestCompleteReviewCycle(context)) ?? -1) + 1;
+});
+const runChangeReportTaskWithForceOverride = Effect.fn(
+  "runChangeReportTaskWithForceOverride",
+)(function* (
   context: WorkflowContext,
-  runner: AgentRunner,
-  task: Parameters<typeof runChangeReportTask>[2],
+  task: Parameters<typeof runChangeReportTask>[1],
   force: boolean,
-  application?: ApplicationExecution,
-): Promise<ChangeReport> {
-  if (!force)
-    return runChangeReportTask(context, runner, task, undefined, application);
-  const previous = context.force;
-  context.force = true;
-  try {
-    return await runChangeReportTask(
-      context,
-      runner,
-      task,
-      undefined,
-      application,
-    );
-  } finally {
-    context.force = previous;
-  }
-}
-
-async function shouldRegenerateArtifact(
-  context: WorkflowContext,
-  artifact: ArtifactRef,
-  application?: ApplicationExecution,
-): Promise<boolean> {
-  if (context.force || !(await artifactExists(context, artifact, application)))
-    return true;
-  const existing = await readArtifact(context, artifact, application);
-  return !validateAgentArtifact(artifact, existing).ok;
-}
-
-function assertAttemptSelectedWhenAttemptsExist(
+) {
+  return yield* runChangeReportTask(
+    force ? { ...context, force: true } : context,
+    task,
+  );
+});
+const shouldRegenerateArtifact = Effect.fn("shouldRegenerateArtifact")(
+  function* (context: WorkflowContext, artifact: ArtifactRef) {
+    if (context.force || !(yield* artifactExists(context, artifact)))
+      return true;
+    const existing = yield* readArtifact(context, artifact);
+    return !validateAgentArtifact(artifact, existing).ok;
+  },
+);
+const assertAttemptSelectedWhenAttemptsExist = Effect.fn(
+  "assertAttemptSelectedWhenAttemptsExist",
+)(function* (
   context: WorkflowContext,
   command: "curate-issues" | "create-issues",
-): void {
+) {
   if (context.attempt !== undefined) return;
+  const fs = yield* FileSystem.FileSystem;
   const attemptsDir = path.join(
     context.outDir,
     "issue",
     context.issueNumber,
     "attempts",
   );
-  if (!existsSync(attemptsDir)) return;
-  const attempts = readdirSync(attemptsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
-    .map((entry) => Number(entry.name))
-    .sort((left, right) => left - right);
-  if (attempts.length === 0) return;
-  const latest = attempts[attempts.length - 1];
+  if (!(yield* fs.exists(attemptsDir))) return;
+  const entries = yield* fs.readDirectory(attemptsDir);
+  let latest: number | undefined;
+  for (const name of entries) {
+    if (
+      !/^\d+$/.test(name) ||
+      (yield* fs.stat(path.join(attemptsDir, name))).type !== "Directory"
+    )
+      continue;
+    latest = Math.max(latest ?? 0, Number(name));
+  }
   if (latest === undefined) return;
-  throw new Error(
-    `Issue #${context.issueNumber} has attempt artifacts under ${path.relative(context.controlCwd, attemptsDir)}. Run '${command} ${context.issueInput} --attempt ${latest}' (or choose another attempt) so reviewer findings are curated from the intended attempt.`,
+  return yield* Effect.fail(
+    new Error(
+      `Issue #${context.issueNumber} has attempt artifacts under ${path.relative(context.controlCwd, attemptsDir)}. Run '${command} ${context.issueInput} --attempt ${latest}' (or choose another attempt) so reviewer findings are curated from the intended attempt.`,
+    ),
   );
-}
-
-export async function runSinglePhase(
+});
+export const runSinglePhase = Effect.fn("runSinglePhase")(function* (
   context: WorkflowContext,
   phase: SinglePhaseCommand,
-  runner: AgentRunner = runAgentPromise,
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runSinglePhase(context, phase, runner, application),
-      ),
-      application,
-    );
-
-  context.observer ??= createFileRunObserver(context);
-  await context.observer.runStarted({ command: phase });
-  try {
+) {
+  const observer = context.observer ?? (yield* createFileRunObserver(context));
+  const current = { ...context, observer };
+  yield* observer.runStarted({ command: phase });
+  return yield* Effect.gen(function* () {
     if (phase === "review")
-      await reviewPhase(
-        context,
-        context.fixPass ?? (await inferNextReviewPass(context, application)),
-        runner,
-        application,
+      yield* reviewPhase(
+        current,
+        context.fixPass ?? (yield* inferNextReviewPass(current)),
       );
-    else if (phase === "readiness") await readinessPhase(context, application);
+    else if (phase === "readiness") yield* readinessPhase(current);
     else if (phase === "curate-issues") {
-      assertAttemptSelectedWhenAttemptsExist(context, "curate-issues");
-      await issueCurationPhase(context, undefined, undefined, application);
+      yield* assertAttemptSelectedWhenAttemptsExist(current, phase);
+      yield* issueCurationPhase(current);
     } else if (phase === "create-issues") {
-      assertAttemptSelectedWhenAttemptsExist(context, "create-issues");
-      await createIssuesPhase(context, runner, application);
+      yield* assertAttemptSelectedWhenAttemptsExist(current, phase);
+      yield* createIssuesPhase(current);
     } else
-      await runWorkflowPhase(
-        context,
-        runner,
+      yield* runWorkflowPhase(
+        current,
         phase,
-        await standalonePhasePass(context, phase, application),
-        undefined,
-        application,
+        yield* standalonePhasePass(current, phase),
       );
-    await context.observer.runCompleted({ status: "completed" });
-  } catch (error) {
-    await context.observer.runFailed(error);
-    throw error;
-  }
-}
-
-async function standalonePhasePass(
+  }).pipe(
+    Effect.provideService(RunObservation, observer),
+    Effect.onExit((exit) =>
+      Exit.isSuccess(exit)
+        ? observer.runCompleted({ status: "completed" })
+        : observer.runFailed(Cause.squash(exit.cause)),
+    ),
+  );
+});
+const standalonePhasePass = Effect.fn("standalonePhasePass")(function* (
   context: WorkflowContext,
   phase: StandaloneWorkflowPhase,
-  application?: ApplicationExecution,
-): Promise<number | undefined> {
+) {
   if (phase === "refine-code")
-    return (
-      context.fixPass ?? (await inferNextRefinementPass(context, application))
-    );
+    return context.fixPass ?? (yield* inferNextRefinementPass(context));
   if (phase === "fix")
-    return context.fixPass ?? (await inferNextFixPass(context, application));
+    return context.fixPass ?? (yield* inferNextFixPass(context));
   if (phase === "reset-baseline") return context.fixPass ?? 1;
   return undefined;
-}
-
+});
 function deterministicDisplay(
   context: WorkflowContext,
   phaseId: string,

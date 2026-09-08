@@ -196,7 +196,7 @@ describe("runAutoContinue", () => {
           },
         },
       ),
-    ).rejects.toThrow("Triage failed: triage failed");
+    ).rejects.toThrow("triage failed");
 
     expect(calls).toEqual([`prepare:${workspacePath}`, "transition", "runner"]);
     expect(

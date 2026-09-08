@@ -40,7 +40,7 @@ import {
   presenter,
   type AgentDisplayContext,
 } from "../presentation/presenter.ts";
-import { runPresentedPhase } from "../presentation/phase.ts";
+import { runPresentedPhasePromise as runPresentedPhase } from "../presentation/phase-promise.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
   createPrReviewContext,

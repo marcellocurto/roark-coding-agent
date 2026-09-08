@@ -1,7 +1,6 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { presenter, type AgentDisplayContext } from "./presenter.ts";
+import { Cause, Effect, Exit } from "effect";
+import { Presentation } from "../runtime/services.ts";
+import type { AgentDisplayContext } from "./presenter.ts";
 
 export interface PresentedPhaseCompletion {
   outcome?: string | undefined;
@@ -9,45 +8,53 @@ export interface PresentedPhaseCompletion {
   failed?: boolean | undefined;
 }
 
-export async function runPresentedPhase<T>(
+export const runPresentedPhase = Effect.fn("runPresentedPhase")(function* <
+  T,
+  E,
+  R,
+  E2 = never,
+  R2 = never,
+>(
   display: AgentDisplayContext,
-  work: () => Promise<T>,
+  work: () => Effect.Effect<T, E, R>,
   completion: (result: T) => PresentedPhaseCompletion,
   options: {
     manageTitle?: boolean | undefined;
-    onError?: ((error: unknown) => void | Promise<void>) | undefined;
+    onError?:
+      | ((error: unknown) => Effect.Effect<void, E2, R2> | void)
+      | undefined;
     failure?: ((error: unknown) => PresentedPhaseCompletion) | undefined;
   } = {},
-  application?: ApplicationExecution,
-): Promise<T> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        runPresentedPhase(display, work, completion, options, application),
-      ),
-      application,
-    );
-
+) {
+  const presentation = yield* Presentation;
   const titleOptions = { manageTitle: options.manageTitle };
-  presenter(application).phaseStarted(display, titleOptions);
-  try {
-    const result = await work();
-    presenter(application).phaseCompleted(display, {
-      ...completion(result),
-      ...titleOptions,
-    });
-    return result;
-  } catch (error) {
-    await options.onError?.(error);
-    const failure = options.failure?.(error);
-    presenter(application).phaseCompleted(display, {
-      outcome:
-        failure?.outcome ??
-        (error instanceof Error ? error.message : String(error)),
-      artifact: failure?.artifact,
-      failed: true,
-      ...titleOptions,
-    });
-    throw error;
-  }
-}
+  presentation.phaseStarted(display, titleOptions);
+  return yield* Effect.suspend(work).pipe(
+    Effect.onExit((exit) =>
+      Effect.gen(function* () {
+        if (Exit.isSuccess(exit)) {
+          presentation.phaseCompleted(display, {
+            ...completion(exit.value),
+            ...titleOptions,
+          });
+          return;
+        }
+        const error = Cause.squash(exit.cause);
+        yield* Effect.suspend(() => options.onError?.(error) ?? Effect.void);
+        const failure = options.failure?.(error);
+        presentation.phaseCompleted(display, {
+          outcome:
+            failure?.outcome ??
+            (Cause.hasInterruptsOnly(exit.cause)
+              ? "Interrupted."
+              : Cause.prettyErrors(exit.cause)
+                  .map((error) => error.message)
+                  .join("\n")),
+          artifact: failure?.artifact,
+          failed: true,
+          ...titleOptions,
+        });
+      }),
+    ),
+  );
+});

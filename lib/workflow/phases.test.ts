@@ -20,12 +20,12 @@ import {
   writeArtifactPromise as writeArtifact,
   writeJsonArtifactPromise as writeJsonArtifact,
 } from "./artifacts-promise.ts";
+import { issueArtifactHasRelationshipSnapshot } from "./phases.ts";
 import {
-  issueArtifactHasRelationshipSnapshot,
-  reviewPhase,
-  runFullWorkflow,
-  runSinglePhase,
-} from "./phases.ts";
+  reviewPhasePromise as reviewPhase,
+  runFullWorkflowPromise as runFullWorkflow,
+  runSinglePhasePromise as runSinglePhase,
+} from "./phases-promise.ts";
 import { noopAsync } from "../utils/async.ts";
 import {
   reviewFinding,
@@ -399,13 +399,13 @@ describe("runFullWorkflow", () => {
         );
       if (phase === "reviewA-0") {
         passZeroReviewsStarted.add(phase);
-        announcePassZeroReviewStarted();
+        if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
         await passZeroReviewsMayFinish;
         return submitReview(request, reviewResult(reviewAFindings));
       }
       if (phase === "reviewB-0") {
         passZeroReviewsStarted.add(phase);
-        announcePassZeroReviewStarted();
+        if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
         await passZeroReviewsMayFinish;
         return submitReview(request, reviewResult(reviewBFindings));
       }
@@ -445,16 +445,10 @@ describe("runFullWorkflow", () => {
     };
 
     const workflow = runFullWorkflow(context, runner);
-    await Promise.race([
-      passZeroReviewStarted,
-      workflow.then(() => {
-        throw new Error("workflow completed before pass-zero reviews started");
-      }),
+    const reviewsStartedTogether = await Promise.race([
+      passZeroReviewStarted.then(() => true),
+      Bun.sleep(1000).then(() => false),
     ]);
-    for (let turn = 0; turn < 50 && passZeroReviewsStarted.size < 2; turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const reviewsStartedTogether = passZeroReviewsStarted.size === 2;
     releasePassZeroReviews();
     const result = await workflow;
     const persistedReviewA = parseReviewResultJson(

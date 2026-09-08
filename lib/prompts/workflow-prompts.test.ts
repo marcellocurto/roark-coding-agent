@@ -3,16 +3,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  codeRefinementPrompt,
-  fixPrompt,
   implementationPrompt,
   planDraftPrompt,
   planPrompt,
-  reviewAPrompt,
-  reviewBPrompt,
   sharedSystemPrompt,
   triagePrompt,
 } from "./workflow-prompts.ts";
+import {
+  codeRefinementPromptPromise as codeRefinementPrompt,
+  fixPromptPromise as fixPrompt,
+  reviewAPromptPromise as reviewAPrompt,
+  reviewBPromptPromise as reviewBPrompt,
+} from "./workflow-prompts-promise.ts";
 import {
   verificationBeforeFixRef,
   type WorkflowContext,

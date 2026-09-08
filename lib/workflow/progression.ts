@@ -1,4 +1,5 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { decodeArtifact } from "./validation.ts";
+import { Effect } from "effect";
 import {
   baselineResetLogRef,
   fixLogRef,
@@ -9,8 +10,8 @@ import {
   type ArtifactRef,
   type WorkflowContext,
 } from "./artifacts.ts";
-import { artifactExistsPromise as artifactExists } from "./artifacts-promise.ts";
-import { readArtifactPromise as readArtifact } from "./artifacts-promise.ts";
+import { artifactExists } from "./artifacts.ts";
+import { readArtifact } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import type { WorkflowRunPhase } from "./phase-vocabulary.ts";
 import {
@@ -23,7 +24,6 @@ import {
 import { parseReviewResultJson } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
-
 export type WorkflowProgressionAction =
   | {
       type: "run";
@@ -31,183 +31,181 @@ export type WorkflowProgressionAction =
       pass?: number | undefined;
       reason: string;
     }
-  | { type: "write-readiness"; reason: string }
-  | { type: "publish-gate"; reason: string }
-  | { type: "noop"; reason: string };
-
+  | {
+      type: "write-readiness";
+      reason: string;
+    }
+  | {
+      type: "publish-gate";
+      reason: string;
+    }
+  | {
+      type: "noop";
+      reason: string;
+    };
 export type WorkflowTerminalStatus =
-  | { status: "triage-stopped"; triageVerdict: string }
-  | { status: "planning-stopped" }
-  | { status: "review-blocked" }
-  | { status: "completed" };
-
+  | {
+      status: "triage-stopped";
+      triageVerdict: string;
+    }
+  | {
+      status: "planning-stopped";
+    }
+  | {
+      status: "review-blocked";
+    }
+  | {
+      status: "completed";
+    };
 export interface WorkflowProgressionPlan {
   actions: WorkflowProgressionAction[];
   terminalStatus?: WorkflowTerminalStatus | undefined;
 }
-
 export interface WorkflowProgressionOptions {
   includePublishGate?: boolean | undefined;
   force?: boolean | undefined;
   completedActions?: readonly WorkflowProgressionAction[] | undefined;
 }
 
-interface Inspection {
-  exists: boolean;
-  valid: boolean;
-  reason: string;
-  content?: string | undefined;
-}
-
 export function issueArtifactHasRelationshipSnapshot(content: string): boolean {
   return /<github_issue_relationships\b/.test(content);
 }
-
-export async function planWorkflowProgression(
-  context: WorkflowContext,
-  options: WorkflowProgressionOptions = {},
-  application?: ApplicationExecution,
-): Promise<WorkflowProgressionPlan> {
-  const issue = await inspect(context, "issue", options, application);
-  if (!issue.valid) return issuePrerequisitePlan(issue.reason, options);
-  if (!issueArtifactHasRelationshipSnapshot(issue.content ?? "")) {
-    return issuePrerequisitePlan(
-      "issue artifact lacks GitHub relationship snapshot",
+export const planWorkflowProgression = Effect.fn("planWorkflowProgression")(
+  function* (
+    context: WorkflowContext,
+    options: WorkflowProgressionOptions = {},
+  ) {
+    const issue = yield* inspect(context, "issue", options);
+    if (!issue.valid) return issuePrerequisitePlan(issue.reason, options);
+    if (!issueArtifactHasRelationshipSnapshot(issue.content ?? "")) {
+      return issuePrerequisitePlan(
+        "issue artifact lacks GitHub relationship snapshot",
+        options,
+      );
+    }
+    const triage = yield* inspect(context, "triage", options);
+    if (!triage.valid) {
+      return pending([
+        run("triage", triage.reason),
+        run("plan-draft", "plan draft depends on triage"),
+        run("plan", "plan refinement depends on plan draft"),
+        run("capture-baseline", "baseline capture depends on refined plan"),
+        run("implement", "implementation depends on plan"),
+        run("refine-code", "refinement depends on implementation", 0),
+        run("review-a", "review A depends on refinement", 0),
+        run("review-b", "review B depends on refinement", 0),
+        readiness("workflow must recompute readiness"),
+        ...publishGate(options, "publish gate must run after readiness"),
+      ]);
+    }
+    const triageResult = yield* decodeArtifact(
+      parseTriageResultJson,
+      triage.content ?? "",
+    );
+    if (!shouldProceedAfterTriage(triageResult)) {
+      const verdict = triageResult.verdict;
+      return terminal(
+        [
+          readiness(
+            `triage verdict is "${verdict}"; readiness records the stop`,
+          ),
+          noop("terminal triage outcome; no plan/implementation/publish gate"),
+        ],
+        { status: "triage-stopped", triageVerdict: verdict },
+      );
+    }
+    const planDraft = yield* inspect(
+      context,
+      "implementationPlanDraft",
       options,
     );
-  }
-
-  const triage = await inspect(context, "triage", options, application);
-  if (!triage.valid) {
-    return pending([
-      run("triage", triage.reason),
-      run("plan-draft", "plan draft depends on triage"),
-      run("plan", "plan refinement depends on plan draft"),
-      run("capture-baseline", "baseline capture depends on refined plan"),
-      run("implement", "implementation depends on plan"),
-      run("refine-code", "refinement depends on implementation", 0),
-      run("review-a", "review A depends on refinement", 0),
-      run("review-b", "review B depends on refinement", 0),
-      readiness("workflow must recompute readiness"),
-      ...publishGate(options, "publish gate must run after readiness"),
-    ]);
-  }
-
-  const triageResult = parseTriageResultJson(triage.content ?? "");
-  if (!shouldProceedAfterTriage(triageResult)) {
-    const verdict = triageResult.verdict;
-    return terminal(
-      [
-        readiness(`triage verdict is "${verdict}"; readiness records the stop`),
-        noop("terminal triage outcome; no plan/implementation/publish gate"),
-      ],
-      { status: "triage-stopped", triageVerdict: verdict },
-    );
-  }
-
-  const planDraft = await inspect(
-    context,
-    "implementationPlanDraft",
-    options,
-    application,
-  );
-  if (!planDraft.valid) {
-    return pending([
-      run("plan-draft", planDraft.reason),
-      run("plan", "plan refinement depends on plan draft"),
-      run("capture-baseline", "baseline capture depends on refined plan"),
-      run("implement", "implementation depends on plan"),
-      run("refine-code", "refinement depends on implementation", 0),
-      run("review-a", "review A depends on refinement", 0),
-      run("review-b", "review B depends on refinement", 0),
-      readiness("workflow must recompute readiness"),
-      ...publishGate(options, "publish gate must run after readiness"),
-    ]);
-  }
-
-  const plan = await inspect(
-    context,
-    "implementationPlan",
-    options,
-    application,
-  );
-  if (!plan.valid) {
-    return pending([
-      run("plan", plan.reason),
-      run("capture-baseline", "baseline capture depends on refined plan"),
-      run("implement", "implementation depends on plan"),
-      run("refine-code", "refinement depends on implementation", 0),
-      run("review-a", "review A depends on refinement", 0),
-      run("review-b", "review B depends on refinement", 0),
-      readiness("workflow must recompute readiness"),
-      ...publishGate(options, "publish gate must run after readiness"),
-    ]);
-  }
-
-  if (
-    !shouldImplementPlan(parseImplementationPlanResultJson(plan.content ?? ""))
-  ) {
-    return terminal(
-      [
-        readiness(
-          "implementation plan is not ready; readiness records the stop",
+    if (!planDraft.valid) {
+      return pending([
+        run("plan-draft", planDraft.reason),
+        run("plan", "plan refinement depends on plan draft"),
+        run("capture-baseline", "baseline capture depends on refined plan"),
+        run("implement", "implementation depends on plan"),
+        run("refine-code", "refinement depends on implementation", 0),
+        run("review-a", "review A depends on refinement", 0),
+        run("review-b", "review B depends on refinement", 0),
+        readiness("workflow must recompute readiness"),
+        ...publishGate(options, "publish gate must run after readiness"),
+      ]);
+    }
+    const plan = yield* inspect(context, "implementationPlan", options);
+    if (!plan.valid) {
+      return pending([
+        run("plan", plan.reason),
+        run("capture-baseline", "baseline capture depends on refined plan"),
+        run("implement", "implementation depends on plan"),
+        run("refine-code", "refinement depends on implementation", 0),
+        run("review-a", "review A depends on refinement", 0),
+        run("review-b", "review B depends on refinement", 0),
+        readiness("workflow must recompute readiness"),
+        ...publishGate(options, "publish gate must run after readiness"),
+      ]);
+    }
+    if (
+      !shouldImplementPlan(
+        yield* decodeArtifact(
+          parseImplementationPlanResultJson,
+          plan.content ?? "",
         ),
-        noop("terminal planning outcome; no implementation/publish gate"),
-      ],
-      { status: "planning-stopped" },
+      )
+    ) {
+      return terminal(
+        [
+          readiness(
+            "implementation plan is not ready; readiness records the stop",
+          ),
+          noop("terminal planning outcome; no implementation/publish gate"),
+        ],
+        { status: "planning-stopped" },
+      );
+    }
+    const baseline = yield* inspect(
+      context,
+      "preImplementationBaseline",
+      options,
     );
-  }
-
-  const baseline = await inspect(
-    context,
-    "preImplementationBaseline",
-    options,
-    application,
-  );
-  if (!baseline.valid) {
-    return pending([
-      run("capture-baseline", baseline.reason),
-      run("implement", "implementation depends on pre-implementation baseline"),
-      run("refine-code", "refinement depends on implementation", 0),
-      run("review-a", "review A depends on refinement", 0),
-      run("review-b", "review B depends on refinement", 0),
-      readiness("workflow must recompute readiness"),
-      ...publishGate(options, "publish gate must run after readiness"),
-    ]);
-  }
-
-  const implementation = await inspect(
-    context,
-    "implementationLog",
-    options,
-    application,
-  );
-  if (!implementation.valid) {
-    return pending([
-      run("implement", implementation.reason),
-      run("refine-code", "refinement depends on implementation", 0),
-      run("review-a", "review A depends on refinement", 0),
-      run("review-b", "review B depends on refinement", 0),
-      readiness("workflow must recompute readiness"),
-      ...publishGate(options, "publish gate must run after readiness"),
-    ]);
-  }
-
-  return reviewCycleProgression(context, options, application);
-}
-
-async function reviewCycleProgression(
+    if (!baseline.valid) {
+      return pending([
+        run("capture-baseline", baseline.reason),
+        run(
+          "implement",
+          "implementation depends on pre-implementation baseline",
+        ),
+        run("refine-code", "refinement depends on implementation", 0),
+        run("review-a", "review A depends on refinement", 0),
+        run("review-b", "review B depends on refinement", 0),
+        readiness("workflow must recompute readiness"),
+        ...publishGate(options, "publish gate must run after readiness"),
+      ]);
+    }
+    const implementation = yield* inspect(
+      context,
+      "implementationLog",
+      options,
+    );
+    if (!implementation.valid) {
+      return pending([
+        run("implement", implementation.reason),
+        run("refine-code", "refinement depends on implementation", 0),
+        run("review-a", "review A depends on refinement", 0),
+        run("review-b", "review B depends on refinement", 0),
+        readiness("workflow must recompute readiness"),
+        ...publishGate(options, "publish gate must run after readiness"),
+      ]);
+    }
+    return yield* reviewCycleProgression(context, options);
+  },
+);
+const reviewCycleProgression = Effect.fn("reviewCycleProgression")(function* (
   context: WorkflowContext,
   options: WorkflowProgressionOptions,
-  application?: ApplicationExecution,
-): Promise<WorkflowProgressionPlan> {
+) {
   for (let pass = 0; pass <= context.maxFixPasses; pass++) {
-    const refinement = await inspect(
-      context,
-      refinementLogRef(pass),
-      options,
-      application,
-    );
+    const refinement = yield* inspect(context, refinementLogRef(pass), options);
     if (!refinement.valid) {
       return pending([
         run("refine-code", refinement.reason, pass),
@@ -217,19 +215,8 @@ async function reviewCycleProgression(
         ...publishGate(options, "publish gate must run after readiness"),
       ]);
     }
-
-    const reviewA = await inspect(
-      context,
-      reviewARef(pass),
-      options,
-      application,
-    );
-    const reviewB = await inspect(
-      context,
-      reviewBRef(pass),
-      options,
-      application,
-    );
+    const reviewA = yield* inspect(context, reviewARef(pass), options);
+    const reviewB = yield* inspect(context, reviewBRef(pass), options);
     const reviewActions: WorkflowProgressionAction[] = [];
     if (!reviewA.valid)
       reviewActions.push(run("review-a", reviewA.reason, pass));
@@ -242,21 +229,27 @@ async function reviewCycleProgression(
         ...publishGate(options, "publish gate must run after readiness"),
       ]);
     }
-
-    const reviewAResult = parseReviewResultJson(reviewA.content ?? "", {
-      allowRestart: true,
-    });
-    const reviewBResult = parseReviewResultJson(reviewB.content ?? "", {
-      allowRestart: true,
-    });
+    const reviewAResult = yield* decodeArtifact(
+      parseReviewResultJson,
+      reviewA.content ?? "",
+      {
+        allowRestart: true,
+      },
+    );
+    const reviewBResult = yield* decodeArtifact(
+      parseReviewResultJson,
+      reviewB.content ?? "",
+      {
+        allowRestart: true,
+      },
+    );
     const nextPass = pass + 1;
     if (needsRestart(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
-      const reset = await inspect(
+      const reset = yield* inspect(
         context,
         baselineResetLogRef(nextPass),
         options,
-        application,
       );
       if (!reset.valid) {
         return pending([
@@ -277,13 +270,11 @@ async function reviewCycleProgression(
           ...publishGate(options, "publish gate must run after readiness"),
         ]);
       }
-      if (await reviewCycleProgressExists(context, nextPass, application))
-        continue;
-      const restartImplementation = await inspect(
+      if (yield* reviewCycleProgressExists(context, nextPass)) continue;
+      const restartImplementation = yield* inspect(
         context,
         implementationRestartLogRef(nextPass),
         options,
-        application,
       );
       if (!restartImplementation.valid) {
         return pending([
@@ -307,15 +298,9 @@ async function reviewCycleProgression(
       }
       continue;
     }
-
     if (needsFix(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
-      const fix = await inspect(
-        context,
-        fixLogRef(nextPass),
-        options,
-        application,
-      );
+      const fix = yield* inspect(context, fixLogRef(nextPass), options);
       if (!fix.valid) {
         return pending([
           run("fix", fix.reason, nextPass),
@@ -328,7 +313,6 @@ async function reviewCycleProgression(
       }
       continue;
     }
-
     if (hasBlockedReview(reviewAResult, reviewBResult)) {
       return terminal(
         [
@@ -340,7 +324,6 @@ async function reviewCycleProgression(
         { status: "review-blocked" },
       );
     }
-
     return terminal(
       [
         readiness(
@@ -353,20 +336,16 @@ async function reviewCycleProgression(
       { status: "completed" },
     );
   }
-
   return maxPassesReached(options);
-}
-
-async function inspect(
+});
+const inspect = Effect.fn("inspect")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
   options: WorkflowProgressionOptions,
-  application?: ApplicationExecution,
-): Promise<Inspection> {
-  const exists = await artifactExists(context, artifact, application);
+) {
+  const exists = yield* artifactExists(context, artifact);
   if (!exists)
     return { exists: false, valid: false, reason: "artifact is missing" };
-
   const forcedAction = forceActionForArtifact(artifact);
   if (
     options.force === true &&
@@ -375,14 +354,12 @@ async function inspect(
   ) {
     return { exists: true, valid: false, reason: "forced rerun requested" };
   }
-
-  const content = await readArtifact(context, artifact, application);
+  const content = yield* readArtifact(context, artifact);
   const validation = validateAgentArtifact(artifact, content);
   if (!validation.ok)
     return { exists: true, valid: false, reason: validation.reason, content };
   return { exists: true, valid: true, reason: "artifact is valid", content };
-}
-
+});
 function forceActionForArtifact(
   artifact: ArtifactRef,
 ): WorkflowProgressionAction | undefined {
@@ -413,26 +390,21 @@ function forceActionForArtifact(
     return run("reset-baseline", "forced rerun requested", artifact.pass);
   return undefined;
 }
-
-async function reviewCycleProgressExists(
-  context: WorkflowContext,
-  pass: number,
-  application?: ApplicationExecution,
-): Promise<boolean> {
-  return (
-    (await artifactExists(context, refinementLogRef(pass), application)) ||
-    (await artifactExists(context, reviewARef(pass), application)) ||
-    (await artifactExists(context, reviewBRef(pass), application))
-  );
-}
-
+const reviewCycleProgressExists = Effect.fn("reviewCycleProgressExists")(
+  function* (context: WorkflowContext, pass: number) {
+    return (
+      (yield* artifactExists(context, refinementLogRef(pass))) ||
+      (yield* artifactExists(context, reviewARef(pass))) ||
+      (yield* artifactExists(context, reviewBRef(pass)))
+    );
+  },
+);
 function hasCompletedAction(
   actions: readonly WorkflowProgressionAction[],
   expected: WorkflowProgressionAction,
 ): boolean {
   return actions.some((action) => actionKey(action) === actionKey(expected));
 }
-
 function actionKey(action: WorkflowProgressionAction): string {
   if (action.type === "run")
     return action.pass === undefined
@@ -440,7 +412,6 @@ function actionKey(action: WorkflowProgressionAction): string {
       : `run:${action.phase}:${action.pass}`;
   return action.type;
 }
-
 function issuePrerequisitePlan(
   reason: string,
   options: WorkflowProgressionOptions,
@@ -459,7 +430,6 @@ function issuePrerequisitePlan(
     ...publishGate(options, "publish gate must run after readiness"),
   ]);
 }
-
 function maxPassesReached(
   options: WorkflowProgressionOptions,
 ): WorkflowProgressionPlan {
@@ -471,20 +441,17 @@ function maxPassesReached(
     { status: "completed" },
   );
 }
-
 function pending(
   actions: WorkflowProgressionAction[],
 ): WorkflowProgressionPlan {
   return { actions };
 }
-
 function terminal(
   actions: WorkflowProgressionAction[],
   terminalStatus: WorkflowTerminalStatus,
 ): WorkflowProgressionPlan {
   return { actions, terminalStatus };
 }
-
 function run(
   phase: WorkflowRunPhase,
   reason: string,
@@ -492,11 +459,9 @@ function run(
 ): WorkflowProgressionAction {
   return { type: "run", phase, pass, reason };
 }
-
 function readiness(reason: string): WorkflowProgressionAction {
   return { type: "write-readiness", reason };
 }
-
 function publishGate(
   options: WorkflowProgressionOptions,
   reason: string,
@@ -505,7 +470,6 @@ function publishGate(
     ? [{ type: "publish-gate", reason }]
     : [];
 }
-
 function noop(reason: string): WorkflowProgressionAction {
   return { type: "noop", reason };
 }

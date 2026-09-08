@@ -1,6 +1,5 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { decodeArtifact } from "./validation.ts";
+import { Effect, Schema } from "effect";
 import path from "node:path";
 import {
   reviewerIssueClassificationLabels,
@@ -19,14 +18,8 @@ import {
   type ArtifactRef,
   type WorkflowContext,
 } from "./artifacts.ts";
-import {
-  artifactExistsPromise as artifactExists,
-  latestCompleteReviewCyclePromise as latestCompleteReviewCycle,
-} from "./artifacts-promise.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "./artifacts-promise.ts";
+import { artifactExists, latestCompleteReviewCycle } from "./artifacts.ts";
+import { readArtifact, writeJsonArtifact } from "./artifacts.ts";
 import {
   escapeReviewMarkdownText,
   type ReviewConcernClassification,
@@ -37,12 +30,10 @@ import {
   parseReviewResultJson,
   type ReviewFindingSource,
 } from "../review/result.ts";
-
 export type IssuePlanClassification = ReviewerIssueClassificationLabel;
 type CuratableReviewConcern =
   | NormalizedReviewerFinding
   | NormalizedReviewBlocker;
-
 export interface IssueCurationPlan {
   version: 2;
   sourceIssue: {
@@ -66,7 +57,6 @@ export interface IssueCurationPlan {
   duplicatesMerged: DuplicateGroup[];
   warnings: string[];
 }
-
 export interface IssuePlanItem {
   planItemId: string;
   classification: IssuePlanClassification;
@@ -90,7 +80,6 @@ export interface IssuePlanItem {
   };
   proposedLabels: string[];
 }
-
 export interface RejectedCandidate {
   sourceFindingIds: string[];
   reviewerSources: ReviewFindingSource[];
@@ -101,38 +90,24 @@ export interface RejectedCandidate {
   impact?: string | undefined;
   rawExcerpt?: string | undefined;
 }
-
 export interface DuplicateGroup {
   winningPlanItemId: string;
   mergedSourceFindingIds: string[];
   reviewerSources: ReviewFindingSource[];
   reason: string;
 }
-
 export interface Clock {
   now(): Date;
 }
-
 export interface IssueCurationOptions {
   prUrl?: string | undefined;
 }
-
 export const issueCurationDefaultClock: Clock = { now: () => new Date() };
-
-export async function issueCurationPhase(
+export const issueCurationPhase = Effect.fn("issueCurationPhase")(function* (
   context: WorkflowContext,
   clock: Clock = issueCurationDefaultClock,
   options: IssueCurationOptions = {},
-  application?: ApplicationExecution,
-): Promise<IssueCurationPlan> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        issueCurationPhase(context, clock, options, application),
-      ),
-      application,
-    );
-
+) {
   const display: AgentDisplayContext = {
     command: context.displayCommand ?? "issue-workflow",
     repository: context.repo,
@@ -142,133 +117,118 @@ export async function issueCurationPhase(
     expectedArtifact: artifactRelativePath(context, "issueCurationPlan"),
     operation: "inspect",
   };
-  return runPresentedPhase(
+  return yield* runPresentedPhase(
     display,
-    async () => {
-      const plan = await buildIssueCurationPlan(
-        context,
-        clock,
-        options,
-        application,
-      );
-      await writeJsonArtifact(context, "issueCurationPlan", plan, application);
+    Effect.fnUntraced(function* () {
+      const plan = yield* buildIssueCurationPlan(context, clock, options);
+      yield* writeJsonArtifact(context, "issueCurationPlan", plan);
       return plan;
-    },
+    }),
     (plan) => ({
       outcome: `planned ${plan.issuesToCreate.length}`,
       artifact: display.expectedArtifact,
     }),
     undefined,
-    application,
   );
-}
-
-export async function buildIssueCurationPlan(
-  context: WorkflowContext,
-  clock: Clock = issueCurationDefaultClock,
-  options: IssueCurationOptions = {},
-  application?: ApplicationExecution,
-): Promise<IssueCurationPlan> {
-  const warnings: string[] = [];
-  const sourceIssue = await loadSourceIssueContext(
-    context,
-    warnings,
-    application,
-  );
-  const artifactPaths = await collectAvailableArtifactPaths(
-    context,
-    application,
-  );
-  const reviewArtifacts = await latestReviewArtifacts(context, application);
-  const reviewA =
-    reviewArtifacts === undefined
-      ? undefined
-      : await readOptionalArtifact(
-          context,
-          reviewArtifacts.reviewA,
-          warnings,
-          application,
+});
+export const buildIssueCurationPlan = Effect.fn("buildIssueCurationPlan")(
+  function* (
+    context: WorkflowContext,
+    clock: Clock = issueCurationDefaultClock,
+    options: IssueCurationOptions = {},
+  ) {
+    const warnings: string[] = [];
+    const sourceIssue = yield* loadSourceIssueContext(context, warnings);
+    const artifactPaths = yield* collectAvailableArtifactPaths(context);
+    const reviewArtifacts = yield* latestReviewArtifacts(context);
+    const reviewA =
+      reviewArtifacts === undefined
+        ? undefined
+        : yield* readOptionalArtifact(
+            context,
+            reviewArtifacts.reviewA,
+            warnings,
+          );
+    const reviewB =
+      reviewArtifacts === undefined
+        ? undefined
+        : yield* readOptionalArtifact(
+            context,
+            reviewArtifacts.reviewB,
+            warnings,
+          );
+    const reviewAResult =
+      reviewA === undefined
+        ? undefined
+        : yield* decodeArtifact(parseReviewResultJson, reviewA, {
+            allowRestart: true,
+          });
+    const reviewBResult =
+      reviewB === undefined
+        ? undefined
+        : yield* decodeArtifact(parseReviewResultJson, reviewB, {
+            allowRestart: true,
+          });
+    const findings = [
+      ...(reviewAResult === undefined
+        ? []
+        : [
+            ...normalizeReviewFindings(reviewAResult, "review-a"),
+            ...normalizeReviewBlockers(reviewAResult, "review-a"),
+          ]),
+      ...(reviewBResult === undefined
+        ? []
+        : [
+            ...normalizeReviewFindings(reviewBResult, "review-b"),
+            ...normalizeReviewBlockers(reviewBResult, "review-b"),
+          ]),
+    ];
+    const rejectedCandidates: RejectedCandidate[] = [];
+    const accepted: CuratableReviewConcern[] = [];
+    for (const finding of findings) {
+      const rejectionReason = issueCandidateRejectionReason(finding);
+      if (rejectionReason) {
+        rejectedCandidates.push(
+          normalizedFindingToRejectedCandidate(finding, rejectionReason),
         );
-  const reviewB =
-    reviewArtifacts === undefined
-      ? undefined
-      : await readOptionalArtifact(
-          context,
-          reviewArtifacts.reviewB,
-          warnings,
-          application,
-        );
-  const reviewAResult =
-    reviewA === undefined
-      ? undefined
-      : parseReviewResultJson(reviewA, { allowRestart: true });
-  const reviewBResult =
-    reviewB === undefined
-      ? undefined
-      : parseReviewResultJson(reviewB, { allowRestart: true });
-  const findings = [
-    ...(reviewAResult === undefined
-      ? []
-      : [
-          ...normalizeReviewFindings(reviewAResult, "review-a"),
-          ...normalizeReviewBlockers(reviewAResult, "review-a"),
-        ]),
-    ...(reviewBResult === undefined
-      ? []
-      : [
-          ...normalizeReviewFindings(reviewBResult, "review-b"),
-          ...normalizeReviewBlockers(reviewBResult, "review-b"),
-        ]),
-  ];
-  const rejectedCandidates: RejectedCandidate[] = [];
-  const accepted: CuratableReviewConcern[] = [];
-
-  for (const finding of findings) {
-    const rejectionReason = issueCandidateRejectionReason(finding);
-    if (rejectionReason) {
-      rejectedCandidates.push(
-        normalizedFindingToRejectedCandidate(finding, rejectionReason),
-      );
-    } else {
-      accepted.push(finding);
+      } else {
+        accepted.push(finding);
+      }
     }
-  }
-
-  const duplicateGroups: DuplicateGroup[] = [];
-  const issuesToCreate = reviewerIssueClassificationLabels.flatMap(
-    (classification) =>
-      buildIssuePlanItems({
-        groups: groupDuplicateFindings(
-          accepted.filter(
-            (finding) => finding.classification === classification,
+    const duplicateGroups: DuplicateGroup[] = [];
+    const issuesToCreate = reviewerIssueClassificationLabels.flatMap(
+      (classification) =>
+        buildIssuePlanItems({
+          groups: groupDuplicateFindings(
+            accepted.filter(
+              (finding) => finding.classification === classification,
+            ),
           ),
-        ),
-        classification,
-        sourceIssue,
-        context,
+          classification,
+          sourceIssue,
+          context,
+          artifactPaths,
+          duplicateGroups,
+          prUrl: options.prUrl,
+        }),
+    );
+    return {
+      version: 2,
+      sourceIssue,
+      run: {
+        runDirRelative: toPosix(context.runDirRelative),
+        ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
+        generatedAt: clock.now().toISOString(),
         artifactPaths,
-        duplicateGroups,
-        prUrl: options.prUrl,
-      }),
-  );
-
-  return {
-    version: 2,
-    sourceIssue,
-    run: {
-      runDirRelative: toPosix(context.runDirRelative),
-      ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
-      generatedAt: clock.now().toISOString(),
-      artifactPaths,
-      ...(options.prUrl ? { prUrl: options.prUrl } : {}),
-    },
-    issuesToCreate,
-    rejectedCandidates,
-    duplicatesMerged: duplicateGroups,
-    warnings,
-  };
-}
-
+        ...(options.prUrl ? { prUrl: options.prUrl } : {}),
+      },
+      issuesToCreate,
+      rejectedCandidates,
+      duplicatesMerged: duplicateGroups,
+      warnings,
+    };
+  },
+);
 function issueCandidateRejectionReason(
   finding: CuratableReviewConcern,
 ): string | undefined {
@@ -287,7 +247,6 @@ function issueCandidateRejectionReason(
     return "vague or speculative candidate";
   return undefined;
 }
-
 function hasConcreteContent(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   if (!normalized) return false;
@@ -299,7 +258,6 @@ function hasConcreteContent(value: string): boolean {
     return false;
   return true;
 }
-
 function hasVagueOrSpeculativeLanguage(
   finding: CuratableReviewConcern,
 ): boolean {
@@ -315,13 +273,11 @@ function hasVagueOrSpeculativeLanguage(
     value,
   );
 }
-
 function groupDuplicateFindings(
   findings: CuratableReviewConcern[],
 ): CuratableReviewConcern[][] {
   const sorted = [...findings].sort(compareFindingsForGrouping);
   const groups: CuratableReviewConcern[][] = [];
-
   for (const finding of sorted) {
     const existing = groups.find((group) =>
       group.some((candidate) => areDuplicateFindings(candidate, finding)),
@@ -329,10 +285,8 @@ function groupDuplicateFindings(
     if (existing) existing.push(finding);
     else groups.push([finding]);
   }
-
   return groups;
 }
-
 function compareFindingsForGrouping(
   left: CuratableReviewConcern,
   right: CuratableReviewConcern,
@@ -345,19 +299,16 @@ function compareFindingsForGrouping(
   if (sourceComparison !== 0) return sourceComparison;
   return left.workflowId.localeCompare(right.workflowId);
 }
-
 function areDuplicateFindings(
   left: CuratableReviewConcern,
   right: CuratableReviewConcern,
 ): boolean {
   if (left.classification !== right.classification) return false;
   if (normalizeTitle(left) === normalizeTitle(right)) return true;
-
   const leftRefs = evidenceReferences(left.evidence);
   const rightRefs = evidenceReferences(right.evidence);
   return leftRefs.some((ref) => rightRefs.includes(ref));
 }
-
 function buildIssuePlanItems(input: {
   groups: CuratableReviewConcern[][];
   classification: IssuePlanClassification;
@@ -370,7 +321,6 @@ function buildIssuePlanItems(input: {
   return input.groups.map((group, index) => {
     const representative = group[0];
     if (!representative) throw new Error("empty issue curation group");
-
     const planItemId = `${input.classification}-${index + 1}`;
     const sourceFindingIds = unique(group.map((finding) => finding.workflowId));
     const reviewerSources = unique(group.map((finding) => finding.source));
@@ -387,7 +337,6 @@ function buildIssuePlanItems(input: {
     const whyBlockingOrNonBlocking = classificationExplanation(
       input.classification,
     );
-
     const item: IssuePlanItem = {
       planItemId,
       classification: input.classification,
@@ -427,7 +376,6 @@ function buildIssuePlanItems(input: {
       ]),
     };
     item.proposedBody = buildProposedIssueBody({ item });
-
     if (group.length > 1) {
       input.duplicateGroups.push({
         winningPlanItemId: planItemId,
@@ -437,11 +385,9 @@ function buildIssuePlanItems(input: {
           "Merged findings with the same classification and matching normalized title or evidence reference.",
       });
     }
-
     return item;
   });
 }
-
 function classificationExplanation(
   classification: IssuePlanClassification,
 ): string {
@@ -451,7 +397,6 @@ function classificationExplanation(
     return "A reviewer flagged this as optional improvement work that should be triaged by a human before implementation.";
   return "A reviewer found follow-up work that is separate from the completed source issue.";
 }
-
 function buildProposedIssueBody(input: { item: IssuePlanItem }): string {
   const issue = input.item.sourceIssueContext;
   const issueLink = issue.url ? ` (${issue.url})` : "";
@@ -476,16 +421,13 @@ function buildProposedIssueBody(input: { item: IssuePlanItem }): string {
   const handling = input.item.recommendedHandling
     .map((value) => `- ${escapeReviewMarkdownText(value)}`)
     .join("\n");
-
   return `## Summary\n\n${summarySentence(title)}\n\n## Why this issue exists\n\n${input.item.whyBlockingOrNonBlocking}\n\n## What the reviewer observed\n\n${evidence}\n\n## Impact\n\n${impact}\n\n## Suggested fix\n\n${handling}\n\n## Acceptance criteria\n\n- The behavior described in “What the reviewer observed” is addressed for the cited code paths.\n- The suggested fix above is completed, or the issue is closed with a clear explanation of why no change is needed.\n- Relevant validation is updated or documented so this gap is less likely to recur.\n- Existing relevant checks continue to pass.\n\n## Triage recommendation\n\nPriority: ${triage.priority}  \nType: ${triage.type}  \nRecommended action: ${triage.recommendedAction}\n\n## Context\n\n- Source issue: #${issue.number} ${issue.title}${issueLink}\n${prLine}- Reviewer finding(s): ${input.item.sourceFindingIds.join(", ")}\n- Reviewer source(s): ${input.item.reviewerSources.join(", ")}\n- Classification: ${input.item.classification}\n- Attempt: ${attempt}\n${nonGoals}`;
 }
-
 function summarySentence(title: string): string {
   const trimmed = title.trim();
   if (!trimmed) return "Address the reviewer finding described below.";
   return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
-
 function triageRecommendation(classification: IssuePlanClassification): {
   priority: string;
   type: string;
@@ -500,7 +442,6 @@ function triageRecommendation(classification: IssuePlanClassification): {
         "Resolve or explicitly dismiss this prerequisite before relying on the completed source issue work.",
     };
   }
-
   if (classification === "suggestion") {
     return {
       priority: "Low",
@@ -509,7 +450,6 @@ function triageRecommendation(classification: IssuePlanClassification): {
         "Implement if the added protection or clarity is worth the cost; otherwise close as not planned.",
     };
   }
-
   return {
     priority: "Medium",
     type: "Non-blocking follow-up",
@@ -517,14 +457,12 @@ function triageRecommendation(classification: IssuePlanClassification): {
       "Implement as a focused follow-up when it fits the roadmap; keep it separate from the completed source issue.",
   };
 }
-
-async function readOptionalArtifact(
+const readOptionalArtifact = Effect.fn("readOptionalArtifact")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
   warnings: string[],
-  application?: ApplicationExecution,
-): Promise<string | undefined> {
-  if (!(await artifactExists(context, artifact, application))) {
+) {
+  if (!(yield* artifactExists(context, artifact))) {
     if (isReviewArtifact(artifact, "reviewA"))
       warnings.push(
         `${artifactDisplayPath(context, artifact)} is missing; treating Review Agent A findings as empty.`,
@@ -535,51 +473,45 @@ async function readOptionalArtifact(
       );
     return undefined;
   }
-
-  try {
-    return await readArtifact(context, artifact, application);
-  } catch (error) {
-    warnings.push(
-      `Could not read ${artifactDisplayPath(context, artifact)}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    return undefined;
-  }
-}
-
-async function latestReviewArtifacts(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<{ reviewA: ArtifactRef; reviewB: ArtifactRef } | undefined> {
-  const latestReviewCycle = await latestCompleteReviewCycle(
-    context,
-    application,
+  return yield* Effect.gen(function* () {
+    return yield* readArtifact(context, artifact);
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        warnings.push(
+          `Could not read ${artifactDisplayPath(context, artifact)}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return undefined;
+      }),
+    ),
   );
+});
+const latestReviewArtifacts = Effect.fn("latestReviewArtifacts")(function* (
+  context: WorkflowContext,
+) {
+  const latestReviewCycle = yield* latestCompleteReviewCycle(context);
   if (latestReviewCycle === undefined) return undefined;
   return {
     reviewA: reviewARef(latestReviewCycle),
     reviewB: reviewBRef(latestReviewCycle),
   };
-}
-
+});
 function isReviewArtifact(
   artifact: ArtifactRef,
   name: "reviewA" | "reviewB",
 ): boolean {
   return typeof artifact !== "string" && artifact.name === name;
 }
-
 function artifactDisplayPath(
   context: WorkflowContext,
   artifact: ArtifactRef,
 ): string {
   return toPosix(artifactRelativePath(context, artifact));
 }
-
-async function loadSourceIssueContext(
+const loadSourceIssueContext = Effect.fn("loadSourceIssueContext")(function* (
   context: WorkflowContext,
   warnings: string[],
-  application?: ApplicationExecution,
-): Promise<IssueCurationPlan["sourceIssue"]> {
+) {
   const fallbackNumber = Number(context.issueNumber);
   const fallback: IssueCurationPlan["sourceIssue"] = {
     number: Number.isInteger(fallbackNumber) ? fallbackNumber : 0,
@@ -590,26 +522,11 @@ async function loadSourceIssueContext(
         }
       : {}),
   };
-
-  const metadata = await readOptionalArtifact(
-    context,
-    "metadata",
-    warnings,
-    application,
-  );
+  const metadata = yield* readOptionalArtifact(context, "metadata", warnings);
   if (metadata) {
-    try {
-      const parsed = JSON.parse(metadata) as {
-        issueNumber?: number | string | undefined;
-        repo?: string | undefined;
-        issue?: {
-          number?: number;
-          title?: string;
-          url?: string | undefined;
-          html_url?: string;
-          htmlUrl?: string;
-        };
-      };
+    const decoded = yield* decodeSourceMetadata(metadata).pipe(Effect.result);
+    if (decoded._tag === "Success") {
+      const parsed = decoded.success;
       const rawNumber = parsed.issue?.number ?? parsed.issueNumber;
       const parsedNumber =
         typeof rawNumber === "number" ? rawNumber : Number(rawNumber);
@@ -625,27 +542,19 @@ async function loadSourceIssueContext(
           ? `https://github.com/${parsed.repo}/issues/${number}`
           : fallback.url);
       return { number, title, ...(url ? { url } : {}) };
-    } catch (error) {
-      warnings.push(
-        `Could not parse ${artifactRelativePath(context, "metadata")}: ${error instanceof Error ? error.message : String(error)}`,
-      );
     }
+    warnings.push(
+      `Could not parse ${artifactRelativePath(context, "metadata")}: ${decoded.failure.message}`,
+    );
   }
 
-  const issueArtifact = await readOptionalArtifact(
-    context,
-    "issue",
-    warnings,
-    application,
-  );
+  const issueArtifact = yield* readOptionalArtifact(context, "issue", warnings);
   if (issueArtifact) return parseIssueArtifact(issueArtifact, fallback);
-
   warnings.push(
     "Source issue artifact is missing; using issue number from workflow context.",
   );
   return fallback;
-}
-
+});
 function parseIssueArtifact(
   markdown: string,
   fallback: IssueCurationPlan["sourceIssue"],
@@ -655,7 +564,6 @@ function parseIssueArtifact(
   const urlMatch = /<url>([\s\S]*?)<\/url>/i.exec(markdown);
   const markdownTitleMatch =
     /^#\s+GitHub Issue\s+#(\d+)(?:\s*[-:]\s*(.+))?\s*$/im.exec(markdown);
-
   const number =
     numberMatch?.[1] !== undefined
       ? Number(numberMatch[1])
@@ -669,46 +577,40 @@ function parseIssueArtifact(
   const url = urlMatch?.[1] ? decodeXmlText(urlMatch[1].trim()) : fallback.url;
   return { number, title, ...(url ? { url } : {}) };
 }
-
-async function collectAvailableArtifactPaths(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<string[]> {
+const collectAvailableArtifactPaths = Effect.fn(
+  "collectAvailableArtifactPaths",
+)(function* (context: WorkflowContext) {
   const artifacts: string[] = [];
   for (const artifact of ISSUE_CURATION_STATIC_ARTIFACT_REFS) {
-    if (await artifactExists(context, artifact, application))
+    if (yield* artifactExists(context, artifact))
       artifacts.push(toPosix(artifactRelativePath(context, artifact)));
   }
-
   for (
     let pass = 0;
     pass <= Math.max(context.maxFixPasses, 0) ||
-    (await artifactExists(context, reviewARef(pass), application)) ||
-    (await artifactExists(context, reviewBRef(pass), application));
+    (yield* artifactExists(context, reviewARef(pass))) ||
+    (yield* artifactExists(context, reviewBRef(pass)));
     pass++
   ) {
     const reviewA = reviewARef(pass);
     const reviewB = reviewBRef(pass);
-    if (await artifactExists(context, reviewA, application))
+    if (yield* artifactExists(context, reviewA))
       artifacts.push(toPosix(artifactRelativePath(context, reviewA)));
-    if (await artifactExists(context, reviewB, application))
+    if (yield* artifactExists(context, reviewB))
       artifacts.push(toPosix(artifactRelativePath(context, reviewB)));
   }
-
   for (
     let pass = 1;
     pass <= Math.max(context.maxFixPasses, 1) ||
-    (await artifactExists(context, fixLogRef(pass), application));
+    (yield* artifactExists(context, fixLogRef(pass)));
     pass++
   ) {
     const fixLog = fixLogRef(pass);
-    if (await artifactExists(context, fixLog, application))
+    if (yield* artifactExists(context, fixLog))
       artifacts.push(toPosix(artifactRelativePath(context, fixLog)));
   }
-
   return unique(artifacts);
-}
-
+});
 function normalizedFindingToRejectedCandidate(
   finding: CuratableReviewConcern,
   reason: string,
@@ -723,11 +625,9 @@ function normalizedFindingToRejectedCandidate(
     impact: finding.currentIssueImpact,
   };
 }
-
 function normalizeTitle(finding: CuratableReviewConcern): string {
   return normalizeText(finding.suggestedIssueTitle ?? finding.title);
 }
-
 function normalizeText(value: string): string {
   return value
     .toLowerCase()
@@ -736,25 +636,21 @@ function normalizeText(value: string): string {
     .trim()
     .replace(/\s+/g, " ");
 }
-
 function evidenceReferences(values: readonly string[]): string[] {
   const matches = values.flatMap(
     (value) => value.match(/[\w./-]+\.[A-Za-z0-9]+(?::\d+(?:-\d+)?)?/g) ?? [],
   );
   return unique(matches.map((match) => match.toLowerCase()));
 }
-
 function summarizeField(
   label: "severity" | "confidence",
   values: string[],
 ): string {
   return `${label}: ${unique(values).join(", ")}`;
 }
-
 function unique<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values.filter((value) => value.trim() !== ""))];
 }
-
 function decodeXmlText(value: string): string {
   return value
     .replace(/&lt;/g, "<")
@@ -763,7 +659,26 @@ function decodeXmlText(value: string): string {
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, "&");
 }
-
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
+
+const decodeSourceMetadata = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      issueNumber: Schema.optional(
+        Schema.Union([Schema.Number, Schema.String]),
+      ),
+      repo: Schema.optional(Schema.String),
+      issue: Schema.optional(
+        Schema.Struct({
+          number: Schema.optional(Schema.Number),
+          title: Schema.optional(Schema.String),
+          url: Schema.optional(Schema.String),
+          html_url: Schema.optional(Schema.String),
+          htmlUrl: Schema.optional(Schema.String),
+        }),
+      ),
+    }),
+  ),
+);

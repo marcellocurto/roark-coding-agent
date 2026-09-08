@@ -15,8 +15,8 @@ import {
   writeArtifactPromise as writeArtifact,
   writeJsonArtifactPromise as writeJsonArtifact,
 } from "./artifacts-promise.ts";
-import { buildIssueCurationPlan } from "./issue-curation.ts";
-import { runSinglePhase } from "./phases.ts";
+import { buildIssueCurationPlanPromise as buildIssueCurationPlan } from "./issue-curation-promise.ts";
+import { runSinglePhasePromise as runSinglePhase } from "./phases-promise.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type {

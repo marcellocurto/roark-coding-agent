@@ -1,12 +1,10 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { decodeArtifact } from "./validation.ts";
+import { Effect } from "effect";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { reviewARef, reviewBRef, type WorkflowContext } from "./artifacts.ts";
-import {
-  artifactExistsPromise as artifactExists,
-  latestCompleteReviewCyclePromise as latestCompleteReviewCycle,
-} from "./artifacts-promise.ts";
-import { readArtifactPromise as readArtifact } from "./artifacts-promise.ts";
+import { artifactExists, latestCompleteReviewCycle } from "./artifacts.ts";
+import { readArtifact } from "./artifacts.ts";
 import { decideReadiness } from "./verdicts.ts";
 import {
   escapeReviewMarkdownText,
@@ -18,7 +16,6 @@ import {
 } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
-
 const readinessDecisionSchema = Type.Object(
   {
     status: Type.Union([
@@ -57,7 +54,6 @@ const readinessDecisionSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-
 export const readinessResultSchema = Type.Object(
   {
     version: Type.Literal(2),
@@ -69,10 +65,8 @@ export const readinessResultSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-
 export type ReadinessResult = Static<typeof readinessResultSchema>;
 export type ReadinessStatus = ReadinessResult["decision"]["status"];
-
 export function parseReadinessResultJson(content: string): ReadinessResult {
   let parsed: unknown;
   try {
@@ -120,61 +114,49 @@ export function parseReadinessResultJson(content: string): ReadinessResult {
   }
   return parsed;
 }
-
-export async function buildReadinessArtifacts(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<{ result: ReadinessResult; markdown: string }> {
-  const triage = (await artifactExists(context, "triage", application))
-    ? parseTriageResultJson(await readArtifact(context, "triage", application))
-    : undefined;
-  const plan = (await artifactExists(
-    context,
-    "implementationPlan",
-    application,
-  ))
-    ? parseImplementationPlanResultJson(
-        await readArtifact(context, "implementationPlan", application),
-      )
-    : undefined;
-  const latestReviewCycle = await latestCompleteReviewCycle(
-    context,
-    application,
-  );
-  const reviewA =
-    latestReviewCycle === undefined
-      ? undefined
-      : parseReviewResultJson(
-          await readArtifact(
-            context,
-            reviewARef(latestReviewCycle),
-            application,
-          ),
-          { allowRestart: true },
-        );
-  const reviewB =
-    latestReviewCycle === undefined
-      ? undefined
-      : parseReviewResultJson(
-          await readArtifact(
-            context,
-            reviewBRef(latestReviewCycle),
-            application,
-          ),
-          { allowRestart: true },
-        );
-  const decision = decideReadiness({ triage, plan, reviewA, reviewB });
-  const result: ReadinessResult = {
-    version: 2,
-    issueNumber: context.issueNumber,
-    runDirectory: context.runDirRelative,
-    latestReviewCycle: latestReviewCycle ?? null,
-    maxFixPasses: context.maxFixPasses,
-    decision,
-  };
-  return { result, markdown: formatReadinessMarkdown(result) };
-}
-
+export const buildReadinessArtifacts = Effect.fn("buildReadinessArtifacts")(
+  function* (context: WorkflowContext) {
+    const triage = (yield* artifactExists(context, "triage"))
+      ? yield* decodeArtifact(
+          parseTriageResultJson,
+          yield* readArtifact(context, "triage"),
+        )
+      : undefined;
+    const plan = (yield* artifactExists(context, "implementationPlan"))
+      ? yield* decodeArtifact(
+          parseImplementationPlanResultJson,
+          yield* readArtifact(context, "implementationPlan"),
+        )
+      : undefined;
+    const latestReviewCycle = yield* latestCompleteReviewCycle(context);
+    const reviewA =
+      latestReviewCycle === undefined
+        ? undefined
+        : yield* decodeArtifact(
+            parseReviewResultJson,
+            yield* readArtifact(context, reviewARef(latestReviewCycle)),
+            { allowRestart: true },
+          );
+    const reviewB =
+      latestReviewCycle === undefined
+        ? undefined
+        : yield* decodeArtifact(
+            parseReviewResultJson,
+            yield* readArtifact(context, reviewBRef(latestReviewCycle)),
+            { allowRestart: true },
+          );
+    const decision = decideReadiness({ triage, plan, reviewA, reviewB });
+    const result: ReadinessResult = {
+      version: 2,
+      issueNumber: context.issueNumber,
+      runDirectory: context.runDirRelative,
+      latestReviewCycle: latestReviewCycle ?? null,
+      maxFixPasses: context.maxFixPasses,
+      decision,
+    };
+    return { result, markdown: formatReadinessMarkdown(result) };
+  },
+);
 export function formatReadinessMarkdown(result: ReadinessResult): string {
   const { decision } = result;
   return `# PR Readiness
@@ -223,7 +205,6 @@ Closes #${result.issueNumber}
 See workflow artifacts in ${result.runDirectory}.
 `;
 }
-
 function renderFindings(
   findings: readonly (NormalizedReviewerFinding | NormalizedReviewBlocker)[],
 ): string {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { Effect, FileSystem } from "effect";
 import path from "node:path";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 
@@ -21,10 +21,10 @@ export interface PhaseSummary {
   status: PhaseStatus;
   startedAt?: string | undefined;
   endedAt?: string | undefined;
-  durationMs?: number | undefined  ;
+  durationMs?: number | undefined;
   artifactPath?: string | undefined;
-  model?: string | undefined  ;
-  thinkingLevel?: string | undefined  ;
+  model?: string | undefined;
+  thinkingLevel?: string | undefined;
   requestedThinkingLevel?: string | undefined;
   effectiveThinkingLevel?: string | undefined;
   sessionId?: string | undefined;
@@ -41,11 +41,11 @@ export interface RunSummary {
   status: RunStatus;
   startedAt?: string | undefined;
   endedAt?: string | undefined;
-  durationMs?: number | undefined  ;
+  durationMs?: number | undefined;
   phases: Record<string, PhaseSummary>;
   totals: ObservabilityTotals;
   lastError?: string | undefined;
-  recoveryCommand?: string | undefined  ;
+  recoveryCommand?: string | undefined;
 }
 
 export interface SessionStatsLike {
@@ -77,31 +77,42 @@ export function emptyTotals(): ObservabilityTotals {
   };
 }
 
-export async function readRunSummary(summaryPath: string): Promise<RunSummary | undefined> {
-  try {
-    return JSON.parse(await readFile(summaryPath, "utf8")) as RunSummary;
-  } catch {
-    return undefined;
-  }
-}
+export const readRunSummary = Effect.fn("readRunSummary")(
+  function* (summaryPath: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const raw = yield* fs.readFileString(summaryPath);
+    return yield* Effect.try(() => JSON.parse(raw) as RunSummary);
+  },
+  Effect.catch(() => Effect.succeed(undefined)),
+);
 
-export async function updateRunSummary(
+export const updateRunSummary = Effect.fn("updateRunSummary")(function* (
   context: WorkflowContext,
   update: (summary: RunSummary) => void,
   options: SummaryOptions = {},
-): Promise<void> {
+) {
+  const fs = yield* FileSystem.FileSystem;
   const warn = options.warn ?? defaultWarn;
-  const summaryPath = path.join(context.runDir, "summary.json");
-  try {
-    await mkdir(context.runDir, { recursive: true });
-    const summary = await readRunSummary(summaryPath) ?? createInitialSummary(context);
+  return yield* Effect.gen(function* () {
+    const summaryPath = path.join(context.runDir, "summary.json");
+    yield* fs.makeDirectory(context.runDir, { recursive: true });
+    const summary =
+      (yield* readRunSummary(summaryPath)) ?? createInitialSummary(context);
     update(summary);
     recomputeSummary(summary);
-    await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
-  } catch (error) {
-    warn(`observability summary write failed: ${formatError(error)}`);
-  }
-}
+    yield* fs.writeFileString(
+      summaryPath,
+      `${JSON.stringify(summary, null, 2)}\n`,
+    );
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        warn(`observability summary write failed: ${error.message}`);
+      }),
+    ),
+    Effect.uninterruptible,
+  );
+});
 
 export function createInitialSummary(context: WorkflowContext): RunSummary {
   return {
@@ -116,7 +127,9 @@ export function createInitialSummary(context: WorkflowContext): RunSummary {
   };
 }
 
-export function totalsFromSessionStats(stats: SessionStatsLike): ObservabilityTotals {
+export function totalsFromSessionStats(
+  stats: SessionStatsLike,
+): ObservabilityTotals {
   return {
     inputTokens: stats.tokens?.input ?? 0,
     outputTokens: stats.tokens?.output ?? 0,
@@ -128,7 +141,10 @@ export function totalsFromSessionStats(stats: SessionStatsLike): ObservabilityTo
   };
 }
 
-export function addTotals(left: ObservabilityTotals, right: ObservabilityTotals): ObservabilityTotals {
+export function addTotals(
+  left: ObservabilityTotals,
+  right: ObservabilityTotals,
+): ObservabilityTotals {
   return {
     inputTokens: left.inputTokens + right.inputTokens,
     outputTokens: left.outputTokens + right.outputTokens,
@@ -151,26 +167,28 @@ function recomputeSummary(summary: RunSummary): void {
     emptyTotals(),
   );
   if (summary.startedAt && summary.endedAt) {
-    summary.durationMs = Math.max(0, Date.parse(summary.endedAt) - Date.parse(summary.startedAt));
+    summary.durationMs = Math.max(
+      0,
+      Date.parse(summary.endedAt) - Date.parse(summary.startedAt),
+    );
   }
   for (const phase of Object.values(summary.phases)) {
     if (phase.startedAt && phase.endedAt) {
-      phase.durationMs = Math.max(0, Date.parse(phase.endedAt) - Date.parse(phase.startedAt));
+      phase.durationMs = Math.max(
+        0,
+        Date.parse(phase.endedAt) - Date.parse(phase.startedAt),
+      );
     }
   }
 }
 
 function buildRecoveryCommand(context: WorkflowContext): string {
   const repo = context.repo ? ` --repo ${context.repo}` : "";
-  if (context.attempt !== undefined) return `roark continue ${context.issueNumber}${repo} --attempt ${context.attempt}`;
+  if (context.attempt !== undefined)
+    return `roark continue ${context.issueNumber}${repo} --attempt ${context.attempt}`;
   return `roark do ${context.issueNumber}${repo}`;
 }
 
 function defaultWarn(message: string): void {
   console.warn(`! ${message}`);
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

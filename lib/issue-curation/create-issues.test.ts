@@ -18,10 +18,10 @@ import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
 import {} from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 
-import { createIssuesFromCurationPlan } from "./create-issues.ts";
+import { createIssuesFromCurationPlanPromise as createIssuesFromCurationPlan } from "./create-issues-promise.ts";
 import { noopAsync } from "../utils/async.ts";
 import { issueDraft, submitIssueDrafts } from "../testing/publishing-drafts.ts";
-import type { IssuePublisher } from "../issue-publishing/github.ts";
+import type { IssuePublisher } from "./create-issues-promise.ts";
 
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
@@ -155,8 +155,7 @@ describe("createIssuesFromCurationPlan", () => {
             approved: true,
             approvalReason: "autorun PR was opened",
             clock,
-            labelEnsurer: async (options, supplied) => {
-              expect(supplied).toBe(application);
+            labelEnsurer: async (options) => {
               await noopAsync();
               ensured.push(options);
             },
@@ -453,7 +452,7 @@ describe("createIssuesFromCurationPlan", () => {
     expect(agentCalls).toBe(1);
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
-    expect(result.failed[0]?.message).toBe("publishing agent failed");
+    expect(result.failed[0]?.message).toContain("publishing agent failed");
     expect(await artifactExists(context, "issueCreationResults")).toBe(true);
   });
 

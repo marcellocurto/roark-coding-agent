@@ -16,7 +16,7 @@ import {
   writeArtifactPromise as writeArtifact,
   writeJsonArtifactPromise as writeJsonArtifact,
 } from "./artifacts-promise.ts";
-import { planWorkflowProgression } from "./progression.ts";
+import { planWorkflowProgressionPromise as planWorkflowProgression } from "./progression-promise.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import {
   implementationPlanResult,

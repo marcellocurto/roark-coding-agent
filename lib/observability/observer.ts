@@ -1,7 +1,17 @@
 import { createEventWriter, type EventWriter } from "./events.ts";
-import { noopAsync } from "../utils/async.ts";
+import {
+  Clock,
+  Context,
+  Effect,
+  type FileSystem,
+  Layer,
+  Semaphore,
+} from "effect";
 import type { ArtifactRef, WorkflowContext } from "../workflow/artifacts.ts";
-import { artifactRelativePath, formatArtifactRef } from "../workflow/artifacts.ts";
+import {
+  artifactRelativePath,
+  formatArtifactRef,
+} from "../workflow/artifacts.ts";
 import {
   addTotals,
   emptyTotals,
@@ -12,18 +22,35 @@ import {
 } from "./summary.ts";
 
 export interface RunObserver {
-  runStarted(input?: { command?: string; recoveryCommand?: string  | undefined}): Promise<void>;
-  runCompleted(input?: { status?: string }): Promise<void>;
-  runFailed(error: unknown): Promise<void>;
-  phaseStarted(input: PhaseObservation): Promise<void>;
-  phaseCompleted(input: PhaseObservation & { reused?: boolean }): Promise<void>;
-  phaseFailed(input: PhaseObservation & { error: unknown }): Promise<void>;
-  agentSessionStarted(input: AgentSessionObservation): Promise<void>;
-  agentSessionStats(input: AgentSessionStatsObservation): Promise<void>;
-  toolStarted(input: ToolObservation): Promise<void>;
-  toolCompleted(input: ToolObservation & { durationMs?: number | undefined; isError?: boolean }): Promise<void>;
-  autoRetryStarted(input: AutoRetryObservation): Promise<void>;
-  autoRetryCompleted(input: AutoRetryObservation & { success?: boolean; finalError?: string  | undefined}): Promise<void>;
+  runStarted(input?: {
+    command?: string;
+    recoveryCommand?: string | undefined;
+  }): Effect.Effect<void>;
+  runCompleted(input?: { status?: string }): Effect.Effect<void>;
+  runFailed(error: unknown): Effect.Effect<void>;
+  phaseStarted(input: PhaseObservation): Effect.Effect<void>;
+  phaseCompleted(
+    input: PhaseObservation & { reused?: boolean },
+  ): Effect.Effect<void>;
+  phaseFailed(
+    input: PhaseObservation & { error: unknown },
+  ): Effect.Effect<void>;
+  agentSessionStarted(input: AgentSessionObservation): Effect.Effect<void>;
+  agentSessionStats(input: AgentSessionStatsObservation): Effect.Effect<void>;
+  toolStarted(input: ToolObservation): Effect.Effect<void>;
+  toolCompleted(
+    input: ToolObservation & {
+      durationMs?: number | undefined;
+      isError?: boolean;
+    },
+  ): Effect.Effect<void>;
+  autoRetryStarted(input: AutoRetryObservation): Effect.Effect<void>;
+  autoRetryCompleted(
+    input: AutoRetryObservation & {
+      success?: boolean;
+      finalError?: string | undefined;
+    },
+  ): Effect.Effect<void>;
 }
 
 export interface PhaseObservation {
@@ -31,15 +58,15 @@ export interface PhaseObservation {
   label?: string | undefined;
   artifact?: ArtifactRef | undefined;
   artifactPath?: string | undefined;
-  model?: string | undefined  ;
-  thinkingLevel?: string | undefined  ;
+  model?: string | undefined;
+  thinkingLevel?: string | undefined;
 }
 
 export interface AgentSessionObservation {
   phase: string;
   sessionId: string;
-  model?: string | undefined  ;
-  thinkingLevel?: string | undefined  ;
+  model?: string | undefined;
+  thinkingLevel?: string | undefined;
   requestedThinkingLevel?: string | undefined;
   effectiveThinkingLevel?: string | undefined;
 }
@@ -67,31 +94,87 @@ export interface AutoRetryObservation {
 
 export function createNoopRunObserver(): RunObserver {
   return {
-    runStarted: noopAsync,
-    runCompleted: noopAsync,
-    runFailed: noopAsync,
-    phaseStarted: noopAsync,
-    phaseCompleted: noopAsync,
-    phaseFailed: noopAsync,
-    agentSessionStarted: noopAsync,
-    agentSessionStats: noopAsync,
-    toolStarted: noopAsync,
-    toolCompleted: noopAsync,
-    autoRetryStarted: noopAsync,
-    autoRetryCompleted: noopAsync,
+    runStarted: () => Effect.void,
+    runCompleted: () => Effect.void,
+    runFailed: () => Effect.void,
+    phaseStarted: () => Effect.void,
+    phaseCompleted: () => Effect.void,
+    phaseFailed: () => Effect.void,
+    agentSessionStarted: () => Effect.void,
+    agentSessionStats: () => Effect.void,
+    toolStarted: () => Effect.void,
+    toolCompleted: () => Effect.void,
+    autoRetryStarted: () => Effect.void,
+    autoRetryCompleted: () => Effect.void,
   };
 }
 
-export function createFileRunObserver(context: WorkflowContext): RunObserver {
-  const writer = createEventWriter(context.runDir);
-  return createRunObserver(context, writer);
-}
+export const createFileRunObserver = Effect.fn("createFileRunObserver")(
+  function* (context: WorkflowContext) {
+    const services = yield* Effect.context<FileSystem.FileSystem>();
+    const writer = yield* createEventWriter(context.runDir);
+    const semaphore = yield* Semaphore.make(1);
+    const observer = createRunObserver(context, writer);
+    return {
+      runStarted: (input) =>
+        semaphore.withPermit(
+          observer.runStarted(input).pipe(Effect.provide(services)),
+        ),
+      runCompleted: (input) =>
+        semaphore.withPermit(
+          observer.runCompleted(input).pipe(Effect.provide(services)),
+        ),
+      runFailed: (input) =>
+        semaphore.withPermit(
+          observer.runFailed(input).pipe(Effect.provide(services)),
+        ),
+      phaseStarted: (input) =>
+        semaphore.withPermit(
+          observer.phaseStarted(input).pipe(Effect.provide(services)),
+        ),
+      phaseCompleted: (input) =>
+        semaphore.withPermit(
+          observer.phaseCompleted(input).pipe(Effect.provide(services)),
+        ),
+      phaseFailed: (input) =>
+        semaphore.withPermit(
+          observer.phaseFailed(input).pipe(Effect.provide(services)),
+        ),
+      agentSessionStarted: (input) =>
+        semaphore.withPermit(
+          observer.agentSessionStarted(input).pipe(Effect.provide(services)),
+        ),
+      agentSessionStats: (input) =>
+        semaphore.withPermit(
+          observer.agentSessionStats(input).pipe(Effect.provide(services)),
+        ),
+      toolStarted: (input) =>
+        semaphore.withPermit(
+          observer.toolStarted(input).pipe(Effect.provide(services)),
+        ),
+      toolCompleted: (input) =>
+        semaphore.withPermit(
+          observer.toolCompleted(input).pipe(Effect.provide(services)),
+        ),
+      autoRetryStarted: (input) =>
+        semaphore.withPermit(
+          observer.autoRetryStarted(input).pipe(Effect.provide(services)),
+        ),
+      autoRetryCompleted: (input) =>
+        semaphore.withPermit(
+          observer.autoRetryCompleted(input).pipe(Effect.provide(services)),
+        ),
+    } satisfies RunObserver;
+  },
+);
 
-function createRunObserver(context: WorkflowContext, writer: EventWriter): RunObserver {
+function createRunObserver(context: WorkflowContext, writer: EventWriter) {
   return {
-    async runStarted(input = {}) {
-      const timestamp = new Date().toISOString();
-      await writer.write({
+    runStarted: Effect.fn("RunObserver.runStarted")(function* (
+      input: Parameters<RunObserver["runStarted"]>[0] = {},
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      yield* writer.write({
         type: "run_started",
         timestamp,
         issueNumber: context.issueNumber,
@@ -100,40 +183,59 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         runDir: context.runDirRelative,
         recoveryCommand: input.recoveryCommand,
       });
-      await updateRunSummary(context, (summary) => {
+      yield* updateRunSummary(context, (summary) => {
         summary.status = "running";
         summary.startedAt = timestamp;
         summary.endedAt = undefined;
         summary.durationMs = undefined;
         summary.phases = {};
         summary.totals = emptyTotals();
-        if (input.recoveryCommand) summary.recoveryCommand = input.recoveryCommand;
+        if (input.recoveryCommand)
+          summary.recoveryCommand = input.recoveryCommand;
         summary.lastError = undefined;
       });
-    },
-    async runCompleted(input = {}) {
-      const timestamp = new Date().toISOString();
+    }),
+    runCompleted: Effect.fn("RunObserver.runCompleted")(function* (
+      input: Parameters<RunObserver["runCompleted"]>[0] = {},
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
       const status = input.status ?? "completed";
-      await writer.write({ type: "run_completed", timestamp, issueNumber: context.issueNumber, attempt: context.attempt, status });
-      await updateRunSummary(context, (summary) => {
+      yield* writer.write({
+        type: "run_completed",
+        timestamp,
+        issueNumber: context.issueNumber,
+        attempt: context.attempt,
+        status,
+      });
+      yield* updateRunSummary(context, (summary) => {
         summary.status = status === "completed" ? "completed" : "stopped";
         summary.endedAt = timestamp;
       });
-    },
-    async runFailed(error) {
-      const timestamp = new Date().toISOString();
+    }),
+    runFailed: Effect.fn("RunObserver.runFailed")(function* (
+      error: Parameters<RunObserver["runFailed"]>[0],
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
       const errorMessage = formatErrorMessage(error);
-      await writer.write({ type: "run_failed", timestamp, issueNumber: context.issueNumber, attempt: context.attempt, errorMessage });
-      await updateRunSummary(context, (summary) => {
+      yield* writer.write({
+        type: "run_failed",
+        timestamp,
+        issueNumber: context.issueNumber,
+        attempt: context.attempt,
+        errorMessage,
+      });
+      yield* updateRunSummary(context, (summary) => {
         summary.status = "failed";
         summary.endedAt = timestamp;
         summary.lastError = errorMessage;
       });
-    },
-    async phaseStarted(input) {
-      const timestamp = new Date().toISOString();
+    }),
+    phaseStarted: Effect.fn("RunObserver.phaseStarted")(function* (
+      input: Parameters<RunObserver["phaseStarted"]>[0],
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
       const artifactPath = observationArtifactPath(context, input);
-      await writer.write({
+      yield* writer.write({
         type: "phase_started",
         timestamp,
         issueNumber: context.issueNumber,
@@ -144,7 +246,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         model: input.model,
         thinkingLevel: input.thinkingLevel,
       });
-      await updateRunSummary(context, (summary) => {
+      yield* updateRunSummary(context, (summary) => {
         const existing = summary.phases[input.phase];
         summary.phases[input.phase] = {
           ...existing,
@@ -157,15 +259,18 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
           thinkingLevel: input.thinkingLevel ?? existing?.thinkingLevel,
-          requestedThinkingLevel: input.thinkingLevel ?? existing?.requestedThinkingLevel,
+          requestedThinkingLevel:
+            input.thinkingLevel ?? existing?.requestedThinkingLevel,
           totals: existing?.totals ?? emptyTotals(),
         };
       });
-    },
-    async phaseCompleted(input) {
-      const timestamp = new Date().toISOString();
+    }),
+    phaseCompleted: Effect.fn("RunObserver.phaseCompleted")(function* (
+      input: Parameters<RunObserver["phaseCompleted"]>[0],
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
       const artifactPath = observationArtifactPath(context, input);
-      await writer.write({
+      yield* writer.write({
         type: input.reused === true ? "phase_skipped" : "phase_completed",
         timestamp,
         issueNumber: context.issueNumber,
@@ -177,7 +282,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         thinkingLevel: input.thinkingLevel,
         reused: input.reused,
       });
-      await updateRunSummary(context, (summary) => {
+      yield* updateRunSummary(context, (summary) => {
         const existing = summary.phases[input.phase];
         summary.phases[input.phase] = {
           ...existing,
@@ -188,18 +293,24 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: existing?.effectiveThinkingLevel ?? input.thinkingLevel ?? existing?.thinkingLevel,
-          requestedThinkingLevel: existing?.requestedThinkingLevel ?? input.thinkingLevel,
+          thinkingLevel:
+            existing?.effectiveThinkingLevel ??
+            input.thinkingLevel ??
+            existing?.thinkingLevel,
+          requestedThinkingLevel:
+            existing?.requestedThinkingLevel ?? input.thinkingLevel,
           reused: input.reused,
           totals: existing?.totals ?? emptyTotals(),
         };
       });
-    },
-    async phaseFailed(input) {
-      const timestamp = new Date().toISOString();
+    }),
+    phaseFailed: Effect.fn("RunObserver.phaseFailed")(function* (
+      input: Parameters<RunObserver["phaseFailed"]>[0],
+    ) {
+      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
       const errorMessage = formatErrorMessage(input.error);
       const artifactPath = observationArtifactPath(context, input);
-      await writer.write({
+      yield* writer.write({
         type: "phase_failed",
         timestamp,
         issueNumber: context.issueNumber,
@@ -211,7 +322,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         thinkingLevel: input.thinkingLevel,
         errorMessage,
       });
-      await updateRunSummary(context, (summary) => {
+      yield* updateRunSummary(context, (summary) => {
         const existing = summary.phases[input.phase];
         summary.phases[input.phase] = {
           ...existing,
@@ -222,44 +333,55 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           endedAt: timestamp,
           artifactPath: artifactPath ?? existing?.artifactPath,
           model: input.model ?? existing?.model,
-          thinkingLevel: existing?.effectiveThinkingLevel ?? input.thinkingLevel ?? existing?.thinkingLevel,
-          requestedThinkingLevel: existing?.requestedThinkingLevel ?? input.thinkingLevel,
+          thinkingLevel:
+            existing?.effectiveThinkingLevel ??
+            input.thinkingLevel ??
+            existing?.thinkingLevel,
+          requestedThinkingLevel:
+            existing?.requestedThinkingLevel ?? input.thinkingLevel,
           errorMessage,
           totals: existing?.totals ?? emptyTotals(),
         };
         summary.lastError = errorMessage;
       });
-    },
-    async agentSessionStarted(input) {
-      const effectiveThinkingLevel = input.effectiveThinkingLevel ?? input.thinkingLevel;
-      await writer.write({
-        type: "agent_session_started",
-        issueNumber: context.issueNumber,
-        attempt: context.attempt,
-        phase: input.phase,
-        sessionId: input.sessionId,
-        model: input.model,
-        thinkingLevel: effectiveThinkingLevel,
-        requestedThinkingLevel: input.requestedThinkingLevel,
-        effectiveThinkingLevel,
-      });
-      await updateRunSummary(context, (summary) => {
-        const existing = summary.phases[input.phase];
-        summary.phases[input.phase] = {
+    }),
+    agentSessionStarted: Effect.fn("RunObserver.agentSessionStarted")(
+      function* (input: Parameters<RunObserver["agentSessionStarted"]>[0]) {
+        const effectiveThinkingLevel =
+          input.effectiveThinkingLevel ?? input.thinkingLevel;
+        yield* writer.write({
+          type: "agent_session_started",
+          issueNumber: context.issueNumber,
+          attempt: context.attempt,
           phase: input.phase,
-          status: existing?.status ?? "running",
-          ...existing,
           sessionId: input.sessionId,
-          model: input.model ?? existing?.model,
-          thinkingLevel: effectiveThinkingLevel ?? existing?.thinkingLevel,
-          requestedThinkingLevel: input.requestedThinkingLevel ?? existing?.requestedThinkingLevel,
-          effectiveThinkingLevel: effectiveThinkingLevel ?? existing?.effectiveThinkingLevel,
-        };
-      });
-    },
-    async agentSessionStats(input) {
+          model: input.model,
+          thinkingLevel: effectiveThinkingLevel,
+          requestedThinkingLevel: input.requestedThinkingLevel,
+          effectiveThinkingLevel,
+        });
+        yield* updateRunSummary(context, (summary) => {
+          const existing = summary.phases[input.phase];
+          summary.phases[input.phase] = {
+            phase: input.phase,
+            status: existing?.status ?? "running",
+            ...existing,
+            sessionId: input.sessionId,
+            model: input.model ?? existing?.model,
+            thinkingLevel: effectiveThinkingLevel ?? existing?.thinkingLevel,
+            requestedThinkingLevel:
+              input.requestedThinkingLevel ?? existing?.requestedThinkingLevel,
+            effectiveThinkingLevel:
+              effectiveThinkingLevel ?? existing?.effectiveThinkingLevel,
+          };
+        });
+      },
+    ),
+    agentSessionStats: Effect.fn("RunObserver.agentSessionStats")(function* (
+      input: Parameters<RunObserver["agentSessionStats"]>[0],
+    ) {
       const totals = totalsFromSessionStats(input.stats);
-      await writer.write({
+      yield* writer.write({
         type: "agent_session_stats",
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -267,7 +389,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         sessionId: input.stats.sessionId,
         totals,
       });
-      await updateRunSummary(context, (summary) => {
+      yield* updateRunSummary(context, (summary) => {
         const existing = summary.phases[input.phase];
         summary.phases[input.phase] = {
           phase: input.phase,
@@ -277,9 +399,11 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
           totals: addTotals(existing?.totals ?? emptyTotals(), totals),
         };
       });
-    },
-    async toolStarted(input) {
-      await writer.write({
+    }),
+    toolStarted: Effect.fn("RunObserver.toolStarted")(function* (
+      input: Parameters<RunObserver["toolStarted"]>[0],
+    ) {
+      yield* writer.write({
         type: "tool_started",
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -288,9 +412,11 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         toolCallId: input.toolCallId,
         toolName: input.toolName,
       });
-    },
-    async toolCompleted(input) {
-      await writer.write({
+    }),
+    toolCompleted: Effect.fn("RunObserver.toolCompleted")(function* (
+      input: Parameters<RunObserver["toolCompleted"]>[0],
+    ) {
+      yield* writer.write({
         type: "tool_completed",
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -301,9 +427,11 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         durationMs: input.durationMs,
         isError: input.isError,
       });
-    },
-    async autoRetryStarted(input) {
-      await writer.write({
+    }),
+    autoRetryStarted: Effect.fn("RunObserver.autoRetryStarted")(function* (
+      input: Parameters<RunObserver["autoRetryStarted"]>[0],
+    ) {
+      yield* writer.write({
         type: "auto_retry_started",
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -314,9 +442,11 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         delayMs: input.delayMs,
         errorMessage: input.errorMessage,
       });
-    },
-    async autoRetryCompleted(input) {
-      await writer.write({
+    }),
+    autoRetryCompleted: Effect.fn("RunObserver.autoRetryCompleted")(function* (
+      input: Parameters<RunObserver["autoRetryCompleted"]>[0],
+    ) {
+      yield* writer.write({
         type: "auto_retry_completed",
         issueNumber: context.issueNumber,
         attempt: context.attempt,
@@ -326,11 +456,14 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter): RunOb
         success: input.success,
         finalError: input.finalError,
       });
-    },
+    }),
   };
 }
 
-function observationArtifactPath(context: WorkflowContext, input: PhaseObservation): string | undefined {
+function observationArtifactPath(
+  context: WorkflowContext,
+  input: PhaseObservation,
+): string | undefined {
   if (input.artifactPath !== undefined) return input.artifactPath;
   if (input.artifact === undefined) return undefined;
   return artifactRelativePath(context, input.artifact);
@@ -339,3 +472,12 @@ function observationArtifactPath(context: WorkflowContext, input: PhaseObservati
 export function phaseNameForArtifact(artifact: ArtifactRef): string {
   return formatArtifactRef(artifact);
 }
+
+export class RunObservation extends Context.Service<
+  RunObservation,
+  RunObserver
+>()("roark/observability/RunObservation") {}
+export const runObservationLayer = Layer.succeed(
+  RunObservation,
+  createNoopRunObserver(),
+);

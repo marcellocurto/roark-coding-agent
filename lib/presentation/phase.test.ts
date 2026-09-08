@@ -1,8 +1,10 @@
-import { runWithPresenter } from "../testing/presentation.ts";
+import { Cause, Effect, Exit } from "effect";
+import { Presentation } from "../runtime/services.ts";
+import { runPresentedPhase as nativeRunPresentedPhase } from "./phase.ts";
 import { Presenter } from "./presenter.ts";
 import { describe, expect, spyOn, test } from "bun:test";
 import { type AgentDisplayContext } from "./presenter.ts";
-import { runPresentedPhase } from "./phase.ts";
+import { runPresentedPhasePromise as runPresentedPhase } from "./phase-promise.ts";
 
 const display: AgentDisplayContext = {
   command: "do",
@@ -15,36 +17,38 @@ const display: AgentDisplayContext = {
 describe("runPresentedPhase", () => {
   test("presents successful and failed completion consistently", async () => {
     let output = "";
-    return runWithPresenter(
-      new Presenter({
-        stream: {
-          isTTY: false,
-          write(chunk) {
-            output += chunk;
-          },
+    const presentation = new Presenter({
+      stream: {
+        isTTY: false,
+        write(chunk) {
+          output += chunk;
         },
-      }),
-      async (application) => {
-        await runPresentedPhase(
-          display,
-          () => Promise.resolve("done"),
-          (outcome) => ({ outcome, artifact: "result.md" }),
-          undefined,
-          application,
-        );
-        const failure = await runPresentedPhase(
-          display,
-          () => Promise.reject(new Error("broken")),
-          () => ({}),
-          undefined,
-          application,
-        ).catch((error: unknown) => error);
-        expect(failure).toEqual(new Error("broken"));
-        expect(output).toContain("DONE #1 · Test phase · done");
-        expect(output).toContain("artifact: result.md");
-        expect(output).toContain("FAILED #1 · Test phase · broken");
       },
+    });
+    await Effect.runPromise(
+      nativeRunPresentedPhase(
+        display,
+        () =>
+          Effect.sync(() => {
+            expect(output).toContain("PHASE #1 · Test phase");
+            return "done";
+          }),
+        (outcome) => ({ outcome, artifact: "result.md" }),
+      ).pipe(Effect.provideService(Presentation, presentation)),
     );
+    const failure = new Error("broken");
+    const exit = await Effect.runPromiseExit(
+      nativeRunPresentedPhase(
+        display,
+        () => Effect.fail(failure),
+        () => ({}),
+      ).pipe(Effect.provideService(Presentation, presentation)),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(failure);
+    expect(output).toContain("DONE #1 · Test phase · done");
+    expect(output).toContain("artifact: result.md");
+    expect(output).toContain("FAILED #1 · Test phase · broken");
   });
 });
 

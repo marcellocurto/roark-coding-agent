@@ -1,4 +1,6 @@
 import { Effect } from "effect";
+import { readRunSummary } from "../observability/summary.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { applicationLayer } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -168,6 +170,12 @@ describe("runAutorunAttemptLifecyclePromise", () => {
       },
     );
 
+    const summary = await runApplicationPromise(
+      readRunSummary(path.join(fixture.workflowContext.runDir, "summary.json")),
+    );
+    expect(summary?.phases["fixLog-1"]?.status).toBe("completed");
+    expect(summary?.phases["reviewA-1"]?.status).toBe("completed");
+    expect(summary?.phases["reviewB-1"]?.status).toBe("completed");
     expect(completions).toBe(2);
     expect(phases.slice(0, 2)).toEqual(["fixLog-1", "refinementLog-1"]);
     expect(phases.slice(2).toSorted()).toEqual(["reviewA-1", "reviewB-1"]);

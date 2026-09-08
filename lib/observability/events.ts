@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { Clock, Effect, FileSystem } from "effect";
 import path from "node:path";
 
 export interface ObservabilityEvent {
@@ -11,7 +11,7 @@ export interface ObservabilityEvent {
 
 export interface EventWriter {
   readonly eventsPath: string;
-  write(event: ObservabilityEvent): Promise<void>;
+  write(event: ObservabilityEvent): Effect.Effect<void>;
 }
 
 export interface EventWriterOptions {
@@ -36,24 +36,37 @@ const redactedKeys = new Set([
   "messages",
 ]);
 
-export function createEventWriter(runDir: string, options: EventWriterOptions = {}): EventWriter {
+export const createEventWriter = Effect.fn("createEventWriter")(function* (
+  runDir: string,
+  options: EventWriterOptions = {},
+) {
+  const fs = yield* FileSystem.FileSystem;
   const eventsPath = path.join(runDir, "events.jsonl");
-  const now = options.now ?? (() => new Date());
+  const now = options.now;
   const warn = options.warn ?? defaultWarn;
-
-  return {
-    eventsPath,
-    async write(event) {
-      try {
-        await mkdir(runDir, { recursive: true });
-        const sanitized = sanitizeEvent({ timestamp: now().toISOString(), ...event });
-        await appendFile(eventsPath, `${JSON.stringify(sanitized)}\n`, "utf8");
-      } catch (error) {
-        warn(`observability event write failed: ${formatError(error)}`);
-      }
+  const write = Effect.fn("writeRunEvent")(
+    function* (event: ObservabilityEvent) {
+      yield* fs.makeDirectory(runDir, { recursive: true });
+      const sanitized = sanitizeEvent({
+        timestamp: (now
+          ? now()
+          : new Date(yield* Clock.currentTimeMillis)
+        ).toISOString(),
+        ...event,
+      });
+      yield* fs.writeFileString(eventsPath, `${JSON.stringify(sanitized)}\n`, {
+        flag: "a",
+      });
     },
-  };
-}
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        warn(`observability event write failed: ${error.message}`);
+      }),
+    ),
+    Effect.uninterruptible,
+  );
+  return { eventsPath, write } satisfies EventWriter;
+});
 
 export function sanitizeEvent(event: ObservabilityEvent): ObservabilityEvent {
   const sanitized: ObservabilityEvent = { type: event.type };
@@ -71,7 +84,8 @@ function sanitizeValue(key: string, value: unknown): unknown {
     const maxLength = key.toLowerCase().includes("error") ? 1000 : 500;
     return value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
   }
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(key, item));
+  if (Array.isArray(value))
+    return value.map((item) => sanitizeValue(key, item));
   if (value && typeof value === "object") {
     const output: Record<string, unknown> = {};
     for (const [childKey, childValue] of Object.entries(value)) {
@@ -85,9 +99,4 @@ function sanitizeValue(key: string, value: unknown): unknown {
 
 function defaultWarn(message: string): void {
   console.warn(`! ${message}`);
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

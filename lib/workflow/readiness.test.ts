@@ -7,10 +7,8 @@ import {
   writeArtifactPromise as writeArtifact,
   writeJsonArtifactPromise as writeJsonArtifact,
 } from "./artifacts-promise.ts";
-import {
-  buildReadinessArtifacts,
-  parseReadinessResultJson,
-} from "./readiness.ts";
+import { parseReadinessResultJson } from "./readiness.ts";
+import { buildReadinessArtifactsPromise as buildReadinessArtifacts } from "./readiness-promise.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import {
   implementationPlanResult,
