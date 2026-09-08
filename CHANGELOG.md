@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
 - Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
 - `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
 - PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.

@@ -1,6 +1,18 @@
 {
   "name": "roark-coding-agent",
   "version": "0.2.0",
+  "description": "A CLI for running coding agents against GitHub issues and pull requests.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marcellocurto/roark-coding-agent.git"
+  },
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "module": "roark.ts",
   "type": "module",
   "bin": {
@@ -12,6 +24,7 @@
     "skills",
     "docs",
     "README.md",
+    "LICENSE",
     "CHANGELOG.md",
     "tsconfig.json"
   ],
@@ -26,7 +39,8 @@
     "lint": "eslint . --cache --cache-strategy content --cache-location .eslintcache",
     "lint:full": "eslint .",
     "check": "bun run typecheck && bun run lint && bun test",
-    "release:check": "bun run check",
+    "release:check": "bun run check && bun run release:check-package",
+    "release:check-package": "bun run scripts/check-package.ts",
     "version:patch": "bun run release:check && bun pm version patch",
     "version:minor": "bun run release:check && bun pm version minor",
     "version:major": "bun run release:check && bun pm version major"

@@ -17,6 +17,7 @@ git status --short
 
 You need:
 
+- Bun 1.4.2 or newer on your `PATH`
 - a GitHub checkout for the target repository
 - a clean control checkout
 - `gh` authenticated as a user or bot with issue, pull request, and branch push permissions
@@ -36,6 +37,9 @@ roark --help
 ```
 
 For persistent servers, pin the checkout to a tag or commit before installing globally.
+
+Once a release is published to npm, you can also use `npm install -g roark-coding-agent`.
+Installing through npm does not install Bun; Roark still requires Bun 1.4.2 or newer on your `PATH`.
 
 ## Initialize the target repository
 

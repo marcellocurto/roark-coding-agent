@@ -47,6 +47,19 @@ Use `Unreleased` for changes that have landed but are not tagged yet.
 bun run release:check
 ```
 
+This runs typechecking, lint, tests, and an installed-package smoke check. Release checks require
+Bun 1.4.2 or newer, Node.js/npm, Git, and access to the npm registry to install dependencies.
+The package check creates an npm tarball, installs it into a temporary global prefix, and runs
+help, version, and status from a separate repository. It also verifies installed skill resolution
+and compares every bundled skill file (including supporting resources) and the package license
+with the source checkout. Temporary files are removed after the check.
+
+To run only the package check:
+
+```bash
+bun run release:check-package
+```
+
 5. Bump the version. This creates a version commit and Git tag such as `v0.2.0`:
 
 ```bash

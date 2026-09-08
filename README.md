@@ -17,7 +17,7 @@ Roark runs once and exits. Use cron, `launchd`, or GitHub Actions to run it on a
 
 You need:
 
-- Bun
+- Bun 1.4.2 or newer
 - Git
 - an authenticated GitHub CLI
 - permission to read issues, manage labels, push branches, and open pull requests
@@ -32,6 +32,11 @@ roark --version
 ```
 
 For servers, pin a tag or commit before installing globally.
+
+Once a release is published to npm, you can install it with `npm install -g roark-coding-agent`.
+Roark runs on Bun even when installed through npm, so Bun 1.4.2 or newer must be available on your `PATH`.
+
+Roark is licensed under the [MIT License](LICENSE). Bundled third-party skills retain their respective licenses.
 
 ## Try it on one issue
 

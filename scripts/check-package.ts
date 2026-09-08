@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runProcessOrThrow } from "../lib/cli/process.ts";
+import packageJson from "../package.json";
+
+const projectRoot = fileURLToPath(new URL("../", import.meta.url));
+const temporaryRoot = await mkdtemp(path.join(tmpdir(), "roark-package-check-"));
+
+try {
+  console.log("Packing Roark and installing into a temporary npm global prefix...");
+  await runProcessOrThrow(["npm", "pack", "--pack-destination", temporaryRoot], { cwd: projectRoot });
+  const tarballs = (await readdir(temporaryRoot)).filter((file) => file.endsWith(".tgz"));
+  const [tarball] = tarballs;
+  assert(tarballs.length === 1 && tarball, "Expected exactly one package tarball");
+
+  const prefix = path.join(temporaryRoot, "install");
+  await runProcessOrThrow([
+    "npm", "install", "--global", "--prefix", prefix, path.join(temporaryRoot, tarball),
+  ], { cwd: temporaryRoot });
+  const globalRoot = (await runProcessOrThrow(["npm", "root", "--global", "--prefix", prefix], {
+    cwd: temporaryRoot,
+  })).trim();
+  const installedRoot = path.join(globalRoot, packageJson.name);
+  const executable = path.join(prefix, "bin", "roark");
+  const target = path.join(temporaryRoot, "target");
+  await mkdir(target);
+  await runProcessOrThrow(["git", "init", "--quiet", target], { cwd: temporaryRoot });
+
+  console.log("Checking the installed CLI outside the source checkout...");
+  assert.equal((await runProcessOrThrow([executable, "--version"], { cwd: target })).trim(), packageJson.version);
+  assert.match(await runProcessOrThrow([executable, "--help"], { cwd: target }), /roark <command>/);
+  assert.equal((await runProcessOrThrow([
+    executable, "status", "--all", "--cwd", target, "--repo", "owner/repo",
+  ], { cwd: target })).trim(), "No observability summaries found.");
+
+  // Exercise resource resolution from the installed module, not the checkout's module.
+  await runProcessOrThrow([process.execPath, "--eval", `
+    import assert from "node:assert/strict";
+    import path from "node:path";
+    import { realpathSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const root = realpathSync(Bun.argv[1]);
+    const skills = await import(pathToFileURL(path.join(root, "lib/pi/bundled-skills.ts")).href);
+    skills.assertBundledSkillsPresent();
+    assert.equal(realpathSync(skills.bundledSkillsRoot), path.join(root, "skills"));
+  `, installedRoot], { cwd: target });
+
+  // Compare all supporting files, so npm ignore rules cannot silently truncate a skill.
+  // Include new, uncommitted resources while excluding ignored local files such as .DS_Store.
+  const skillFiles = await runProcessOrThrow([
+    "git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "skills/",
+  ], { cwd: projectRoot });
+  const resources = ["LICENSE", ...skillFiles.split("\0").filter(Boolean)];
+  for (const resource of resources) {
+    const [source, installed] = await Promise.all([
+      readFile(path.join(projectRoot, resource)),
+      readFile(path.join(installedRoot, resource)),
+    ]);
+    assert(source.equals(installed), `Installed resource differs: ${resource}`);
+  }
+  console.log(`Package check passed on Bun ${Bun.version}: CLI, bundled skill resolution, and ${resources.length} resource files.`);
+} finally {
+  await rm(temporaryRoot, { recursive: true, force: true });
+}
