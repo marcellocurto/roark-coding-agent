@@ -238,7 +238,7 @@
         "lib/{pr-publishing,issue-publishing}/{result,artifact}.ts",
         "lib/pr-revision/{plan,execution}.ts",
         "lib/observability/{observer,events,status,summary}.ts",
-        "lib/issue-curation/{create-issues,labels}.ts",
+        "lib/issue-curation/{create-issues,labels,persistence}.ts",
         "lib/issue-publishing/{github,service}.ts",
         "lib/autorun/{discovery,continue,continue-plan,copy-path,observability,attempt-lifecycle,completion,publish-flow,publish,branch,labels,failure,triage-stop,ledger-comments,lock,verification,workspace,workspace-service}.ts",
         "lib/pr-review/{workflow,artifacts}.ts",

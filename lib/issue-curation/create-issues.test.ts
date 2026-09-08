@@ -1,5 +1,8 @@
+import { ArtifactStore } from "../workflow/artifact-store.ts";
+import { ArtifactContractError } from "../structured-output/contract.ts";
+import { readExistingCreatedEntries } from "./persistence.ts";
 import { Context, Scope } from "effect";
-import { Schema, Effect } from "effect";
+import { Cause, Exit, PlatformError, Schema, Effect } from "effect";
 import {
   createIssuesFromCurationPlan,
   type CreateIssuesOptions,
@@ -85,6 +88,7 @@ const runIssueCreation = Effect.fnUntraced(function* (
   );
 });
 import {
+  writeArtifact,
   writeJsonArtifact,
   artifactExists,
   readArtifact,
@@ -843,3 +847,188 @@ function planItem(
     proposedLabels: labels,
   };
 }
+
+test("legacy plan arrays preserve valid entries, malformed skips, and classification labels", async () => {
+  const context = await tempContext({ yes: false });
+  const plan = basePlan();
+  await runApplicationPromise(
+    writeJsonArtifact(context, "issueCurationPlan", {
+      sourceIssue: plan.sourceIssue,
+      blockingIssuesToCreate: [plan.issuesToCreate[0], null],
+      followUpIssuesToCreate: [plan.issuesToCreate[1]],
+      duplicatesMerged: [null, { mergedSourceFindingIds: ["one", "two"] }],
+    }),
+  );
+  const result = await runApplicationPromise(
+    runIssueCreation({ context, clock }),
+  );
+  expect(
+    result.wouldCreate.map((item) => [item.planItemId, item.kind]),
+  ).toEqual([
+    ["external-blocker-1", "blocking"],
+    ["follow-up-1", "follow-up"],
+  ]);
+  expect(result.wouldCreate[0]?.labels).toContain("review:external-blocker");
+  expect(result.skipped).toContainEqual({
+    planItemId: "blocking-2",
+    kind: "blocking",
+    reason: "malformed",
+    message: "Plan entry is not an object.",
+  });
+  expect(result.counts).toMatchObject({
+    acceptedPlanItems: 3,
+    skippedMalformed: 1,
+    skippedDuplicateGroups: 2,
+    skippedDuplicateSourceFindings: 2,
+  });
+});
+
+test("invalid plan rows leave valid neighbors creatable", async () => {
+  const context = await tempContext({ yes: false });
+  const plan = basePlan();
+  const valid = plan.issuesToCreate[0];
+  if (!valid) throw new Error("missing fixture item");
+  await runApplicationPromise(
+    writeJsonArtifact(context, "issueCurationPlan", {
+      ...plan,
+      issuesToCreate: [
+        {
+          ...valid,
+          planItemId: "  valid  ",
+          proposedTitle: "  Valid title  ",
+          proposedLabels: [7, " extra ", "review:follow-up"],
+          sourceIssueContext: {
+            ...valid.sourceIssueContext,
+            url: { invalid: true },
+          },
+          runContext: { ...valid.runContext, attempt: "invalid", prUrl: false },
+        },
+        { ...valid, planItemId: "bad-context", sourceFindingIds: [42] },
+        { ...valid, planItemId: "bad-title", proposedTitle: "   " },
+      ],
+    }),
+  );
+  const result = await runApplicationPromise(
+    runIssueCreation({ context, clock }),
+  );
+  expect(result.wouldCreate).toHaveLength(1);
+  expect(result.wouldCreate[0]).toMatchObject({
+    planItemId: "valid",
+    title: "Valid title",
+    labels: ["needs-triage", "review:external-blocker", "extra"],
+  });
+  expect(result.skipped.map((item) => [item.planItemId, item.message])).toEqual(
+    [
+      ["bad-context", "Missing required field(s): structured issue context."],
+      ["bad-title", "Missing required field(s): proposedTitle."],
+    ],
+  );
+});
+
+test("salvages published identities despite malformed optional metadata and neighboring records", async () => {
+  const context = await tempContext({ yes: true });
+  await runApplicationPromise(
+    writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+  );
+  await runApplicationPromise(
+    writeJsonArtifact(context, "issueCreationResults", {
+      created: [
+        {
+          planItemId: " external-blocker-1 ",
+          kind: "blocking",
+          title: " Existing blocker ",
+          url: 7,
+          number: "broken",
+          stdout: {},
+        },
+        null,
+        {
+          planItemId: "follow-up-1",
+          kind: "follow-up",
+          title: " Existing follow-up ",
+          number: 301,
+          url: " https://github.com/owner/repo/issues/301 ",
+          stdout: " created ",
+        },
+        { planItemId: "invalid-kind", kind: "invalid", title: "Bad record" },
+      ],
+    }),
+  );
+  const result = await runApplicationPromise(
+    runIssueCreation({
+      context,
+      clock,
+      labelEnsurer: () =>
+        Effect.die(new Error("already-created issues must not need labels")),
+      issuePublisher: () =>
+        Effect.die(new Error("already-created issues must not be republished")),
+      agentRunner: () =>
+        Effect.die(
+          new Error("already-created issues must not be authored again"),
+        ),
+    }),
+  );
+  expect(result.counts).toMatchObject({
+    createdCurrentRun: 0,
+    createdTotalRecorded: 2,
+    skippedAlreadyCreated: 2,
+  });
+  expect(result.created).toEqual([
+    {
+      planItemId: "external-blocker-1",
+      kind: "blocking",
+      title: "Existing blocker",
+      source: "existing-result",
+    },
+    {
+      planItemId: "follow-up-1",
+      kind: "follow-up",
+      title: "Existing follow-up",
+      number: 301,
+      url: "https://github.com/owner/repo/issues/301",
+      stdout: "created",
+      source: "existing-result",
+    },
+  ]);
+});
+
+test("history recovery preserves a read failure combined with a cleanup defect", async () => {
+  const context = await tempContext({ yes: false });
+  const failure = PlatformError.systemError({
+    _tag: "PermissionDenied",
+    module: "FileSystem",
+    method: "readFileString",
+  });
+  const defect = new Error("history cleanup defect");
+  const exit = await runApplicationPromise(
+    Effect.exit(
+      readExistingCreatedEntries(context).pipe(
+        Effect.provideServiceEffect(
+          ArtifactStore,
+          Effect.map(ArtifactStore, (store) => ({
+            ...store,
+            exists: () => Effect.succeed(true),
+            read: () =>
+              Effect.fail(failure).pipe(Effect.ensuring(Effect.die(defect))),
+          })),
+        ),
+      ),
+    ),
+  );
+  expect(Exit.isFailure(exit)).toBe(true);
+  if (Exit.isFailure(exit)) {
+    expect(Cause.hasFails(exit.cause)).toBe(true);
+    expect(Cause.hasDies(exit.cause)).toBe(true);
+    expect(Cause.pretty(exit.cause)).toContain(defect.message);
+  }
+});
+
+test("an unreadable plan fails with a typed artifact error", async () => {
+  const context = await tempContext({ yes: false });
+  await runApplicationPromise(
+    writeArtifact(context, "issueCurationPlan", "not JSON"),
+  );
+  expect(
+    runApplicationPromise(runIssueCreation({ context, clock })),
+  ).rejects.toThrow(ArtifactContractError);
+});

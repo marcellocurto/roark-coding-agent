@@ -8,6 +8,8 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Migrated persisted curation-plan and publication-history decoding to Effect Schema, preserving legacy plans, per-entry skips, and already-created identities when optional metadata is damaged.
+
 - Migrated GitHub response decoding to native Effect Schema contracts for issues, dependencies, PR feedback, paginated comments, and publishing duplicate searches. Malformed responses retain typed schema causes and cannot silently stand in for empty feedback.
 
 - Migrated structured artifact contracts to Effect Schema, preserving normalization and workflow routing while keeping malformed output recoverable and propagating validator and formatter defects.

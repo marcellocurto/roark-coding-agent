@@ -1,6 +1,16 @@
+import {
+  readIssueCurationPlan,
+  readExistingCreatedEntries,
+  classificationForKind,
+  type PublishingPlan,
+  type ValidPlanItem,
+  type IssuePlanKind,
+  type IssueCreationCreatedEntry,
+  type IssueCreationSkippedEntry,
+} from "./persistence.ts";
 import { IssuePublishing } from "../issue-publishing/service.ts";
 import { Presentation } from "../runtime/services.ts";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import {
   issuePublishingPrompt,
   issuePublishingSystemPrompt,
@@ -8,7 +18,6 @@ import {
 import {
   formatIssueDraftMarkdown,
   type IssueDraftCollection,
-  type IssueDraftRenderingContext,
 } from "../issue-publishing/result.ts";
 import { issueDraftArtifactDefinition } from "../issue-publishing/artifact.ts";
 import { type AgentDisplayContext } from "../presentation/presenter.ts";
@@ -19,44 +28,19 @@ import {
   artifactRelativePath,
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
-import { artifactExists } from "../workflow/artifacts.ts";
+import { writeArtifact, writeJsonArtifact } from "../workflow/artifacts.ts";
+import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
 import {
-  readArtifact,
-  writeArtifact,
-  writeJsonArtifact,
-} from "../workflow/artifacts.ts";
-import type {
-  IssueCurationPlan,
-  IssuePlanClassification,
-} from "../workflow/issue-curation.ts";
-import {
-  reviewerIssueClassificationLabels,
   reviewerIssueLabelForClassification,
   reviewerIssueManagedLabels,
   reviewerIssueTriageLabels,
 } from "./labels.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
-export interface IssueCreationCreatedEntry {
-  planItemId: string;
-  kind: IssuePlanKind;
-  title: string;
-  url?: string | undefined;
-  number?: number | undefined;
-  stdout?: string | undefined;
-  source: "current-run" | "existing-result";
-}
 export interface IssueCreationFailedEntry {
   planItemId: string;
   kind: IssuePlanKind;
   title: string;
-  message: string;
-}
-export interface IssueCreationSkippedEntry {
-  planItemId: string;
-  kind: IssueCreationSkippedKind;
-  title?: string | undefined;
-  reason: "already-created" | "malformed";
   message: string;
 }
 export interface IssueCreationWouldCreateEntry {
@@ -113,15 +97,6 @@ export interface CreateIssuesOptions {
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
 }
-type IssuePlanKind = IssuePlanClassification | "blocking";
-type IssueCreationSkippedKind = IssuePlanKind | "unknown";
-interface ValidPlanItem {
-  kind: IssuePlanKind;
-  planItemId: string;
-  title: string;
-  labels: string[];
-  renderingContext: IssueDraftRenderingContext;
-}
 const issueCreationDefaultClock = { now: () => new Date() };
 export const createIssuesPhase = Effect.fn("createIssuesPhase")(function* (
   context: WorkflowContext,
@@ -151,12 +126,11 @@ export const createIssuesFromCurationPlan = Effect.fn(
   const sourcePlanPath = artifactRelativePath(context, "issueCurationPlan");
   const resultPath = artifactRelativePath(context, "issueCreationResults");
   const existingCreated = yield* readExistingCreatedEntries(context);
-  const collected = collectPlanItems(plan);
-  const skipped: IssueCreationSkippedEntry[] = [...collected.malformed];
+  const skipped: IssueCreationSkippedEntry[] = [...plan.malformed];
   const existingCreatedIds = new Set(
     existingCreated.map((entry) => entry.planItemId),
   );
-  const creatable = collected.valid.filter((item) => {
+  const creatable = plan.valid.filter((item) => {
     if (!context.force && existingCreatedIds.has(item.planItemId)) {
       skipped.push({
         planItemId: item.planItemId,
@@ -191,7 +165,6 @@ export const createIssuesFromCurationPlan = Effect.fn(
       skipped,
       wouldCreate,
       relationshipOutcomes: [],
-      countsInput: collected.counts,
     });
     yield* printDryRunSummary(context, result);
     return result;
@@ -222,7 +195,6 @@ export const createIssuesFromCurationPlan = Effect.fn(
         skipped,
         wouldCreate: [],
         relationshipOutcomes: [],
-        countsInput: collected.counts,
       });
       yield* writeJsonArtifact(context, "issueCreationResults", result);
       yield* printApprovedSummary(context, result);
@@ -269,7 +241,6 @@ export const createIssuesFromCurationPlan = Effect.fn(
       skipped,
       wouldCreate: [],
       relationshipOutcomes: publishResult.relationshipOutcomes,
-      countsInput: collected.counts,
     });
     yield* writeJsonArtifact(context, "issueCreationResults", result);
     return result;
@@ -467,311 +438,9 @@ function formatIssueDraftCollectionMarkdown(
     })
     .join("\n---\n\n");
 }
-// Plan entries are validated individually below so malformed candidates remain
-// reportable skips instead of making the entire plan unreadable.
-const persistedPlanSchema = Schema.Struct({
-  sourceIssue: Schema.optional(
-    Schema.Struct({
-      number: Schema.Number,
-      title: Schema.String,
-      url: Schema.optional(Schema.String),
-    }),
-  ),
-  issuesToCreate: Schema.optional(Schema.Unknown),
-  blockingIssuesToCreate: Schema.optional(Schema.Unknown),
-  followUpIssuesToCreate: Schema.optional(Schema.Unknown),
-  rejectedCandidates: Schema.optional(Schema.Unknown),
-  duplicatesMerged: Schema.optional(Schema.Unknown),
-  warnings: Schema.optional(Schema.Unknown),
-});
-type PersistedPlan = typeof persistedPlanSchema.Type;
-const decodePersistedPlan = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(persistedPlanSchema),
-);
-const readIssueCurationPlan = Effect.fn("readIssueCurationPlan")(function* (
-  context: WorkflowContext,
-) {
-  if (!(yield* artifactExists(context, "issueCurationPlan"))) {
-    return yield* Effect.fail(
-      new Error(
-        `Missing issue curation plan: ${artifactRelativePath(context, "issueCurationPlan")}. Run 'curate-issues' first.`,
-      ),
-    );
-  }
-  return yield* Effect.gen(function* () {
-    return yield* decodePersistedPlan(
-      yield* readArtifact(context, "issueCurationPlan"),
-    );
-  }).pipe(
-    Effect.catch((error) =>
-      Effect.gen(function* () {
-        return yield* Effect.fail(
-          new Error(
-            `Could not parse ${artifactRelativePath(context, "issueCurationPlan")}: ${error instanceof Error ? error.message : String(error)}`,
-          ),
-        );
-      }),
-    ),
-  );
-});
-const decodeJson = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Unknown),
-);
-const readExistingCreatedEntries = Effect.fn("readExistingCreatedEntries")(
-  function* (context: WorkflowContext) {
-    if (!(yield* artifactExists(context, "issueCreationResults"))) return [];
-    return yield* Effect.gen(function* () {
-      const parsed = yield* decodeJson(
-        yield* readArtifact(context, "issueCreationResults"),
-      );
-      if (!isRecord(parsed) || !Array.isArray(parsed["created"])) return [];
-      return parsed["created"].flatMap((entry) => {
-        if (!isRecord(entry)) return [];
-        const planItemId = asNonEmptyString(entry["planItemId"]);
-        const title = asNonEmptyString(entry["title"]);
-        const kind = parseIssuePlanKind(entry["kind"]);
-        if (!planItemId || !title || !kind) return [];
-        return [
-          {
-            planItemId,
-            kind,
-            title,
-            ...(asNonEmptyString(entry["url"])
-              ? { url: asNonEmptyString(entry["url"]) }
-              : {}),
-            ...(typeof entry["number"] === "number" &&
-            Number.isInteger(entry["number"])
-              ? { number: entry["number"] }
-              : {}),
-            ...(asNonEmptyString(entry["stdout"])
-              ? { stdout: asNonEmptyString(entry["stdout"]) }
-              : {}),
-            source: "existing-result" as const,
-          },
-        ];
-      });
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.gen(function* () {
-          (yield* Presentation).warning(
-            `could not parse existing ${artifactRelativePath(context, "issueCreationResults")}; rerun idempotence will not use it: ${error instanceof Error ? error.message : String(error)}`,
-          );
-          return [];
-        }),
-      ),
-    );
-  },
-);
-function collectPlanItems(plan: PersistedPlan): {
-  valid: ValidPlanItem[];
-  malformed: IssueCreationSkippedEntry[];
-  counts: Pick<
-    IssueCreationResults["counts"],
-    | "acceptedPlanItems"
-    | "skippedRejectedCandidates"
-    | "skippedDuplicateGroups"
-    | "skippedDuplicateSourceFindings"
-    | "skippedParserWarnings"
-    | "skippedMalformed"
-  >;
-} {
-  const normalized = Array.isArray(plan.issuesToCreate)
-    ? asArray(plan.issuesToCreate)
-    : undefined;
-  const classificationMalformed: IssueCreationSkippedEntry[] = [];
-  const accepted = Array.isArray(normalized)
-    ? normalized.flatMap((item, index) => {
-        const record = isRecord(item) ? item : undefined;
-        const classification = parseIssuePlanClassification(
-          record?.["classification"],
-        );
-        if (!classification) {
-          classificationMalformed.push(
-            malformedSkip(
-              record
-                ? (asNonEmptyString(record["planItemId"]) ??
-                    `unclassified-${index + 1}`)
-                : `unclassified-${index + 1}`,
-              "unknown",
-              record ? asNonEmptyString(record["proposedTitle"]) : undefined,
-              "Missing or invalid required field(s): classification. Expected one of: external-blocker, follow-up, suggestion.",
-            ),
-          );
-          return [];
-        }
-        return [{ raw: item, kind: classification, index }];
-      })
-    : [
-        ...asArray(plan.blockingIssuesToCreate).map((item, index) => ({
-          raw: item,
-          kind: "blocking" as const,
-          index,
-        })),
-        ...asArray(plan.followUpIssuesToCreate).map((item, index) => ({
-          raw: item,
-          kind: "follow-up" as const,
-          index,
-        })),
-      ];
-  const acceptedPlanItemCount = Array.isArray(normalized)
-    ? normalized.length
-    : accepted.length;
-  const valid: ValidPlanItem[] = [];
-  const malformed: IssueCreationSkippedEntry[] = [...classificationMalformed];
-  for (const entry of accepted) {
-    const parsed = parseValidPlanItem(entry.raw, entry.kind, entry.index);
-    if ("item" in parsed) valid.push(parsed.item);
-    else malformed.push(parsed.skipped);
-  }
-  const rejectedCandidates = asArray(plan.rejectedCandidates);
-  const duplicatesMerged = asArray(plan.duplicatesMerged);
-  const warnings = asArray(plan.warnings);
-  return {
-    valid,
-    malformed,
-    counts: {
-      acceptedPlanItems: acceptedPlanItemCount,
-      skippedRejectedCandidates: rejectedCandidates.length,
-      skippedDuplicateGroups: duplicatesMerged.length,
-      skippedDuplicateSourceFindings: duplicatesMerged.reduce<number>(
-        (total, group) => {
-          const ids =
-            isRecord(group) && Array.isArray(group["mergedSourceFindingIds"])
-              ? group["mergedSourceFindingIds"]
-              : [];
-          return total + ids.length;
-        },
-        0,
-      ),
-      skippedParserWarnings: warnings.length,
-      skippedMalformed: malformed.length,
-    },
-  };
-}
-function parseValidPlanItem(
-  raw: unknown,
-  kind: IssuePlanKind,
-  index: number,
-):
-  | {
-      item: ValidPlanItem;
-    }
-  | {
-      skipped: IssueCreationSkippedEntry;
-    } {
-  const fallbackId = `${kind}-${index + 1}`;
-  if (!isRecord(raw)) {
-    return {
-      skipped: malformedSkip(
-        fallbackId,
-        kind,
-        undefined,
-        "Plan entry is not an object.",
-      ),
-    };
-  }
-  const planItemId = asNonEmptyString(raw["planItemId"]);
-  const title = asNonEmptyString(raw["proposedTitle"]);
-  const renderingContext = parseIssueDraftRenderingContext(raw, kind);
-  const missing = [
-    ...(planItemId ? [] : ["planItemId"]),
-    ...(title ? [] : ["proposedTitle"]),
-    ...(renderingContext ? [] : ["structured issue context"]),
-  ];
-  if (missing.length > 0 || !planItemId || !title || !renderingContext) {
-    return {
-      skipped: malformedSkip(
-        planItemId ?? fallbackId,
-        kind,
-        title,
-        `Missing required field(s): ${missing.join(", ")}.`,
-      ),
-    };
-  }
-  const { proposedLabels } = raw;
-  return {
-    item: {
-      kind,
-      planItemId,
-      title,
-      labels: Array.isArray(proposedLabels)
-        ? proposedLabels.filter(
-            (label): label is string => typeof label === "string",
-          )
-        : [],
-      renderingContext,
-    },
-  };
-}
-function parseIssueDraftRenderingContext(
-  value: Record<string, unknown>,
-  kind: IssuePlanKind,
-): IssueDraftRenderingContext | undefined {
-  const sourceIssue = value["sourceIssueContext"];
-  const runContext = value["runContext"];
-  if (
-    !isStringArray(value["sourceFindingIds"]) ||
-    !isStringArray(value["reviewerSources"]) ||
-    !isRecord(sourceIssue) ||
-    typeof sourceIssue["number"] !== "number" ||
-    !Number.isInteger(sourceIssue["number"]) ||
-    typeof sourceIssue["title"] !== "string" ||
-    !isRecord(runContext) ||
-    typeof runContext["runDirRelative"] !== "string" ||
-    !isStringArray(runContext["artifactPaths"])
-  )
-    return undefined;
-  const sourceUrl = asNonEmptyString(sourceIssue["url"]);
-  const relatedPrUrl = asNonEmptyString(runContext["prUrl"]);
-  const attempt =
-    typeof runContext["attempt"] === "number" &&
-    Number.isInteger(runContext["attempt"])
-      ? runContext["attempt"]
-      : undefined;
-  return {
-    sourceIssue: {
-      number: sourceIssue["number"],
-      title: sourceIssue["title"],
-      ...(sourceUrl ? { url: sourceUrl } : {}),
-    },
-    ...(relatedPrUrl ? { relatedPrUrl } : {}),
-    classification: classificationForKind(kind),
-    sourceFindingIds: value["sourceFindingIds"],
-    reviewerSources: value["reviewerSources"],
-    ...(attempt !== undefined ? { attempt } : {}),
-  };
-}
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
-}
-function malformedSkip(
-  planItemId: string,
-  kind: IssueCreationSkippedKind,
-  title: string | undefined,
-  message: string,
-): IssueCreationSkippedEntry {
-  return {
-    planItemId,
-    kind,
-    ...(title ? { title } : {}),
-    reason: "malformed",
-    message,
-  };
-}
-function parseIssuePlanKind(value: unknown): IssuePlanKind | undefined {
-  if (value === "blocking") return value;
-  return parseIssuePlanClassification(value);
-}
-function parseIssuePlanClassification(
-  value: unknown,
-): IssuePlanClassification | undefined {
-  return reviewerIssueClassificationLabels.find((label) => label === value);
-}
 function buildResult(input: {
   context: WorkflowContext;
-  plan: PersistedPlan;
+  plan: PublishingPlan;
   sourcePlanPath: string;
   resultPath: string;
   generatedAt: string;
@@ -783,15 +452,6 @@ function buildResult(input: {
   skipped: IssueCreationSkippedEntry[];
   wouldCreate: IssueCreationWouldCreateEntry[];
   relationshipOutcomes: IssueCreationRelationshipOutcomeEntry[];
-  countsInput: Pick<
-    IssueCreationResults["counts"],
-    | "acceptedPlanItems"
-    | "skippedRejectedCandidates"
-    | "skippedDuplicateGroups"
-    | "skippedDuplicateSourceFindings"
-    | "skippedParserWarnings"
-    | "skippedMalformed"
-  >;
 }): IssueCreationResults {
   const created = [...input.existingCreated, ...input.createdCurrentRun];
   return {
@@ -809,7 +469,7 @@ function buildResult(input: {
     wouldCreate: input.wouldCreate,
     relationshipOutcomes: input.relationshipOutcomes,
     counts: {
-      ...input.countsInput,
+      ...input.plan.counts,
       wouldCreate: input.wouldCreate.length,
       createdCurrentRun: input.createdCurrentRun.length,
       createdTotalRecorded: created.length,
@@ -834,9 +494,6 @@ function labelsForPlanItem(
     reviewerIssueLabelForClassification(classificationForKind(item.kind)),
     ...additionalLabels,
   ]);
-}
-function classificationForKind(kind: IssuePlanKind): IssuePlanClassification {
-  return kind === "blocking" ? "external-blocker" : kind;
 }
 function normalizeLabels(labels: string[]): string[] {
   const seen = new Set<string>();
@@ -926,15 +583,4 @@ function zeroCreatedExplanation(result: IssueCreationResults): string {
   if (result.failed.length > 0)
     return "Publishing or label setup failed; inspect failed entries in issue-creation-results.json.";
   return "No creatable plan items remained after idempotence and validation checks.";
-}
-function asArray(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : [];
-}
-function asNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== ""
-    ? value.trim()
-    : undefined;
-}
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
