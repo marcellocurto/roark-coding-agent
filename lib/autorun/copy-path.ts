@@ -1,5 +1,5 @@
 import path from "node:path";
-import { Result, Schema, SchemaGetter, SchemaIssue } from "effect";
+import { Effect, Result, Schema, SchemaGetter, SchemaIssue } from "effect";
 
 const normalizedPath = Schema.String.annotate({
   message: "must be a non-empty string.",
@@ -49,7 +49,7 @@ export const copyToWorktreePathSchema = normalizedPath.pipe(
 const decodePath = Schema.decodeUnknownResult(copyToWorktreePathSchema);
 const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1();
 
-class InvalidCopyPathError extends Schema.TaggedError<InvalidCopyPathError>()(
+export class InvalidCopyPathError extends Schema.TaggedError<InvalidCopyPathError>()(
   "InvalidCopyPathError",
   {
     keyPath: Schema.String,
@@ -77,3 +77,17 @@ export function validateCopyToWorktreeEntry(
     });
   return result.success;
 }
+
+export const decodeCopyToWorktreeEntry = Effect.fnUntraced(function* (
+  value: string,
+  keyPath?: string,
+) {
+  keyPath ??= "workspace.copyToWorktree";
+  return yield* Schema.decodeUnknownEffect(copyToWorktreePathSchema)(
+    value,
+  ).pipe(
+    Effect.mapError(
+      (cause) => new InvalidCopyPathError({ keyPath, input: value, cause }),
+    ),
+  );
+});

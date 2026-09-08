@@ -1,3 +1,4 @@
+import { runApplicationPromise } from "../runtime/application.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -25,9 +26,7 @@ import {
   triageResult,
 } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
-
 const tempDirs: string[] = [];
-
 async function tempContext() {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-continue-plan-"));
   tempDirs.push(dir);
@@ -42,12 +41,10 @@ async function tempContext() {
     attempt: 1,
   });
 }
-
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-
 describe("planContinuation", () => {
   test("ignores review Markdown artifacts from earlier runs", async () => {
     const context = await tempContext();
@@ -75,9 +72,7 @@ describe("planContinuation", () => {
       path.join(context.runDir, "review-b-0.md"),
       "# Historical Review B\n\n## Verdict\napprove\n",
     );
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps.slice(0, 2)).toEqual([
       {
         type: "run",
@@ -93,21 +88,17 @@ describe("planContinuation", () => {
       },
     ]);
   });
-
   test("reruns only invalid latest Review B before readiness and publish gate", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context);
     await writeArtifact(context, reviewBRef(0), "");
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       { type: "run", phase: "review-b", pass: 0, reason: "artifact is empty" },
       { type: "write-readiness", reason: "workflow must recompute readiness" },
       { type: "publish-gate", reason: "publish gate must run after readiness" },
     ]);
   });
-
   test("treats non-proceed triage as terminal", async () => {
     const context = await tempContext();
     await writeArtifact(context, "issue", issueArtifact());
@@ -116,9 +107,7 @@ describe("planContinuation", () => {
       "triage",
       triageResult("needs-human-decision"),
     );
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
         type: "write-readiness",
@@ -131,13 +120,10 @@ describe("planContinuation", () => {
       },
     ]);
   });
-
   test("does not plan implementation for a valid refined plan that is not ready", async () => {
     const context = await tempContext();
     await writeReadyThroughPlan(context, "no");
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
         type: "write-readiness",
@@ -149,7 +135,6 @@ describe("planContinuation", () => {
       },
     ]);
   });
-
   test("continues from a missing refinement after an existing fix pass", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required");
@@ -158,9 +143,7 @@ describe("planContinuation", () => {
       fixLogRef(1),
       JSON.stringify(changeReport({ summary: "Fixed." })),
     );
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps[0]).toEqual({
       type: "run",
       phase: "refine-code",
@@ -168,7 +151,6 @@ describe("planContinuation", () => {
       reason: "artifact is missing",
     });
   });
-
   test("writes readiness and runs the gate when latest review cycle is approved", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required");
@@ -184,9 +166,7 @@ describe("planContinuation", () => {
     );
     await writeArtifact(context, reviewARef(1), JSON.stringify(reviewResult()));
     await writeArtifact(context, reviewBRef(1), JSON.stringify(reviewResult()));
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
         type: "write-readiness",
@@ -196,7 +176,6 @@ describe("planContinuation", () => {
       { type: "publish-gate", reason: "publish gate must run after readiness" },
     ]);
   });
-
   test("does not plan a fix for follow-up-only structured reviews", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(
@@ -204,9 +183,7 @@ describe("planContinuation", () => {
       "approve",
       reviewResultJson([finding("FU1", "follow-up")]),
     );
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
         type: "write-readiness",
@@ -215,7 +192,6 @@ describe("planContinuation", () => {
       { type: "publish-gate", reason: "publish gate must run after readiness" },
     ]);
   });
-
   test("plans readiness without fix work for external-blocker structured reviews", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(
@@ -223,9 +199,7 @@ describe("planContinuation", () => {
       "approve",
       reviewResultJson([finding("B1", "external-blocker")]),
     );
-
-    const steps = await planContinuation(context);
-
+    const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
         type: "write-readiness",
@@ -235,7 +209,6 @@ describe("planContinuation", () => {
       { type: "publish-gate", reason: "publish gate records non-publish" },
     ]);
   });
-
   test("continues a failed verification attempt into fix/refine/review when budget remains", async () => {
     const context = await tempContext();
     context.maxFixPasses = 2;
@@ -250,11 +223,11 @@ describe("planContinuation", () => {
       "verification",
       "# Verification\n\n## Exit Code\n1\n",
     );
-
-    const steps = await planContinuation(context, {
-      attemptOutcome: "failed-verification",
-    });
-
+    const steps = await runApplicationPromise(
+      planContinuation(context, {
+        attemptOutcome: "failed-verification",
+      }),
+    );
     expect(steps).toEqual([
       {
         type: "run",
@@ -290,7 +263,6 @@ describe("planContinuation", () => {
       },
     ]);
   });
-
   test("does not auto-repair command-unavailable verification failures", async () => {
     const context = await tempContext();
     context.maxFixPasses = 2;
@@ -300,11 +272,11 @@ describe("planContinuation", () => {
       "verification",
       "# Verification\n\n## Command\n`bun run typecheck`\n\n## Exit Code\n127\n\n## Stdout (tail)\n```\n\n```\n\n## Stderr (tail)\n```\n/bin/bash: tsc: command not found\n```\n",
     );
-
-    const steps = await planContinuation(context, {
-      attemptOutcome: "failed-verification",
-    });
-
+    const steps = await runApplicationPromise(
+      planContinuation(context, {
+        attemptOutcome: "failed-verification",
+      }),
+    );
     expect(steps).toEqual([
       {
         type: "noop",
@@ -314,7 +286,6 @@ describe("planContinuation", () => {
     ]);
   });
 });
-
 async function writeReadyThroughPlan(
   context: Awaited<ReturnType<typeof tempContext>>,
   ready: "yes" | "no",
@@ -332,7 +303,6 @@ async function writeReadyThroughPlan(
     implementationPlanResult(ready === "yes"),
   );
 }
-
 async function writeHappyPathThroughReviews(
   context: Awaited<ReturnType<typeof tempContext>>,
   reviewVerdict = "approve",
@@ -365,15 +335,12 @@ async function writeHappyPathThroughReviews(
   );
   await writeArtifact(context, reviewBRef(0), reviewResultJson(findings));
 }
-
 function issueArtifact(): string {
   return '# GitHub Issue #11\n\n<github_issue_relationships source="gh">\n  <blocking_status active_blockers="0" total_blockers="0" />\n</github_issue_relationships>\n';
 }
-
 function reviewResultJson(findings: ReviewFinding[]): string {
   return JSON.stringify(reviewResult(findings));
 }
-
 function finding(
   title: string,
   classification: ReviewConcernClassification,

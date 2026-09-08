@@ -1,22 +1,20 @@
 import { Presentation, Verification } from "../runtime/services.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { Effect, Layer } from "effect";
+
+import { Effect, FileSystem, Layer, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
 import {
   executeProcess,
   type InvalidProcessCommandError,
   type ProcessExecutionError,
 } from "../cli/process.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+
 import path from "node:path";
 import {
   verificationBeforeFixFullRef,
   verificationBeforeFixRef,
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
-import { writeArtifactPromise as writeArtifact } from "../workflow/artifacts-promise.ts";
+import { writeArtifact } from "../workflow/artifacts.ts";
 import { type VerificationDisplayContext } from "../presentation/presenter.ts";
 
 export const defaultAutorunVerifyCommand = "bun run typecheck";
@@ -24,56 +22,60 @@ export const defaultAutorunVerifyCommand = "bun run typecheck";
 const verificationOutputTailBytes = 4_000;
 export const defaultVerificationTimeoutMs = 600_000;
 
-export async function inferVerificationCommand(
-  cwd: string,
-  options: {
-    scripts?: readonly string[] | undefined;
-    allowMakefile?: boolean | undefined;
-  } = {},
-): Promise<string | undefined> {
-  const scripts = options.scripts ?? ["typecheck", "test"];
-  const packagePath = path.join(cwd, "package.json");
-  if (existsSync(packagePath)) {
-    try {
-      const parsed = JSON.parse(await readFile(packagePath, "utf8")) as {
-        scripts?: Record<string, unknown>;
-      };
-      const script = scripts.find(
-        (candidate) =>
-          typeof parsed.scripts?.[candidate] === "string" &&
-          parsed.scripts[candidate].trim().length > 0,
-      );
-      if (script) return `${packageRunner(cwd)} ${script}`;
-    } catch {
-      // Continue to other repository-native inference sources.
-    }
-  }
-  if (options.allowMakefile !== false) {
-    const makefilePath = path.join(cwd, "Makefile");
-    if (
-      existsSync(makefilePath) &&
-      /^test\s*:/m.test(await readFile(makefilePath, "utf8"))
-    )
-      return "make test";
-  }
-  return undefined;
-}
+const PackageScripts = Schema.Struct({
+  scripts: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+});
+const decodePackageScripts = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(PackageScripts),
+);
 
-function packageRunner(cwd: string): string {
-  if (
-    existsSync(path.join(cwd, "bun.lock")) ||
-    existsSync(path.join(cwd, "bun.lockb"))
-  )
-    return "bun run";
-  if (existsSync(path.join(cwd, "pnpm-lock.yaml"))) return "pnpm run";
-  if (existsSync(path.join(cwd, "yarn.lock"))) return "yarn";
-  if (
-    existsSync(path.join(cwd, "package-lock.json")) ||
-    existsSync(path.join(cwd, "npm-shrinkwrap.json"))
-  )
-    return "npm run";
+export const inferVerificationCommand = Effect.fn("inferVerificationCommand")(
+  function* (
+    cwd: string,
+    options: {
+      scripts?: readonly string[] | undefined;
+      allowMakefile?: boolean | undefined;
+    } = {},
+  ) {
+    const fs = yield* FileSystem.FileSystem;
+    const scripts = options.scripts ?? ["typecheck", "test"];
+    const parsed = yield* fs
+      .readFileString(path.join(cwd, "package.json"))
+      .pipe(
+        Effect.flatMap(decodePackageScripts),
+        Effect.catch(() => Effect.succeed(undefined)),
+      );
+    const script = scripts.find((candidate) => {
+      const value = parsed?.scripts?.[candidate];
+      return typeof value === "string" && value.trim().length > 0;
+    });
+    if (script) return `${yield* packageRunner(cwd)} ${script}`;
+    if (options.allowMakefile !== false) {
+      const makefile = path.join(cwd, "Makefile");
+      if (
+        (yield* fs.exists(makefile)) &&
+        /^test\s*:/m.test(yield* fs.readFileString(makefile))
+      )
+        return "make test";
+    }
+    return undefined;
+  },
+);
+
+const packageRunner = Effect.fnUntraced(function* (cwd: string) {
+  const fs = yield* FileSystem.FileSystem;
+  for (const [lockfile, runner] of [
+    ["bun.lock", "bun run"],
+    ["bun.lockb", "bun run"],
+    ["pnpm-lock.yaml", "pnpm run"],
+    ["yarn.lock", "yarn"],
+    ["package-lock.json", "npm run"],
+    ["npm-shrinkwrap.json", "npm run"],
+  ] as const) {
+    if (yield* fs.exists(path.join(cwd, lockfile))) return runner;
+  }
   return "bun run";
-}
+});
 
 export interface VerificationResult {
   ok: boolean;
@@ -192,14 +194,6 @@ export const runVerification = Effect.fn("runVerification")(function* (
   return result;
 });
 
-// Promise compatibility ends here; migrated callers compose runVerification.
-export function runVerificationPromise(
-  options: VerificationOptions,
-  application?: ApplicationExecution,
-): Promise<VerificationResult> {
-  return runApplicationPromise(runVerification(options), application);
-}
-
 export function formatVerificationArtifact(result: VerificationResult): string {
   return formatVerificationOutput(result, tailText, " (tail)");
 }
@@ -238,44 +232,40 @@ ${formatOutput(result.stderr)}
 `;
 }
 
-export async function writeVerificationArtifact(
-  context: WorkflowContext,
-  result: VerificationResult,
-  application?: ApplicationExecution,
-): Promise<void> {
-  await writeArtifact(
-    context,
-    "verification",
-    formatVerificationArtifact(result),
-    application,
-  );
-  await writeArtifact(
-    context,
-    "verificationFull",
-    formatCompleteVerificationArtifact(result),
-    application,
-  );
-}
+export const writeVerificationArtifact = Effect.fn("writeVerificationArtifact")(
+  function* (context: WorkflowContext, result: VerificationResult) {
+    yield* writeArtifact(
+      context,
+      "verification",
+      formatVerificationArtifact(result),
+    );
+    yield* writeArtifact(
+      context,
+      "verificationFull",
+      formatCompleteVerificationArtifact(result),
+    );
+  },
+  Effect.uninterruptible,
+);
 
-export async function writeVerificationBeforeFixArtifact(
+export const writeVerificationBeforeFixArtifact = Effect.fn(
+  "writeVerificationBeforeFixArtifact",
+)(function* (
   context: WorkflowContext,
   pass: number,
   result: VerificationResult,
-  application?: ApplicationExecution,
-): Promise<void> {
-  await writeArtifact(
+) {
+  yield* writeArtifact(
     context,
     verificationBeforeFixRef(pass),
     formatVerificationArtifact(result),
-    application,
   );
-  await writeArtifact(
+  yield* writeArtifact(
     context,
     verificationBeforeFixFullRef(pass),
     formatCompleteVerificationArtifact(result),
-    application,
   );
-}
+}, Effect.uninterruptible);
 
 export function classifyVerificationFailure(
   result: VerificationResult,

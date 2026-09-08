@@ -8,7 +8,7 @@ import {
   attemptStoreLayer,
   formatAttemptMetadata,
 } from "../autorun/attempts.ts";
-import { writeVerificationArtifact } from "../autorun/verification.ts";
+import { writeVerificationArtifactPromise as writeVerificationArtifact } from "../autorun/verification-promise.ts";
 import { artifactFilename } from "../workflow/artifact-catalog.ts";
 import { describe, expect, test } from "bun:test";
 import { Cause, Effect, Exit, PlatformError } from "effect";

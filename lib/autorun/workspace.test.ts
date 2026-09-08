@@ -1,5 +1,8 @@
-import { Cause, Effect, Exit } from "effect";
-import { applicationLayer } from "../runtime/application.ts";
+import { rejects as assertRejects } from "node:assert/strict";
+import { Workspace } from "./workspace-service.ts";
+import * as nativeWorkspace from "./workspace.ts";
+import { Cause, Deferred, Effect, Exit, Fiber, FileSystem } from "effect";
+import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { Presentation } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -18,28 +21,31 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  assertWorkspacePathSafe,
-  assertPinnedPrReviewWorkspace,
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
-  listManagedWorkspaces,
-  listWorkspaces,
-  prepareCloneWorkspace,
-  preparePrReviewWorkspace,
-  preparePrRevisionWorkspace,
-  refreshCopyToWorktree,
-  removeWorkspace,
-  resolveCloneRemote,
-  resolvePrReviewCloneRemote,
-  runRemoveCommand,
   runLifecycleHook,
-  runLifecycleHookPromise,
   sanitizeWorkspaceSegment,
   workspacePathForIssue,
   workspacePathForPrRevision,
   workspaceStateFile,
-  type ProcessRunner,
 } from "./workspace.ts";
+import {
+  runLifecycleHookPromise,
+  type ProcessRunner,
+} from "./workspace-promise.ts";
+import {
+  assertWorkspacePathSafePromise as assertWorkspacePathSafe,
+  listManagedWorkspacesPromise as listManagedWorkspaces,
+  listWorkspacesPromise as listWorkspaces,
+  prepareCloneWorkspacePromise as prepareCloneWorkspace,
+  preparePrReviewWorkspacePromise as preparePrReviewWorkspace,
+  preparePrRevisionWorkspacePromise as preparePrRevisionWorkspace,
+  refreshCopyToWorktreePromise as refreshCopyToWorktree,
+  removeWorkspacePromise as removeWorkspace,
+  resolveCloneRemotePromise as resolveCloneRemote,
+  resolvePrReviewCloneRemotePromise as resolvePrReviewCloneRemote,
+  runRemoveCommandPromise as runRemoveCommand,
+} from "./workspace-promise.ts";
 import {
   runProcessPromise,
   runProcessOrThrowPromise,
@@ -47,7 +53,6 @@ import {
 import { noopAsync } from "../utils/async.ts";
 import {} from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
-
 const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({
   stdout,
   stderr: "",
@@ -58,7 +63,6 @@ const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({
   stderr,
   exitCode: 1,
 });
-
 describe("managed clone workspaces", () => {
   test("computes sanitized issue and PR revision workspace paths inside the configured root", () => {
     const workspacePath = workspacePathForIssue({
@@ -78,17 +82,17 @@ describe("managed clone workspaces", () => {
     ).toBe(path.resolve("/tmp/roark-root/owner-repo.name/pr-12"));
     expect(sanitizeWorkspaceSegment("../Bad Value!")).toBe("bad-value");
   });
-
   test("rejects workspace path escapes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-root-"));
-    expect(
+    await assertRejects(
       assertWorkspacePathSafe({
         root,
         workspacePath: path.join(root, "../escape"),
       }),
-    ).rejects.toThrow("must stay inside");
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("must stay inside"),
+    );
   });
-
   test("resolves remote names and preflights the resulting URL", async () => {
     await noopAsync();
     const calls: string[][] = [];
@@ -101,7 +105,6 @@ describe("managed clone workspaces", () => {
         return ok("abc\tHEAD\n");
       return fail();
     };
-
     expect(
       resolveCloneRemote({ cwd: "/repo", cloneRemote: "upstream", runner }),
     ).resolves.toEqual({
@@ -113,7 +116,6 @@ describe("managed clone workspaces", () => {
       ["git", "ls-remote", "git@github.com:owner/repo.git", "HEAD"],
     ]);
   });
-
   test("resolves a PR review clone from the requested repository instead of the control checkout", async () => {
     await noopAsync();
     const calls: string[][] = [];
@@ -125,7 +127,6 @@ describe("managed clone workspaces", () => {
         ? ok("abc\tHEAD\n")
         : fail(`unexpected command: ${args.join(" ")}`);
     };
-
     expect(
       resolvePrReviewCloneRemote({
         cwd: "/unrelated-control-checkout",
@@ -141,7 +142,6 @@ describe("managed clone workspaces", () => {
       ["git", "ls-remote", "https://github.com/target/repo", "HEAD"],
     ]);
   });
-
   test("existing legacy lock directory does not block workspace preparation", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-stale-lock-"),
@@ -164,7 +164,6 @@ describe("managed clone workspaces", () => {
       }
       return ok();
     };
-
     const prepared = await prepareCloneWorkspace({
       controlCwd: root,
       repo: "owner/repo",
@@ -179,12 +178,10 @@ describe("managed clone workspaces", () => {
       mode: "auto",
       runner,
     });
-
     expect(prepared.path).toBe(workspacePath);
     expect((await lstat(`${workspacePath}.lock`)).isDirectory()).toBe(true);
     await rm(root, { recursive: true, force: true });
   });
-
   test("reused issue clone workspace does not merge or stash a moved origin base", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-no-base-sync-"),
@@ -214,7 +211,6 @@ describe("managed clone workspaces", () => {
         return fail(`${args[1] ?? "git command"} should not run`);
       return ok();
     };
-
     const prepared = await prepareCloneWorkspace({
       controlCwd: root,
       repo: "owner/repo",
@@ -229,7 +225,6 @@ describe("managed clone workspaces", () => {
       mode: "continue",
       runner,
     });
-
     expect(prepared.path).toBe(workspacePath);
     expect(
       calls.some(
@@ -240,7 +235,6 @@ describe("managed clone workspaces", () => {
     ).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("legacy lock sidecars are not listed and are removed with workspaces", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-legacy-lock-"),
@@ -260,25 +254,21 @@ describe("managed clone workspaces", () => {
     await mkdir(prWorkspacePath, { recursive: true });
     await mkdir(`${workspacePath}.lock`, { recursive: true });
     await mkdir(`${prWorkspacePath}.lock`, { recursive: true });
-
     expect(
       await listWorkspaces({
         workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
         repo: "owner/repo",
       }),
     ).toEqual([workspacePath, prWorkspacePath].toSorted());
-
     await removeWorkspace({
       workspacePath,
       force: true,
       hooks: defaultLifecycleHooks,
     });
-
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     expect(Bun.file(`${workspacePath}.lock`).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("remove resolves PR revision workspaces", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-pr-workspace-remove-"),
@@ -290,7 +280,6 @@ describe("managed clone workspaces", () => {
       prNumber: 98,
     });
     await mkdir(workspacePath, { recursive: true });
-
     await runRemoveCommand({
       command: "remove",
       targets: [{ kind: "pr", number: 98 }],
@@ -300,11 +289,9 @@ describe("managed clone workspaces", () => {
       workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
       hooks: defaultLifecycleHooks,
     });
-
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("managed workspace discovery preserves target identity for interactive selection", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-select-remove-"),
@@ -322,7 +309,6 @@ describe("managed clone workspaces", () => {
     });
     await mkdir(issuePath, { recursive: true });
     await mkdir(prPath, { recursive: true });
-
     expect(
       await listManagedWorkspaces({
         workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
@@ -335,7 +321,6 @@ describe("managed clone workspaces", () => {
     ]);
     await rm(root, { recursive: true, force: true });
   });
-
   test("batch removal preflights dirty workspaces before deleting any selection", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-remove-preflight-"),
@@ -356,8 +341,7 @@ describe("managed clone workspaces", () => {
     await runProcessOrThrowPromise(["git", "init"], { cwd: cleanPath });
     await runProcessOrThrowPromise(["git", "init"], { cwd: dirtyPath });
     await writeFile(path.join(dirtyPath, "recoverable.txt"), "keep me\n");
-
-    expect(
+    await assertRejects(
       runRemoveCommand({
         command: "remove",
         targets: [
@@ -370,13 +354,14 @@ describe("managed clone workspaces", () => {
         workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
         hooks: defaultLifecycleHooks,
       }),
-    ).rejects.toThrow("Refusing to remove dirty workspace");
-
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("Refusing to remove dirty workspace"),
+    );
     expect(lstat(cleanPath)).resolves.toBeDefined();
     expect(lstat(dirtyPath)).resolves.toBeDefined();
     await rm(root, { recursive: true, force: true });
   });
-
   test("direct removal fails clearly when a managed workspace does not exist", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-workspace-remove-missing-"),
@@ -387,8 +372,7 @@ describe("managed clone workspaces", () => {
       repo: "owner/repo",
       issueNumber: 404,
     });
-
-    expect(
+    await assertRejects(
       runRemoveCommand({
         command: "remove",
         targets: [{ kind: "issue", number: 404 }],
@@ -398,10 +382,12 @@ describe("managed clone workspaces", () => {
         workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
         hooks: defaultLifecycleHooks,
       }),
-    ).rejects.toThrow(`Managed workspace not found:\n${missingPath}`);
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(`Managed workspace not found:\n${missingPath}`),
+    );
     await rm(root, { recursive: true, force: true });
   });
-
   test("fatal afterCreate hook poisons a fresh workspace", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-poison-"));
     const workspaceRoot = path.join(root, "managed");
@@ -426,8 +412,7 @@ describe("managed clone workspaces", () => {
       if (args[0] === "sh") return fail("install failed");
       return ok(options?.cwd ?? "");
     };
-
-    expect(
+    await assertRejects(
       prepareCloneWorkspace({
         controlCwd: root,
         repo: "owner/repo",
@@ -442,16 +427,20 @@ describe("managed clone workspaces", () => {
         mode: "auto",
         runner,
       }),
-    ).rejects.toThrow("afterCreate hook failed");
-
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("afterCreate hook failed"),
+    );
     const state = JSON.parse(
       await readFile(path.join(workspacePath, workspaceStateFile), "utf8"),
-    ) as { hook: string; stderrTail: string };
+    ) as {
+      hook: string;
+      stderrTail: string;
+    };
     expect(state.hook).toBe("afterCreate");
     expect(state.stderrTail).toContain("install failed");
     await rm(root, { recursive: true, force: true });
   });
-
   test("does not poison a new review workspace when the PR head changes during setup", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-race-"));
     const workspaceRoot = path.join(root, "managed");
@@ -481,8 +470,7 @@ describe("managed clone workspaces", () => {
       if (args[0] === "git" && args[1] === "rev-parse") return ok("new-head\n");
       return fail(`unexpected command: ${args.join(" ")}`);
     };
-
-    expect(
+    await assertRejects(
       preparePrReviewWorkspace({
         controlCwd: root,
         repo: "owner/repo",
@@ -494,14 +482,17 @@ describe("managed clone workspaces", () => {
         hooks: defaultLifecycleHooks,
         runner,
       }),
-    ).rejects.toThrow("changed while its review workspace was prepared");
-
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          "changed while its review workspace was prepared",
+        ),
+    );
     expect(
       Bun.file(path.join(workspacePath, workspaceStateFile)).exists(),
     ).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("reused PR revision workspace refuses to reset unpushed local commits", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-pr-workspace-unpushed-"),
@@ -530,7 +521,6 @@ describe("managed clone workspaces", () => {
         return fail("checkout should not run");
       return ok();
     };
-
     let error: unknown;
     try {
       await preparePrRevisionWorkspace({
@@ -545,7 +535,6 @@ describe("managed clone workspaces", () => {
     } catch (caught) {
       error = caught;
     }
-
     expect(error).toBeInstanceOf(Error);
     expect(error instanceof Error ? error.message : String(error)).toContain(
       "unpushed local commit",
@@ -555,7 +544,6 @@ describe("managed clone workspaces", () => {
     ).toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("PR revision workspace preparation creates and releases a lock", async () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-lock-",
@@ -566,13 +554,11 @@ describe("managed clone workspaces", () => {
     try {
       prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
       const owner = await readWorkspaceLockOwner(fixture.lockDir);
-
       expect((await lstat(fixture.lockDir)).isDirectory()).toBe(true);
       expect(owner.pid).toBe(process.pid);
       expect(typeof owner.token).toBe("string");
       expect(owner.token).not.toBe("");
       expect(Number.isNaN(Date.parse(String(owner.createdAt)))).toBe(false);
-
       await prepared.releaseLock();
       prepared = undefined;
       expect(await Bun.file(fixture.lockDir).exists()).toBe(false);
@@ -581,7 +567,6 @@ describe("managed clone workspaces", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("PR revision workspace preparation refuses an active lock", async () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-active-lock-",
@@ -591,7 +576,6 @@ describe("managed clone workspaces", () => {
       | undefined;
     try {
       prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
-
       let error: unknown;
       try {
         await preparePrRevisionWorkspace(fixture.prepareInput);
@@ -608,7 +592,6 @@ describe("managed clone workspaces", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("PR revision workspace preparation replaces stale locks", async () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-stale-lock-",
@@ -630,10 +613,8 @@ describe("managed clone workspaces", () => {
     try {
       prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
       const owner = await readWorkspaceLockOwner(fixture.lockDir);
-
       expect(owner.token).not.toBe("stale-token");
       expect(owner.pid).toBe(process.pid);
-
       await prepared.releaseLock();
       prepared = undefined;
       expect(await Bun.file(fixture.lockDir).exists()).toBe(false);
@@ -642,7 +623,6 @@ describe("managed clone workspaces", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("PR revision workspace preparation releases its lock on failure", async () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-failed-lock-",
@@ -655,7 +635,6 @@ describe("managed clone workspaces", () => {
         return fail("remote unavailable");
       return fail("unexpected command");
     };
-
     try {
       let error: unknown;
       try {
@@ -672,7 +651,6 @@ describe("managed clone workspaces", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("copies ignored host paths recursively, dereferences symlinks, preserves modes, and removes stale destinations", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-copy-worktree-"));
     const control = path.join(root, "control");
@@ -705,7 +683,6 @@ describe("managed clone workspaces", () => {
       "../real-dir",
       path.join(control, ".secrets", "env", "linkdir"),
     );
-
     await initGitRepo(worktree, ".secrets/env\n");
     await mkdir(path.join(worktree, ".secrets", "env"), { recursive: true });
     await writeFile(
@@ -713,13 +690,11 @@ describe("managed clone workspaces", () => {
       "stale\n",
       "utf8",
     );
-
     await refreshCopyToWorktree({
       controlCwd: control,
       worktreePath: worktree,
       copyToWorktree: [".secrets/env"],
     });
-
     expect(
       await readFile(
         path.join(worktree, ".secrets", "env", "local.env"),
@@ -752,7 +727,6 @@ describe("managed clone workspaces", () => {
     ).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("copyToWorktree rejects symlink destination parents before removing or copying", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-copy-symlink-parent-"),
@@ -774,15 +748,15 @@ describe("managed clone workspaces", () => {
       "utf8",
     );
     await symlink(outside, path.join(worktree, ".secrets"));
-
-    expect(
+    await assertRejects(
       refreshCopyToWorktree({
         controlCwd: control,
         worktreePath: worktree,
         copyToWorktree: [".secrets/env"],
       }),
-    ).rejects.toThrow("destination parent");
-
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("destination parent"),
+    );
     expect(await readFile(path.join(outside, "env", "stale.txt"), "utf8")).toBe(
       "outside stale\n",
     );
@@ -791,7 +765,6 @@ describe("managed clone workspaces", () => {
     ).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
-
   test("copyToWorktree fails before writing when a source is missing or destination is not ignored", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-copy-preflight-"));
     const control = path.join(root, "control");
@@ -799,33 +772,36 @@ describe("managed clone workspaces", () => {
     await mkdir(control, { recursive: true });
     await writeFile(path.join(control, "ignored"), "copy me\n", "utf8");
     await initGitRepo(worktree, "ignored\nmissing\n");
-
-    expect(
+    await assertRejects(
       refreshCopyToWorktree({
         controlCwd: control,
         worktreePath: worktree,
         copyToWorktree: ["ignored", "missing"],
       }),
-    ).rejects.toThrow("source 'missing' is missing");
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("source 'missing' is missing"),
+    );
     expect(Bun.file(path.join(worktree, "ignored")).exists()).resolves.toBe(
       false,
     );
-
     await writeFile(path.join(worktree, "ignored"), "stale\n", "utf8");
     await initGitRepo(worktree, "");
-    expect(
+    await assertRejects(
       refreshCopyToWorktree({
         controlCwd: control,
         worktreePath: worktree,
         copyToWorktree: ["ignored"],
       }),
-    ).rejects.toThrow("destination must be ignored");
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("destination must be ignored"),
+    );
     expect(await readFile(path.join(worktree, "ignored"), "utf8")).toBe(
       "stale\n",
     );
     await rm(root, { recursive: true, force: true });
   });
-
   test("copyToWorktree fails when copied content is visible to Git after copy", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-copy-status-"));
     const control = path.join(root, "control");
@@ -839,18 +815,18 @@ describe("managed clone workspaces", () => {
       if (args[1] === "status") return ok("?? visible\n");
       return ok();
     };
-
-    expect(
+    await assertRejects(
       refreshCopyToWorktree({
         controlCwd: control,
         worktreePath: worktree,
         copyToWorktree: ["visible"],
         runner,
       }),
-    ).rejects.toThrow("visible to Git");
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("visible to Git"),
+    );
     await rm(root, { recursive: true, force: true });
   });
-
   test("copies configured paths before afterCreate hooks run", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-copy-after-create-"));
     const control = path.join(root, "control");
@@ -883,7 +859,6 @@ describe("managed clone workspaces", () => {
           : fail("missing local.env");
       return ok();
     };
-
     await prepareCloneWorkspace({
       controlCwd: control,
       repo: "owner/repo",
@@ -905,7 +880,6 @@ describe("managed clone workspaces", () => {
     expect(calls.some((args) => args[0] === "sh")).toBe(true);
     await rm(root, { recursive: true, force: true });
   });
-
   test("non-fatal afterRun hook warns through sanitized redirected output", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-hook-"));
     await writeFile(path.join(root, "file"), "ok");
@@ -939,7 +913,6 @@ describe("managed clone workspaces", () => {
       },
     );
   });
-
   test("pins a PR pull ref, repairs its origin, and compares merge-base to head without mutation", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-pr-review-pinned-"));
     const source = path.join(root, "source");
@@ -996,7 +969,6 @@ describe("managed clone workspaces", () => {
       ["git", "remote", "add", "origin", `file://${remote}`],
       { cwd: source },
     );
-
     const calls: string[][] = [];
     const prepared = await preparePrReviewWorkspace({
       controlCwd: source,
@@ -1017,7 +989,6 @@ describe("managed clone workspaces", () => {
         return runProcessPromise(args, options);
       },
     });
-
     expect(prepared.comparison.mergeBaseOid).toBe(initial);
     expect(prepared.comparison.changedFiles).toEqual(["feature.txt"]);
     expect(prepared.comparison.inspectionCommand).toBe(
@@ -1043,45 +1014,54 @@ describe("managed clone workspaces", () => {
       ),
     ).toBe(false);
     await prepared.releaseLock();
-
     await runProcessOrThrowPromise(
       ["git", "remote", "set-url", "origin", `file://${source}`],
       { cwd: prepared.path },
     );
-    const reused = await preparePrReviewWorkspace({
-      controlCwd: source,
-      repo: "owner/repo",
-      repositoryUrl: `file://${remote}`,
-      prNumber: 12,
-      baseRefName: "main",
-      baseRefOid: baseOid,
-      headRefOid: headOid,
-      workspace: {
-        ...defaultWorkspaceConfig,
-        root: path.join(root, "managed"),
-      },
-      hooks: defaultLifecycleHooks,
-    });
-    expect(
-      (
-        await runProcessOrThrowPromise(["git", "remote", "get-url", "origin"], {
-          cwd: reused.path,
-        })
-      ).trim(),
-    ).toBe(`file://${remote}`);
-    await writeFile(
-      path.join(reused.path, "unexpected.txt"),
-      "mutation\n",
-      "utf8",
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const workspaces = yield* Workspace;
+        const fs = yield* FileSystem.FileSystem;
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const reused = yield* workspaces.preparePrReview({
+              controlCwd: source,
+              repo: "owner/repo",
+              repositoryUrl: `file://${remote}`,
+              prNumber: 12,
+              baseRefName: "main",
+              baseRefOid: baseOid,
+              headRefOid: headOid,
+              workspace: {
+                ...defaultWorkspaceConfig,
+                root: path.join(root, "managed"),
+              },
+              hooks: defaultLifecycleHooks,
+            });
+            expect(yield* fs.exists(`${reused.path}.lock`)).toBe(true);
+            yield* fs.writeFileString(
+              path.join(reused.path, "unexpected.txt"),
+              "mutation\n",
+            );
+            const checked = yield* Effect.exit(
+              workspaces.assertPinnedReview({ cwd: reused.path, headOid }),
+            );
+            expect(Exit.isFailure(checked)).toBe(true);
+            if (Exit.isFailure(checked)) {
+              expect(Cause.hasFails(checked.cause)).toBe(true);
+              expect(Cause.pretty(checked.cause)).toContain(
+                "changed during inspection",
+              );
+            }
+          }),
+        );
+        // The application Layer is still alive: only the review scope has closed.
+        expect(yield* fs.exists(`${prepared.path}.lock`)).toBe(false);
+      }).pipe(Effect.provide(applicationLayer)),
     );
-    expect(
-      assertPinnedPrReviewWorkspace({ cwd: reused.path, headOid }),
-    ).rejects.toThrow("changed during inspection");
-    await reused.releaseLock();
     await rm(root, { recursive: true, force: true });
-  }, 15_000);
+  }, 15000);
 });
-
 async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
   root: string;
   lockDir: string;
@@ -1109,7 +1089,6 @@ async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
     if (args[0] === "git" && args[1] === "checkout") return ok();
     return fail(`unexpected command: ${args.join(" ")}`);
   };
-
   return {
     root,
     lockDir: `${workspacePath}.lock`,
@@ -1124,15 +1103,19 @@ async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
     },
   };
 }
-
-async function readWorkspaceLockOwner(
-  lockDir: string,
-): Promise<{ token?: unknown; pid?: unknown; createdAt?: unknown }> {
+async function readWorkspaceLockOwner(lockDir: string): Promise<{
+  token?: unknown;
+  pid?: unknown;
+  createdAt?: unknown;
+}> {
   return JSON.parse(
     await readFile(path.join(lockDir, "owner.json"), "utf8"),
-  ) as { token?: unknown; pid?: unknown; createdAt?: unknown };
+  ) as {
+    token?: unknown;
+    pid?: unknown;
+    createdAt?: unknown;
+  };
 }
-
 function findDeadPid(): number {
   for (const pid of [2147483647, 2147483646, 999999, 424242]) {
     try {
@@ -1149,7 +1132,6 @@ function findDeadPid(): number {
   }
   throw new Error("Unable to find a dead PID for stale lock test.");
 }
-
 async function initGitRepo(cwd: string, gitignore: string): Promise<void> {
   await mkdir(cwd, { recursive: true });
   await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
@@ -1167,7 +1149,6 @@ async function initGitRepo(cwd: string, gitignore: string): Promise<void> {
   });
   await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], { cwd });
 }
-
 for (const name of ["beforeRun", "afterRun"] as const) {
   test(`${name} treats a descendant timeout as failure after the shell exits zero`, async () => {
     let output = "";
@@ -1204,3 +1185,118 @@ for (const name of ["beforeRun", "afterRun"] as const) {
     }
   });
 }
+test("interrupted workspace initialization records poison before returning", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "roark-init-interruption-"));
+  const workspacePath = workspacePathForIssue({
+    root: path.join(root, "managed"),
+    repo: "owner/repo",
+    issueNumber: 1,
+  });
+  try {
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const started = yield* Deferred.make<undefined>();
+        const runner: nativeWorkspace.ProcessRunner = Effect.fnUntraced(
+          function* (args) {
+            if (args[0] === "sh") {
+              yield* Deferred.succeed(started, undefined);
+              return yield* Effect.never;
+            }
+            if (args[1] === "clone")
+              yield* fs
+                .makeDirectory(path.join(workspacePath, ".git"), {
+                  recursive: true,
+                })
+                .pipe(Effect.orDie);
+            return {
+              stdout: args[1] === "remote" ? "local.git" : "",
+              stderr: "",
+              exitCode: args[1] === "show-ref" ? 1 : 0,
+            };
+          },
+        );
+        const input = {
+          controlCwd: root,
+          repo: "owner/repo",
+          issueNumber: 1,
+          plan: {
+            issueNumber: 1,
+            branchName: "roark/issue-1",
+            baseBranch: "main",
+          },
+          workspace: {
+            ...defaultWorkspaceConfig,
+            root: path.join(root, "managed"),
+          },
+          hooks: { ...defaultLifecycleHooks, afterCreate: "setup" },
+          mode: "auto" as const,
+          runner,
+        };
+        const initializing = yield* Effect.forkScoped(
+          nativeWorkspace.prepareCloneWorkspace(input),
+        );
+        yield* Deferred.await(started);
+        yield* Fiber.interrupt(initializing);
+        expect(
+          yield* fs.readFileString(
+            path.join(workspacePath, workspaceStateFile),
+          ),
+        ).toContain("interrupted");
+        const reused = yield* Effect.exit(
+          nativeWorkspace.prepareCloneWorkspace(input),
+        );
+        expect(Exit.isFailure(reused)).toBe(true);
+        if (Exit.isFailure(reused)) {
+          expect(Cause.hasFails(reused.cause)).toBe(true);
+          expect(Cause.pretty(reused.cause)).toContain("marked poisoned");
+        }
+      }).pipe(Effect.scoped, Effect.provide(applicationLayer)),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy workspace ownership lasts through its caller's finalizer", async () => {
+  const fixture = await createPrRevisionWorkspaceFixture(
+    "roark-legacy-workspace-owner-",
+  );
+  let prepared:
+    | Awaited<ReturnType<typeof preparePrRevisionWorkspace>>
+    | undefined;
+  try {
+    await Effect.runPromise(
+      fromLegacyPromise(async (application) => {
+        prepared = await preparePrRevisionWorkspace(
+          fixture.prepareInput,
+          application,
+        );
+      }).pipe(
+        Effect.onExit(() =>
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            expect(yield* fs.exists(fixture.lockDir)).toBe(true);
+          }).pipe(
+            Effect.ensuring(
+              Effect.suspend(() => {
+                const workspace = prepared;
+                return workspace
+                  ? Effect.promise(() => workspace.releaseLock())
+                  : Effect.void;
+              }),
+            ),
+          ),
+        ),
+        Effect.provide(applicationLayer),
+      ),
+    );
+    await assertRejects(
+      stat(fixture.lockDir),
+      (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ENOENT",
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});

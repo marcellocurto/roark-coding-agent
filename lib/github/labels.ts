@@ -194,3 +194,47 @@ function normalizeLabelName(label: string): string {
 function normalizeColor(color: string): string {
   return color.trim().replace(/^#/, "");
 }
+
+export const addIssueLabel = Effect.fn("GitHub.addIssueLabel")(
+  function* (input: {
+    cwd: string;
+    repo?: string | undefined;
+    issueNumber: number;
+    label: string;
+  }) {
+    yield* runProcessOrThrow(
+      [
+        "gh",
+        "issue",
+        "edit",
+        String(input.issueNumber),
+        "--add-label",
+        input.label,
+        ...(input.repo ? ["--repo", input.repo] : []),
+      ],
+      { cwd: input.cwd, label: "gh issue edit --add-label" },
+    );
+  },
+);
+
+export const removeIssueLabel = Effect.fn("GitHub.removeIssueLabel")(
+  function* (input: {
+    cwd: string;
+    repo?: string | undefined;
+    issueNumber: number;
+    label: string;
+  }) {
+    yield* runProcessOrThrow(
+      [
+        "gh",
+        "issue",
+        "edit",
+        String(input.issueNumber),
+        "--remove-label",
+        input.label,
+        ...(input.repo ? ["--repo", input.repo] : []),
+      ],
+      { cwd: input.cwd, label: "gh issue edit --remove-label" },
+    );
+  },
+);

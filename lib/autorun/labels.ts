@@ -1,38 +1,28 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import {
-  type EnsureGitHubLabelsResult,
-  type RequiredGitHubLabel,
-} from "../github/labels.ts";
-import { ensureGitHubLabelsPromise as ensureGitHubLabels } from "../github/promise.ts";
-
+import { GitHub } from "../github/service.ts";
+import { Effect } from "effect";
+import { type RequiredGitHubLabel } from "../github/labels.ts";
 export interface AutorunLabelContractInput {
   readyLabel?: string | undefined;
   inProgressLabel: string;
   failureLabel: string;
   successLabel: string;
 }
-
 export type EnsureAutorunLabelContractOptions = AutorunLabelContractInput & {
   cwd: string;
   repo?: string | undefined;
   dryRun?: boolean | undefined;
 };
-
 export const autorunBlockedLabel = "blocked";
 export const autorunNeedsHumanLabel = "needs-human";
 export const autorunNeedsTriageLabel = "needs-triage";
 export const autorunTriageRejectedLabel = "triage-rejected";
 export const autorunWontFixLabel = "wont-fix";
-
 export interface AutorunWorkflowLabelInput {
   readyLabel?: string | undefined;
   inProgressLabel: string;
   failureLabel: string;
   successLabel: string;
 }
-
 export function buildRequiredAutorunLabels(
   input: AutorunLabelContractInput,
 ): RequiredGitHubLabel[] {
@@ -89,7 +79,6 @@ export function buildRequiredAutorunLabels(
     },
   ]);
 }
-
 export function autorunWorkflowLabels(
   input: AutorunWorkflowLabelInput,
 ): string[] {
@@ -105,9 +94,12 @@ export function autorunWorkflowLabels(
     autorunWontFixLabel,
   ]);
 }
-
 export function labelsToRemoveForAutorunTransition(input: {
-  issueLabels?: readonly { name: string }[] | undefined;
+  issueLabels?:
+    | readonly {
+        name: string;
+      }[]
+    | undefined;
   workflow: AutorunWorkflowLabelInput;
   nextLabel: string;
   knownPresent?: readonly string[] | undefined;
@@ -124,30 +116,16 @@ export function labelsToRemoveForAutorunTransition(input: {
     (label) => normalizeLabel(label) !== normalizeLabel(input.nextLabel),
   );
 }
-
-export async function ensureAutorunLabelContract(
-  options: EnsureAutorunLabelContractOptions,
-  application?: ApplicationExecution,
-): Promise<EnsureGitHubLabelsResult> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        ensureAutorunLabelContract(options, application),
-      ),
-      application,
-    );
-
-  return ensureGitHubLabels(
-    {
-      cwd: options.cwd,
-      repo: options.repo,
-      dryRun: options.dryRun,
-      labels: buildRequiredAutorunLabels(options),
-    },
-    application,
-  );
-}
-
+export const ensureAutorunLabelContract = Effect.fn(
+  "ensureAutorunLabelContract",
+)(function* (options: EnsureAutorunLabelContractOptions) {
+  return yield* (yield* GitHub).ensureGitHubLabels({
+    cwd: options.cwd,
+    repo: options.repo,
+    dryRun: options.dryRun,
+    labels: buildRequiredAutorunLabels(options),
+  });
+});
 export function mergeLifecycleSkipLabels(input: {
   skipLabels: readonly string[];
   inProgressLabel: string;
@@ -166,7 +144,6 @@ export function mergeLifecycleSkipLabels(input: {
     autorunWontFixLabel,
   ]);
 }
-
 function uniqueLabels(
   labels: (RequiredGitHubLabel | undefined)[],
 ): RequiredGitHubLabel[] {
@@ -183,7 +160,6 @@ function uniqueLabels(
   }
   return result;
 }
-
 function uniqueLabelNames(labels: readonly string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -197,7 +173,6 @@ function uniqueLabelNames(labels: readonly string[]): string[] {
   }
   return result;
 }
-
 function normalizeLabel(label: string): string {
   return label.trim().toLowerCase();
 }

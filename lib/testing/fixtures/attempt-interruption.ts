@@ -4,7 +4,10 @@ import path from "node:path";
 import { runAutorunAttemptLifecycle } from "../../autorun/attempt-lifecycle.ts";
 import { formatAttemptMetadata } from "../../autorun/attempts.ts";
 import { withCheckoutLock } from "../../autorun/lock.ts";
-import { runVerificationPromise } from "../../autorun/verification.ts";
+import {
+  runVerification,
+  verificationLayer,
+} from "../../autorun/verification.ts";
 import { applicationLayer } from "../../runtime/application.ts";
 import { createWorkflowContext } from "../../workflow/artifacts.ts";
 
@@ -67,13 +70,13 @@ BunRuntime.runMain(
         afterRun: () => cleanup,
       },
       {
-        runFullWorkflow: async (_context, _runner, _options, application) => {
-          await runVerificationPromise(
-            { command: "sleep 30 & echo $! > child.pid; wait", cwd },
-            application,
-          );
-          return { status: "completed" };
-        },
+        runFullWorkflow: Effect.fnUntraced(function* () {
+          yield* runVerification({
+            command: "sleep 30 & echo $! > child.pid; wait",
+            cwd,
+          }).pipe(Effect.provide(verificationLayer));
+          return { status: "completed" } as const;
+        }),
       },
     ),
   ).pipe(Effect.provide(applicationLayer)),

@@ -13,13 +13,13 @@ import {
   fromLegacyPromise,
   runApplicationPromise,
 } from "./lib/runtime/application.ts";
-import { runAutoContinue } from "./lib/autorun/continue.ts";
-import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
+import { runAutoContinuePromise } from "./lib/autorun/continue-promise.ts";
+import { runAutoDiscoveryPromise } from "./lib/autorun/discovery-promise.ts";
 import {
-  listManagedWorkspaces,
-  runRemoveCommand,
-  runWorkspaceCommand,
-} from "./lib/autorun/workspace.ts";
+  listManagedWorkspacesPromise as listManagedWorkspaces,
+  runRemoveCommandPromise as runRemoveCommand,
+  runWorkspaceCommandPromise as runWorkspaceCommand,
+} from "./lib/autorun/workspace-promise.ts";
 import { isLongRunningCommand, parseArgs, usage } from "./lib/cli/args.ts";
 import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
@@ -28,7 +28,7 @@ import {
   resolveInteractiveWorkspaceRemoval,
 } from "./lib/cli/interactive.ts";
 import { runPrRevisionPromise } from "./lib/pr-revision/workflow.ts";
-import { runPrReviewPromise } from "./lib/pr-review/workflow.ts";
+import { runPrReviewPromise } from "./lib/pr-review/workflow-promise.ts";
 import {
   formatDoLocalModeStartMessage,
   printDoLocalModeReadyMessageIfReady,
@@ -90,7 +90,7 @@ export async function main(
   }
 
   if (parsed.command === "auto") {
-    const result = await runAutoDiscovery(parsed, undefined, application);
+    const result = await runAutoDiscoveryPromise(parsed, application);
     if (result.kind === "dry-run")
       presenter(application).outcome(
         "SUCCESS",
@@ -117,7 +117,7 @@ export async function main(
 
   if (parsed.command === "continue") {
     presentAutorunOutcome(
-      await runAutoContinue(parsed, undefined, application),
+      await runAutoContinuePromise(parsed, application),
       application,
     );
     return;
@@ -135,7 +135,7 @@ export async function main(
   }
 
   if (parsed.command === "review-pr") {
-    const result = await runPrReviewPromise(parsed, undefined, application);
+    const result = await runPrReviewPromise(parsed, application);
     presenter(application).outcome(
       result.outcome === "blocked" ? "BLOCKED" : "SUCCESS",
       `PR #${parsed.prNumber}`,

@@ -1,3 +1,124 @@
+import { runPrReview } from "./workflow.ts";
+import {
+  runApplicationPromise,
+  type ApplicationExecution,
+} from "../runtime/application.ts";
+import { GitHub } from "../github/service.ts";
+import { GitHubResponseError } from "../github/errors.ts";
+import { Workspace } from "../autorun/workspace-service.ts";
+import { WorkspaceCommandError } from "../autorun/workspace.ts";
+import {
+  type preparePrReviewWorkspacePromise,
+  type runLifecycleHookPromise,
+  type assertPinnedPrReviewWorkspacePromise,
+} from "../autorun/workspace-promise.ts";
+import {
+  type fetchPullRequestFeedbackPromise,
+  type postIssueCommentPromise,
+} from "../github/promise.ts";
+import { providePromiseAgent } from "../workflow/promise-boundary.ts";
+import { runAgentPromise, type AgentRunner } from "../workflow/agent-runner.ts";
+
+interface RunPrReviewDependencies {
+  fetchFeedback?: typeof fetchPullRequestFeedbackPromise | undefined;
+  prepareWorkspace?: typeof preparePrReviewWorkspacePromise | undefined;
+  runLifecycleHookPromise?: typeof runLifecycleHookPromise | undefined;
+  agentRunner?: AgentRunner | undefined;
+  postComment?: typeof postIssueCommentPromise | undefined;
+  assertWorkspace?: typeof assertPinnedPrReviewWorkspacePromise | undefined;
+}
+
+function reviewWithDependencies(
+  options: Parameters<typeof runPrReview>[0],
+  deps: RunPrReviewDependencies = {},
+  application?: ApplicationExecution,
+) {
+  return runApplicationPromise(
+    Effect.gen(function* () {
+      const github = yield* GitHub;
+      const workspace = yield* Workspace;
+      const fetchFeedback = deps.fetchFeedback;
+      const postComment = deps.postComment;
+      const prepare = deps.prepareWorkspace;
+      const hook = deps.runLifecycleHookPromise;
+      const assert = deps.assertWorkspace;
+      return yield* runPrReview(options).pipe(
+        Effect.provideService(GitHub, {
+          ...github,
+          ...(fetchFeedback
+            ? {
+                fetchPullRequestFeedback: (
+                  input: Parameters<typeof fetchFeedback>[0],
+                ) =>
+                  Effect.tryPromise({
+                    try: () => fetchFeedback(input, application),
+                    catch: (cause) => new GitHubResponseError({ cause }),
+                  }),
+              }
+            : {}),
+          ...(postComment
+            ? {
+                postIssueComment: (input: Parameters<typeof postComment>[0]) =>
+                  Effect.tryPromise({
+                    try: () => postComment(input, application),
+                    catch: (cause) => new GitHubResponseError({ cause }),
+                  }),
+              }
+            : {}),
+        }),
+        Effect.provideService(Workspace, {
+          ...workspace,
+          ...(prepare
+            ? {
+                preparePrReview: Effect.fnUntraced(function* (
+                  input: Parameters<typeof workspace.preparePrReview>[0],
+                ) {
+                  const prepared = yield* Effect.acquireRelease(
+                    Effect.tryPromise({
+                      try: () => prepare(input, application),
+                      catch: (cause) => new WorkspaceCommandError({ cause }),
+                    }),
+                    (result) =>
+                      Effect.tryPromise({
+                        try: () => result.releaseLock(),
+                        catch: (cause) => new WorkspaceCommandError({ cause }),
+                      }).pipe(Effect.orDie),
+                  );
+                  return { ...prepared, releaseLock: () => Effect.void };
+                }),
+              }
+            : {}),
+          ...(hook
+            ? {
+                runHook: (
+                  name: Parameters<typeof hook>[0],
+                  config: Parameters<typeof hook>[1],
+                  cwd: string,
+                ) =>
+                  Effect.tryPromise({
+                    try: () => hook(name, config, cwd, undefined, application),
+                    catch: (cause) => new WorkspaceCommandError({ cause }),
+                  }),
+              }
+            : {}),
+          ...(assert
+            ? {
+                assertPinnedReview: (input: Parameters<typeof assert>[0]) =>
+                  Effect.tryPromise({
+                    try: () => assert(input, application),
+                    catch: (cause) => new WorkspaceCommandError({ cause }),
+                  }),
+              }
+            : {}),
+        }),
+        providePromiseAgent(deps.agentRunner ?? runAgentPromise),
+      );
+    }),
+    application,
+  );
+}
+
+import { rejects as assertRejects } from "node:assert/strict";
 import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
@@ -11,12 +132,10 @@ import { defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import type { PullRequestFeedback } from "../github/pr.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { noopAsync } from "../utils/async.ts";
-import { runPrReviewPromise } from "./workflow.ts";
 import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
 import {} from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
-
-describe("runPrReviewPromise", () => {
+describe("reviewWithDependencies", () => {
   test("sets the preparation title while workspace preparation is pending", async () => {
     let output = "";
     const stream: TerminalStream = {
@@ -37,8 +156,7 @@ describe("runPrReviewPromise", () => {
         const pendingPreparation = new Promise<never>((_, reject) => {
           rejectPreparation = reject;
         });
-
-        const running = runPrReviewPromise(
+        const running = reviewWithDependencies(
           {
             command: "review-pr",
             prNumber: 12,
@@ -58,17 +176,20 @@ describe("runPrReviewPromise", () => {
           },
           application,
         );
-
         await started;
         const outputWhilePending = output;
         rejectPreparation?.(new Error("stop after title assertion"));
-        expect(running).rejects.toThrow("stop after title assertion");
+        await assertRejects(
+          running,
+          (error: unknown) =>
+            error instanceof Error &&
+            error.message.includes("stop after title assertion"),
+        );
         await running.catch(() => undefined);
         expect(outputWhilePending).toContain("PR #12 · Review preparation");
       },
     );
   });
-
   test("posts each reviewer's exact Markdown as its own comment", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-control-"),
@@ -77,10 +198,9 @@ describe("runPrReviewPromise", () => {
     await initAgentRepo(agent);
     const publishedComments: string[] = [];
     const feedback = reviewFeedback();
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
-        runPrReviewPromise(
+        reviewWithDependencies(
           {
             command: "review-pr",
             prNumber: 12,
@@ -153,7 +273,6 @@ describe("runPrReviewPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("completed");
     expect(result.published).toBe(true);
     expect(publishedComments).toEqual([
@@ -177,7 +296,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("runs both reviewers read-only against the pinned diff and cleans mirrored artifacts", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-control-"),
@@ -190,10 +308,9 @@ describe("runPrReviewPromise", () => {
     let preparedRepositoryUrl: string | undefined;
     let preparedBeforeVerifyHook: string | undefined;
     const lifecycleCalls: string[] = [];
-
     await Effect.runPromise(
       fromLegacyPromise((application) =>
-        runPrReviewPromise(
+        reviewWithDependencies(
           {
             command: "review-pr",
             prNumber: 12,
@@ -270,7 +387,6 @@ describe("runPrReviewPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(preparedCopyToWorktree).toEqual(["local.env"]);
     expect(preparedRepositoryUrl).toBe("https://github.com/owner/repo");
     expect(preparedBeforeVerifyHook).toBe("bun run setup-tests");
@@ -305,7 +421,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("filters generated and unrelated feedback from reviewer context", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-control-"),
@@ -369,8 +484,7 @@ describe("runPrReviewPromise", () => {
         repository: "other/repo",
       },
     ];
-
-    const result = await runPrReviewPromise(
+    const result = await reviewWithDependencies(
       {
         command: "review-pr",
         prNumber: 12,
@@ -418,7 +532,6 @@ describe("runPrReviewPromise", () => {
         ),
       },
     );
-
     const reviewContext = await readFile(
       path.join(result.context.reviewDir, "pr-context.md"),
       "utf8",
@@ -440,7 +553,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("retains full verification diagnostics outside the truncated reviewer artifact", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-control-"),
@@ -448,10 +560,9 @@ describe("runPrReviewPromise", () => {
     const agent = await mkdtemp(path.join(tmpdir(), "roark-pr-review-agent-"));
     await initAgentRepo(agent);
     const feedback = reviewFeedback();
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
-        runPrReviewPromise(
+        reviewWithDependencies(
           {
             command: "review-pr",
             prNumber: 12,
@@ -507,14 +618,13 @@ describe("runPrReviewPromise", () => {
               ok: true,
               command,
               exitCode: 0,
-              stdout: `diagnostic-at-start\n${"x".repeat(5_000)}\ndiagnostic-at-end`,
+              stdout: `diagnostic-at-start\n${"x".repeat(5000)}\ndiagnostic-at-end`,
               stderr: "",
             }),
         }),
         Effect.provide(applicationLayer),
       ),
     );
-
     const reviewerVerification = await readFile(
       path.join(result.context.reviewDir, "verification.md"),
       "utf8",
@@ -530,7 +640,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("retains a review when PR requirement text changes and does not publish it", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-stale-control-"),
@@ -542,7 +651,7 @@ describe("runPrReviewPromise", () => {
     const initial = reviewFeedback();
     let fetches = 0;
     let publications = 0;
-    const result = await runPrReviewPromise(
+    const result = await reviewWithDependencies(
       {
         command: "review-pr",
         prNumber: 12,
@@ -629,7 +738,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("preserves completed artifacts when comment publishing fails", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-publish-control-"),
@@ -639,7 +747,7 @@ describe("runPrReviewPromise", () => {
     );
     await initAgentRepo(agent);
     const feedback = reviewFeedback();
-    const run = runPrReviewPromise(
+    const run = reviewWithDependencies(
       {
         command: "review-pr",
         prNumber: 12,
@@ -694,8 +802,12 @@ describe("runPrReviewPromise", () => {
         },
       },
     );
-
-    expect(run).rejects.toThrow("reviewer comment publishing failed");
+    await assertRejects(
+      run,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("reviewer comment publishing failed"),
+    );
     await run.catch(() => undefined);
     const reviewDir = path.join(control, ".roark/runs/pr/12/review-1");
     expect(
@@ -707,7 +819,6 @@ describe("runPrReviewPromise", () => {
     await rm(control, { recursive: true, force: true });
     await rm(agent, { recursive: true, force: true });
   });
-
   test("waits for both reviewers before cleaning up after one reviewer fails", async () => {
     const control = await mkdtemp(
       path.join(tmpdir(), "roark-pr-review-failure-control-"),
@@ -719,8 +830,7 @@ describe("runPrReviewPromise", () => {
     const feedback = reviewFeedback();
     let secondReviewerFinished = false;
     let lockReleasedEarly = false;
-
-    const run = runPrReviewPromise(
+    const run = reviewWithDependencies(
       {
         command: "review-pr",
         prNumber: 12,
@@ -772,8 +882,12 @@ describe("runPrReviewPromise", () => {
         },
       },
     );
-
-    expect(run).rejects.toThrow("review A unavailable");
+    await assertRejects(
+      run,
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("review A unavailable"),
+    );
     await run.catch(() => undefined);
     expect(secondReviewerFinished).toBe(true);
     expect(lockReleasedEarly).toBe(false);
@@ -789,7 +903,6 @@ describe("runPrReviewPromise", () => {
     await rm(agent, { recursive: true, force: true });
   });
 });
-
 function reviewFeedback(): PullRequestFeedback {
   return {
     repo: "owner/repo",
@@ -814,11 +927,9 @@ function reviewFeedback(): PullRequestFeedback {
     fetchedAt: "2026-07-12T00:00:00.000Z",
   };
 }
-
 function approvedReview(id: string): string {
   return `## Review\n\n**Approved.**\n\n${id}`;
 }
-
 async function initAgentRepo(cwd: string): Promise<void> {
   await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
 }

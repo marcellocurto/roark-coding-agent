@@ -1,3 +1,5 @@
+import { providePromiseAgent } from "../workflow/promise-boundary.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -17,9 +19,11 @@ import {
   buildPushArgv,
   buildStageAllArgv,
   buildSuccessLabelArgv,
+  formatCommitMessage,
+} from "./publish.ts";
+import {
   collectPrBodyArtifactPaths,
   collectPrChangedFiles,
-  formatCommitMessage,
   hasUncommittedChanges,
   publishAutorunResult,
   updatePrBody,
@@ -35,15 +39,12 @@ import { triageResult } from "../testing/workflow-results.ts";
 import { prDraft, submitPrDraft } from "../testing/publishing-drafts.ts";
 import {} from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
-
 const tempDirs: string[] = [];
-
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
-
 describe("autorun publish argv builders", () => {
   test("buildStageAllArgv stages target changes but excludes roark control state", () => {
     expect(buildStageAllArgv()).toEqual([
@@ -55,19 +56,16 @@ describe("autorun publish argv builders", () => {
       ":(exclude).roark",
     ]);
   });
-
   test("buildCommitArgv composes a git commit command", () => {
     expect(
       buildCommitArgv({ message: "roark: workflow artifacts for #9" }),
     ).toEqual(["git", "commit", "-m", "roark: workflow artifacts for #9"]);
   });
-
   test("buildPushArgv composes a git push command with -u", () => {
     expect(
       buildPushArgv({ remote: "origin", branchName: "roark/issue-9" }),
     ).toEqual(["git", "push", "-u", "origin", "roark/issue-9"]);
   });
-
   test("buildSuccessLabelArgv composes a gh issue edit command", () => {
     expect(
       buildSuccessLabelArgv({
@@ -86,13 +84,11 @@ describe("autorun publish argv builders", () => {
       "owner/repo",
     ]);
   });
-
   test("buildSuccessLabelArgv omits --repo when not provided", () => {
     expect(
       buildSuccessLabelArgv({ issueNumber: 9, label: "agent-pr-opened" }),
     ).toEqual(["gh", "issue", "edit", "9", "--add-label", "agent-pr-opened"]);
   });
-
   test("buildSuccessLabelArgv applies the terminal state in one label transition", () => {
     expect(
       buildSuccessLabelArgv({
@@ -119,7 +115,6 @@ describe("autorun publish argv builders", () => {
     ]);
   });
 });
-
 describe("formatCommitMessage", () => {
   test("includes the issue number", () => {
     expect(formatCommitMessage({ issueNumber: 9 })).toBe(
@@ -127,7 +122,6 @@ describe("formatCommitMessage", () => {
     );
   });
 });
-
 describe("collectPrBodyArtifactPaths", () => {
   test("excludes unnumbered review JSON files", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-artifacts-"));
@@ -145,9 +139,9 @@ describe("collectPrBodyArtifactPaths", () => {
     await writeJsonArtifact(context, "triage", triageResult());
     await Bun.write(path.join(context.runDir, "review-a.json"), "{}\n");
     await Bun.write(path.join(context.runDir, "review-b.json"), "{}\n");
-
-    const paths = await collectPrBodyArtifactPaths(context);
-
+    const paths = await runApplicationPromise(
+      collectPrBodyArtifactPaths(context),
+    );
     expect(paths).not.toContain(
       path.join(context.runDirRelative, "review-a.json"),
     );
@@ -156,7 +150,6 @@ describe("collectPrBodyArtifactPaths", () => {
     );
   });
 });
-
 describe("PR changed files", () => {
   test("derives the complete PR file list from Git relative to the base branch", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-changed-files-"));
@@ -188,15 +181,13 @@ describe("PR changed files", () => {
       { cwd },
     );
     await runProcessOrThrowPromise(["git", "commit", "-m", "change"], { cwd });
-
-    expect(await collectPrChangedFiles({ cwd, baseBranch: "main" })).toEqual([
-      "README.md",
-      "feature.ts",
-      "path with spaces.ts",
-    ]);
+    expect(
+      await runApplicationPromise(
+        collectPrChangedFiles({ cwd, baseBranch: "main" }),
+      ),
+    ).toEqual(["README.md", "feature.ts", "path with spaces.ts"]);
   });
 });
-
 describe("PR body updates", () => {
   test("rerenders from the structured PR draft and appends follow-up issues without an agent", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-update-"));
@@ -233,32 +224,32 @@ if [ "$1" = "pr" ] && [ "$2" = "edit" ]; then cat > "$ROARK_GH_BODY"; fi
       "prDraftMarkdown",
       "MALICIOUS STALE MARKDOWN\n",
     );
-
     const oldPath = process.env["PATH"];
     const oldBody = process.env["ROARK_GH_BODY"];
     process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
     process.env["ROARK_GH_BODY"] = ghBody;
     try {
-      await updatePrBody({
-        cwd,
-        repo: "owner/repo",
-        pr: "https://github.com/owner/repo/pull/4",
-        issueNumber: 9,
-        workflowContext: context,
-        followUpIssues: [
-          {
-            title: "Track edge case",
-            number: 22,
-            url: "https://github.com/owner/repo/issues/22",
-          },
-        ],
-      });
+      await runApplicationPromise(
+        updatePrBody({
+          cwd,
+          repo: "owner/repo",
+          pr: "https://github.com/owner/repo/pull/4",
+          issueNumber: 9,
+          workflowContext: context,
+          followUpIssues: [
+            {
+              title: "Track edge case",
+              number: 22,
+              url: "https://github.com/owner/repo/issues/22",
+            },
+          ],
+        }),
+      );
     } finally {
       process.env["PATH"] = oldPath;
       if (oldBody === undefined) delete process.env["ROARK_GH_BODY"];
       else process.env["ROARK_GH_BODY"] = oldBody;
     }
-
     const body = await readFile(ghBody, "utf8");
     expect(body).toContain(
       "[#22: Track edge case](https://github.com/owner/repo/issues/22)",
@@ -268,7 +259,6 @@ if [ "$1" = "pr" ] && [ "$2" = "edit" ]; then cat > "$ROARK_GH_BODY"; fi
     expect(await readArtifact(context, "prDraftMarkdown")).toBe(body);
   });
 });
-
 describe("publish git staging", () => {
   test("ignores .roark/runs when deciding and staging publish changes", async () => {
     const repo = await mkdtemp(
@@ -294,7 +284,6 @@ describe("publish git staging", () => {
     await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], {
       cwd: repo,
     });
-
     await mkdir(path.join(repo, ".roark/runs/issue/9/attempts/1"), {
       recursive: true,
     });
@@ -303,18 +292,19 @@ describe("publish git staging", () => {
       "{}\n",
       "utf8",
     );
-    expect(await hasUncommittedChanges({ cwd: repo })).toBe(false);
-
+    expect(
+      await runApplicationPromise(hasUncommittedChanges({ cwd: repo })),
+    ).toBe(false);
     await writeFile(path.join(repo, "feature.txt"), "feature\n", "utf8");
-    expect(await hasUncommittedChanges({ cwd: repo })).toBe(true);
+    expect(
+      await runApplicationPromise(hasUncommittedChanges({ cwd: repo })),
+    ).toBe(true);
     await runProcessOrThrowPromise(buildStageAllArgv(), { cwd: repo });
-
     const cached = await gitOutput(repo, ["diff", "--cached", "--name-only"]);
     expect(cached).toContain("feature.txt");
     expect(cached).not.toContain(".roark/runs");
   });
 });
-
 describe("PR body update presentation", () => {
   test("completes the continuation phase when the canonical draft is unavailable", async () => {
     let output = "";
@@ -330,9 +320,8 @@ describe("PR body update presentation", () => {
         tmpdir(),
         `roark-missing-pr-draft-${crypto.randomUUID()}`,
       );
-
-      const update = updatePrBody(
-        {
+      const update = runApplicationPromise(
+        updatePrBody({
           cwd: missingCwd,
           repo: "owner/repo",
           pr: "https://github.com/owner/repo/pull/1",
@@ -352,7 +341,7 @@ describe("PR body update presentation", () => {
             maxFixPasses: 1,
             thinkingConfig: getWorkflowThinkingConfig(),
           },
-        },
+        }),
         application,
       );
       let failure: unknown;
@@ -367,7 +356,6 @@ describe("PR body update presentation", () => {
     });
   });
 });
-
 describe("publishAutorunResult", () => {
   test("announces publication when the initial git operation fails", () => {
     let output = "";
@@ -385,9 +373,8 @@ describe("publishAutorunResult", () => {
           tmpdir(),
           `roark-missing-publish-${crypto.randomUUID()}`,
         );
-
-        const publication = publishAutorunResult(
-          {
+        const publication = runApplicationPromise(
+          publishAutorunResult({
             options: {
               cwd: missingCwd,
               repo: "owner/repo",
@@ -417,7 +404,7 @@ describe("publishAutorunResult", () => {
               maxFixPasses: 1,
               thinkingConfig: getWorkflowThinkingConfig(),
             },
-          },
+          }),
           application,
         );
         expect(
@@ -433,7 +420,6 @@ describe("publishAutorunResult", () => {
       },
     );
   });
-
   test("uses agent cwd for git and control cwd for PR authoring agent and issue labels", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-publish-test-"));
     tempDirs.push(root);
@@ -451,7 +437,6 @@ describe("publishAutorunResult", () => {
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
-
     await runProcessOrThrowPromise(["git", "init", "-b", "main", agentCwd]);
     await runProcessOrThrowPromise(
       ["git", "config", "user.email", "test@example.com"],
@@ -479,7 +464,6 @@ describe("publishAutorunResult", () => {
       ["git", "push", "-u", "origin", "roark/issue-9"],
       { cwd: agentCwd },
     );
-
     const oldPath = process.env["PATH"];
     const oldGhLog = process.env["ROARK_GH_LOG"];
     const oldGhBody = process.env["ROARK_GH_BODY"];
@@ -494,53 +478,55 @@ describe("publishAutorunResult", () => {
         command: string;
         skillPaths?: string[] | undefined;
       }[] = [];
-      const publishedPr = await publishAutorunResult({
-        options: {
-          cwd: controlCwd,
-          repo: "owner/repo",
-          readyLabel: "ready-for-agent",
-          failureLabel: "agent-failed",
-          successLabel: "agent-pr-opened",
-          inProgressLabel: "agent-in-progress",
-          remote: "origin",
-          baseBranch: "main",
-        },
-        issue: {
-          number: 9,
-          title: "Fix bug",
-          labels: [{ name: "ready-for-agent" }],
-        },
-        branchPlan: {
-          issueNumber: 9,
-          branchName: "roark/issue-9",
-          baseBranch: "main",
-        },
-        workflowContext: {
-          controlCwd,
-          agentCwd,
-          outDir: path.join(controlCwd, ".roark/runs"),
-          runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
-          runDirRelative: ".roark/runs/issue/9/attempts/1",
-          issueInput: "9",
-          issueNumber: "9",
-          displayCommand: "continue",
-          attempt: 1,
-          force: false,
-          yes: false,
-          maxFixPasses: 1,
-          thinkingConfig: getWorkflowThinkingConfig(),
-        },
-        agentRunner: (request) => {
-          agentRequests.push({
-            cwd: request.cwd,
-            prompt: request.prompt,
-            command: request.display.command,
-            skillPaths: request.skillPaths,
-          });
-          return submitPrDraft(request, prDraft({ title: "Fix bug" }));
-        },
-      });
-
+      const publishedPr = await runApplicationPromise(
+        publishAutorunResult({
+          options: {
+            cwd: controlCwd,
+            repo: "owner/repo",
+            readyLabel: "ready-for-agent",
+            failureLabel: "agent-failed",
+            successLabel: "agent-pr-opened",
+            inProgressLabel: "agent-in-progress",
+            remote: "origin",
+            baseBranch: "main",
+          },
+          issue: {
+            number: 9,
+            title: "Fix bug",
+            labels: [{ name: "ready-for-agent" }],
+          },
+          branchPlan: {
+            issueNumber: 9,
+            branchName: "roark/issue-9",
+            baseBranch: "main",
+          },
+          workflowContext: {
+            controlCwd,
+            agentCwd,
+            outDir: path.join(controlCwd, ".roark/runs"),
+            runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
+            runDirRelative: ".roark/runs/issue/9/attempts/1",
+            issueInput: "9",
+            issueNumber: "9",
+            displayCommand: "continue",
+            attempt: 1,
+            force: false,
+            yes: false,
+            maxFixPasses: 1,
+            thinkingConfig: getWorkflowThinkingConfig(),
+          },
+        }).pipe(
+          providePromiseAgent((request) => {
+            agentRequests.push({
+              cwd: request.cwd,
+              prompt: request.prompt,
+              command: request.display.command,
+              skillPaths: request.skillPaths,
+            });
+            return submitPrDraft(request, prDraft({ title: "Fix bug" }));
+          }),
+        ),
+      );
       expect(publishedPr).toEqual({
         url: "https://github.com/owner/repo/pull/1",
         number: 1,
@@ -563,7 +549,6 @@ describe("publishAutorunResult", () => {
       if (oldGhBody === undefined) delete process.env["ROARK_GH_BODY"];
       else process.env["ROARK_GH_BODY"] = oldGhBody;
     }
-
     const ghCalls = await readFile(ghLog, "utf8");
     expect(ghCalls).toContain(
       `${controlCwd}\tpr create --base main --head roark/issue-9 --title Fix bug --body-file - --repo owner/repo`,
@@ -580,7 +565,6 @@ describe("publishAutorunResult", () => {
     expect(publishedBody).not.toContain("Roark automation details");
     expect(publishedBody).not.toContain(".roark/runs/");
   });
-
   test("creates one commit for target changes and excludes .roark/runs artifacts", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-publish-commit-test-"),
@@ -600,7 +584,6 @@ describe("publishAutorunResult", () => {
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
-
     await runProcessOrThrowPromise(["git", "init", "-b", "main", agentCwd]);
     await runProcessOrThrowPromise(
       ["git", "config", "user.email", "test@example.com"],
@@ -635,7 +618,6 @@ describe("publishAutorunResult", () => {
       ["git", "push", "-u", "origin", "roark/issue-9"],
       { cwd: agentCwd },
     );
-
     const beforeCommitCount = Number(
       await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]),
     );
@@ -648,51 +630,53 @@ describe("publishAutorunResult", () => {
       "{}\n",
       "utf8",
     );
-
     const oldPath = process.env["PATH"];
     const oldGhLog = process.env["ROARK_GH_LOG"];
     process.env["PATH"] = `${binDir}:${oldPath ?? ""}`;
     process.env["ROARK_GH_LOG"] = ghLog;
     try {
-      await publishAutorunResult({
-        options: {
-          cwd: controlCwd,
-          repo: "owner/repo",
-          failureLabel: "agent-failed",
-          successLabel: "agent-pr-opened",
-          inProgressLabel: "agent-in-progress",
-          remote: "origin",
-          baseBranch: "main",
-        },
-        issue: { number: 9, title: "Fix bug" },
-        branchPlan: {
-          issueNumber: 9,
-          branchName: "roark/issue-9",
-          baseBranch: "main",
-        },
-        workflowContext: {
-          controlCwd,
-          agentCwd,
-          outDir: path.join(controlCwd, ".roark/runs"),
-          runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
-          runDirRelative: ".roark/runs/issue/9/attempts/1",
-          issueInput: "9",
-          issueNumber: "9",
-          attempt: 1,
-          force: false,
-          yes: false,
-          maxFixPasses: 1,
-          thinkingConfig: getWorkflowThinkingConfig(),
-        },
-        agentRunner: (request) =>
-          submitPrDraft(request, prDraft({ title: "Fix bug" })),
-      });
+      await runApplicationPromise(
+        publishAutorunResult({
+          options: {
+            cwd: controlCwd,
+            repo: "owner/repo",
+            failureLabel: "agent-failed",
+            successLabel: "agent-pr-opened",
+            inProgressLabel: "agent-in-progress",
+            remote: "origin",
+            baseBranch: "main",
+          },
+          issue: { number: 9, title: "Fix bug" },
+          branchPlan: {
+            issueNumber: 9,
+            branchName: "roark/issue-9",
+            baseBranch: "main",
+          },
+          workflowContext: {
+            controlCwd,
+            agentCwd,
+            outDir: path.join(controlCwd, ".roark/runs"),
+            runDir: path.join(controlCwd, ".roark/runs/issue/9/attempts/1"),
+            runDirRelative: ".roark/runs/issue/9/attempts/1",
+            issueInput: "9",
+            issueNumber: "9",
+            attempt: 1,
+            force: false,
+            yes: false,
+            maxFixPasses: 1,
+            thinkingConfig: getWorkflowThinkingConfig(),
+          },
+        }).pipe(
+          providePromiseAgent((request) =>
+            submitPrDraft(request, prDraft({ title: "Fix bug" })),
+          ),
+        ),
+      );
     } finally {
       process.env["PATH"] = oldPath;
       if (oldGhLog === undefined) delete process.env["ROARK_GH_LOG"];
       else process.env["ROARK_GH_LOG"] = oldGhLog;
     }
-
     const afterCommitCount = Number(
       await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]),
     );
@@ -703,7 +687,6 @@ describe("publishAutorunResult", () => {
     expect(await gitOutput(agentCwd, ["show", "HEAD:feature.txt"])).toBe(
       "feature",
     );
-
     const committedPaths = await gitOutput(agentCwd, [
       "ls-tree",
       "-r",
@@ -712,9 +695,8 @@ describe("publishAutorunResult", () => {
     ]);
     expect(committedPaths).toContain("feature.txt");
     expect(committedPaths).not.toContain(".roark/runs");
-  }, 10_000);
+  }, 10000);
 });
-
 async function gitOutput(cwd: string, args: string[]): Promise<string> {
   return (await runProcessOrThrowPromise(["git", ...args], { cwd })).trim();
 }

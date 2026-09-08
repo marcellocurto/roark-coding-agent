@@ -1,58 +1,50 @@
-import { Effect } from "effect";
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import type { PreparedPrReviewWorkspace } from "../autorun/workspace.ts";
+import { Cause, DateTime, Effect, Exit, Schema } from "effect";
+import { AgentExecution } from "../runtime/services.ts";
+import { Workspace } from "../autorun/workspace-service.ts";
+import { GitHub } from "../github/service.ts";
+import { Presentation } from "../runtime/services.ts";
+
 import path from "node:path";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
-  runVerificationPromise,
   type VerificationResult,
 } from "../autorun/verification.ts";
+import { runVerification } from "../autorun/verification.ts";
 import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
-  assertPinnedPrReviewWorkspace,
-  preparePrReviewWorkspace,
-  runLifecycleHookPromise,
-  type PreparedPrReviewWorkspace,
 } from "../autorun/workspace.ts";
+
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import {
   isRoarkGeneratedPrSummaryComment,
   type PullRequestClosingIssue,
   type PullRequestFeedback,
 } from "../github/pr.ts";
-import { fetchPullRequestFeedbackPromise as fetchPullRequestFeedback } from "../github/promise.ts";
 import { truncateGitHubIssueComment } from "../github/comments.ts";
-import { postIssueCommentPromise as postIssueComment } from "../github/promise.ts";
-import { runAgentPromise } from "../workflow/agent-runner.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import {
   correctnessReviewLens,
   maintainabilityReviewLens,
   type ReviewLensDefinition,
 } from "../review/contract.ts";
-import type { AgentRunner } from "../workflow/agent-runner.ts";
-import {
-  presenter,
-  type AgentDisplayContext,
-} from "../presentation/presenter.ts";
-import { runPresentedPhasePromise as runPresentedPhase } from "../presentation/phase-promise.ts";
+import { type AgentDisplayContext } from "../presentation/presenter.ts";
+import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { type PrReviewContext } from "./artifacts.ts";
 import {
   createPrReviewContext,
   removeAgentPrReviewArtifacts,
-  type PrReviewContext,
   writePrReviewArtifact,
   writePrReviewInputArtifact,
   writePrReviewInputJson,
   writePrReviewJson,
 } from "./artifacts.ts";
 import { prReviewPrompt } from "./prompts.ts";
-
 export interface PrReviewResult {
   outcome: "completed" | "blocked";
   context: PrReviewContext;
@@ -60,201 +52,129 @@ export interface PrReviewResult {
   published: boolean;
   stale: boolean;
 }
-
-export interface RunPrReviewDependencies {
-  fetchFeedback?: typeof fetchPullRequestFeedback | undefined;
-  prepareWorkspace?: typeof preparePrReviewWorkspace | undefined;
-  runLifecycleHookPromise?: typeof runLifecycleHookPromise | undefined;
-  agentRunner?: AgentRunner | undefined;
-  postComment?: typeof postIssueComment | undefined;
-  assertWorkspace?: typeof assertPinnedPrReviewWorkspace | undefined;
-}
-
 export const runPrReview = Effect.fn("runPrReview")(function* (
   options: ReviewPrCliOptions,
-  deps: RunPrReviewDependencies = {},
 ) {
-  const state: {
-    prepared?: Awaited<ReturnType<typeof preparePrReviewWorkspace>>;
-    context?: PrReviewContext;
-  } = {};
-  return yield* fromLegacyPromise((application) =>
-    runPrReviewBody(options, deps, application, state),
-  ).pipe(
-    Effect.onExit(() =>
-      Effect.suspend(() => {
-        const prepared = state.prepared;
-        if (!prepared) return Effect.void;
-        const context = state.context;
-        const removeArtifacts = context
-          ? Effect.tryPromise({
-              try: () => removeAgentPrReviewArtifacts(context),
-              catch: (error) => error,
-            })
-          : Effect.void;
-        const afterRun = fromLegacyPromise((application) =>
-          (deps.runLifecycleHookPromise ?? runLifecycleHookPromise)(
-            "afterRun",
-            options.hooks ?? defaultLifecycleHooks,
-            prepared.path,
-            undefined,
-            application,
-          ),
-        );
-        return removeArtifacts.pipe(
-          Effect.ensuring(afterRun.pipe(Effect.orDie)),
-          Effect.ensuring(
-            Effect.tryPromise({
-              try: () => prepared.releaseLock(),
-              catch: (error) => error,
-            }).pipe(Effect.orDie),
-          ),
-        );
-      }),
-    ),
-  );
-});
-
-export function runPrReviewPromise(
-  options: ReviewPrCliOptions,
-  deps: RunPrReviewDependencies = {},
-  application?: ApplicationExecution,
-): Promise<PrReviewResult> {
-  return runApplicationPromise(runPrReview(options, deps), application);
-}
-
-async function runPrReviewBody(
-  options: ReviewPrCliOptions,
-  deps: RunPrReviewDependencies,
-  application: ApplicationExecution,
-  state: {
-    prepared?: Awaited<ReturnType<typeof preparePrReviewWorkspace>>;
-    context?: PrReviewContext;
-  },
-): Promise<PrReviewResult> {
-  const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
-  const initial = await fetchFeedback(
-    { cwd: options.cwd, repo: options.repo, prNumber: options.prNumber },
-    application,
-  );
-  validateReviewablePr(initial);
-  presenter(application).transition(
+  const github = yield* GitHub;
+  const workspaces = yield* Workspace;
+  const fetchFeedback = github.fetchPullRequestFeedback;
+  const initial = yield* fetchFeedback({
+    cwd: options.cwd,
+    repo: options.repo,
+    prNumber: options.prNumber,
+  });
+  yield* Effect.try(() => {
+    validateReviewablePr(initial);
+  });
+  (yield* Presentation).transition(
     "Review preparation",
     `PR #${initial.pr.number}`,
     { operation: "inspect" },
   );
   const hooks = options.hooks ?? defaultLifecycleHooks;
-  const prepareWorkspace = deps.prepareWorkspace ?? preparePrReviewWorkspace;
+  const prepareWorkspace = workspaces.preparePrReview;
   const workspace = options.workspace ?? defaultWorkspaceConfig;
-  const prepared = await prepareWorkspace(
-    {
-      controlCwd: options.cwd,
-      repo: initial.repo,
-      repositoryUrl: initial.pr.baseRepositoryUrl,
-      prNumber: options.prNumber,
-      baseRefName: initial.pr.baseRefName,
-      baseRefOid: initial.pr.baseRefOid,
-      headRefOid: initial.pr.headRefOid,
-      workspace,
-      hooks,
-    },
-    application,
+  const prepared = yield* prepareWorkspace({
+    controlCwd: options.cwd,
+    repo: initial.repo,
+    repositoryUrl: initial.pr.baseRepositoryUrl,
+    prNumber: options.prNumber,
+    baseRefName: initial.pr.baseRefName,
+    baseRefOid: initial.pr.baseRefOid,
+    headRefOid: initial.pr.headRefOid,
+    workspace,
+    hooks,
+  });
+  yield* Effect.addFinalizer(() =>
+    workspaces.runHook("afterRun", hooks, prepared.path).pipe(Effect.orDie),
   );
-  state.prepared = prepared;
-  const hookRunner = deps.runLifecycleHookPromise ?? runLifecycleHookPromise;
-  const assertWorkspace = deps.assertWorkspace ?? assertPinnedPrReviewWorkspace;
-  const context = await createPrReviewContext(
-    { ...options, repo: initial.repo, agentCwd: prepared.path },
-    application,
+  const hookRunner = workspaces.runHook;
+  const assertWorkspace = workspaces.assertPinnedReview;
+  const context = yield* createPrReviewContext({
+    ...options,
+    repo: initial.repo,
+    agentCwd: prepared.path,
+  });
+  yield* Effect.addFinalizer(() =>
+    removeAgentPrReviewArtifacts(context).pipe(Effect.orDie),
   );
-  state.context = context;
-  presenter(application).transition(
+  (yield* Presentation).transition(
     "Review preparation",
     `PR #${context.prNumber}`,
     { pass: context.generation, operation: "inspect" },
   );
-  presenter(application).line(`Run directory: ${context.reviewDirRelative}`);
-  presenter(application).line(
+  (yield* Presentation).line(`Run directory: ${context.reviewDirRelative}`);
+  (yield* Presentation).line(
     `Review workspace: ${path.basename(context.agentCwd)}`,
   );
-  await hookRunner(
-    "beforeRun",
-    hooks,
-    context.agentCwd,
-    undefined,
-    application,
-  );
-  await assertWorkspace(
-    { cwd: context.agentCwd, headOid: prepared.comparison.headOid },
-    application,
-  );
-
+  yield* hookRunner("beforeRun", hooks, context.agentCwd);
+  yield* assertWorkspace({
+    cwd: context.agentCwd,
+    headOid: prepared.comparison.headOid,
+  });
   const closingIssues = sameRepositoryClosingIssues(initial);
-  await writePrReviewInputJson(context, "pr-context.json", {
+  yield* writePrReviewInputJson(context, "pr-context.json", {
     ...initial,
     closingIssues,
   });
-  await writePrReviewInputArtifact(
+  yield* writePrReviewInputArtifact(
     context,
     "pr-context.md",
     formatPrContext(initial, closingIssues),
   );
-  await writePrReviewInputJson(context, "comparison.json", prepared.comparison);
-
-  let verification: VerificationResult | undefined;
-  await hookRunner(
-    "beforeVerify",
-    hooks,
-    context.agentCwd,
-    undefined,
-    application,
+  yield* writePrReviewInputJson(
+    context,
+    "comparison.json",
+    prepared.comparison,
   );
-  try {
-    verification = await runVerificationPromise(
-      {
-        command: options.verifyCommand,
-        cwd: context.agentCwd,
-        display: {
-          target: `PR #${context.prNumber}`,
-          repository: context.repo,
-          pass: context.generation,
-        },
+  let verification: VerificationResult | undefined;
+  yield* hookRunner("beforeVerify", hooks, context.agentCwd);
+  yield* Effect.gen(function* () {
+    verification = yield* runVerification({
+      command: options.verifyCommand,
+      cwd: context.agentCwd,
+      display: {
+        target: `PR #${context.prNumber}`,
+        repository: context.repo,
+        pass: context.generation,
       },
-      application,
-    );
-    await writePrReviewInputArtifact(
+    });
+    yield* writePrReviewInputArtifact(
       context,
       "verification.md",
       formatVerificationArtifact(verification),
     );
-    await writePrReviewArtifact(
+    yield* writePrReviewArtifact(
       context,
       "verification-full.md",
       formatCompleteVerificationArtifact(verification),
     );
-    presenter(application).artifact(
+    (yield* Presentation).artifact(
       path.join(context.reviewDirRelative, "verification.md"),
     );
     const classification = classifyVerificationFailure(verification);
     if (!verification.ok) {
-      presenter(application).line(
+      (yield* Presentation).line(
         `ACTION user action required for verification: ${classification.recoveryGuidance ?? classification.reason}`,
       );
     }
-  } catch (error) {
-    const reason = `Verification could not run: ${errorMessage(error)}`;
-    await writePrReviewInputArtifact(
-      context,
-      "verification.md",
-      `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`,
-    );
-  }
-  await assertWorkspace(
-    { cwd: context.agentCwd, headOid: prepared.comparison.headOid },
-    application,
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* (error) {
+        const reason = `Verification could not run: ${errorMessage(error)}`;
+        yield* writePrReviewInputArtifact(
+          context,
+          "verification.md",
+          `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`,
+        );
+      }),
+    ),
   );
-
-  await writePrReviewJson(
+  yield* assertWorkspace({
+    cwd: context.agentCwd,
+    headOid: prepared.comparison.headOid,
+  });
+  yield* writePrReviewJson(
     context,
     "metadata.json",
     metadata(context, initial, prepared, {
@@ -262,78 +182,64 @@ async function runPrReviewBody(
       verificationCommand: options.verifyCommand,
     }),
   );
-
-  const runner = deps.agentRunner ?? runAgentPromise;
-  const [reviewAResult, reviewBResult] = await Promise.allSettled([
-    runReviewer(
-      context,
-      prepared,
-      runner,
-      correctnessReviewLens,
-      "reviewA",
-      application,
-    ),
-    runReviewer(
-      context,
-      prepared,
-      runner,
-      maintainabilityReviewLens,
-      "reviewB",
-      application,
-    ),
-  ]);
-  if (
-    reviewAResult.status === "rejected" ||
-    reviewBResult.status === "rejected"
-  ) {
-    const failures = [reviewAResult, reviewBResult]
-      .filter(
-        (result): result is PromiseRejectedResult =>
-          result.status === "rejected",
-      )
-      .map((result) => errorMessage(result.reason));
-    throw new Error(`PR reviewer failed: ${failures.join("; ")}`);
-  }
+  const [reviewAResult, reviewBResult] = yield* Effect.all(
+    [
+      Effect.exit(
+        runReviewer(context, prepared, correctnessReviewLens, "reviewA"),
+      ),
+      Effect.exit(
+        runReviewer(context, prepared, maintainabilityReviewLens, "reviewB"),
+      ),
+    ],
+    { concurrency: "unbounded" },
+  );
+  if (Exit.isFailure(reviewAResult) && Exit.isFailure(reviewBResult))
+    return yield* Effect.failCause(
+      Cause.combine(reviewAResult.cause, reviewBResult.cause),
+    );
+  if (Exit.isFailure(reviewAResult))
+    return yield* Effect.failCause(reviewAResult.cause);
+  if (Exit.isFailure(reviewBResult))
+    return yield* Effect.failCause(reviewBResult.cause);
   const reviewA = reviewAResult.value;
   const reviewB = reviewBResult.value;
-  await assertWorkspace(
-    { cwd: context.agentCwd, headOid: prepared.comparison.headOid },
-    application,
-  );
-
-  const latest = await fetchFeedback(
-    { cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber },
-    application,
-  );
+  yield* assertWorkspace({
+    cwd: context.agentCwd,
+    headOid: prepared.comparison.headOid,
+  });
+  const latest = yield* fetchFeedback({
+    cwd: options.cwd,
+    repo: initial.repo,
+    prNumber: options.prNumber,
+  });
   const staleReasons = prIdentityChanges(initial, latest);
   if (staleReasons.length > 0) {
-    await writePrReviewJson(
+    yield* writePrReviewJson(
       context,
       "metadata.json",
       metadata(context, initial, prepared, {
-        outcome: "blocked",
+        outcome: "blocked" as const,
         stale: true,
         staleReason: `PR changed during review (${staleReasons.join("; ")}); review comments were not published.`,
         latestPr: latest.pr,
-        endedAt: new Date().toISOString(),
+        endedAt: DateTime.formatIso(yield* DateTime.now),
       }),
     );
     return {
-      outcome: "blocked",
+      outcome: "blocked" as const,
       context,
       verification,
       published: false,
       stale: true,
     };
   }
-
-  await writePrReviewJson(
+  yield* writePrReviewJson(
     context,
     "metadata.json",
     metadata(context, initial, prepared, {
-      outcome: "completed",
+      outcome: "completed" as const,
       stale: false,
-      endedAt: new Date().toISOString(),
+      endedAt: DateTime.formatIso(yield* DateTime.now),
     }),
   );
   let published = false;
@@ -347,72 +253,68 @@ async function runPrReviewBody(
       pass: context.generation,
       operation: "publish",
     };
-    presenter(application).phaseStarted(publishDisplay);
-    try {
-      const postComment = deps.postComment ?? postIssueComment;
-      await postComment(
-        {
-          cwd: context.controlCwd,
-          repo: context.repo,
-          issueNumber: context.prNumber,
-          body: publicReviewComment(context, "a", reviewA),
-        },
-        application,
-      );
-      await postComment(
-        {
-          cwd: context.controlCwd,
-          repo: context.repo,
-          issueNumber: context.prNumber,
-          body: publicReviewComment(context, "b", reviewB),
-        },
-        application,
-      );
+    (yield* Presentation).phaseStarted(publishDisplay);
+    yield* Effect.gen(function* () {
+      const postComment = github.postIssueComment;
+      yield* postComment({
+        cwd: context.controlCwd,
+        repo: context.repo,
+        issueNumber: context.prNumber,
+        body: publicReviewComment(context, "a", reviewA),
+      });
+      yield* postComment({
+        cwd: context.controlCwd,
+        repo: context.repo,
+        issueNumber: context.prNumber,
+        body: publicReviewComment(context, "b", reviewB),
+      });
       published = true;
-      presenter(application).phaseCompleted(publishDisplay, {
+      (yield* Presentation).phaseCompleted(publishDisplay, {
         outcome: "published 2 reviewer comments",
       });
-    } catch (error) {
-      await writePrReviewJson(
-        context,
-        "metadata.json",
-        metadata(context, initial, prepared, {
-          outcome: "completed",
-          publication: "failed",
-          publicationError: errorMessage(error),
-          endedAt: new Date().toISOString(),
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          yield* writePrReviewJson(
+            context,
+            "metadata.json",
+            metadata(context, initial, prepared, {
+              outcome: "completed" as const,
+              publication: "failed",
+              publicationError: errorMessage(error),
+              endedAt: DateTime.formatIso(yield* DateTime.now),
+            }),
+          );
+          const publicationError = new PrReviewError({
+            message: `PR review completed, but reviewer comment publishing failed: ${errorMessage(error)}`,
+          });
+          (yield* Presentation).phaseCompleted(publishDisplay, {
+            outcome: publicationError.message,
+            failed: true,
+          });
+          return yield* Effect.fail(publicationError);
         }),
-      );
-      const publicationError = new Error(
-        `PR review completed, but reviewer comment publishing failed: ${errorMessage(error)}`,
-      );
-      presenter(application).phaseCompleted(publishDisplay, {
-        outcome: publicationError.message,
-        failed: true,
-      });
-      throw publicationError;
-    }
+      ),
+    );
   }
   return {
-    outcome: "completed",
+    outcome: "completed" as const,
     context,
     verification,
     published,
     stale: false,
   };
-}
-
+}, Effect.scoped);
 function validateReviewablePr(feedback: PullRequestFeedback): void {
   if (feedback.pr.state !== "OPEN")
-    throw new Error(
-      `PR #${feedback.pr.number} must be open. Current state: ${feedback.pr.state}.`,
-    );
+    throw new PrReviewError({
+      message: `PR #${feedback.pr.number} must be open. Current state: ${feedback.pr.state}.`,
+    });
   if (!feedback.pr.baseRefOid || !feedback.pr.headRefOid)
-    throw new Error(
-      `PR #${feedback.pr.number} metadata did not include immutable base and head commit identifiers.`,
-    );
+    throw new PrReviewError({
+      message: `PR #${feedback.pr.number} metadata did not include immutable base and head commit identifiers.`,
+    });
 }
-
 function prIdentityChanges(
   initial: PullRequestFeedback,
   latest: PullRequestFeedback,
@@ -435,15 +337,12 @@ function prIdentityChanges(
   }
   return changes;
 }
-
-async function runReviewer(
+const runReviewer = Effect.fn("runReviewer")(function* (
   context: PrReviewContext,
   prepared: PreparedPrReviewWorkspace,
-  runner: AgentRunner,
   lens: ReviewLensDefinition,
   stage: "reviewA" | "reviewB",
-  application?: ApplicationExecution,
-): Promise<string> {
+) {
   const artifactName = stage === "reviewA" ? "review-a" : "review-b";
   const display: AgentDisplayContext = {
     command: "review-pr",
@@ -455,38 +354,38 @@ async function runReviewer(
     expectedArtifact: `${context.reviewDirRelative}/${artifactName}.md`,
     operation: "review",
   };
-  return runPresentedPhase(
+  return yield* runPresentedPhase(
     display,
-    async () => {
-      const markdown = (
-        await runner(
-          {
-            cwd: context.agentCwd,
-            model: effectiveModelForStage(context.model, stage),
-            thinkingLevel: context.thinkingConfig[stage],
-            systemPrompt: sharedSystemPrompt,
-            prompt: prReviewPrompt({
-              context,
-              comparison: prepared.comparison,
-              lens,
-            }),
-            fileEditingToolsEnabled: false,
-            display,
-          },
-          application,
-        )
-      ).trim();
+    Effect.fnUntraced(function* () {
+      const markdown = (yield* (yield* AgentExecution).run({
+        cwd: context.agentCwd,
+        model: effectiveModelForStage(context.model, stage),
+        thinkingLevel: context.thinkingConfig[stage],
+        systemPrompt: sharedSystemPrompt,
+        prompt: prReviewPrompt({
+          context,
+          comparison: prepared.comparison,
+          lens,
+        }),
+        fileEditingToolsEnabled: false,
+        display,
+      })).trim();
       if (!markdown)
-        throw new Error(`${lens.role} returned an empty PR review comment.`);
-      await writePrReviewArtifact(context, `${artifactName}.md`, markdown);
+        return yield* Effect.fail(
+          new PrReviewError({
+            message: `${lens.role} returned an empty PR review comment.`,
+          }),
+        );
+      yield* writePrReviewArtifact(context, `${artifactName}.md`, markdown);
       return markdown;
-    },
-    () => ({ outcome: "completed", artifact: display.expectedArtifact }),
+    }),
+    () => ({
+      outcome: "completed" as const,
+      artifact: display.expectedArtifact,
+    }),
     { manageTitle: false },
-    application,
   );
-}
-
+});
 function publicReviewComment(
   context: PrReviewContext,
   reviewer: "a" | "b",
@@ -503,7 +402,6 @@ function publicReviewComment(
   });
   return truncateGitHubIssueComment(`${marker}\n${body.trim()}\n`);
 }
-
 export function sameRepositoryClosingIssues(
   feedback: PullRequestFeedback,
 ): PullRequestClosingIssue[] {
@@ -511,7 +409,6 @@ export function sameRepositoryClosingIssues(
     (issue) => issue.repository?.toLowerCase() === feedback.repo.toLowerCase(),
   );
 }
-
 function formatPrContext(
   feedback: PullRequestFeedback,
   closingIssues: PullRequestClosingIssue[],
@@ -558,11 +455,9 @@ function formatPrContext(
   ];
   return `${lines.join("\n")}\n`;
 }
-
 function listOrNone(values: string[]): string[] {
   return values.length === 0 ? ["None."] : values.map((value) => `- ${value}`);
 }
-
 function metadata(
   context: PrReviewContext,
   feedback: PullRequestFeedback,
@@ -581,7 +476,11 @@ function metadata(
     ...update,
   };
 }
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+export class PrReviewError extends Schema.TaggedError<PrReviewError>()(
+  "PrReviewError",
+  { message: Schema.String },
+) {}

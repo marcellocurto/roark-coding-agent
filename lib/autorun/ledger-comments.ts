@@ -1,6 +1,6 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { GitHub } from "../github/service.ts";
+import { Presentation } from "../runtime/services.ts";
+import { Effect } from "effect";
 import {
   reviewARef,
   reviewBRef,
@@ -8,13 +8,12 @@ import {
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
 import {
-  artifactExistsPromise as artifactExists,
-  latestCompleteReviewCyclePromise as latestCompleteReviewCycle,
-} from "../workflow/artifacts-promise.ts";
-import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
+  artifactExists,
+  latestCompleteReviewCycle,
+} from "../workflow/artifacts.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
-import { postOrUpdateIssueCommentByMarkerPromise as postOrUpdateIssueCommentByMarker } from "../github/promise.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
@@ -23,23 +22,18 @@ import {
   parseReviewResultJson,
   type ReviewFindingSource,
 } from "../review/result.ts";
-import { presenter } from "../presentation/presenter.ts";
-
 export type LedgerCommentPhase = string;
-
 export interface LedgerCommentArtifactInput {
   issueNumber: number;
   attempt: number;
   artifactContent: string;
 }
-
 export type ReadinessLedgerCommentInput = Pick<
   LedgerCommentArtifactInput,
   "issueNumber" | "attempt" | "artifactContent"
 > & {
   recoveryCommand?: string | undefined;
 };
-
 export function formatAttemptStartComment(input: {
   issueNumber: number;
   attempt: number;
@@ -60,10 +54,10 @@ export function formatAttemptStartComment(input: {
   ];
   return `${lines.join("\n")}\n`;
 }
-
 export type PublishIssueLedgerCommentFn = typeof publishIssueLedgerComment;
-
-export async function publishPlanningLedgerComments(
+export const publishPlanningLedgerComments = Effect.fn(
+  "publishPlanningLedgerComments",
+)(function* (
   input: {
     cwd: string;
     repo?: string | undefined;
@@ -71,54 +65,42 @@ export async function publishPlanningLedgerComments(
     workflowContext: WorkflowContext;
     attemptMetadata: AttemptMetadata;
   },
-  injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {},
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        publishPlanningLedgerComments(input, injected, application),
-      ),
-      application,
-    );
-
+  injected: {
+    publishIssueLedgerComment?: PublishIssueLedgerCommentFn;
+  } = {},
+) {
   const publishLedgerComment =
     injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-  await publishArtifactLedgerComment(
-    {
-      ...input,
-      artifact: "triage",
-      renderedArtifact: "triageMarkdown",
-      phase: "triage",
-      formatBody: (artifactContent) =>
-        formatTriageLedgerComment({
-          issueNumber: input.issue.number,
-          attempt: input.attemptMetadata.attempt,
-          artifactContent,
-        }),
-      publishLedgerComment,
-    },
-    application,
-  );
-  await publishArtifactLedgerComment(
-    {
-      ...input,
-      artifact: "implementationPlan",
-      renderedArtifact: "implementationPlanMarkdown",
-      phase: "implementation-plan",
-      formatBody: (artifactContent) =>
-        formatImplementationPlanLedgerComment({
-          issueNumber: input.issue.number,
-          attempt: input.attemptMetadata.attempt,
-          artifactContent,
-        }),
-      publishLedgerComment,
-    },
-    application,
-  );
-}
-
-export async function publishReviewLedgerComments(
+  yield* publishArtifactLedgerComment({
+    ...input,
+    artifact: "triage",
+    renderedArtifact: "triageMarkdown",
+    phase: "triage",
+    formatBody: (artifactContent) =>
+      formatTriageLedgerComment({
+        issueNumber: input.issue.number,
+        attempt: input.attemptMetadata.attempt,
+        artifactContent,
+      }),
+    publishLedgerComment,
+  });
+  yield* publishArtifactLedgerComment({
+    ...input,
+    artifact: "implementationPlan",
+    renderedArtifact: "implementationPlanMarkdown",
+    phase: "implementation-plan",
+    formatBody: (artifactContent) =>
+      formatImplementationPlanLedgerComment({
+        issueNumber: input.issue.number,
+        attempt: input.attemptMetadata.attempt,
+        artifactContent,
+      }),
+    publishLedgerComment,
+  });
+});
+export const publishReviewLedgerComments = Effect.fn(
+  "publishReviewLedgerComments",
+)(function* (
   input: {
     cwd: string;
     repo?: string | undefined;
@@ -126,75 +108,47 @@ export async function publishReviewLedgerComments(
     workflowContext: WorkflowContext;
     attemptMetadata: AttemptMetadata;
   },
-  injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {},
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        publishReviewLedgerComments(input, injected, application),
-      ),
-      application,
-    );
-
+  injected: {
+    publishIssueLedgerComment?: PublishIssueLedgerCommentFn;
+  } = {},
+) {
   const publishLedgerComment =
     injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
-  const latestCycle = await latestCompleteReviewCycle(
-    input.workflowContext,
-    application,
-  );
+  const latestCycle = yield* latestCompleteReviewCycle(input.workflowContext);
   if (latestCycle === undefined) return;
-  await publishReviewLedgerComment(
-    {
-      ...input,
-      artifact: reviewARef(latestCycle),
-      phase: `review-a-${latestCycle}`,
-      title: `Review A pass ${latestCycle}`,
-      markerPhase: "review-a",
-      publishLedgerComment,
-    },
-    application,
-  );
-  await publishReviewLedgerComment(
-    {
-      ...input,
-      artifact: reviewBRef(latestCycle),
-      phase: `review-b-${latestCycle}`,
-      title: `Review B pass ${latestCycle}`,
-      markerPhase: "review-b",
-      publishLedgerComment,
-    },
-    application,
-  );
-}
-
-export async function publishIssueLedgerComment(
-  input: {
+  yield* publishReviewLedgerComment({
+    ...input,
+    artifact: reviewARef(latestCycle),
+    phase: `review-a-${latestCycle}`,
+    title: `Review A pass ${latestCycle}`,
+    markerPhase: "review-a",
+    publishLedgerComment,
+  });
+  yield* publishReviewLedgerComment({
+    ...input,
+    artifact: reviewBRef(latestCycle),
+    phase: `review-b-${latestCycle}`,
+    title: `Review B pass ${latestCycle}`,
+    markerPhase: "review-b",
+    publishLedgerComment,
+  });
+});
+export const publishIssueLedgerComment = Effect.fn("publishIssueLedgerComment")(
+  function* (input: {
     cwd: string;
     repo?: string | undefined;
     issueNumber: number;
     attemptMetadata: AttemptMetadata;
     phase: LedgerCommentPhase;
     body: string;
-  },
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        publishIssueLedgerComment(input, application),
-      ),
-      application,
-    );
-
-  const marker = buildRoarkMarker({
-    issueNumber: input.issueNumber,
-    attempt: input.attemptMetadata.attempt,
-    phase: input.phase,
-  });
-  try {
-    const ref = await postOrUpdateIssueCommentByMarker(
-      {
+  }) {
+    const marker = buildRoarkMarker({
+      issueNumber: input.issueNumber,
+      attempt: input.attemptMetadata.attempt,
+      phase: input.phase,
+    });
+    yield* Effect.gen(function* () {
+      const ref = yield* (yield* GitHub).postOrUpdateIssueCommentByMarker({
         cwd: input.cwd,
         repo: input.repo,
         issueNumber: input.issueNumber,
@@ -202,17 +156,19 @@ export async function publishIssueLedgerComment(
         body: input.body,
         existingCommentId:
           input.attemptMetadata.githubComments?.issue?.[input.phase]?.id,
-      },
-      application,
+      });
+      recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `failed to publish ${input.phase} issue ledger comment: ${error.message}`,
+          );
+        }),
+      ),
     );
-    recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
-  } catch (error) {
-    presenter(application).warning(
-      `failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`,
-    );
-  }
-}
-
+  },
+);
 export function formatTriageLedgerComment(
   input: LedgerCommentArtifactInput,
 ): string {
@@ -228,7 +184,6 @@ export function formatTriageLedgerComment(
   ];
   return `${lines.join("\n")}\n`;
 }
-
 export function formatImplementationPlanLedgerComment(
   input: LedgerCommentArtifactInput,
 ): string {
@@ -241,7 +196,6 @@ export function formatImplementationPlanLedgerComment(
   const lines = [marker, "", content.trimEnd()];
   return `${lines.join("\n")}\n`;
 }
-
 export function formatReadinessLedgerComment(
   input: ReadinessLedgerCommentInput,
 ): string {
@@ -263,7 +217,6 @@ export function formatReadinessLedgerComment(
   if (readiness) lines.push("", readiness);
   return `${lines.join("\n")}\n`;
 }
-
 export function formatReviewLedgerComment(input: {
   issueNumber: number;
   attempt: number;
@@ -290,7 +243,6 @@ export function formatReviewLedgerComment(input: {
   );
   return [marker, "", content.trimEnd()].join("\n") + "\n";
 }
-
 export function formatPrCreatedComment(input: {
   issueNumber: number;
   attempt: number;
@@ -309,9 +261,8 @@ export function formatPrCreatedComment(input: {
   ];
   return `${lines.join("\n")}\n`;
 }
-
-async function publishArtifactLedgerComment(
-  input: {
+const publishArtifactLedgerComment = Effect.fn("publishArtifactLedgerComment")(
+  function* (input: {
     cwd: string;
     repo?: string | undefined;
     issue: AutorunIssueCandidate;
@@ -323,48 +274,32 @@ async function publishArtifactLedgerComment(
     attemptMetadataPath?: string | undefined;
     formatBody: (artifactContent: string) => string;
     publishLedgerComment: PublishIssueLedgerCommentFn;
-  },
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (
-    !(await artifactExists(input.workflowContext, input.artifact, application))
-  )
-    return;
-  const artifactContent = await readArtifact(
-    input.workflowContext,
-    input.artifact,
-    application,
-  );
-  const validation = validateAgentArtifact(input.artifact, artifactContent);
-  if (!validation.ok) return;
-  if (
-    !(await artifactExists(
+  }) {
+    if (!(yield* artifactExists(input.workflowContext, input.artifact))) return;
+    const artifactContent = yield* readArtifact(
+      input.workflowContext,
+      input.artifact,
+    );
+    const validation = validateAgentArtifact(input.artifact, artifactContent);
+    if (!validation.ok) return;
+    if (!(yield* artifactExists(input.workflowContext, input.renderedArtifact)))
+      return;
+    const renderedContent = yield* readArtifact(
       input.workflowContext,
       input.renderedArtifact,
-      application,
-    ))
-  )
-    return;
-  const renderedContent = await readArtifact(
-    input.workflowContext,
-    input.renderedArtifact,
-    application,
-  );
-  await input.publishLedgerComment(
-    {
+    );
+    yield* input.publishLedgerComment({
       cwd: input.cwd,
       repo: input.repo,
       issueNumber: input.issue.number,
       attemptMetadata: input.attemptMetadata,
       phase: input.phase,
       body: input.formatBody(renderedContent),
-    },
-    application,
-  );
-}
-
-async function publishReviewLedgerComment(
-  input: {
+    });
+  },
+);
+const publishReviewLedgerComment = Effect.fn("publishReviewLedgerComment")(
+  function* (input: {
     cwd: string;
     repo?: string | undefined;
     issue: AutorunIssueCandidate;
@@ -375,46 +310,36 @@ async function publishReviewLedgerComment(
     markerPhase?: "review-a" | "review-b" | undefined;
     title: string;
     publishLedgerComment: PublishIssueLedgerCommentFn;
-  },
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (
-    !(await artifactExists(input.workflowContext, input.artifact, application))
-  )
-    return;
-  const artifactContent = await readArtifact(
-    input.workflowContext,
-    input.artifact,
-    application,
-  );
-  const validation = validateAgentArtifact(input.artifact, artifactContent);
-  if (!validation.ok) return;
-  const body = formatReviewLedgerComment({
-    issueNumber: input.issue.number,
-    attempt: input.attemptMetadata.attempt,
-    phase: input.phase,
-    markerPhase: input.markerPhase,
-    title: input.title,
-    artifactContent,
-  });
-  await input.publishLedgerComment(
-    {
+  }) {
+    if (!(yield* artifactExists(input.workflowContext, input.artifact))) return;
+    const artifactContent = yield* readArtifact(
+      input.workflowContext,
+      input.artifact,
+    );
+    const validation = validateAgentArtifact(input.artifact, artifactContent);
+    if (!validation.ok) return;
+    const body = formatReviewLedgerComment({
+      issueNumber: input.issue.number,
+      attempt: input.attemptMetadata.attempt,
+      phase: input.phase,
+      markerPhase: input.markerPhase,
+      title: input.title,
+      artifactContent,
+    });
+    yield* input.publishLedgerComment({
       cwd: input.cwd,
       repo: input.repo,
       issueNumber: input.issue.number,
       attemptMetadata: input.attemptMetadata,
       phase: input.phase,
       body,
-    },
-    application,
-  );
-}
-
+    });
+  },
+);
 function formatFencedBlock(value: string, language: string): string {
   const fence = longestBacktickRun(value) >= 4 ? "`````" : "````";
   return `${fence}${language}\n${value}\n${fence}`;
 }
-
 function longestBacktickRun(value: string): number {
   let longest = 0;
   let current = 0;
@@ -427,9 +352,4 @@ function longestBacktickRun(value: string): number {
     }
   }
   return longest;
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

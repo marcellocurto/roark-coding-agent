@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import { withCheckoutLock } from "./lock.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { readRunSummary } from "../observability/summary.ts";
 import { expect, test } from "bun:test";
@@ -8,8 +10,6 @@ import {
   readAttemptIndexPromise as readAttemptIndex,
   readAttemptMetadataPromise as readAttemptMetadata,
 } from "./attempts-promise.ts";
-import { withCheckoutLockPromise } from "./lock.ts";
-
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`${signal} waits for attempt finalization before releasing the lock and exiting`, async () => {
     const cwd = await mkdtemp(
@@ -28,7 +28,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     const stderr = new Response(child.stderr).text();
     const lock = { cwd, name: "shutdown", description: "shutdown fixture" };
     const waitFile = async (filename: string): Promise<string> => {
-      const deadline = Date.now() + 5_000;
+      const deadline = Date.now() + 5000;
       while (Date.now() < deadline) {
         const value = await readFile(path.join(cwd, filename), "utf8").catch(
           () => undefined,
@@ -46,8 +46,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       await waitFile("cleanup-started");
       expect(child.exitCode).toBeNull();
       expect(() => process.kill(pid, 0)).toThrow();
-      const busy = await withCheckoutLockPromise(lock, () =>
-        Promise.resolve(),
+      const busy = await runApplicationPromise(
+        withCheckoutLock(
+          lock,
+          Effect.tryPromise({
+            try: () => Promise.resolve(),
+            catch: (error) => error,
+          }),
+        ),
       ).catch((error: unknown) => error);
       expect(busy).toBeInstanceOf(Error);
       if (busy instanceof Error)
@@ -67,7 +73,15 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       expect(summary?.endedAt ?? null).toBe(metadata.endedAt);
       expect((await readAttemptIndex(issueDir))[0]?.outcome).toBe("errored");
       expect(
-        await withCheckoutLockPromise(lock, () => Promise.resolve("released")),
+        await runApplicationPromise(
+          withCheckoutLock(
+            lock,
+            Effect.tryPromise({
+              try: () => Promise.resolve("released"),
+              catch: (error) => error,
+            }),
+          ),
+        ),
       ).toBe("released");
     } finally {
       await writeFile(path.join(cwd, "allow-cleanup"), "continue").catch(
@@ -77,10 +91,16 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       await child.exited;
       await Promise.all([stdout, stderr]);
       // Also removes a stale lease if the test had to terminate the fixture.
-      await withCheckoutLockPromise(lock, () => Promise.resolve()).catch(
-        () => undefined,
-      );
+      await runApplicationPromise(
+        withCheckoutLock(
+          lock,
+          Effect.tryPromise({
+            try: () => Promise.resolve(),
+            catch: (error) => error,
+          }),
+        ),
+      ).catch(() => undefined);
       await rm(cwd, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 10000);
 }

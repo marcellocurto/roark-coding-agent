@@ -17,10 +17,8 @@ import {
   defaultAutorunReadyLabel,
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
-import {
-  defaultAutorunVerifyCommand,
-  inferVerificationCommand,
-} from "../autorun/verification.ts";
+import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
+import { inferVerificationCommandPromise as inferVerificationCommand } from "../autorun/verification-promise.ts";
 import {
   defaultMaxFixPasses,
   type AutoCliOptions,

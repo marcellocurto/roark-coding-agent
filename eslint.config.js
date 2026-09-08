@@ -96,6 +96,9 @@ export default tseslint.config(
       "lib/observability/{observer,events,summary}.ts",
       "lib/issue-curation/{create-issues,labels}.ts",
       "lib/issue-publishing/{github,service}.ts",
+      "lib/autorun/{discovery,continue,continue-plan,copy-path,observability,attempt-lifecycle,completion,publish-flow,publish,branch,labels,failure,triage-stop,ledger-comments,lock,verification,workspace,workspace-service}.ts",
+      "lib/pr-review/{workflow,artifacts}.ts",
+      "lib/github/{labels,pr-publishing,service}.ts",
     ],
     rules: {
       "no-restricted-imports": [
@@ -116,6 +119,17 @@ export default tseslint.config(
       ],
       "no-restricted-syntax": [
         "error",
+        {
+          selector:
+            ":matches(FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)[async=true]",
+          message:
+            "Workflow operations compose Effects; adapt Promise APIs at their external boundary.",
+        },
+        {
+          selector: "TryStatement:has(YieldExpression)",
+          message:
+            "Handle yielded Effect failures with Effect combinators, not JavaScript try/catch.",
+        },
         {
           selector:
             "CallExpression[callee.object.name='Effect'][callee.property.name=/^run(Promise|Sync|Fork|Callback)/]",

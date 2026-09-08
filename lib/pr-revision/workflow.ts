@@ -17,10 +17,10 @@ import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
-  runVerificationPromise,
   verificationFailureReason,
   type VerificationResult,
 } from "../autorun/verification.ts";
+import { runVerificationPromise as runVerificationPromise } from "../autorun/verification-promise.ts";
 import { type PullRequestFeedback } from "../github/pr.ts";
 import { fetchPullRequestFeedbackPromise as fetchPullRequestFeedback } from "../github/promise.ts";
 import { runAgentPromise } from "../workflow/agent-runner.ts";
@@ -49,10 +49,12 @@ import {
 import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
-  preparePrRevisionWorkspace,
+} from "../autorun/workspace.ts";
+import {
   runLifecycleHookPromise,
   type PreparedPrRevisionWorkspace,
-} from "../autorun/workspace.ts";
+} from "../autorun/workspace-promise.ts";
+import { preparePrRevisionWorkspacePromise as preparePrRevisionWorkspace } from "../autorun/workspace-promise.ts";
 import { validatePrBranchSafety } from "./branch.ts";
 import type { checkoutPrHeadBranch } from "./branch.ts";
 import { postPrRevisionSummaryComment } from "./comments.ts";

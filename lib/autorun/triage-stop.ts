@@ -1,30 +1,19 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
-import {
-  truncateGitHubIssueComment,
-  type GitHubCommentRef,
-} from "../github/comments.ts";
-import {
-  postIssueCommentPromise as postIssueComment,
-  postOrUpdateIssueCommentByMarkerPromise as postOrUpdateIssueCommentByMarker,
-} from "../github/promise.ts";
+import { decodeArtifact } from "../workflow/validation.ts";
+import { GitHub } from "../github/service.ts";
+import { Presentation } from "../runtime/services.ts";
+import { Effect } from "effect";
+import { truncateGitHubIssueComment } from "../github/comments.ts";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
-import { presenter } from "../presentation/presenter.ts";
-
 export type TriageStoppedVerdict = string;
-
 export interface FormatTriageStoppedCommentInput {
   issueNumber: number;
   issueUrl?: string | undefined;
   triageVerdict: TriageStoppedVerdict;
   triageArtifactContent?: string | undefined;
 }
-
 export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
   cwd: string;
   repo?: string | undefined;
@@ -32,16 +21,14 @@ export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
   marker?: string | undefined;
   existingCommentId?: number | undefined;
 };
-
-export async function readTriageStoppedVerdict(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<TriageStoppedVerdict> {
-  return parseTriageResultJson(
-    await readArtifact(context, "triage", application),
-  ).verdict;
-}
-
+export const readTriageStoppedVerdict = Effect.fn("readTriageStoppedVerdict")(
+  function* (context: WorkflowContext) {
+    return (yield* decodeArtifact(
+      parseTriageResultJson,
+      yield* readArtifact(context, "triage"),
+    )).verdict;
+  },
+);
 export function mapTriageVerdictToLabel(
   verdict: TriageStoppedVerdict,
 ): "blocked" | "needs-human" | "triage-rejected" {
@@ -49,7 +36,6 @@ export function mapTriageVerdictToLabel(
   if (verdict === "reject") return "triage-rejected";
   return "needs-human";
 }
-
 export function formatTriageStoppedComment(
   input: FormatTriageStoppedCommentInput,
 ): string {
@@ -58,7 +44,6 @@ export function formatTriageStoppedComment(
     `${sanitizePublicMarkdown(input.triageArtifactContent).trimEnd()}\n`,
   );
 }
-
 export function buildTriageStopAddLabelArgv(options: {
   repo?: string | undefined;
   issueNumber: number;
@@ -75,7 +60,6 @@ export function buildTriageStopAddLabelArgv(options: {
     ...repoArgs,
   ];
 }
-
 export function buildTriageStopRemoveLabelArgv(options: {
   repo?: string | undefined;
   issueNumber: number;
@@ -92,92 +76,75 @@ export function buildTriageStopRemoveLabelArgv(options: {
     ...repoArgs,
   ];
 }
-
-export async function markIssueTriageStopped(
-  options: MarkIssueTriageStoppedOptions,
-  application?: ApplicationExecution,
-): Promise<GitHubCommentRef | undefined> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        markIssueTriageStopped(options, application),
-      ),
-      application,
-    );
-
-  const label = mapTriageVerdictToLabel(options.triageVerdict);
-  const comment = formatTriageStoppedComment(options);
-
-  try {
-    await runProcessOrThrowPromise(
-      buildTriageStopAddLabelArgv({
+export const markIssueTriageStopped = Effect.fn("markIssueTriageStopped")(
+  function* (options: MarkIssueTriageStoppedOptions) {
+    const label = mapTriageVerdictToLabel(options.triageVerdict);
+    const comment = formatTriageStoppedComment(options);
+    yield* Effect.gen(function* () {
+      yield* (yield* GitHub).addIssueLabel({
+        cwd: options.cwd,
         repo: options.repo,
         issueNumber: options.issueNumber,
-        label,
-      }),
-      { cwd: options.cwd, label: "gh issue edit --add-label (triage stop)" },
-      application,
+        label: label,
+      });
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `failed to apply triage-stop label '${label}': ${error.message}`,
+          );
+        }),
+      ),
     );
-  } catch (error) {
-    presenter(application).warning(
-      `failed to apply triage-stop label '${label}': ${formatError(error)}`,
-    );
-  }
-
-  for (const removeLabel of uniqueLabels(options.removeLabels ?? []).filter(
-    (candidate) => candidate !== label,
-  )) {
-    try {
-      await runProcessOrThrowPromise(
-        buildTriageStopRemoveLabelArgv({
+    for (const removeLabel of uniqueLabels(options.removeLabels ?? []).filter(
+      (candidate) => candidate !== label,
+    )) {
+      yield* Effect.gen(function* () {
+        yield* (yield* GitHub).removeIssueLabel({
+          cwd: options.cwd,
           repo: options.repo,
           issueNumber: options.issueNumber,
           label: removeLabel,
-        }),
-        {
-          cwd: options.cwd,
-          label: "gh issue edit --remove-label (triage stop cleanup)",
-        },
-        application,
-      );
-    } catch (error) {
-      presenter(application).warning(
-        `failed to remove label '${removeLabel}': ${formatError(error)}`,
+        });
+      }).pipe(
+        Effect.catch(
+          Effect.fnUntraced(function* (error) {
+            (yield* Presentation).warning(
+              `failed to remove label '${removeLabel}': ${error.message}`,
+            );
+          }),
+        ),
       );
     }
-  }
-
-  try {
-    if (options.marker) {
-      return await postOrUpdateIssueCommentByMarker(
-        {
+    return yield* Effect.gen(function* () {
+      if (options.marker) {
+        return yield* (yield* GitHub).postOrUpdateIssueCommentByMarker({
           cwd: options.cwd,
           repo: options.repo,
           issueNumber: options.issueNumber,
           marker: options.marker,
           body: comment,
           existingCommentId: options.existingCommentId,
-        },
-        application,
-      );
-    }
-    await postIssueComment(
-      {
+        });
+      }
+      yield* (yield* GitHub).postIssueComment({
         cwd: options.cwd,
         repo: options.repo,
         issueNumber: options.issueNumber,
         body: comment,
-      },
-      application,
+      });
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `failed to post triage-stop comment: ${error.message}`,
+          );
+        }),
+      ),
     );
-  } catch (error) {
-    presenter(application).warning(
-      `failed to post triage-stop comment: ${formatError(error)}`,
-    );
-  }
-  return undefined;
-}
-
+    return undefined;
+  },
+);
 function uniqueLabels(labels: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -188,9 +155,4 @@ function uniqueLabels(labels: string[]): string[] {
     result.push(trimmed);
   }
   return result;
-}
-
-function formatError(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return String(error);
 }

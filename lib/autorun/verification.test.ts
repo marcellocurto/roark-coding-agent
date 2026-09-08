@@ -19,13 +19,15 @@ import {
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   parseVerificationArtifact,
-  runVerificationPromise,
   runVerification,
-  writeVerificationArtifact,
-  writeVerificationBeforeFixArtifact,
   verificationFailureReason,
   type VerificationResult,
 } from "./verification.ts";
+import {
+  runVerificationPromise as runVerificationPromise,
+  writeVerificationArtifactPromise as writeVerificationArtifact,
+  writeVerificationBeforeFixArtifactPromise as writeVerificationBeforeFixArtifact,
+} from "./verification-promise.ts";
 
 describe("autorun verification", () => {
   test("classifies a timeout as failure even when the shell exited zero", () => {

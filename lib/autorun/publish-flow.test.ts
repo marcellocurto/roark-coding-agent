@@ -1,3 +1,5 @@
+import { PrReviewError } from "../pr-review/workflow.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -34,57 +36,54 @@ import { changeReport } from "../testing/change-reports.ts";
 import {} from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
-
 const tempDirs: string[] = [];
-
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-
 describe("verification repair planning", () => {
   test("archives failed verification and schedules the next shared fix pass", async () => {
     const context = await tempContext(2);
-    const repair = await planVerificationRepair(context, failedVerification(1));
-
+    const repair = await runApplicationPromise(
+      planVerificationRepair(context, failedVerification(1)),
+    );
     expect(repair).toEqual({ pass: 1 });
     expect(
       await readArtifact(context, { name: "verificationBeforeFix", pass: 1 }),
     ).toContain("## Exit Code\n1");
   });
-
   test("uses the next pass after reviewer-driven fixes", async () => {
     const context = await tempContext(2);
     await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
-
     expect(
-      await planVerificationRepair(context, failedVerification(1)),
+      await runApplicationPromise(
+        planVerificationRepair(context, failedVerification(1)),
+      ),
     ).toEqual({ pass: 2 });
     expect(
       await readArtifact(context, { name: "verificationBeforeFix", pass: 2 }),
     ).toContain("## Exit Code\n1");
   });
-
   test("does not schedule repair when fix budget is exhausted", async () => {
     const context = await tempContext(1);
     await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
-
     expect(
-      await planVerificationRepair(context, failedVerification(1)),
-    ).toBeUndefined();
-  });
-
-  test("does not consume fix budget for command-unavailable verification failures", async () => {
-    const context = await tempContext(1);
-
-    expect(
-      await planVerificationRepair(
-        context,
-        failedVerification(127, "sh: missing: command not found"),
+      await runApplicationPromise(
+        planVerificationRepair(context, failedVerification(1)),
       ),
     ).toBeUndefined();
   });
-
+  test("does not consume fix budget for command-unavailable verification failures", async () => {
+    const context = await tempContext(1);
+    expect(
+      await runApplicationPromise(
+        planVerificationRepair(
+          context,
+          failedVerification(127, "sh: missing: command not found"),
+        ),
+      ),
+    ).toBeUndefined();
+  });
   test("canonical readiness JSON drives publication even when rendered Markdown disagrees", async () => {
     const context = await tempContext(1);
     context.model = "provider/reviewer";
@@ -100,7 +99,10 @@ describe("verification repair planning", () => {
       "# PR Readiness\n\n## Status\nnot-ready\n",
     );
     const postPrCalls: string[] = [];
-    const prBodyUpdates: { pr: string; followUpCount: number }[] = [];
+    const prBodyUpdates: {
+      pr: string;
+      followUpCount: number;
+    }[] = [];
     const postPublicationOrder: string[] = [];
     const reviewCalls: ReviewPrCliOptions[] = [];
     const workspace = {
@@ -111,89 +113,99 @@ describe("verification repair planning", () => {
       copyToWorktree: ["local.env"],
     };
     const hooks = { beforeRun: "bun install", timeoutMs: 1234 };
-
     const outcome = await Effect.runPromise(
       fromLegacyPromise((application) =>
-        runPublishGate(
-          {
-            options: {
-              cwd: context.controlCwd,
-              repo: "owner/repo",
-              verifyCommand: "bun run typecheck",
-              failureLabel: "failed",
-              successLabel: "done",
-              inProgressLabel: "in-progress",
-              remote: "origin",
-              baseBranch: "main",
-              workspace,
-              hooks,
+        runApplicationPromise(
+          runPublishGate(
+            {
+              options: {
+                cwd: context.controlCwd,
+                repo: "owner/repo",
+                verifyCommand: "bun run typecheck",
+                failureLabel: "failed",
+                successLabel: "done",
+                inProgressLabel: "in-progress",
+                remote: "origin",
+                baseBranch: "main",
+                workspace,
+                hooks,
+              },
+              issue: {
+                number: 1,
+                title: "Issue",
+                url: "https://github.com/owner/repo/issues/1",
+              },
+              branchPlan: {
+                issueNumber: 1,
+                branchName: "roark/issue-1",
+                baseBranch: "main",
+              },
+              workflowContext: context,
+              attemptMetadata: attemptMetadata(context),
+              attemptMetadataPath:
+                ".roark/runs/issue/1/attempts/1/attempt.json",
             },
-            issue: {
-              number: 1,
-              title: "Issue",
-              url: "https://github.com/owner/repo/issues/1",
-            },
-            branchPlan: {
-              issueNumber: 1,
-              branchName: "roark/issue-1",
-              baseBranch: "main",
-            },
-            workflowContext: context,
-            attemptMetadata: attemptMetadata(context),
-            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-          },
-          {
-            refreshCopyToWorktree: async () => {
-              await noopAsync();
-            },
-            runLifecycleHookPromise: async () => {
-              await noopAsync();
-            },
-            runVerificationPromise: async ({ command }) => (
-              await noopAsync(),
-              { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
-            ),
-            writeVerificationArtifact: async () => {
-              await noopAsync();
-            },
-            publishAutorunResult: async () => (
-              await noopAsync(),
-              { url: "https://github.com/owner/repo/pull/10", number: 10 }
-            ),
-            publishIssueLedgerComment: async () => {
-              await noopAsync();
-              return undefined;
-            },
-            postPrIssueCreation: async ({ prUrl }, supplied) => {
-              expect(supplied).toBe(application);
-              await noopAsync();
-              postPrCalls.push(prUrl);
-              return undefined;
-            },
-            updatePrBody: async ({ pr, followUpIssues }) => {
-              await noopAsync();
-              postPublicationOrder.push("body-update");
-              prBodyUpdates.push({
+            {
+              refreshCopyToWorktree: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              runLifecycleHook: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              runVerification: Effect.fnUntraced(function* ({ command }) {
+                return (
+                  yield* Effect.void,
+                  { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
+                );
+              }),
+              writeVerificationArtifact: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              publishAutorunResult: Effect.fnUntraced(function* () {
+                return (
+                  yield* Effect.void,
+                  { url: "https://github.com/owner/repo/pull/10", number: 10 }
+                );
+              }),
+              publishIssueLedgerComment: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              postPrIssueCreation: Effect.fnUntraced(function* ({ prUrl }) {
+                yield* Effect.void;
+                postPrCalls.push(prUrl);
+                return undefined;
+              }),
+              updatePrBody: Effect.fnUntraced(function* ({
                 pr,
-                followUpCount: followUpIssues?.length ?? 0,
-              });
+                followUpIssues,
+              }) {
+                yield* Effect.void;
+                postPublicationOrder.push("body-update");
+                prBodyUpdates.push({
+                  pr,
+                  followUpCount: followUpIssues?.length ?? 0,
+                });
+                return undefined;
+              }),
+              runPrReview: Effect.fnUntraced(function* (options) {
+                yield* Effect.void;
+                postPublicationOrder.push("pr-review");
+                reviewCalls.push(options);
+                return {
+                  outcome: "completed" as const,
+                  context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+                };
+              }),
             },
-            runPrReviewPromise: async (options, _dependencies, supplied) => {
-              expect(supplied).toBe(application);
-              await noopAsync();
-              postPublicationOrder.push("pr-review");
-              reviewCalls.push(options);
-              return {
-                outcome: "completed",
-                context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-              };
-            },
-          },
+          ),
           application,
         ),
       ).pipe(Effect.provide(applicationLayer)),
     );
-
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
     expect(prBodyUpdates).toEqual([
@@ -217,7 +229,6 @@ describe("verification repair planning", () => {
       },
     ]);
   });
-
   test("automatic PR review failures do not turn an opened PR into a failed attempt", async () => {
     const context = await tempContext(1);
     await writeJsonArtifact(
@@ -240,32 +251,36 @@ describe("verification repair planning", () => {
         roots: [context.controlCwd],
       }),
       async (application) => {
-        const outcome = await runPublishGate(
-          {
-            options: publishGateOptions(context),
-            issue: {
-              number: 1,
-              title: "Issue",
-              url: "https://github.com/owner/repo/issues/1",
+        const outcome = await runApplicationPromise(
+          runPublishGate(
+            {
+              options: publishGateOptions(context),
+              issue: {
+                number: 1,
+                title: "Issue",
+                url: "https://github.com/owner/repo/issues/1",
+              },
+              branchPlan: {
+                issueNumber: 1,
+                branchName: "roark/issue-1",
+                baseBranch: "main",
+              },
+              workflowContext: context,
+              attemptMetadata: attemptMetadata(context),
+              attemptMetadataPath:
+                ".roark/runs/issue/1/attempts/1/attempt.json",
             },
-            branchPlan: {
-              issueNumber: 1,
-              branchName: "roark/issue-1",
-              baseBranch: "main",
-            },
-            workflowContext: context,
-            attemptMetadata: attemptMetadata(context),
-            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-          },
-          successfulPublicationDependencies({
-            runPrReviewPromise: async () => {
-              await noopAsync();
-              throw new Error("review service unavailable");
-            },
-          }),
+            successfulPublicationDependencies({
+              runPrReview: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return yield* Effect.fail(
+                  new PrReviewError({ message: "review service unavailable" }),
+                );
+              }),
+            }),
+          ),
           application,
         );
-
         expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
         expect(warningOutput).toContain(
           "automatic PR review failed after PR #10 was published",
@@ -274,7 +289,6 @@ describe("verification repair planning", () => {
       },
     );
   });
-
   test("a stale automatic PR review preserves the published outcome and review artifact", async () => {
     const context = await tempContext(1);
     await writeJsonArtifact(
@@ -297,35 +311,37 @@ describe("verification repair planning", () => {
         roots: [context.controlCwd],
       }),
       async (application) => {
-        const outcome = await runPublishGate(
-          {
-            options: publishGateOptions(context),
-            issue: {
-              number: 1,
-              title: "Issue",
-              url: "https://github.com/owner/repo/issues/1",
+        const outcome = await runApplicationPromise(
+          runPublishGate(
+            {
+              options: publishGateOptions(context),
+              issue: {
+                number: 1,
+                title: "Issue",
+                url: "https://github.com/owner/repo/issues/1",
+              },
+              branchPlan: {
+                issueNumber: 1,
+                branchName: "roark/issue-1",
+                baseBranch: "main",
+              },
+              workflowContext: context,
+              attemptMetadata: attemptMetadata(context),
+              attemptMetadataPath:
+                ".roark/runs/issue/1/attempts/1/attempt.json",
             },
-            branchPlan: {
-              issueNumber: 1,
-              branchName: "roark/issue-1",
-              baseBranch: "main",
-            },
-            workflowContext: context,
-            attemptMetadata: attemptMetadata(context),
-            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-          },
-          successfulPublicationDependencies({
-            runPrReviewPromise: async () => {
-              await noopAsync();
-              return {
-                outcome: "blocked",
-                context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-              };
-            },
-          }),
+            successfulPublicationDependencies({
+              runPrReview: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return {
+                  outcome: "blocked" as const,
+                  context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+                };
+              }),
+            }),
+          ),
           application,
         );
-
         expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
         expect(warningOutput).toContain(
           "automatic PR review for #10 was blocked",
@@ -334,64 +350,63 @@ describe("verification repair planning", () => {
       },
     );
   });
-
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(1);
     await writeJsonArtifact(context, "readiness", readinessResult("not-ready"));
     let postPrCalled = false;
     let reviewPrCalled = false;
-
-    const outcome = await runPublishGate(
-      {
-        options: {
-          cwd: context.controlCwd,
-          repo: "owner/repo",
-          verifyCommand: "bun run typecheck",
-          failureLabel: "failed",
-          successLabel: "done",
-          inProgressLabel: "in-progress",
-          remote: "origin",
-          baseBranch: "main",
+    const outcome = await runApplicationPromise(
+      runPublishGate(
+        {
+          options: {
+            cwd: context.controlCwd,
+            repo: "owner/repo",
+            verifyCommand: "bun run typecheck",
+            failureLabel: "failed",
+            successLabel: "done",
+            inProgressLabel: "in-progress",
+            remote: "origin",
+            baseBranch: "main",
+          },
+          issue: {
+            number: 1,
+            title: "Issue",
+            url: "https://github.com/owner/repo/issues/1",
+          },
+          branchPlan: {
+            issueNumber: 1,
+            branchName: "roark/issue-1",
+            baseBranch: "main",
+          },
+          workflowContext: context,
+          attemptMetadata: attemptMetadata(context),
+          attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
         },
-        issue: {
-          number: 1,
-          title: "Issue",
-          url: "https://github.com/owner/repo/issues/1",
+        {
+          handleNonPublish: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          postPrIssueCreation: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            postPrCalled = true;
+            return undefined;
+          }),
+          runPrReview: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            reviewPrCalled = true;
+            return {
+              outcome: "completed" as const,
+              context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+            };
+          }),
         },
-        branchPlan: {
-          issueNumber: 1,
-          branchName: "roark/issue-1",
-          baseBranch: "main",
-        },
-        workflowContext: context,
-        attemptMetadata: attemptMetadata(context),
-        attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-      },
-      {
-        handleNonPublish: async () => {
-          await noopAsync();
-        },
-        postPrIssueCreation: async () => {
-          await noopAsync();
-          postPrCalled = true;
-          return undefined;
-        },
-        runPrReviewPromise: async () => {
-          await noopAsync();
-          reviewPrCalled = true;
-          return {
-            outcome: "completed",
-            context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-          };
-        },
-      },
+      ),
     );
-
     expect(outcome.outcome).toBe("failed-readiness");
     expect(postPrCalled).toBe(false);
     expect(reviewPrCalled).toBe(false);
   });
-
   test("failed verification does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(0);
     await writeJsonArtifact(
@@ -401,71 +416,82 @@ describe("verification repair planning", () => {
     );
     let postPrCalled = false;
     let reviewPrCalled = false;
-
-    const outcome = await runPublishGate(
-      {
-        options: {
-          cwd: context.controlCwd,
-          repo: "owner/repo",
-          verifyCommand: "bun run typecheck",
-          failureLabel: "failed",
-          successLabel: "done",
-          inProgressLabel: "in-progress",
-          remote: "origin",
-          baseBranch: "main",
+    const outcome = await runApplicationPromise(
+      runPublishGate(
+        {
+          options: {
+            cwd: context.controlCwd,
+            repo: "owner/repo",
+            verifyCommand: "bun run typecheck",
+            failureLabel: "failed",
+            successLabel: "done",
+            inProgressLabel: "in-progress",
+            remote: "origin",
+            baseBranch: "main",
+          },
+          issue: {
+            number: 1,
+            title: "Issue",
+            url: "https://github.com/owner/repo/issues/1",
+          },
+          branchPlan: {
+            issueNumber: 1,
+            branchName: "roark/issue-1",
+            baseBranch: "main",
+          },
+          workflowContext: context,
+          attemptMetadata: attemptMetadata(context),
+          attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
         },
-        issue: {
-          number: 1,
-          title: "Issue",
-          url: "https://github.com/owner/repo/issues/1",
+        {
+          refreshCopyToWorktree: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          runLifecycleHook: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          runVerification: Effect.fnUntraced(function* ({ command }) {
+            return (
+              yield* Effect.void,
+              {
+                ok: false,
+                command,
+                exitCode: 1,
+                stdout: "",
+                stderr: "lint failed",
+              }
+            );
+          }),
+          writeVerificationArtifact: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          handleNonPublish: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          postPrIssueCreation: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            postPrCalled = true;
+            return undefined;
+          }),
+          runPrReview: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            reviewPrCalled = true;
+            return {
+              outcome: "completed" as const,
+              context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+            };
+          }),
         },
-        branchPlan: {
-          issueNumber: 1,
-          branchName: "roark/issue-1",
-          baseBranch: "main",
-        },
-        workflowContext: context,
-        attemptMetadata: attemptMetadata(context),
-        attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-      },
-      {
-        refreshCopyToWorktree: async () => {
-          await noopAsync();
-        },
-        runLifecycleHookPromise: async () => {
-          await noopAsync();
-        },
-        runVerificationPromise: async ({ command }) => (
-          await noopAsync(),
-          { ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" }
-        ),
-        writeVerificationArtifact: async () => {
-          await noopAsync();
-        },
-        handleNonPublish: async () => {
-          await noopAsync();
-        },
-        postPrIssueCreation: async () => {
-          await noopAsync();
-          postPrCalled = true;
-          return undefined;
-        },
-        runPrReviewPromise: async () => {
-          await noopAsync();
-          reviewPrCalled = true;
-          return {
-            outcome: "completed",
-            context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-          };
-        },
-      },
+      ),
     );
-
     expect(outcome.outcome).toBe("failed-verification");
     expect(postPrCalled).toBe(false);
     expect(reviewPrCalled).toBe(false);
   });
-
   test("verification runner exceptions propagate through the publish gate", async () => {
     const context = await tempContext(1);
     await writeJsonArtifact(
@@ -487,52 +513,52 @@ describe("verification repair planning", () => {
         description: "verification runner failed",
       }),
     });
-
-    const running = runPublishGate(
-      {
-        options: {
-          cwd: context.controlCwd,
-          repo: "owner/repo",
-          verifyCommand: "bun run typecheck",
-          failureLabel: "failed",
-          successLabel: "done",
-          inProgressLabel: "in-progress",
-          remote: "origin",
-          baseBranch: "main",
+    const running = runApplicationPromise(
+      runPublishGate(
+        {
+          options: {
+            cwd: context.controlCwd,
+            repo: "owner/repo",
+            verifyCommand: "bun run typecheck",
+            failureLabel: "failed",
+            successLabel: "done",
+            inProgressLabel: "in-progress",
+            remote: "origin",
+            baseBranch: "main",
+          },
+          issue: {
+            number: 1,
+            title: "Issue",
+            url: "https://github.com/owner/repo/issues/1",
+          },
+          branchPlan: {
+            issueNumber: 1,
+            branchName: "roark/issue-1",
+            baseBranch: "main",
+          },
+          workflowContext: context,
+          attemptMetadata: attemptMetadata(context),
+          attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
         },
-        issue: {
-          number: 1,
-          title: "Issue",
-          url: "https://github.com/owner/repo/issues/1",
-        },
-        branchPlan: {
-          issueNumber: 1,
-          branchName: "roark/issue-1",
-          baseBranch: "main",
-        },
-        workflowContext: context,
-        attemptMetadata: attemptMetadata(context),
-        attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-      },
-      {
-        refreshCopyToWorktree: async () => {
-          await noopAsync();
-        },
-        runLifecycleHookPromise: async () => {
-          await noopAsync();
-        },
-        runVerificationPromise: (input) =>
-          Effect.runPromise(
+        {
+          refreshCopyToWorktree: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          runLifecycleHook: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          runVerification: (input) =>
             runVerification(input).pipe(
               Effect.provideService(Verification, {
                 execute: () => Effect.fail(failure),
               }),
               Effect.provide(applicationLayer),
             ),
-          ),
-      },
+        },
+      ),
     );
-
     let thrown: unknown;
     try {
       await running;
@@ -541,7 +567,6 @@ describe("verification repair planning", () => {
     }
     expect(thrown).toBe(failure);
   });
-
   test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
     const context = await tempContext(1);
     await writeArtifact(
@@ -581,20 +606,25 @@ describe("verification repair planning", () => {
         ],
       }),
     );
-
-    await createReviewerIssuesAfterPr({
-      workflowContext: context,
-      prUrl: "https://github.com/owner/repo/pull/10",
-    });
-
+    await runApplicationPromise(
+      createReviewerIssuesAfterPr({
+        workflowContext: context,
+        prUrl: "https://github.com/owner/repo/pull/10",
+      }),
+    );
     const plan = JSON.parse(
       await readArtifact(context, "issueCurationPlan"),
     ) as {
-      run: { prUrl?: string; artifactPaths: string[] };
+      run: {
+        prUrl?: string;
+        artifactPaths: string[];
+      };
       issuesToCreate: {
         planItemId: string;
         sourceFindingIds: string[];
-        runContext: { prUrl?: string };
+        runContext: {
+          prUrl?: string;
+        };
       }[];
     };
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
@@ -610,7 +640,6 @@ describe("verification repair planning", () => {
       ".roark/runs/issue/1/attempts/1/review-a-0.json",
     );
   });
-
   test("terminal command-unavailable failures include setup guidance", async () => {
     await noopAsync();
     const context = await tempContext(1);
@@ -631,69 +660,76 @@ describe("verification repair planning", () => {
     return runWithPresenter(
       new Presenter({ stream, roots: [context.controlCwd] }),
       async (application) => {
-        const outcome = await runPublishGate(
-          {
-            options: {
-              cwd: context.controlCwd,
-              repo: "owner/repo",
-              verifyCommand: "bun run typecheck",
-              failureLabel: "failed",
-              successLabel: "done",
-              inProgressLabel: "in-progress",
-              remote: "origin",
-              baseBranch: "main",
-              hooks: { timeoutMs: 1000 },
+        const outcome = await runApplicationPromise(
+          runPublishGate(
+            {
+              options: {
+                cwd: context.controlCwd,
+                repo: "owner/repo",
+                verifyCommand: "bun run typecheck",
+                failureLabel: "failed",
+                successLabel: "done",
+                inProgressLabel: "in-progress",
+                remote: "origin",
+                baseBranch: "main",
+                hooks: { timeoutMs: 1000 },
+              },
+              issue: {
+                number: 1,
+                title: "Issue",
+                url: "https://github.com/owner/repo/issues/1",
+              },
+              branchPlan: {
+                issueNumber: 1,
+                branchName: "roark/issue-1",
+                baseBranch: "main",
+              },
+              workflowContext: context,
+              attemptMetadata: {
+                attempt: 1,
+                issueNumber: 1,
+                branch: "roark/issue-1",
+                baseBranch: "main",
+                worktreePath: context.agentCwd,
+                runArtifactPath: context.runDirRelative,
+                startedAt: new Date("2026-05-08T00:00:00.000Z").toISOString(),
+                endedAt: null,
+                outcome: "in-progress",
+                outcomeDetail: null,
+              },
+              attemptMetadataPath:
+                ".roark/runs/issue/1/attempts/1/attempt.json",
             },
-            issue: {
-              number: 1,
-              title: "Issue",
-              url: "https://github.com/owner/repo/issues/1",
+            {
+              refreshCopyToWorktree: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              runLifecycleHook: Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return undefined;
+              }),
+              runVerification: Effect.fnUntraced(function* ({ command }) {
+                return (
+                  yield* Effect.void,
+                  {
+                    ok: false,
+                    command,
+                    exitCode: 127,
+                    stdout: "",
+                    stderr: "/bin/bash: tsc: command not found",
+                  }
+                );
+              }),
+              handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
+                yield* Effect.void;
+                failureComment = decision.reason;
+                return undefined;
+              }),
             },
-            branchPlan: {
-              issueNumber: 1,
-              branchName: "roark/issue-1",
-              baseBranch: "main",
-            },
-            workflowContext: context,
-            attemptMetadata: {
-              attempt: 1,
-              issueNumber: 1,
-              branch: "roark/issue-1",
-              baseBranch: "main",
-              worktreePath: context.agentCwd,
-              runArtifactPath: context.runDirRelative,
-              startedAt: new Date("2026-05-08T00:00:00.000Z").toISOString(),
-              endedAt: null,
-              outcome: "in-progress",
-              outcomeDetail: null,
-            },
-            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
-          },
-          {
-            refreshCopyToWorktree: async () => {
-              await noopAsync();
-            },
-            runLifecycleHookPromise: async () => {
-              await noopAsync();
-            },
-            runVerificationPromise: async ({ command }) => (
-              await noopAsync(),
-              {
-                ok: false,
-                command,
-                exitCode: 127,
-                stdout: "",
-                stderr: "/bin/bash: tsc: command not found",
-              }
-            ),
-            handleNonPublish: async ({ decision }) => {
-              await noopAsync();
-              failureComment = decision.reason;
-            },
-          },
+          ),
           application,
         );
-
         expect(outcome).toEqual({
           outcome: "failed-verification",
           outcomeDetail:
@@ -708,7 +744,6 @@ describe("verification repair planning", () => {
     );
   });
 });
-
 function attemptMetadata(context: WorkflowContext) {
   return {
     attempt: 1,
@@ -723,7 +758,6 @@ function attemptMetadata(context: WorkflowContext) {
     outcomeDetail: null,
   };
 }
-
 function publishGateOptions(context: WorkflowContext) {
   return {
     cwd: context.controlCwd,
@@ -736,50 +770,58 @@ function publishGateOptions(context: WorkflowContext) {
     baseBranch: "main",
   };
 }
-
 function successfulPublicationDependencies(
   overrides: Parameters<typeof runPublishGate>[1] = {},
 ): Parameters<typeof runPublishGate>[1] {
   return {
-    refreshCopyToWorktree: async () => {
-      await noopAsync();
-    },
-    runLifecycleHookPromise: async () => {
-      await noopAsync();
-    },
-    runVerificationPromise: async ({ command }) => (
-      await noopAsync(),
-      { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
-    ),
-    writeVerificationArtifact: async () => {
-      await noopAsync();
-    },
-    publishAutorunResult: async () => (
-      await noopAsync(),
-      { url: "https://github.com/owner/repo/pull/10", number: 10 }
-    ),
-    publishIssueLedgerComment: async () => {
-      await noopAsync();
+    refreshCopyToWorktree: Effect.fnUntraced(function* () {
+      yield* Effect.void;
       return undefined;
-    },
-    postPrIssueCreation: async () => {
-      await noopAsync();
+    }),
+    runLifecycleHook: Effect.fnUntraced(function* () {
+      yield* Effect.void;
       return undefined;
-    },
-    updatePrBody: async () => {
-      await noopAsync();
-    },
-    runPrReviewPromise: async () => (
-      await noopAsync(),
-      {
-        outcome: "completed",
-        context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-      }
-    ),
+    }),
+    runVerification: Effect.fnUntraced(function* ({ command }) {
+      return (
+        yield* Effect.void,
+        { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
+      );
+    }),
+    writeVerificationArtifact: Effect.fnUntraced(function* () {
+      yield* Effect.void;
+      return undefined;
+    }),
+    publishAutorunResult: Effect.fnUntraced(function* () {
+      return (
+        yield* Effect.void,
+        { url: "https://github.com/owner/repo/pull/10", number: 10 }
+      );
+    }),
+    publishIssueLedgerComment: Effect.fnUntraced(function* () {
+      yield* Effect.void;
+      return undefined;
+    }),
+    postPrIssueCreation: Effect.fnUntraced(function* () {
+      yield* Effect.void;
+      return undefined;
+    }),
+    updatePrBody: Effect.fnUntraced(function* () {
+      yield* Effect.void;
+      return undefined;
+    }),
+    runPrReview: Effect.fnUntraced(function* () {
+      return (
+        yield* Effect.void,
+        {
+          outcome: "completed" as const,
+          context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+        }
+      );
+    }),
     ...overrides,
   };
 }
-
 async function tempContext(maxFixPasses: number): Promise<WorkflowContext> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-publish-flow-"));
   tempDirs.push(cwd);
@@ -800,7 +842,6 @@ async function tempContext(maxFixPasses: number): Promise<WorkflowContext> {
     thinkingConfig: getWorkflowThinkingConfig(),
   };
 }
-
 function failedVerification(
   exitCode: number,
   stderr = "lint failed",
@@ -813,7 +854,6 @@ function failedVerification(
     stderr,
   };
 }
-
 function structuredReview(findings: ReviewFinding[] = []): string {
   return JSON.stringify(reviewResult(findings));
 }

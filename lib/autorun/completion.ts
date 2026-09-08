@@ -1,8 +1,6 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { Effect } from "effect";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
@@ -17,16 +15,15 @@ import {
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import {
-  mapTriageVerdictToLabel,
-  markIssueTriageStopped,
-} from "./triage-stop.ts";
+import { mapTriageVerdictToLabel } from "./triage-stop.ts";
+import { markIssueTriageStopped } from "./triage-stop.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
-
 export type AutorunCompletionOutcome =
   | PublishGateOutcome
-  | { outcome: "triage-stopped"; outcomeDetail: string | null };
-
+  | {
+      outcome: "triage-stopped";
+      outcomeDetail: string | null;
+    };
 export interface CompleteAutorunWorkflowInput {
   workflowResult: WorkflowRunResult;
   options: AutorunGateOptions;
@@ -37,54 +34,39 @@ export interface CompleteAutorunWorkflowInput {
   attemptMetadataPath: string;
   recoveryCommand?: string | undefined;
 }
-
 export interface CompleteAutorunWorkflowInjected {
   publishGate?: typeof runPublishGate | undefined;
-  markTriageStopped?:
-    | ((...args: Parameters<typeof markIssueTriageStopped>) => Promise<unknown>)
-    | undefined;
+  markTriageStopped?: typeof markIssueTriageStopped | undefined;
   publishPlanningLedgerComments?:
     | typeof publishPlanningLedgerComments
     | undefined;
 }
-
-export async function completeAutorunWorkflow(
-  input: CompleteAutorunWorkflowInput,
-  injected: CompleteAutorunWorkflowInjected = {},
-  application?: ApplicationExecution,
-): Promise<AutorunCompletionOutcome> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        completeAutorunWorkflow(input, injected, application),
-      ),
-      application,
-    );
-
-  const publishGate = injected.publishGate ?? runPublishGate;
-  const markTriageStopped =
-    injected.markTriageStopped ?? markIssueTriageStopped;
-  const publishPlanning =
-    injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
-
-  if (input.workflowResult.status === "triage-stopped") {
-    const phase = "triage";
-    const marker = buildRoarkMarker({
-      issueNumber: input.issue.number,
-      attempt: input.attemptMetadata.attempt,
-      phase,
-    });
-    const ref = await markTriageStopped(
-      {
+export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
+  function* (
+    input: CompleteAutorunWorkflowInput,
+    injected: CompleteAutorunWorkflowInjected = {},
+  ) {
+    const publishGate = injected.publishGate ?? runPublishGate;
+    const markTriageStopped =
+      injected.markTriageStopped ?? markIssueTriageStopped;
+    const publishPlanning =
+      injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
+    if (input.workflowResult.status === "triage-stopped") {
+      const phase = "triage";
+      const marker = buildRoarkMarker({
+        issueNumber: input.issue.number,
+        attempt: input.attemptMetadata.attempt,
+        phase,
+      });
+      const ref = yield* markTriageStopped({
         cwd: input.options.cwd,
         repo: input.options.repo,
         issueNumber: input.issue.number,
         issueUrl: input.issue.url,
         triageVerdict: input.workflowResult.triageVerdict,
-        triageArtifactContent: await readArtifactIfExists(
+        triageArtifactContent: yield* readArtifactIfExists(
           input.workflowContext,
           "triageMarkdown",
-          application,
         ),
         removeLabels: labelsToRemoveForAutorunTransition({
           issueLabels: input.issue.labels,
@@ -100,75 +82,59 @@ export async function completeAutorunWorkflow(
         marker,
         existingCommentId:
           input.attemptMetadata.githubComments?.issue?.[phase]?.id,
+      });
+      if (ref !== undefined)
+        recordAttemptIssueComment(input.attemptMetadata, phase, ref);
+      return {
+        outcome: "triage-stopped" as const,
+        outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
+      } satisfies AutorunCompletionOutcome;
+    }
+    yield* publishPlanning(
+      {
+        cwd: input.options.cwd,
+        repo: input.options.repo,
+        issue: input.issue,
+        workflowContext: input.workflowContext,
+        attemptMetadata: input.attemptMetadata,
       },
-      application,
+      undefined,
     );
-    if (isCommentRef(ref))
-      recordAttemptIssueComment(input.attemptMetadata, phase, ref);
-    return {
-      outcome: "triage-stopped",
-      outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
-    };
-  }
-
-  await publishPlanning(
-    {
-      cwd: input.options.cwd,
-      repo: input.options.repo,
-      issue: input.issue,
-      workflowContext: input.workflowContext,
-      attemptMetadata: input.attemptMetadata,
-    },
-    undefined,
-    application,
-  );
-
-  await publishReviewLedgerComments(
-    {
-      cwd: input.options.cwd,
-      repo: input.options.repo,
-      issue: input.issue,
-      workflowContext: input.workflowContext,
-      attemptMetadata: input.attemptMetadata,
-    },
-    undefined,
-    application,
-  );
-
-  return publishGate(
-    {
-      options: input.options,
-      issue: input.issue,
-      branchPlan: input.branchPlan,
-      workflowContext: input.workflowContext,
-      attemptMetadata: input.attemptMetadata,
-      attemptMetadataPath: input.attemptMetadataPath,
-      recoveryCommand: input.recoveryCommand,
-    },
-    undefined,
-    application,
-  );
-}
-
-async function readArtifactIfExists(
+    yield* publishReviewLedgerComments(
+      {
+        cwd: input.options.cwd,
+        repo: input.options.repo,
+        issue: input.issue,
+        workflowContext: input.workflowContext,
+        attemptMetadata: input.attemptMetadata,
+      },
+      undefined,
+    );
+    return yield* publishGate(
+      {
+        options: input.options,
+        issue: input.issue,
+        branchPlan: input.branchPlan,
+        workflowContext: input.workflowContext,
+        attemptMetadata: input.attemptMetadata,
+        attemptMetadataPath: input.attemptMetadataPath,
+        recoveryCommand: input.recoveryCommand,
+      },
+      undefined,
+    );
+  },
+);
+const readArtifactIfExists = Effect.fn("readArtifactIfExists")(function* (
   context: WorkflowContext,
   artifact: "triageMarkdown",
-  application?: ApplicationExecution,
-): Promise<string | undefined> {
-  try {
-    return await readArtifact(context, artifact, application);
-  } catch {
-    return undefined;
-  }
-}
-
-function isCommentRef(
-  value: unknown,
-): value is { id: number; url?: string | undefined; marker: string } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { id?: unknown }).id === "number" &&
-    typeof (value as { marker?: unknown }).marker === "string"
+) {
+  return yield* Effect.gen(function* () {
+    return yield* readArtifact(context, artifact);
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
   );
-}
+});

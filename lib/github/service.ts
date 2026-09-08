@@ -1,3 +1,4 @@
+import * as publishing from "./pr-publishing.ts";
 import { Context, Effect, Layer } from "effect";
 import type { GitHubRequirements } from "./errors.ts";
 import * as issue from "./issue.ts";
@@ -6,6 +7,8 @@ import * as pr from "./pr.ts";
 import * as labels from "./labels.ts";
 
 const operations = {
+  createPullRequest: publishing.createPullRequest,
+  updatePullRequest: publishing.updatePullRequest,
   listOpenGitHubIssues: issue.listOpenGitHubIssues,
   getCurrentGitHubLogin: issue.getCurrentGitHubLogin,
   claimGitHubIssue: issue.claimGitHubIssue,
@@ -20,6 +23,8 @@ const operations = {
   resolvePullRequestRepo: pr.resolvePullRequestRepo,
   ensureGitHubLabels: labels.ensureGitHubLabels,
   listGitHubLabelNames: labels.listGitHubLabelNames,
+  addIssueLabel: labels.addIssueLabel,
+  removeIssueLabel: labels.removeIssueLabel,
 };
 
 export class GitHub extends Context.Service<
@@ -39,6 +44,14 @@ export const gitHubLayer = Layer.effect(
   Effect.gen(function* () {
     const context = yield* Effect.context<GitHubRequirements>();
     return GitHub.of({
+      createPullRequest: (...args) =>
+        operations.createPullRequest(...args).pipe(Effect.provide(context)),
+      updatePullRequest: (...args) =>
+        operations.updatePullRequest(...args).pipe(Effect.provide(context)),
+      addIssueLabel: (...args) =>
+        operations.addIssueLabel(...args).pipe(Effect.provide(context)),
+      removeIssueLabel: (...args) =>
+        operations.removeIssueLabel(...args).pipe(Effect.provide(context)),
       listOpenGitHubIssues: (...args) =>
         operations.listOpenGitHubIssues(...args).pipe(Effect.provide(context)),
       getCurrentGitHubLogin: (...args) =>

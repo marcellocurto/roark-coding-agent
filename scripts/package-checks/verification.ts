@@ -3,11 +3,11 @@ import { Effect } from "effect";
 import {
   parseVerificationArtifact,
   runVerification,
-  writeVerificationArtifact,
 } from "../../lib/autorun/verification.ts";
+import { writeVerificationArtifact } from "../../lib/autorun/verification.ts";
 import { applicationLayer } from "../../lib/runtime/application.ts";
 import { createWorkflowContext } from "../../lib/workflow/artifacts.ts";
-import { readArtifactPromise as readArtifact } from "../../lib/workflow/artifacts-promise.ts";
+import { readArtifact } from "../../lib/workflow/artifacts.ts";
 
 process.env["CI"] = "1";
 const cwd = process.cwd();
@@ -21,7 +21,7 @@ const context = createWorkflowContext({
   maxFixPasses: 1,
 });
 
-const timedOut = await Effect.runPromise(
+await Effect.runPromise(
   Effect.gen(function* () {
     const passed = yield* runVerification({
       command: "printf installed-output",
@@ -46,14 +46,18 @@ const timedOut = await Effect.runPromise(
     assert.equal(result.timedOut, true);
     assert.equal(result.exitCode, 137);
     assert.equal(result.stdout, "before-timeout");
-    return result;
+    yield* writeVerificationArtifact(context, result);
+    const persisted = parseVerificationArtifact(
+      yield* readArtifact(context, "verification"),
+    );
+    assert(
+      persisted,
+      "Installed verification must produce a readable artifact",
+    );
+    assert.equal(persisted.timedOut, true);
+    assert.match(
+      yield* readArtifact(context, "verificationFull"),
+      /before-timeout/,
+    );
   }).pipe(Effect.provide(applicationLayer)),
 );
-
-await writeVerificationArtifact(context, timedOut);
-const persisted = parseVerificationArtifact(
-  await readArtifact(context, "verification"),
-);
-assert(persisted, "Installed verification must produce a readable artifact");
-assert.equal(persisted.timedOut, true);
-assert.match(await readArtifact(context, "verificationFull"), /before-timeout/);

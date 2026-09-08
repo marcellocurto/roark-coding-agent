@@ -1,5 +1,5 @@
 import { Presentation } from "../runtime/services.ts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { runProcessOrThrow } from "../cli/process.ts";
 
 export interface PreImplementationBaseline {
@@ -20,9 +20,9 @@ export const assertCleanGit = Effect.fn("assertCleanGit")(function* (context: {
     return;
   }
   return yield* Effect.fail(
-    new Error(
-      `Git working tree has changes outside .roark. Commit/stash them or pass --yes.\n\n${dirtyLines.join("\n")}`,
-    ),
+    new GitWorkspaceError({
+      message: `Git working tree has changes outside .roark. Commit/stash them or pass --yes.\n\n${dirtyLines.join("\n")}`,
+    }),
   );
 });
 export const assertCleanAutorunGit = Effect.fn("assertCleanAutorunGit")(
@@ -30,10 +30,11 @@ export const assertCleanAutorunGit = Effect.fn("assertCleanAutorunGit")(
     const dirtyLines = yield* gitDirtyLinesOutsideRoark(context.cwd);
     if (dirtyLines.length === 0) return;
     return yield* Effect.fail(
-      new Error(
-        `Autorun needs a clean git working tree before it can claim issues, switch branches, push, or open PRs. ` +
+      new GitWorkspaceError({
+        message:
+          `Autorun needs a clean git working tree before it can claim issues, switch branches, push, or open PRs. ` +
           `Commit or stash changes outside .roark, or use 'do <issue>' for local/manual mode.\n\n${dirtyLines.join("\n")}`,
-      ),
+      }),
     );
   },
 );
@@ -48,9 +49,9 @@ export const assertCleanGitTree = Effect.fn("assertCleanGitTree")(
       return;
     }
     return yield* Effect.fail(
-      new Error(
-        `Git working tree has changes. Commit/stash them or pass --yes.\n\n${dirtyLines.join("\n")}`,
-      ),
+      new GitWorkspaceError({
+        message: `Git working tree has changes. Commit/stash them or pass --yes.\n\n${dirtyLines.join("\n")}`,
+      }),
     );
   },
 );
@@ -129,3 +130,8 @@ function unquoteGitPath(filePath: string): string {
   }
   return filePath;
 }
+
+export class GitWorkspaceError extends Schema.TaggedError<GitWorkspaceError>()(
+  "GitWorkspaceError",
+  { message: Schema.String },
+) {}

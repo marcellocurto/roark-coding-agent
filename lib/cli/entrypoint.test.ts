@@ -1,6 +1,6 @@
 import { runWithPresenter } from "../testing/presentation.ts";
 import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
-import { runVerificationPromise } from "../autorun/verification.ts";
+import { runVerificationPromise as runVerificationPromise } from "../autorun/verification-promise.ts";
 import {
   Verification,
   CommandExecution,

@@ -1,57 +1,48 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
+import type { ArtifactStore } from "../workflow/artifact-store.ts";
+import { Effect, type PlatformError } from "effect";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { inferNextFixPassPromise as inferNextFixPass } from "../workflow/artifacts-promise.ts";
-import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
+import { inferNextFixPass } from "../workflow/artifacts.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
 import { type WorkflowProgressionAction } from "../workflow/progression.ts";
-import { planWorkflowProgressionPromise as planWorkflowProgression } from "../workflow/progression-promise.ts";
+import { planWorkflowProgression } from "../workflow/progression.ts";
 import type { AttemptOutcome } from "./attempts.ts";
 import {
   classifyVerificationFailure,
   parseVerificationArtifact,
 } from "./verification.ts";
-
 export type ContinuePlanStep = WorkflowProgressionAction;
-
 export interface PlanContinuationOptions {
   attemptOutcome?: AttemptOutcome | undefined;
 }
-
-export async function planContinuation(
+export const planContinuation = Effect.fn("planContinuation")(function* (
   context: WorkflowContext,
   options: PlanContinuationOptions = {},
-  application?: ApplicationExecution,
-): Promise<ContinuePlanStep[]> {
-  const verificationRepair = await planFailedVerificationContinuation(
+) {
+  const verificationRepair = yield* planFailedVerificationContinuation(
     context,
     options,
-    application,
   );
   if (verificationRepair) return verificationRepair;
-
-  const progression = await planWorkflowProgression(
-    context,
-    {
-      includePublishGate: true,
-      force: context.force,
-    },
-    application,
-  );
+  const progression = yield* planWorkflowProgression(context, {
+    includePublishGate: true,
+    force: context.force,
+  });
   return progression.actions;
-}
-
-async function planFailedVerificationContinuation(
+});
+const planFailedVerificationContinuation = Effect.fn(
+  "planFailedVerificationContinuation",
+)(function* (
   context: WorkflowContext,
   options: PlanContinuationOptions,
-  application?: ApplicationExecution,
-): Promise<ContinuePlanStep[] | undefined> {
+): Effect.fn.Return<
+  ContinuePlanStep[] | undefined,
+  PlatformError.PlatformError,
+  ArtifactStore
+> {
   if (context.force || options.attemptOutcome !== "failed-verification")
     return undefined;
-  const failedVerification = await readFailedVerificationArtifact(
-    context,
-    application,
-  );
+  const failedVerification = yield* readFailedVerificationArtifact(context);
   if (!failedVerification) return undefined;
-
   const classification = classifyVerificationFailure(failedVerification);
   if (!classification.repairable) {
     return [
@@ -63,8 +54,7 @@ async function planFailedVerificationContinuation(
       },
     ];
   }
-
-  const pass = await safeInferNextFixPass(context, application);
+  const pass = yield* safeInferNextFixPass(context);
   if (pass === undefined) return undefined;
   if (pass > context.maxFixPasses) {
     return [
@@ -75,7 +65,6 @@ async function planFailedVerificationContinuation(
       },
     ];
   }
-
   return [
     {
       type: "run",
@@ -110,34 +99,37 @@ async function planFailedVerificationContinuation(
       reason: "publish gate must rerun after verification repair",
     },
   ];
-}
-
-async function safeInferNextFixPass(
+});
+const safeInferNextFixPass = Effect.fn("safeInferNextFixPass")(function* (
   context: WorkflowContext,
-  application?: ApplicationExecution,
-): Promise<number | undefined> {
-  try {
-    return await inferNextFixPass(context, application);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readFailedVerificationArtifact(
-  context: WorkflowContext,
-  application?: ApplicationExecution,
 ) {
-  try {
+  return yield* Effect.gen(function* () {
+    return yield* inferNextFixPass(context);
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});
+const readFailedVerificationArtifact = Effect.fn(
+  "readFailedVerificationArtifact",
+)(function* (context: WorkflowContext) {
+  return yield* Effect.gen(function* () {
     const result = parseVerificationArtifact(
-      await readArtifact(context, "verification", application),
+      yield* readArtifact(context, "verification"),
     );
     if (!result || result.ok) return undefined;
     return result;
-  } catch {
-    return undefined;
-  }
-}
-
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});
 export function formatContinuationPlan(
   steps: readonly ContinuePlanStep[],
 ): string[] {

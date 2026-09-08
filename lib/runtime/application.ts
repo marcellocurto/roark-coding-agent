@@ -1,4 +1,8 @@
 import {
+  type Workspace,
+  workspaceLayer,
+} from "../autorun/workspace-service.ts";
+import {
   type IssuePublishing,
   issuePublishingLayer,
 } from "../issue-publishing/service.ts";
@@ -43,6 +47,7 @@ export const applicationServicesLayer = Layer.suspend(() =>
       Layer.provideMerge(repositoryConfigurationLayer),
     ),
     verificationLayer,
+    workspaceLayer,
     gitHubLayer,
     agentExecutionLayer,
     artifactStoreLayer,
@@ -67,7 +72,8 @@ export type ApplicationServices =
   | ArtifactStore
   | AttemptStore
   | RunObservation
-  | IssuePublishing;
+  | IssuePublishing
+  | Workspace;
 
 // Only internal Promise hops use this carrier. A rejection value alone cannot
 // distinguish typed failure from defect, interruption, or combined failures.

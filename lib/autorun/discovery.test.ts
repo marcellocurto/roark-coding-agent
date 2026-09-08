@@ -1,3 +1,8 @@
+import { rejects as assertRejects } from "node:assert/strict";
+import { WorkspaceError } from "./workspace.ts";
+import { GitWorkspaceError } from "../workflow/git.ts";
+import { Effect } from "effect";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
@@ -20,57 +25,55 @@ import { runAutoDiscovery } from "./discovery.ts";
 import { noopAsync } from "../utils/async.ts";
 import {} from "../presentation/presenter.ts";
 import { fetchIssuePhasePromise as fetchIssuePhase } from "../workflow/phases-promise.ts";
-
 const tempDirs: string[] = [];
 const noOpLabelContract = {
-  ensureAutorunLabelContract: async () => (
-    await noopAsync(),
-    { existing: [], missing: [], created: [] }
-  ),
+  ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+    return (yield* Effect.void, { existing: [], missing: [], created: [] });
+  }),
 };
-
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-
 describe("runAutoDiscovery", () => {
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async (input) => {
-            await noopAsync();
-            listed = true;
-            expect(input.limit).toBe(100);
-            return [
-              issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
-              issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(4, "2026-01-01T00:00:00Z", [
-                defaultAutorunReadyLabel,
-                "agent-in-progress",
-              ]),
-            ];
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              listed = true;
+              expect(input.limit).toBe(100);
+              return [
+                issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
+                issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
+                issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+                issue(4, "2026-01-01T00:00:00Z", [
+                  defaultAutorunReadyLabel,
+                  "agent-in-progress",
+                ]),
+              ];
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* (input) {
+              return (
+                yield* Effect.void,
+                dependencyClearRelationships(Number(input.issueNumber))
+              );
+            }),
           },
-          fetchGitHubIssueRelationships: async (input) => (
-            await noopAsync(),
-            dependencyClearRelationships(Number(input.issueNumber))
-          ),
-        },
+        ),
         application,
       );
     });
-
     expect(listed).toBe(true);
     expect(logs.join("\n")).toContain("#3 Issue 3");
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
   });
-
   test("retains a discovered dry-run target in the presenter identity", async () => {
     let output = "";
     const presentation = new Presenter({
@@ -85,20 +88,22 @@ describe("runAutoDiscovery", () => {
     });
     return runWithPresenter(presentation, async (application) => {
       presentation.run({ command: "auto", repository: "owner/repo" });
-
-      const result = await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [issue(29, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]
-          ),
-          fetchGitHubIssueRelationships: async () => (
-            await noopAsync(),
-            dependencyClearRelationships(29)
-          ),
-        },
+      const result = await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [issue(29, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* () {
+              return (yield* Effect.void, dependencyClearRelationships(29));
+            }),
+          },
+        ),
         application,
       );
       presentation.outcome(
@@ -106,154 +111,166 @@ describe("runAutoDiscovery", () => {
         presentation.currentTarget(),
         "dry run complete",
       );
-
       expect(result.kind).toBe("dry-run");
       expect(presentation.currentTarget()).toBe("#29");
       expect(output).toContain("DONE #29 · Discovery");
       expect(output).toContain("SUCCESS #29 · dry run complete");
     });
   });
-
   test("sanitizes hostile issue metadata in ordinary discovery output", async () => {
     const logs = await captureLogs(async (application) => {
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              {
-                ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-                title: "hostile\u001b]0;owned\u0007\rrewritten",
-                url: "https://example.invalid/one\nINJECTED",
-              },
-            ]
-          ),
-          fetchGitHubIssueRelationships: async () => (
-            await noopAsync(),
-            dependencyClearRelationships(1)
-          ),
-        },
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  {
+                    ...issue(1, "2026-01-01T00:00:00Z", [
+                      defaultAutorunReadyLabel,
+                    ]),
+                    title: "hostile\u001b]0;owned\u0007\rrewritten",
+                    url: "https://example.invalid/one\nINJECTED",
+                  },
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* () {
+              return (yield* Effect.void, dependencyClearRelationships(1));
+            }),
+          },
+        ),
         application,
       );
     });
-
     const output = logs.join("\n");
     expect(output).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
     expect(output).toContain("hostile ]0;owned rewritten");
     expect(output).toContain("INJECTED");
   });
-
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
     await noopAsync();
     const checkedBodies: string[] = [];
-
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              {
-                ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-                body: "Depends on #99",
-              },
-              issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-            ]
-          ),
-          fetchGitHubIssueRelationships: async (input) => {
-            await noopAsync();
-            checkedBodies.push(input.body);
-            return Number(input.issueNumber) === 1
-              ? dependencyClearRelationships(
-                  1,
-                  [],
-                  [bodyBlocker(99, "Body blocker", "OPEN")],
-                )
-              : dependencyClearRelationships(Number(input.issueNumber));
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  {
+                    ...issue(1, "2026-01-01T00:00:00Z", [
+                      defaultAutorunReadyLabel,
+                    ]),
+                    body: "Depends on #99",
+                  },
+                  issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              checkedBodies.push(input.body);
+              return Number(input.issueNumber) === 1
+                ? dependencyClearRelationships(
+                    1,
+                    [],
+                    [bodyBlocker(99, "Body blocker", "OPEN")],
+                  )
+                : dependencyClearRelationships(Number(input.issueNumber));
+            }),
           },
-        },
+        ),
         application,
       );
     });
-
     const logText = logs.join("\n");
     expect(checkedBodies).toEqual(["Depends on #99", ""]);
     expect(logText).toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("blocked by #99 Body blocker [OPEN]");
     expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
   });
-
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              {
-                ...issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-                body: "Blocked by #99",
-              },
-            ]
-          ),
-          fetchGitHubIssueRelationships: async () => (
-            await noopAsync(),
-            dependencyClearRelationships(
-              1,
-              [],
-              [bodyBlocker(99, "Closed body blocker", "CLOSED")],
-            )
-          ),
-        },
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  {
+                    ...issue(1, "2026-01-01T00:00:00Z", [
+                      defaultAutorunReadyLabel,
+                    ]),
+                    body: "Blocked by #99",
+                  },
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                dependencyClearRelationships(
+                  1,
+                  [],
+                  [bodyBlocker(99, "Closed body blocker", "CLOSED")],
+                )
+              );
+            }),
+          },
+        ),
         application,
       );
     });
-
     const logText = logs.join("\n");
     expect(logText).not.toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
   });
-
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
     await noopAsync();
     const checked: number[] = [];
-
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-            ]
-          ),
-          fetchGitHubIssueRelationships: async (input) => {
-            await noopAsync();
-            const issueNumber = Number(input.issueNumber);
-            checked.push(issueNumber);
-            return issueNumber === 1
-              ? dependencyClearRelationships(issueNumber, [
-                  dependency(99, "Blocker", "OPEN"),
-                ])
-              : dependencyClearRelationships(issueNumber);
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+                  issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              const issueNumber = Number(input.issueNumber);
+              checked.push(issueNumber);
+              return issueNumber === 1
+                ? dependencyClearRelationships(issueNumber, [
+                    dependency(99, "Blocker", "OPEN"),
+                  ])
+                : dependencyClearRelationships(issueNumber);
+            }),
           },
-        },
+        ),
         application,
       );
     });
-
     const logText = logs.join("\n");
     expect(checked).toEqual([1, 2]);
     expect(logText).toContain("Skipped issue(s) with active blockers:");
@@ -261,215 +278,237 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("blocked by #99 Blocker [OPEN]");
     expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
   });
-
   test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
     await noopAsync();
     const checked: number[] = [];
-
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-            ]
-          ),
-          fetchGitHubIssueRelationships: async (input) => {
-            await noopAsync();
-            const issueNumber = Number(input.issueNumber);
-            checked.push(issueNumber);
-            return issueNumber === 1
-              ? dependencyClearRelationships(issueNumber, [
-                  dependency(99, "Closed blocker", "CLOSED"),
-                ])
-              : dependencyClearRelationships(issueNumber);
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+                  issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              const issueNumber = Number(input.issueNumber);
+              checked.push(issueNumber);
+              return issueNumber === 1
+                ? dependencyClearRelationships(issueNumber, [
+                    dependency(99, "Closed blocker", "CLOSED"),
+                  ])
+                : dependencyClearRelationships(issueNumber);
+            }),
           },
-        },
+        ),
         application,
       );
     });
-
     const logText = logs.join("\n");
     expect(checked).toEqual([1]);
     expect(logText).not.toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
   });
-
   test("discovery auto selection limit counts unblocked issues", async () => {
     await noopAsync();
     const checked: number[] = [];
-
     const logs = await captureLogs(async (application) => {
       await noopAsync();
-      await runAutoDiscovery(
-        { ...baseOptions(), dryRun: true, limit: 2 },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [
-              issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-              issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
-            ]
-          ),
-          fetchGitHubIssueRelationships: async (input) => {
-            await noopAsync();
-            const issueNumber = Number(input.issueNumber);
-            checked.push(issueNumber);
-            return issueNumber === 1
-              ? dependencyClearRelationships(issueNumber, [
-                  dependency(99, "Blocker", "OPEN"),
-                ])
-              : dependencyClearRelationships(issueNumber);
+      await runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), dryRun: true, limit: 2 },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [
+                  issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+                  issue(2, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
+                  issue(3, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
+                ]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              const issueNumber = Number(input.issueNumber);
+              checked.push(issueNumber);
+              return issueNumber === 1
+                ? dependencyClearRelationships(issueNumber, [
+                    dependency(99, "Blocker", "OPEN"),
+                  ])
+                : dependencyClearRelationships(issueNumber);
+            }),
           },
-        },
+        ),
         application,
       );
     });
-
     const logText = logs.join("\n");
     expect(checked).toEqual([1, 2, 3]);
     expect(logText).toContain("Selected issue(s):");
     expect(logText).toContain("- #2 Issue 2");
     expect(logText).toContain("- #3 Issue 3");
   });
-
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
     await noopAsync();
     let preflighted = false;
     let claimed = false;
-
-    expect(
-      runAutoDiscovery(
-        { ...baseOptions() },
-        {
-          ...noOpLabelContract,
-          listOpenGitHubIssues: async () => (
-            await noopAsync(),
-            [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]
-          ),
-          fetchGitHubIssueRelationships: async () => (
-            await noopAsync(),
-            {
-              fetchedAt: "2026-05-07T00:00:00.000Z",
-              repo: "owner/repo",
-              nativeDependenciesAvailable: false,
-              blockedBy: [],
-              blocking: [],
-              bodyDeclaredBlockers: [],
-              unavailableReason: "GitHub dependency API unavailable",
-            }
-          ),
-          assertCleanAutorunGit: async () => {
-            await noopAsync();
-            preflighted = true;
+    await assertRejects(
+      runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions() },
+          {
+            ...noOpLabelContract,
+            listOpenGitHubIssues: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                [issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel])]
+              );
+            }),
+            fetchGitHubIssueRelationships: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                {
+                  fetchedAt: "2026-05-07T00:00:00.000Z",
+                  repo: "owner/repo",
+                  nativeDependenciesAvailable: false,
+                  blockedBy: [],
+                  blocking: [],
+                  bodyDeclaredBlockers: [],
+                  unavailableReason: "GitHub dependency API unavailable",
+                }
+              );
+            }),
+            assertCleanAutorunGit: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              preflighted = true;
+              return undefined;
+            }),
+            claimGitHubIssue: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              claimed = true;
+              return undefined;
+            }),
           },
-          claimGitHubIssue: async () => {
-            await noopAsync();
-            claimed = true;
-          },
-        },
+        ),
       ),
-    ).rejects.toThrow(
-      "Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable",
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          "Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable",
+        ),
     );
-
     expect(preflighted).toBe(false);
     expect(claimed).toBe(false);
   });
-
   test("targeted auto ensures labels before fetching the requested issue", async () => {
     await noopAsync();
     const calls: string[] = [];
-    await runAutoDiscovery(
-      { ...baseOptions(), issue: "owner/repo#29", dryRun: true },
-      {
-        ...noOpLabelContract,
-        ensureAutorunLabelContract: async () => {
-          await noopAsync();
-          calls.push("ensure-labels");
-          return { existing: [], missing: [], created: [] };
+    await runApplicationPromise(
+      runAutoDiscovery(
+        { ...baseOptions(), issue: "owner/repo#29", dryRun: true },
+        {
+          ...noOpLabelContract,
+          ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("ensure-labels");
+            return { existing: [], missing: [], created: [] };
+          }),
+          listOpenGitHubIssues: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return yield* Effect.die(
+              new Error("targeted auto should not list issues"),
+            );
+          }),
+          fetchGitHubIssue: Effect.fnUntraced(function* (input) {
+            yield* Effect.void;
+            calls.push(`fetch:${input}`);
+            return fetchedGitHubIssue(29, []);
+          }),
         },
-        listOpenGitHubIssues: async () => {
-          await noopAsync();
-          throw new Error("targeted auto should not list issues");
-        },
-        fetchGitHubIssue: async (input) => {
-          await noopAsync();
-          calls.push(`fetch:${input}`);
-          return fetchedGitHubIssue(29, []);
-        },
-      },
+      ),
     );
-
     expect(calls).toEqual(["ensure-labels", "fetch:owner/repo#29"]);
   });
-
   test("targeted auto refuses skip labels before claim", async () => {
     await noopAsync();
     let claimed = false;
     let preflighted = false;
-
-    expect(
-      runAutoDiscovery(
-        { ...baseOptions(), issue: "29" },
-        {
-          ...noOpLabelContract,
-          fetchGitHubIssue: async () => (
-            await noopAsync(),
-            fetchedGitHubIssue(29, ["agent-in-progress"])
-          ),
-          assertCleanAutorunGit: async () => {
-            await noopAsync();
-            preflighted = true;
+    await assertRejects(
+      runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), issue: "29" },
+          {
+            ...noOpLabelContract,
+            fetchGitHubIssue: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                fetchedGitHubIssue(29, ["agent-in-progress"])
+              );
+            }),
+            assertCleanAutorunGit: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              preflighted = true;
+              return undefined;
+            }),
+            claimGitHubIssue: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              claimed = true;
+              return undefined;
+            }),
           },
-          claimGitHubIssue: async () => {
-            await noopAsync();
-            claimed = true;
-          },
-        },
+        ),
       ),
-    ).rejects.toThrow("Issue #29 has skip label agent-in-progress");
-
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("Issue #29 has skip label agent-in-progress"),
+    );
     expect(preflighted).toBe(false);
     expect(claimed).toBe(false);
   });
-
   test("dirty autorun preflight runs before claim", async () => {
     await noopAsync();
     const order: string[] = [];
-
-    expect(
-      runAutoDiscovery(
-        { ...baseOptions(), issue: "29" },
-        {
-          ...noOpLabelContract,
-          fetchGitHubIssue: async () => (
-            await noopAsync(),
-            fetchedGitHubIssue(29, ["ready-for-agent"])
-          ),
-          assertCleanAutorunGit: async () => {
-            await noopAsync();
-            order.push("preflight");
-            throw new Error("dirty worktree");
+    await assertRejects(
+      runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(), issue: "29" },
+          {
+            ...noOpLabelContract,
+            fetchGitHubIssue: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void, fetchedGitHubIssue(29, ["ready-for-agent"])
+              );
+            }),
+            assertCleanAutorunGit: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              order.push("preflight");
+              return yield* Effect.fail(
+                new GitWorkspaceError({ message: "dirty worktree" }),
+              );
+            }),
+            claimGitHubIssue: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              order.push("claim");
+              return undefined;
+            }),
           },
-          claimGitHubIssue: async () => {
-            await noopAsync();
-            order.push("claim");
-          },
-        },
+        ),
       ),
-    ).rejects.toThrow("dirty worktree");
-
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("dirty worktree"),
+    );
     expect(order).toEqual(["preflight"]);
   });
-
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
     await noopAsync();
     const cwd = await mkdtemp(
@@ -479,58 +518,59 @@ describe("runAutoDiscovery", () => {
     const workspacePath = path.join(cwd, "managed-workspace");
     const calls: string[] = [];
     let fetchCount = 0;
-
-    await runAutoDiscovery(
-      {
-        ...baseOptions(cwd),
-        issue: "29",
-        noAssign: true,
-        hooks: {
-          timeoutMs: 1000,
-          beforeRun: "printf should-not-run > before-run.txt",
+    await runApplicationPromise(
+      runAutoDiscovery(
+        {
+          ...baseOptions(cwd),
+          issue: "29",
+          noAssign: true,
+          hooks: {
+            timeoutMs: 1000,
+            beforeRun: "printf should-not-run > before-run.txt",
+          },
         },
-      },
-      {
-        ...noOpLabelContract,
-        fetchGitHubIssue: async () => {
-          await noopAsync();
-          fetchCount += 1;
-          return fetchCount === 1
-            ? fetchedGitHubIssue(29, [])
-            : fetchedGitHubIssue(29, ["agent-in-progress"]);
-        },
-        assertCleanAutorunGit: async () => {
-          await noopAsync();
-          calls.push("preflight");
-        },
-        prepareCloneWorkspace: async () => {
-          await noopAsync();
-          calls.push("workspace");
-          return {
-            path: workspacePath,
-            metadata: {
+        {
+          ...noOpLabelContract,
+          fetchGitHubIssue: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            fetchCount += 1;
+            return fetchCount === 1
+              ? fetchedGitHubIssue(29, [])
+              : fetchedGitHubIssue(29, ["agent-in-progress"]);
+          }),
+          assertCleanAutorunGit: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("preflight");
+            return undefined;
+          }),
+          prepareCloneWorkspace: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("workspace");
+            return {
               path: workspacePath,
-              strategy: "clone",
-              cloneRemote: "origin",
-              createdNow: true,
-            },
-          };
+              metadata: {
+                path: workspacePath,
+                strategy: "clone" as const,
+                cloneRemote: "origin",
+                createdNow: true,
+              },
+            };
+          }),
+          claimGitHubIssue: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("claim");
+            return undefined;
+          }),
+          runFullWorkflow: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("workflow");
+            return { status: "completed" as const };
+          }),
         },
-        claimGitHubIssue: async () => {
-          await noopAsync();
-          calls.push("claim");
-        },
-        runFullWorkflow: async () => {
-          await noopAsync();
-          calls.push("workflow");
-          return { status: "completed" };
-        },
-      },
+      ),
     );
-
     expect(calls).toEqual(["preflight", "workspace"]);
   });
-
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
     await noopAsync();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
@@ -541,77 +581,91 @@ describe("runAutoDiscovery", () => {
     tempDirs.push(workspacePath);
     const calls: string[] = [];
     let fetchCount = 0;
-
-    await runAutoDiscovery(
-      {
-        ...baseOptions(cwd),
-        issue: "29",
-        noAssign: true,
-        hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
-      },
-      {
-        ...noOpLabelContract,
-        clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
-        fetchGitHubIssue: async () => {
-          await noopAsync();
-          fetchCount += 1;
-          return fetchedGitHubIssue(
-            29,
-            ["ready-for-agent"],
-            fetchCount === 1 ? "Initial issue title" : "Fresh issue title",
-          );
+    await runApplicationPromise(
+      runAutoDiscovery(
+        {
+          ...baseOptions(cwd),
+          issue: "29",
+          noAssign: true,
+          hooks: {
+            timeoutMs: 1000,
+            beforeRun: "printf before > before-run.txt",
+          },
         },
-        assertCleanAutorunGit: async () => {
-          await noopAsync();
-          calls.push("preflight");
-        },
-        claimGitHubIssue: async (input) => {
-          await noopAsync();
-          calls.push(`claim:${input.plan.branchName}`);
-          expect(input.repo).toBe("owner/repo");
-          expect(input.plan.removeLabels).toEqual(["ready-for-agent"]);
-        },
-        prepareCloneWorkspace: async (input) => {
-          await noopAsync();
-          calls.push(`workspace:${input.plan.branchName}`);
-          expect(input.controlCwd).toBe(cwd);
-          return {
-            path: workspacePath,
-            metadata: {
+        {
+          ...noOpLabelContract,
+          clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
+          fetchGitHubIssue: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            fetchCount += 1;
+            return fetchedGitHubIssue(
+              29,
+              ["ready-for-agent"],
+              fetchCount === 1 ? "Initial issue title" : "Fresh issue title",
+            );
+          }),
+          assertCleanAutorunGit: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("preflight");
+            return undefined;
+          }),
+          claimGitHubIssue: Effect.fnUntraced(function* (input) {
+            yield* Effect.void;
+            calls.push(`claim:${input.plan.branchName}`);
+            expect(input.repo).toBe("owner/repo");
+            expect(input.plan.removeLabels).toEqual(["ready-for-agent"]);
+            return undefined;
+          }),
+          prepareCloneWorkspace: Effect.fnUntraced(function* (input) {
+            yield* Effect.void;
+            calls.push(`workspace:${input.plan.branchName}`);
+            expect(input.controlCwd).toBe(cwd);
+            return {
               path: workspacePath,
-              strategy: "clone",
-              cloneRemote: "origin",
-              cloneUrl: "git@github.com:owner/repo.git",
-              createdNow: true,
+              metadata: {
+                path: workspacePath,
+                strategy: "clone" as const,
+                cloneRemote: "origin",
+                cloneUrl: "git@github.com:owner/repo.git",
+                createdNow: true,
+              },
+            };
+          }),
+          publishIssueLedgerComment: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            calls.push("ledger");
+            return undefined;
+          }),
+          runFullWorkflow: Effect.fnUntraced(
+            function* (context, workflowOptions) {
+              calls.push(`workflow:${context.runDirRelative}`);
+              expect(context.controlCwd).toBe(cwd);
+              expect(context.agentCwd).toBe(workspacePath);
+              const suppliedSnapshot = workflowOptions?.issueSnapshot;
+              expect(suppliedSnapshot?.issue.title).toBe("Fresh issue title");
+              if (!suppliedSnapshot)
+                return yield* Effect.die(
+                  new Error("Expected fresh pre-claim issue snapshot"),
+                );
+              expect(
+                yield* Effect.promise(() =>
+                  readFile(path.join(workspacePath, "before-run.txt"), "utf8"),
+                ),
+              ).toBe("before");
+              yield* Effect.promise(() =>
+                fetchIssuePhase(context, suppliedSnapshot),
+              );
+              return { status: "completed" as const };
             },
-          };
+          ),
+          completeAutorunWorkflow: Effect.fnUntraced(function* (input) {
+            yield* Effect.void;
+            calls.push(`complete:${input.branchPlan.branchName}`);
+            return { outcome: "published" as const, outcomeDetail: null };
+          }),
         },
-        publishIssueLedgerComment: async () => {
-          await noopAsync();
-          calls.push("ledger");
-        },
-        runFullWorkflow: async (context, _runner, workflowOptions) => {
-          calls.push(`workflow:${context.runDirRelative}`);
-          expect(context.controlCwd).toBe(cwd);
-          expect(context.agentCwd).toBe(workspacePath);
-          const suppliedSnapshot = workflowOptions?.issueSnapshot;
-          expect(suppliedSnapshot?.issue.title).toBe("Fresh issue title");
-          if (!suppliedSnapshot)
-            throw new Error("Expected fresh pre-claim issue snapshot");
-          expect(
-            await readFile(path.join(workspacePath, "before-run.txt"), "utf8"),
-          ).toBe("before");
-          await fetchIssuePhase(context, suppliedSnapshot);
-          return { status: "completed" };
-        },
-        completeAutorunWorkflow: async (input) => {
-          await noopAsync();
-          calls.push(`complete:${input.branchPlan.branchName}`);
-          return { outcome: "published", outcomeDetail: null };
-        },
-      },
+      ),
     );
-
     expect(calls).toEqual([
       "preflight",
       "workspace:roark/issue-29",
@@ -640,7 +694,6 @@ describe("runAutoDiscovery", () => {
       createdNow: true,
     });
   });
-
   test("non-dry auto runs are serialized per issue", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-auto-lock-"));
     tempDirs.push(cwd);
@@ -652,52 +705,62 @@ describe("runAutoDiscovery", () => {
     const release = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-
-    const first = runAutoDiscovery(
-      { ...baseOptions(cwd), issue: "29", noAssign: true },
-      {
-        ...noOpLabelContract,
-        fetchGitHubIssue: async () => (
-          await noopAsync(),
-          fetchedGitHubIssue(29, [])
-        ),
-        assertCleanAutorunGit: async () => {
-          await noopAsync();
-        },
-        prepareCloneWorkspace: async () => {
-          enteredFirst();
-          await release;
-          throw new Error("stop first auto");
-        },
-      },
-    );
-
-    await firstEntered;
-
-    expect(
+    const first = runApplicationPromise(
       runAutoDiscovery(
         { ...baseOptions(cwd), issue: "29", noAssign: true },
         {
           ...noOpLabelContract,
-          fetchGitHubIssue: async () => (
-            await noopAsync(),
-            fetchedGitHubIssue(29, [])
-          ),
-          assertCleanAutorunGit: async () => {
-            await noopAsync();
-          },
-          prepareCloneWorkspace: async () => {
-            await noopAsync();
-            throw new Error("second auto should not prepare a workspace");
-          },
+          fetchGitHubIssue: Effect.fnUntraced(function* () {
+            return (yield* Effect.void, fetchedGitHubIssue(29, []));
+          }),
+          assertCleanAutorunGit: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          prepareCloneWorkspace: Effect.fnUntraced(function* () {
+            enteredFirst();
+            yield* Effect.promise(() => release);
+            return yield* Effect.fail(
+              new WorkspaceError({ message: "stop first auto" }),
+            );
+          }),
         },
       ),
-    ).rejects.toThrow("roark auto issue #29 is already running");
-
+    );
+    await firstEntered;
+    await assertRejects(
+      runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(cwd), issue: "29", noAssign: true },
+          {
+            ...noOpLabelContract,
+            fetchGitHubIssue: Effect.fnUntraced(function* () {
+              return (yield* Effect.void, fetchedGitHubIssue(29, []));
+            }),
+            assertCleanAutorunGit: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            prepareCloneWorkspace: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.die(
+                new Error("second auto should not prepare a workspace"),
+              );
+            }),
+          },
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("roark auto issue #29 is already running"),
+    );
     releaseFirst();
-    expect(first).rejects.toThrow("stop first auto");
+    await assertRejects(
+      first,
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("stop first auto"),
+    );
   });
-
   test("non-dry auto allows different issues to run concurrently in one checkout", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-auto-issue-lock-"));
     tempDirs.push(cwd);
@@ -709,53 +772,63 @@ describe("runAutoDiscovery", () => {
     const release = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-
-    const first = runAutoDiscovery(
-      { ...baseOptions(cwd), issue: "29", noAssign: true },
-      {
-        ...noOpLabelContract,
-        fetchGitHubIssue: async () => (
-          await noopAsync(),
-          fetchedGitHubIssue(29, [])
-        ),
-        assertCleanAutorunGit: async () => {
-          await noopAsync();
-        },
-        prepareCloneWorkspace: async () => {
-          enteredFirst();
-          await release;
-          throw new Error("stop first auto");
-        },
-      },
-    );
-
-    await firstEntered;
-
-    expect(
+    const first = runApplicationPromise(
       runAutoDiscovery(
-        { ...baseOptions(cwd), issue: "30", noAssign: true },
+        { ...baseOptions(cwd), issue: "29", noAssign: true },
         {
           ...noOpLabelContract,
-          fetchGitHubIssue: async () => (
-            await noopAsync(),
-            fetchedGitHubIssue(30, [])
-          ),
-          assertCleanAutorunGit: async () => {
-            await noopAsync();
-          },
-          prepareCloneWorkspace: async () => {
-            await noopAsync();
-            throw new Error("second auto reached workspace");
-          },
+          fetchGitHubIssue: Effect.fnUntraced(function* () {
+            return (yield* Effect.void, fetchedGitHubIssue(29, []));
+          }),
+          assertCleanAutorunGit: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return undefined;
+          }),
+          prepareCloneWorkspace: Effect.fnUntraced(function* () {
+            enteredFirst();
+            yield* Effect.promise(() => release);
+            return yield* Effect.fail(
+              new WorkspaceError({ message: "stop first auto" }),
+            );
+          }),
         },
       ),
-    ).rejects.toThrow("second auto reached workspace");
-
+    );
+    await firstEntered;
+    await assertRejects(
+      runApplicationPromise(
+        runAutoDiscovery(
+          { ...baseOptions(cwd), issue: "30", noAssign: true },
+          {
+            ...noOpLabelContract,
+            fetchGitHubIssue: Effect.fnUntraced(function* () {
+              return (yield* Effect.void, fetchedGitHubIssue(30, []));
+            }),
+            assertCleanAutorunGit: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            prepareCloneWorkspace: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.die(
+                new Error("second auto reached workspace"),
+              );
+            }),
+          },
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes("second auto reached workspace"),
+    );
     releaseFirst();
-    expect(first).rejects.toThrow("stop first auto");
+    await assertRejects(
+      first,
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("stop first auto"),
+    );
   });
 });
-
 function baseOptions(cwd = "/repo"): AutoCliOptions {
   return {
     command: "auto",
@@ -777,7 +850,6 @@ function baseOptions(cwd = "/repo"): AutoCliOptions {
     yes: false,
   };
 }
-
 function issue(number: number, createdAt: string, labels: string[]) {
   return {
     number,
@@ -787,7 +859,6 @@ function issue(number: number, createdAt: string, labels: string[]) {
     labels: labels.map((name) => ({ name })),
   };
 }
-
 function dependencyClearRelationships(
   issueNumber: number,
   blockedBy: {
@@ -814,7 +885,6 @@ function dependencyClearRelationships(
     issueNumber,
   };
 }
-
 function dependency(number: number, title: string, state: string) {
   return {
     number,
@@ -823,7 +893,6 @@ function dependency(number: number, title: string, state: string) {
     url: `https://github.com/owner/repo/issues/${number}`,
   };
 }
-
 function bodyBlocker(number: number, title: string, state: string) {
   return {
     raw: `#${number}`,
@@ -836,7 +905,6 @@ function bodyBlocker(number: number, title: string, state: string) {
     closed: state === "CLOSED",
   };
 }
-
 function fetchedGitHubIssue(
   number: number,
   labels: string[],
@@ -862,7 +930,6 @@ function fetchedGitHubIssue(
     },
   };
 }
-
 async function captureLogs(
   fn: (application: ApplicationExecution) => Promise<void>,
 ): Promise<string[]> {
