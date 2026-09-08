@@ -1,6 +1,6 @@
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
+import { applicationLayer } from "../runtime/application.ts";
 import { describe, expect, test } from "bun:test";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
@@ -58,38 +58,34 @@ describe("completeAutorunWorkflow", () => {
     let publishCalls = 0;
     const marked: unknown[] = [];
     const outcome = await Effect.runPromise(
-      fromLegacyPromise((application) =>
-        runApplicationPromise(
-          completeAutorunWorkflow(
-            {
-              workflowResult: {
-                status: "triage-stopped",
-                triageVerdict: "blocked",
-              },
-              options,
-              issue,
-              branchPlan,
-              workflowContext,
-              attemptMetadata,
-              attemptMetadataPath:
-                ".roark/runs/issue/12/attempts/1/attempt.json",
+      Effect.gen(function* () {
+        return yield* completeAutorunWorkflow(
+          {
+            workflowResult: {
+              status: "triage-stopped",
+              triageVerdict: "blocked",
             },
-            {
-              publishGate: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                publishCalls += 1;
-                return { outcome: "published" as const, outcomeDetail: null };
-              }),
-              markTriageStopped: Effect.fnUntraced(function* (input) {
-                yield* Effect.void;
-                marked.push(input);
-                return undefined;
-              }),
-            },
-          ),
-          application,
-        ),
-      ).pipe(Effect.provide(applicationLayer)),
+            options,
+            issue,
+            branchPlan,
+            workflowContext,
+            attemptMetadata,
+            attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
+          },
+          {
+            publishGate: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              publishCalls += 1;
+              return { outcome: "published" as const, outcomeDetail: null };
+            }),
+            markTriageStopped: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              marked.push(input);
+              return undefined;
+            }),
+          },
+        );
+      }).pipe(Effect.provide(applicationLayer)),
     );
     expect(outcome).toEqual({
       outcome: "triage-stopped",

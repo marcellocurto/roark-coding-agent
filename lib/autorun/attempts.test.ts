@@ -1,6 +1,5 @@
 import { Schema, Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
-
 import {
   AttemptStore,
   attemptArtifactRelativePath,
@@ -196,7 +195,6 @@ describe("writeAttemptMetadata + readAttemptMetadata", () => {
       failure: { _tag: "AttemptDataError" },
     });
   });
-
   test("preserves additional metadata fields when reading existing attempts", async () => {
     const issueDir = await makeIssueDir();
     const metadata = {
@@ -215,7 +213,6 @@ describe("writeAttemptMetadata + readAttemptMetadata", () => {
     );
     expect(parsed).toEqual(metadata);
   });
-
   test("round-trips metadata as JSON with stable formatting", async () => {
     const issueDir = await makeIssueDir();
     const metadata = formatAttemptMetadata({

@@ -1,9 +1,5 @@
 import * as nativeVerification from "../autorun/verification.ts";
-import {
-  runApplicationPromise,
-  applicationLayer,
-  fromLegacyPromise,
-} from "./application.ts";
+import { applicationLayer } from "./application.ts";
 import { reviewATaskForPass } from "../workflow/tasks.ts";
 import {
   verificationBeforeFixRef,
@@ -39,27 +35,24 @@ const silentPresenter = () =>
 describe("application service boundaries", () => {
   test("agent callers use the supplied service without constructing a Pi session", async () => {
     const output = await Effect.runPromise(
-      fromLegacyPromise((application) =>
-        runApplicationPromise(
-          Effect.flatMap(AgentExecution, (agent) =>
-            agent.run({
-              cwd: process.cwd(),
-              thinkingLevel: "low",
-              systemPrompt: "",
-              prompt: "request",
-              fileEditingToolsEnabled: false,
-              display: {
-                command: "do",
-                target: "#1",
-                phaseId: "test",
-                phaseLabel: "Test",
-                operation: "inspect",
-              },
-            }),
-          ),
-          application,
-        ),
-      ).pipe(
+      Effect.gen(function* () {
+        return yield* Effect.flatMap(AgentExecution, (agent) =>
+          agent.run({
+            cwd: process.cwd(),
+            thinkingLevel: "low",
+            systemPrompt: "",
+            prompt: "request",
+            fileEditingToolsEnabled: false,
+            display: {
+              command: "do",
+              target: "#1",
+              phaseId: "test",
+              phaseLabel: "Test",
+              operation: "inspect",
+            },
+          }),
+        );
+      }).pipe(
         Effect.provideService(AgentExecution, {
           run: (request) => Effect.succeed(request.prompt),
         }),
@@ -170,18 +163,15 @@ test("verification artifact helpers retain the caller's store", async () => {
   });
   const writes: string[] = [];
   await Effect.runPromise(
-    fromLegacyPromise((application) =>
-      runApplicationPromise(
-        nativeVerification.writeVerificationArtifact(context, {
-          command: "test",
-          ok: true,
-          exitCode: 0,
-          stdout: "done",
-          stderr: "",
-        }),
-        application,
-      ),
-    ).pipe(
+    Effect.gen(function* () {
+      return yield* nativeVerification.writeVerificationArtifact(context, {
+        command: "test",
+        ok: true,
+        exitCode: 0,
+        stdout: "done",
+        stderr: "",
+      });
+    }).pipe(
       Effect.provideService(ArtifactStore, {
         ensure: () => Effect.void,
         exists: () => Effect.succeed(false),
@@ -268,10 +258,9 @@ test("prebuilt task prompts use the storage service from their execution", async
   });
   const checked: string[] = [];
   await Effect.runPromise(
-    fromLegacyPromise(
-      async (application) =>
-        await runApplicationPromise(task.prompt(context), application),
-    ).pipe(
+    Effect.gen(function* () {
+      return yield* task.prompt(context);
+    }).pipe(
       Effect.provideService(ArtifactStore, {
         ensure: () => Effect.void,
         exists: (_location, artifact) =>

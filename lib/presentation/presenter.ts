@@ -1,6 +1,5 @@
-import { Context, Layer } from "effect";
+import { Layer } from "effect";
 import { Presentation } from "../runtime/services.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
 import { formatToolDuration } from "./duration.ts";
 import {
   boundLine,
@@ -476,15 +475,6 @@ export class Presenter {
 
 export const presentationLayer = (options: PresenterOptions = {}) =>
   Layer.sync(Presentation, () => new Presenter(options));
-
-// Only legacy Promise callers need this explicit lookup. Native operations yield Presentation.
-export function presenter(
-  application: ApplicationExecution | undefined,
-): Presenter {
-  if (!application)
-    throw new Error("Presentation requires an application execution.");
-  return Context.get(application.services, Presentation);
-}
 
 export function renderMarkdownPlain(markdown: string): string {
   return renderMarkdownLines(markdown)

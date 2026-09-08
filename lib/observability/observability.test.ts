@@ -13,20 +13,16 @@ import { createEventWriter } from "./events.ts";
 import { createFileRunObserver } from "./observer.ts";
 import { renderStatus } from "./status.ts";
 import { readRunSummary, updateRunSummary } from "./summary.ts";
-
 const tempDirs: string[] = [];
-
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-
 async function tempDir(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-observe-"));
   tempDirs.push(dir);
   return dir;
 }
-
 function context(cwd: string, attempt?: number): WorkflowContext {
   return createWorkflowContext({
     command: "do",
@@ -40,7 +36,6 @@ function context(cwd: string, attempt?: number): WorkflowContext {
     attempt,
   });
 }
-
 describe("observability event writing", () => {
   test("appends sanitized JSONL events", async () => {
     const cwd = await tempDir();
@@ -50,7 +45,6 @@ describe("observability event writing", () => {
         now: () => new Date("2026-01-01T00:00:00.000Z"),
       }),
     );
-
     await runApplicationPromise(
       writer.write({
         type: "tool_started",
@@ -62,7 +56,6 @@ describe("observability event writing", () => {
     await runApplicationPromise(
       writer.write({ type: "phase_completed", phase: "triage" }),
     );
-
     const lines = (await readFile(path.join(runDir, "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
@@ -80,13 +73,11 @@ describe("observability event writing", () => {
       },
     ]);
   });
-
   test("warns instead of throwing when event writes fail", async () => {
     const cwd = await tempDir();
     const runDir = path.join(cwd, "not-a-directory");
     await writeFile(runDir, "file");
     const warnings: string[] = [];
-
     const writer = await runApplicationPromise(
       createEventWriter(runDir, { warn: (message) => warnings.push(message) }),
     );
@@ -94,7 +85,6 @@ describe("observability event writing", () => {
     expect(warnings.join("\n")).toContain("observability event write failed");
   });
 });
-
 describe("observability summary writing", () => {
   test("records phase status and Pi session totals", async () => {
     const cwd = await tempDir();
@@ -102,7 +92,6 @@ describe("observability summary writing", () => {
     const observer = await runApplicationPromise(
       createFileRunObserver(runContext),
     );
-
     await runApplicationPromise(observer.runStarted({ command: "do" }));
     await runApplicationPromise(
       observer.phaseStarted({
@@ -149,7 +138,6 @@ describe("observability summary writing", () => {
       }),
     );
     await runApplicationPromise(observer.runCompleted({ status: "completed" }));
-
     const summary = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -189,14 +177,12 @@ describe("observability summary writing", () => {
       cost: 0.0123,
     });
   });
-
   test("resets run-scoped summary state when a new run starts", async () => {
     const cwd = await tempDir();
     const runContext = context(cwd);
     const observer = await runApplicationPromise(
       createFileRunObserver(runContext),
     );
-
     await runApplicationPromise(observer.runStarted({ command: "do" }));
     await runApplicationPromise(
       observer.phaseStarted({
@@ -219,9 +205,7 @@ describe("observability summary writing", () => {
       }),
     );
     await runApplicationPromise(observer.runCompleted({ status: "completed" }));
-
     await runApplicationPromise(observer.runStarted({ command: "triage" }));
-
     const summary = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -241,7 +225,6 @@ describe("observability summary writing", () => {
     expect(summary).not.toHaveProperty("endedAt");
     expect(summary).not.toHaveProperty("durationMs");
   });
-
   test("finalizes autorun attempt outcome events and summary timing after gates", async () => {
     const cwd = await tempDir();
     const runContext = context(cwd, 1);
@@ -252,7 +235,6 @@ describe("observability summary writing", () => {
         summary.endedAt = "2026-05-07T00:00:01.000Z";
       }),
     );
-
     await runApplicationPromise(
       finalizeAttemptObservability({
         context: runContext,
@@ -261,7 +243,6 @@ describe("observability summary writing", () => {
         endedAt: "2026-05-07T00:00:05.000Z",
       }),
     );
-
     const events = (
       await readFile(path.join(runContext.runDir, "events.jsonl"), "utf8")
     )
@@ -275,7 +256,6 @@ describe("observability summary writing", () => {
       status: "failed",
       outcomeDetail: "verification failed",
     });
-
     const summary = Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
@@ -291,14 +271,12 @@ describe("observability summary writing", () => {
     expect(summary.durationMs).toBe(5000);
     expect(summary.lastError).toBe("verification failed");
   });
-
   test("warns instead of throwing when summary writes fail", async () => {
     const cwd = await tempDir();
     const badRunDir = path.join(cwd, "not-a-directory");
     await writeFile(badRunDir, "file");
     const runContext = { ...context(cwd), runDir: badRunDir };
     const warnings: string[] = [];
-
     await runApplicationPromise(
       updateRunSummary(
         runContext,
@@ -311,7 +289,6 @@ describe("observability summary writing", () => {
     expect(warnings.join("\n")).toContain("observability summary write failed");
   });
 });
-
 describe("status rendering", () => {
   test("ignores invalid summary data instead of passing it to status rendering", async () => {
     const cwd = await tempDir();
@@ -373,16 +350,17 @@ describe("status rendering", () => {
         2,
       ),
     );
-
-    const output = await renderStatus({
-      command: "status",
-      issue: "42",
-      all: false,
-      cwd,
-      outDir: ".roark/runs",
-      repo: "owner/repo",
-      attempt: 2,
-    });
+    const output = await runApplicationPromise(
+      renderStatus({
+        command: "status",
+        issue: "42",
+        all: false,
+        cwd,
+        outDir: ".roark/runs",
+        repo: "owner/repo",
+        attempt: 2,
+      }),
+    );
     expect(output).toContain("Issue #42 attempt 2");
     expect(output).toContain("Status: failed");
     expect(output).toContain("Totals: tokens=3");
@@ -392,7 +370,6 @@ describe("status rendering", () => {
     );
     expect(output).toContain("- Triage: failed");
   });
-
   test("renders all known direct and attempt summaries", async () => {
     const cwd = await tempDir();
     const summaryDir = path.join(cwd, ".roark/runs/issue/7");
@@ -439,13 +416,14 @@ describe("status rendering", () => {
         },
       }),
     );
-
-    const output = await renderStatus({
-      command: "status",
-      all: true,
-      cwd,
-      outDir: ".roark/runs",
-    });
+    const output = await runApplicationPromise(
+      renderStatus({
+        command: "status",
+        all: true,
+        cwd,
+        outDir: ".roark/runs",
+      }),
+    );
     expect(output).toContain("Known Roark runs:");
     expect(output).toContain("#7: completed");
     expect(output).toContain("tokens=12");

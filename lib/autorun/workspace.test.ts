@@ -14,10 +14,8 @@ import {
   runProcess,
   type ProcessOptions,
 } from "../cli/process.ts";
-
 import {
   runApplicationPromise,
-  type ApplicationExecution,
   applicationLayer,
 } from "../runtime/application.ts";
 import { rejects as assertRejects } from "node:assert/strict";
@@ -937,29 +935,23 @@ describe("managed clone workspaces", () => {
     };
     return runWithPresenter(
       new Presenter({ stream, errorStream: stream }),
-      async (application) => {
-        try {
-          const hook = runApplicationPromise(
-            nativeWorkspace.runLifecycleHook(
-              "afterRun",
-              { timeoutMs: 1000, afterRun: "hostile\u001b]0;owned\rcommand" },
-              root,
-              adaptRunner(
-                () => Promise.resolve(fail("after\nfailed\u0007")),
-                application,
-              ),
-            ),
-            application,
-          );
-          await hook;
-          expect(output).toContain("WARNING afterRun hook failed");
-          expect(output).not.toMatch(
-            /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/,
-          );
-        } finally {
-          await rm(root, { recursive: true, force: true });
-        }
-      },
+      Effect.gen(function* () {
+        const hook = yield* Effect.forkScoped(
+          nativeWorkspace.runLifecycleHook(
+            "afterRun",
+            { timeoutMs: 1000, afterRun: "hostile\u001b]0;owned\rcommand" },
+            root,
+            adaptRunner(() => Promise.resolve(fail("after\nfailed\u0007"))),
+          ),
+        );
+        yield* Fiber.join(hook);
+        expect(output).toContain("WARNING afterRun hook failed");
+        expect(output).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
+      }).pipe(
+        Effect.ensuring(
+          Effect.promise(() => rm(root, { recursive: true, force: true })),
+        ),
+      ),
     );
   });
   test("pins a PR pull ref, repairs its origin, and compares merge-base to head without mutation", async () => {
@@ -1348,12 +1340,11 @@ type Input<T> = Omit<T, "runner"> & {
 };
 function adaptRunner(
   runner: TestProcessRunner | undefined,
-  application?: ApplicationExecution,
 ): nativeWorkspace.ProcessRunner | undefined {
   if (!runner) return undefined;
   return (args, options) =>
     Effect.tryPromise({
-      try: () => runner([...args], options, application),
+      try: () => runner([...args], options),
       catch: (cause) => new nativeWorkspace.WorkspaceCommandError({ cause }),
     });
 }
@@ -1361,7 +1352,6 @@ async function preparePrRevisionWorkspace(
   input: Input<
     Parameters<typeof nativeWorkspace.preparePrRevisionWorkspace>[0]
   >,
-  application?: ApplicationExecution,
 ) {
   // This Promise API transfers the lock to its caller's workflow finalizer.
   // Closing the intervening Promise bridge must not release that lock early.
@@ -1371,10 +1361,9 @@ async function preparePrRevisionWorkspace(
       nativeWorkspace
         .preparePrRevisionWorkspace({
           ...input,
-          runner: adaptRunner(input.runner, application),
+          runner: adaptRunner(input.runner),
         })
         .pipe(Effect.provideService(Scope.Scope, scope)),
-      application,
     );
     return {
       ...prepared,
@@ -1387,7 +1376,6 @@ async function preparePrRevisionWorkspace(
 }
 async function preparePrReviewWorkspace(
   input: Input<Parameters<typeof nativeWorkspace.preparePrReviewWorkspace>[0]>,
-  application?: ApplicationExecution,
 ) {
   // This Promise API transfers the lock to its caller's workflow finalizer.
   // Closing the intervening Promise bridge must not release that lock early.
@@ -1397,10 +1385,9 @@ async function preparePrReviewWorkspace(
       nativeWorkspace
         .preparePrReviewWorkspace({
           ...input,
-          runner: adaptRunner(input.runner, application),
+          runner: adaptRunner(input.runner),
         })
         .pipe(Effect.provideService(Scope.Scope, scope)),
-      application,
     );
     return {
       ...prepared,
@@ -1414,5 +1401,4 @@ async function preparePrReviewWorkspace(
 type TestProcessRunner = (
   args: string[],
   options?: ProcessOptions,
-  application?: ApplicationExecution,
 ) => Promise<ProcessResult>;

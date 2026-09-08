@@ -105,9 +105,8 @@ const runSummarySchema = Schema.Struct({
   lastError: Schema.optional(Schema.String),
   recoveryCommand: Schema.optional(Schema.String),
 });
-const decodeRunSummary = Schema.decodeUnknownSync(
-  Schema.fromJsonString(runSummarySchema),
-);
+const runSummaryJson = Schema.fromJsonString(runSummarySchema);
+const decodeRunSummary = Schema.decodeUnknownSync(runSummaryJson);
 
 export function parseRunSummary(raw: string): RunSummary {
   return decodeRunSummary(raw, { onExcessProperty: "preserve" });
@@ -129,7 +128,9 @@ export const readRunSummary = Effect.fn("readRunSummary")(
   function* (summaryPath: string) {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs.readFileString(summaryPath);
-    return yield* Effect.try(() => parseRunSummary(raw));
+    return yield* Schema.decodeUnknownEffect(runSummaryJson)(raw, {
+      onExcessProperty: "preserve",
+    });
   },
   Effect.catch(() => Effect.succeed(undefined)),
 );

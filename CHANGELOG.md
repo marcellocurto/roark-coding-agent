@@ -8,6 +8,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Completed Effect-native CLI dispatch, interactive prompt lifetimes, and status loading; removed the internal Promise execution bridge and migrated workflow test fixtures to native Effects.
 - Migrated all default agent phases to GPT-6 Astra through Pi 0.85.1. Default thinking now varies by phase, fast uses low except for medium Reviews A and B, and deep uses high execution with xhigh planning/reviews. Publishing uses low in every profile; explicit model and thinking overrides remain available.
 - Established the Effect v4 application runtime and Bun platform services, with scoped process execution and Effect-native verification timeouts. Interrupting migrated subprocess work now waits for process-group cleanup, including descendants whose shell has already exited.
 - Moved existing autorun, continuation, publishing, and PR review workflows to native Effect composition, with scoped workspace locks, interruption-safe artifact writes, and recovery markers for interrupted workspace initialization.

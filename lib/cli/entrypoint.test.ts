@@ -2,10 +2,13 @@ import { Schema, Cause, Effect, Exit } from "effect";
 import {
   runApplicationPromise,
   applicationLayer,
-  fromLegacyPromise,
 } from "../runtime/application.ts";
 import * as nativeVerification from "../autorun/verification.ts";
-import { runProcess, runProcessOrThrow } from "./process.ts";
+import {
+  InvalidProcessCommandError,
+  runProcess,
+  runProcessOrThrow,
+} from "./process.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import {
   Verification,
@@ -14,12 +17,12 @@ import {
   Presentation,
 } from "../runtime/services.ts";
 import { type ExitNotificationRequest } from "./notifications.ts";
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  main,
   presentAutorunOutcome,
   runCli,
   workflowOutcomeStatus,
@@ -34,37 +37,82 @@ afterEach(async () => {
   );
 });
 describe("CLI lifecycle services", () => {
-  test("verification defects survive the Promise route and bypass ordinary CLI failure handling", async () => {
-    const defect = new Error("verification service defect");
+  test.each([false, true])(
+    "verification defects bypass ordinary CLI failure handling (expected failure: %s)",
+    async (withFailure) => {
+      const defect = new Error("verification service defect");
+      let output = "";
+      let notified = false;
+      const stream = {
+        isTTY: false,
+        write(chunk: string) {
+          output += chunk;
+        },
+      };
+      const exit = await Effect.runPromiseExit(
+        runCli(["do", "1"]).pipe(
+          Effect.provideService(CommandExecution, {
+            execute: () =>
+              Effect.gen(function* () {
+                yield* nativeVerification.runVerification({
+                  command: "unused",
+                  cwd: process.cwd(),
+                });
+              }),
+          }),
+          Effect.provideService(Verification, {
+            execute: () =>
+              withFailure
+                ? Effect.fail(
+                    new InvalidProcessCommandError({ args: [] }),
+                  ).pipe(Effect.ensuring(Effect.die(defect)))
+                : Effect.die(defect),
+          }),
+          Effect.provideService(ExitNotifications, {
+            send: () =>
+              Effect.sync(() => {
+                notified = true;
+              }),
+            deliver: () => Effect.void,
+          }),
+          Effect.provideService(
+            Presentation,
+            new Presenter({ stream, errorStream: stream }),
+          ),
+          Effect.provide(applicationLayer),
+        ),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.hasDies(exit.cause)).toBe(true);
+        expect(Cause.hasFails(exit.cause)).toBe(withFailure);
+        expect(Cause.pretty(exit.cause)).toContain(defect.message);
+        if (withFailure)
+          expect(Cause.pretty(exit.cause)).toContain("A command is required.");
+        else expect(Cause.squash(exit.cause)).toBe(defect);
+      }
+      expect(output).not.toContain("run failed");
+      expect(output).not.toContain(defect.message);
+      expect(notified).toBe(false);
+    },
+  );
+  test("invalid issue input reports failure and sends one failure notification", async () => {
+    const notices: ExitNotificationRequest[] = [];
     let output = "";
-    let notified = false;
     const stream = {
       isTTY: false,
       write(chunk: string) {
         output += chunk;
       },
     };
-    const exit = await Effect.runPromiseExit(
-      runCli(["do", "1"]).pipe(
-        Effect.provideService(CommandExecution, {
-          execute: () =>
-            fromLegacyPromise(async (application) => {
-              await runApplicationPromise(
-                nativeVerification.runVerification({
-                  command: "unused",
-                  cwd: process.cwd(),
-                }),
-                application,
-              );
-            }),
-        }),
-        Effect.provideService(Verification, {
-          execute: () => Effect.die(defect),
-        }),
+    const argv = ["do", "not-an-issue", "--repo", "owner/repo"];
+    const code = await Effect.runPromise(
+      runCli(argv).pipe(
+        Effect.provideService(CommandExecution, { execute: main }),
         Effect.provideService(ExitNotifications, {
-          send: () =>
+          send: (request) =>
             Effect.sync(() => {
-              notified = true;
+              notices.push(request);
             }),
           deliver: () => Effect.void,
         }),
@@ -75,15 +123,9 @@ describe("CLI lifecycle services", () => {
         Effect.provide(applicationLayer),
       ),
     );
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(Cause.hasDies(exit.cause)).toBe(true);
-      expect(Cause.hasFails(exit.cause)).toBe(false);
-      expect(Cause.squash(exit.cause)).toBe(defect);
-    }
-    expect(output).not.toContain("FAILED");
-    expect(output).not.toContain(defect.message);
-    expect(notified).toBe(false);
+    expect(code).toBe(1);
+    expect(output).toContain("Could not parse issue 'not-an-issue'.");
+    expect(notices).toEqual([{ argv, succeeded: false }]);
   });
   test("presents published and stopped outcomes distinctly", async () => {
     let output = "";
@@ -96,22 +138,20 @@ describe("CLI lifecycle services", () => {
           },
         },
       }),
-      async (application) => {
-        presentAutorunOutcome(
-          { issueNumber: 1, outcome: "published", outcomeDetail: null },
-          application,
-        );
-        presentAutorunOutcome(
-          {
-            issueNumber: 2,
-            outcome: "triage-stopped",
-            outcomeDetail: "not actionable",
-          },
-          application,
-        );
+      Effect.gen(function* () {
+        yield* presentAutorunOutcome({
+          issueNumber: 1,
+          outcome: "published" as const,
+          outcomeDetail: null,
+        });
+        yield* presentAutorunOutcome({
+          issueNumber: 2,
+          outcome: "triage-stopped" as const,
+          outcomeDetail: "not actionable",
+        });
         expect(workflowOutcomeStatus("review-blocked")).toBe("BLOCKED");
-        await Promise.resolve();
-      },
+        yield* Effect.void;
+      }),
     );
     expect(output).toContain("SUCCESS #1 · published");
     expect(output).toContain("STOPPED #2 · not actionable");
@@ -294,7 +334,7 @@ describe("roark executable", () => {
   });
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  test(`runtime ${signal} interrupts verification through the Promise boundary and reaps its descendants`, async () => {
+  test(`runtime ${signal} interrupts verification through the CLI lifecycle and reaps its descendants`, async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-runtime-signal-"));
     tempDirs.push(cwd);
     const fixture = path.join(

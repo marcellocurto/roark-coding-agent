@@ -12,12 +12,10 @@ import { PrReviewError } from "../pr-review/workflow.ts";
 import {
   runApplicationPromise,
   applicationLayer,
-  fromLegacyPromise,
 } from "../runtime/application.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-
 import { ProcessExecutionError } from "../cli/process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -122,97 +120,90 @@ describe("verification repair planning", () => {
     };
     const hooks = { beforeRun: "bun install", timeoutMs: 1234 };
     const outcome = await Effect.runPromise(
-      fromLegacyPromise((application) =>
-        runApplicationPromise(
-          runPublishGate(
-            {
-              options: {
-                cwd: context.controlCwd,
-                repo: "owner/repo",
-                verifyCommand: "bun run typecheck",
-                failureLabel: "failed",
-                successLabel: "done",
-                inProgressLabel: "in-progress",
-                remote: "origin",
-                baseBranch: "main",
-                workspace,
-                hooks,
-              },
-              issue: {
-                number: 1,
-                title: "Issue",
-                url: "https://github.com/owner/repo/issues/1",
-              },
-              branchPlan: {
-                issueNumber: 1,
-                branchName: "roark/issue-1",
-                baseBranch: "main",
-              },
-              workflowContext: context,
-              attemptMetadata: attemptMetadata(context),
-              attemptMetadataPath:
-                ".roark/runs/issue/1/attempts/1/attempt.json",
+      Effect.gen(function* () {
+        return yield* runPublishGate(
+          {
+            options: {
+              cwd: context.controlCwd,
+              repo: "owner/repo",
+              verifyCommand: "bun run typecheck",
+              failureLabel: "failed",
+              successLabel: "done",
+              inProgressLabel: "in-progress",
+              remote: "origin",
+              baseBranch: "main",
+              workspace,
+              hooks,
             },
-            {
-              refreshCopyToWorktree: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              runLifecycleHook: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              runVerification: Effect.fnUntraced(function* ({ command }) {
-                return (
-                  yield* Effect.void,
-                  { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
-                );
-              }),
-              writeVerificationArtifact: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              publishAutorunResult: Effect.fnUntraced(function* () {
-                return (
-                  yield* Effect.void,
-                  { url: "https://github.com/owner/repo/pull/10", number: 10 }
-                );
-              }),
-              publishIssueLedgerComment: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              postPrIssueCreation: Effect.fnUntraced(function* ({ prUrl }) {
-                yield* Effect.void;
-                postPrCalls.push(prUrl);
-                return undefined;
-              }),
-              updatePrBody: Effect.fnUntraced(function* ({
+            issue: {
+              number: 1,
+              title: "Issue",
+              url: "https://github.com/owner/repo/issues/1",
+            },
+            branchPlan: {
+              issueNumber: 1,
+              branchName: "roark/issue-1",
+              baseBranch: "main",
+            },
+            workflowContext: context,
+            attemptMetadata: attemptMetadata(context),
+            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+          },
+          {
+            refreshCopyToWorktree: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            runLifecycleHook: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            runVerification: Effect.fnUntraced(function* ({ command }) {
+              return (
+                yield* Effect.void,
+                { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" }
+              );
+            }),
+            writeVerificationArtifact: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            publishAutorunResult: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                { url: "https://github.com/owner/repo/pull/10", number: 10 }
+              );
+            }),
+            publishIssueLedgerComment: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            postPrIssueCreation: Effect.fnUntraced(function* ({ prUrl }) {
+              yield* Effect.void;
+              postPrCalls.push(prUrl);
+              return undefined;
+            }),
+            updatePrBody: Effect.fnUntraced(function* ({ pr, followUpIssues }) {
+              yield* Effect.void;
+              postPublicationOrder.push("body-update");
+              prBodyUpdates.push({
                 pr,
-                followUpIssues,
-              }) {
-                yield* Effect.void;
-                postPublicationOrder.push("body-update");
-                prBodyUpdates.push({
-                  pr,
-                  followUpCount: followUpIssues?.length ?? 0,
-                });
-                return undefined;
-              }),
-              runPrReview: Effect.fnUntraced(function* (options) {
-                yield* Effect.void;
-                postPublicationOrder.push("pr-review");
-                reviewCalls.push(options);
-                return {
-                  outcome: "completed" as const,
-                  context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-                };
-              }),
-            },
-          ),
-          application,
-        ),
-      ).pipe(Effect.provide(applicationLayer)),
+                followUpCount: followUpIssues?.length ?? 0,
+              });
+              return undefined;
+            }),
+            runPrReview: Effect.fnUntraced(function* (options) {
+              yield* Effect.void;
+              postPublicationOrder.push("pr-review");
+              reviewCalls.push(options);
+              return {
+                outcome: "completed" as const,
+                context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+              };
+            }),
+          },
+        );
+      }).pipe(Effect.provide(applicationLayer)),
     );
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
@@ -256,43 +247,42 @@ describe("verification repair planning", () => {
         errorStream: stream,
         roots: [context.controlCwd],
       }),
-      async (application) => {
-        const outcome = await runApplicationPromise(
-          runPublishGate(
-            {
-              options: publishGateOptions(context),
-              issue: {
-                number: 1,
-                title: "Issue",
-                url: "https://github.com/owner/repo/issues/1",
-              },
-              branchPlan: {
-                issueNumber: 1,
-                branchName: "roark/issue-1",
-                baseBranch: "main",
-              },
-              workflowContext: context,
-              attemptMetadata: attemptMetadata(context),
-              attemptMetadataPath:
-                ".roark/runs/issue/1/attempts/1/attempt.json",
+      Effect.gen(function* () {
+        const outcome = yield* runPublishGate(
+          {
+            options: publishGateOptions(context),
+            issue: {
+              number: 1,
+              title: "Issue",
+              url: "https://github.com/owner/repo/issues/1",
             },
-            successfulPublicationDependencies({
-              runPrReview: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return yield* Effect.fail(
-                  new PrReviewError({ message: "review service unavailable" }),
-                );
-              }),
+            branchPlan: {
+              issueNumber: 1,
+              branchName: "roark/issue-1",
+              baseBranch: "main",
+            },
+            workflowContext: context,
+            attemptMetadata: attemptMetadata(context),
+            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+          },
+          successfulPublicationDependencies({
+            runPrReview: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(
+                new PrReviewError({ message: "review service unavailable" }),
+              );
             }),
-          ),
-          application,
+          }),
         );
-        expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
+        expect(outcome).toEqual({
+          outcome: "published" as const,
+          outcomeDetail: null,
+        });
         expect(warningOutput).toContain(
           "automatic PR review failed after PR #10 was published",
         );
         expect(warningOutput).toContain("review service unavailable");
-      },
+      }),
     );
   });
   test("a stale automatic PR review preserves the published outcome and review artifact", async () => {
@@ -314,44 +304,43 @@ describe("verification repair planning", () => {
         errorStream: stream,
         roots: [context.controlCwd],
       }),
-      async (application) => {
-        const outcome = await runApplicationPromise(
-          runPublishGate(
-            {
-              options: publishGateOptions(context),
-              issue: {
-                number: 1,
-                title: "Issue",
-                url: "https://github.com/owner/repo/issues/1",
-              },
-              branchPlan: {
-                issueNumber: 1,
-                branchName: "roark/issue-1",
-                baseBranch: "main",
-              },
-              workflowContext: context,
-              attemptMetadata: attemptMetadata(context),
-              attemptMetadataPath:
-                ".roark/runs/issue/1/attempts/1/attempt.json",
+      Effect.gen(function* () {
+        const outcome = yield* runPublishGate(
+          {
+            options: publishGateOptions(context),
+            issue: {
+              number: 1,
+              title: "Issue",
+              url: "https://github.com/owner/repo/issues/1",
             },
-            successfulPublicationDependencies({
-              runPrReview: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return {
-                  outcome: "blocked" as const,
-                  context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
-                };
-              }),
+            branchPlan: {
+              issueNumber: 1,
+              branchName: "roark/issue-1",
+              baseBranch: "main",
+            },
+            workflowContext: context,
+            attemptMetadata: attemptMetadata(context),
+            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+          },
+          successfulPublicationDependencies({
+            runPrReview: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return {
+                outcome: "blocked" as const,
+                context: { reviewDirRelative: ".roark/runs/pr/10/review-1" },
+              };
             }),
-          ),
-          application,
+          }),
         );
-        expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
+        expect(outcome).toEqual({
+          outcome: "published" as const,
+          outcomeDetail: null,
+        });
         expect(warningOutput).toContain(
           "automatic PR review for #10 was blocked",
         );
         expect(warningOutput).toContain("artifact: .roark/runs/pr/10/review-1");
-      },
+      }),
     );
   });
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
@@ -675,79 +664,75 @@ describe("verification repair planning", () => {
     };
     return runWithPresenter(
       new Presenter({ stream, roots: [context.controlCwd] }),
-      async (application) => {
-        const outcome = await runApplicationPromise(
-          runPublishGate(
-            {
-              options: {
-                cwd: context.controlCwd,
-                repo: "owner/repo",
-                verifyCommand: "bun run typecheck",
-                failureLabel: "failed",
-                successLabel: "done",
-                inProgressLabel: "in-progress",
-                remote: "origin",
-                baseBranch: "main",
-                hooks: { timeoutMs: 1000 },
-              },
-              issue: {
-                number: 1,
-                title: "Issue",
-                url: "https://github.com/owner/repo/issues/1",
-              },
-              branchPlan: {
-                issueNumber: 1,
-                branchName: "roark/issue-1",
-                baseBranch: "main",
-              },
-              workflowContext: context,
-              attemptMetadata: {
-                attempt: 1,
-                issueNumber: 1,
-                branch: "roark/issue-1",
-                baseBranch: "main",
-                worktreePath: context.agentCwd,
-                runArtifactPath: context.runDirRelative,
-                startedAt: new Date("2026-05-08T00:00:00.000Z").toISOString(),
-                endedAt: null,
-                outcome: "in-progress",
-                outcomeDetail: null,
-              },
-              attemptMetadataPath:
-                ".roark/runs/issue/1/attempts/1/attempt.json",
+      Effect.gen(function* () {
+        const outcome = yield* runPublishGate(
+          {
+            options: {
+              cwd: context.controlCwd,
+              repo: "owner/repo",
+              verifyCommand: "bun run typecheck",
+              failureLabel: "failed",
+              successLabel: "done",
+              inProgressLabel: "in-progress",
+              remote: "origin",
+              baseBranch: "main",
+              hooks: { timeoutMs: 1000 },
             },
-            {
-              refreshCopyToWorktree: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              runLifecycleHook: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                return undefined;
-              }),
-              runVerification: Effect.fnUntraced(function* ({ command }) {
-                return (
-                  yield* Effect.void,
-                  {
-                    ok: false,
-                    command,
-                    exitCode: 127,
-                    stdout: "",
-                    stderr: "/bin/bash: tsc: command not found",
-                  }
-                );
-              }),
-              handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
-                yield* Effect.void;
-                failureComment = decision.reason;
-                return undefined;
-              }),
+            issue: {
+              number: 1,
+              title: "Issue",
+              url: "https://github.com/owner/repo/issues/1",
             },
-          ),
-          application,
+            branchPlan: {
+              issueNumber: 1,
+              branchName: "roark/issue-1",
+              baseBranch: "main",
+            },
+            workflowContext: context,
+            attemptMetadata: {
+              attempt: 1,
+              issueNumber: 1,
+              branch: "roark/issue-1",
+              baseBranch: "main",
+              worktreePath: context.agentCwd,
+              runArtifactPath: context.runDirRelative,
+              startedAt: new Date("2026-05-08T00:00:00.000Z").toISOString(),
+              endedAt: null,
+              outcome: "in-progress" as const,
+              outcomeDetail: null,
+            },
+            attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
+          },
+          {
+            refreshCopyToWorktree: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            runLifecycleHook: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return undefined;
+            }),
+            runVerification: Effect.fnUntraced(function* ({ command }) {
+              return (
+                yield* Effect.void,
+                {
+                  ok: false,
+                  command,
+                  exitCode: 127,
+                  stdout: "",
+                  stderr: "/bin/bash: tsc: command not found",
+                }
+              );
+            }),
+            handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
+              yield* Effect.void;
+              failureComment = decision.reason;
+              return undefined;
+            }),
+          },
         );
         expect(outcome).toEqual({
-          outcome: "failed-verification",
+          outcome: "failed-verification" as const,
           outcomeDetail:
             "verification command exited 127 because a required command was not found. Install dependencies in the verification workspace or configure hooks.beforeVerify, for example: bun install --frozen-lockfile.",
         });
@@ -756,7 +741,7 @@ describe("verification repair planning", () => {
           "artifact: .roark/runs/issue/1/attempts/1/verification.md",
         );
         expect(output).toContain("ACTION user action required:");
-      },
+      }),
     );
   });
 });

@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
@@ -599,10 +600,14 @@ describe("issue curation phase", () => {
     );
     await runApplicationPromise(
       nativePhases.runSinglePhase(context, "curate-issues").pipe(
-        provideTestAgent(async () => {
-          await Promise.resolve();
-          throw new Error("curation should not invoke an agent");
-        }),
+        provideTestAgent(
+          Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return yield* Effect.fail(
+              new Error("curation should not invoke an agent"),
+            );
+          }),
+        ),
       ),
     );
     expect(

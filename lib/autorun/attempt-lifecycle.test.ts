@@ -157,30 +157,50 @@ describe("runAutorunAttemptLifecycle", () => {
           }),
         },
       ).pipe(
-        provideTestAgent(async (request) => {
-          await Promise.resolve();
-          phases.push(request.display.phaseId);
-          expect(request.prompt).toContain("failed_verification");
-          if (request.display.phaseId === "fixLog-1") {
-            return submitChangeReport(
-              request,
-              changeReport({ summary: "Addressed verification failure." }),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
+            phases.push(request.display.phaseId);
+            expect(request.prompt).toContain("failed_verification");
+            if (request.display.phaseId === "fixLog-1") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({
+                      summary: "Addressed verification failure.",
+                    }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "refinementLog-1") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({ summary: "Refined." }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewA-1") {
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult()),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewB-1") {
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult()),
+                catch: (error) => error,
+              });
+            }
+            return yield* Effect.fail(
+              new Error(`unexpected phase ${request.display.phaseId}`),
             );
-          }
-          if (request.display.phaseId === "refinementLog-1") {
-            return submitChangeReport(
-              request,
-              changeReport({ summary: "Refined." }),
-            );
-          }
-          if (request.display.phaseId === "reviewA-1") {
-            return submitReview(request, reviewResult());
-          }
-          if (request.display.phaseId === "reviewB-1") {
-            return submitReview(request, reviewResult());
-          }
-          throw new Error(`unexpected phase ${request.display.phaseId}`);
-        }),
+          }),
+        ),
       ),
     );
     const summary = await runApplicationPromise(
@@ -246,70 +266,105 @@ describe("runAutorunAttemptLifecycle", () => {
           }),
         },
       ).pipe(
-        provideTestAgent(async (request) => {
-          await Promise.resolve();
-          phases.push(request.display.phaseId);
-          if (request.display.phaseId === "fixLog-1") {
-            return submitChangeReport(
-              request,
-              changeReport({
-                summary: "Partially addressed verification failure.",
-                validation: [
-                  {
-                    command: "bun test",
-                    status: "failed",
-                    details: "Numbered review requested another fix.",
-                  },
-                ],
-                remainingConcerns: ["Numbered review requested another fix."],
-              }),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
+            phases.push(request.display.phaseId);
+            if (request.display.phaseId === "fixLog-1") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({
+                      summary: "Partially addressed verification failure.",
+                      validation: [
+                        {
+                          command: "bun test",
+                          status: "failed",
+                          details: "Numbered review requested another fix.",
+                        },
+                      ],
+                      remainingConcerns: [
+                        "Numbered review requested another fix.",
+                      ],
+                    }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "refinementLog-1") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({ summary: "Refined." }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewA-1") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitReview(
+                    request,
+                    reviewResult([
+                      reviewFinding(
+                        "must-fix-current",
+                        "Numbered review requested another fix.",
+                      ),
+                    ]),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewB-1") {
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult()),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "fixLog-2") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({
+                      summary: "Completed verification repair.",
+                      addressedFindingIds: [
+                        "review-a:numbered-review-requested-another-fix",
+                      ],
+                    }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "refinementLog-2") {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({ summary: "Refined." }),
+                  ),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewA-2") {
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult()),
+                catch: (error) => error,
+              });
+            }
+            if (request.display.phaseId === "reviewB-2") {
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult()),
+                catch: (error) => error,
+              });
+            }
+            return yield* Effect.fail(
+              new Error(`unexpected phase ${request.display.phaseId}`),
             );
-          }
-          if (request.display.phaseId === "refinementLog-1") {
-            return submitChangeReport(
-              request,
-              changeReport({ summary: "Refined." }),
-            );
-          }
-          if (request.display.phaseId === "reviewA-1") {
-            return submitReview(
-              request,
-              reviewResult([
-                reviewFinding(
-                  "must-fix-current",
-                  "Numbered review requested another fix.",
-                ),
-              ]),
-            );
-          }
-          if (request.display.phaseId === "reviewB-1") {
-            return submitReview(request, reviewResult());
-          }
-          if (request.display.phaseId === "fixLog-2") {
-            return submitChangeReport(
-              request,
-              changeReport({
-                summary: "Completed verification repair.",
-                addressedFindingIds: [
-                  "review-a:numbered-review-requested-another-fix",
-                ],
-              }),
-            );
-          }
-          if (request.display.phaseId === "refinementLog-2") {
-            return submitChangeReport(
-              request,
-              changeReport({ summary: "Refined." }),
-            );
-          }
-          if (request.display.phaseId === "reviewA-2") {
-            return submitReview(request, reviewResult());
-          }
-          if (request.display.phaseId === "reviewB-2") {
-            return submitReview(request, reviewResult());
-          }
-          throw new Error(`unexpected phase ${request.display.phaseId}`);
-        }),
+          }),
+        ),
       ),
     );
     expect(completions).toBe(2);

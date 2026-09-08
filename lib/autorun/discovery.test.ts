@@ -1,13 +1,12 @@
+import type { ApplicationServices } from "../runtime/application.ts";
+import type { Scope } from "effect";
 import * as nativePhases from "../workflow/phases.ts";
 import { AttemptStore } from "./attempts.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { WorkspaceError } from "./workspace.ts";
 import { GitWorkspaceError } from "../workflow/git.ts";
 import { Effect } from "effect";
-import {
-  runApplicationPromise,
-  type ApplicationExecution,
-} from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -38,10 +37,10 @@ afterEach(async () => {
 describe("runAutoDiscovery", () => {
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -66,10 +65,9 @@ describe("runAutoDiscovery", () => {
               );
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     expect(listed).toBe(true);
     expect(logs.join("\n")).toContain("#3 Issue 3");
     expect(logs.join("\n")).not.toContain("#1 Issue 1");
@@ -86,10 +84,11 @@ describe("runAutoDiscovery", () => {
       },
       now: () => 100,
     });
-    return runWithPresenter(presentation, async (application) => {
-      presentation.run({ command: "auto", repository: "owner/repo" });
-      const result = await runApplicationPromise(
-        runAutoDiscovery(
+    return runWithPresenter(
+      presentation,
+      Effect.gen(function* () {
+        presentation.run({ command: "auto", repository: "owner/repo" });
+        const result = yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -103,24 +102,23 @@ describe("runAutoDiscovery", () => {
               return (yield* Effect.void, dependencyClearRelationships(29));
             }),
           },
-        ),
-        application,
-      );
-      presentation.outcome(
-        "SUCCESS",
-        presentation.currentTarget(),
-        "dry run complete",
-      );
-      expect(result.kind).toBe("dry-run");
-      expect(presentation.currentTarget()).toBe("#29");
-      expect(output).toContain("DONE #29 · Discovery");
-      expect(output).toContain("SUCCESS #29 · dry run complete");
-    });
+        );
+        presentation.outcome(
+          "SUCCESS",
+          presentation.currentTarget(),
+          "dry run complete",
+        );
+        expect(result.kind).toBe("dry-run");
+        expect(presentation.currentTarget()).toBe("#29");
+        expect(output).toContain("DONE #29 · Discovery");
+        expect(output).toContain("SUCCESS #29 · dry run complete");
+      }),
+    );
   });
   test("sanitizes hostile issue metadata in ordinary discovery output", async () => {
-    const logs = await captureLogs(async (application) => {
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -142,10 +140,9 @@ describe("runAutoDiscovery", () => {
               return (yield* Effect.void, dependencyClearRelationships(1));
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const output = logs.join("\n");
     expect(output).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
     expect(output).toContain("hostile ]0;owned rewritten");
@@ -154,10 +151,10 @@ describe("runAutoDiscovery", () => {
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
     await Promise.resolve();
     const checkedBodies: string[] = [];
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -187,10 +184,9 @@ describe("runAutoDiscovery", () => {
                 : dependencyClearRelationships(Number(input.issueNumber));
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const logText = logs.join("\n");
     expect(checkedBodies).toEqual(["Depends on #99", ""]);
     expect(logText).toContain("Skipped issue(s) with active blockers:");
@@ -198,10 +194,10 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
   });
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -229,10 +225,9 @@ describe("runAutoDiscovery", () => {
               );
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const logText = logs.join("\n");
     expect(logText).not.toContain("Skipped issue(s) with active blockers:");
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
@@ -240,10 +235,10 @@ describe("runAutoDiscovery", () => {
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
     await Promise.resolve();
     const checked: number[] = [];
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -267,10 +262,9 @@ describe("runAutoDiscovery", () => {
                 : dependencyClearRelationships(issueNumber);
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const logText = logs.join("\n");
     expect(checked).toEqual([1, 2]);
     expect(logText).toContain("Skipped issue(s) with active blockers:");
@@ -281,10 +275,10 @@ describe("runAutoDiscovery", () => {
   test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
     await Promise.resolve();
     const checked: number[] = [];
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
           {
             ...noOpLabelContract,
@@ -308,10 +302,9 @@ describe("runAutoDiscovery", () => {
                 : dependencyClearRelationships(issueNumber);
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const logText = logs.join("\n");
     expect(checked).toEqual([1]);
     expect(logText).not.toContain("Skipped issue(s) with active blockers:");
@@ -320,10 +313,10 @@ describe("runAutoDiscovery", () => {
   test("discovery auto selection limit counts unblocked issues", async () => {
     await Promise.resolve();
     const checked: number[] = [];
-    const logs = await captureLogs(async (application) => {
-      await Promise.resolve();
-      await runApplicationPromise(
-        runAutoDiscovery(
+    const logs = await captureLogs(
+      Effect.gen(function* () {
+        yield* Effect.void;
+        yield* runAutoDiscovery(
           { ...baseOptions(), dryRun: true, limit: 2 },
           {
             ...noOpLabelContract,
@@ -348,10 +341,9 @@ describe("runAutoDiscovery", () => {
                 : dependencyClearRelationships(issueNumber);
             }),
           },
-        ),
-        application,
-      );
-    });
+        );
+      }),
+    );
     const logText = logs.join("\n");
     expect(checked).toEqual([1, 2, 3]);
     expect(logText).toContain("Selected issue(s):");
@@ -933,8 +925,8 @@ function fetchedGitHubIssue(
     },
   };
 }
-async function captureLogs(
-  fn: (application: ApplicationExecution) => Promise<void>,
+function captureLogs(
+  work: Effect.Effect<void, unknown, ApplicationServices | Scope.Scope>,
 ): Promise<string[]> {
   const logs: string[] = [];
   return runWithPresenter(
@@ -947,9 +939,6 @@ async function captureLogs(
         },
       },
     }),
-    async (application) => {
-      await fn(application);
-      return logs;
-    },
+    work.pipe(Effect.as(logs)),
   );
 }

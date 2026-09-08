@@ -14,7 +14,7 @@ import {
   toolsForFileEditingMode,
 } from "./agent.ts";
 import { Deferred, Effect } from "effect";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
+import { applicationLayer } from "../runtime/application.ts";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -489,27 +489,24 @@ test("agent interruption waits for SDK abort and session disposal", async () => 
   const controller = new AbortController();
   let finished = false;
   const running = Effect.runPromiseExit(
-    fromLegacyPromise((application) =>
-      runApplicationPromise(
-        Effect.flatMap(AgentExecution, (agent) =>
-          agent.run({
-            cwd: fixture.cwd,
-            thinkingLevel: "high",
-            systemPrompt: "Cancellation test",
-            prompt: "Test only",
-            fileEditingToolsEnabled: false,
-            display: {
-              command: "do",
-              target: "#1",
-              phaseId: "cancellation",
-              phaseLabel: "Cancellation",
-              operation: "inspect",
-            },
-          }),
-        ),
-        application,
-      ),
-    ).pipe(Effect.provide(applicationLayer)),
+    Effect.gen(function* () {
+      return yield* Effect.flatMap(AgentExecution, (agent) =>
+        agent.run({
+          cwd: fixture.cwd,
+          thinkingLevel: "high",
+          systemPrompt: "Cancellation test",
+          prompt: "Test only",
+          fileEditingToolsEnabled: false,
+          display: {
+            command: "do",
+            target: "#1",
+            phaseId: "cancellation",
+            phaseLabel: "Cancellation",
+            operation: "inspect",
+          },
+        }),
+      );
+    }).pipe(Effect.provide(applicationLayer)),
     { signal: controller.signal },
   ).then((exit) => {
     finished = true;

@@ -72,11 +72,14 @@ describe("runAgentTask skill loading", () => {
     tempDirs.push(path.dirname(agentCwd));
     const context = await createContext({ agentCwd });
     const requests: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       requests.push(request.cwd);
-      return submitTriage(request, triageResult());
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult()),
+        catch: (error) => error,
+      });
+    });
     await runApplicationPromise(
       nativeTasks
         .runTriageTask(context, toNativeRetry({}))
@@ -87,11 +90,14 @@ describe("runAgentTask skill loading", () => {
   test("normal workflow tasks do not request any skill paths", async () => {
     const context = await createContext();
     const requests: unknown[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       requests.push(request.skillPaths);
-      return submitTriage(request, triageResult());
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult()),
+        catch: (error) => error,
+      });
+    });
     expect(
       runApplicationPromise(
         nativeTasks
@@ -105,11 +111,14 @@ describe("runAgentTask skill loading", () => {
   });
   test("sends the routed model unless the CLI supplied a global override", async () => {
     const requests: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       requests.push(request.model ?? "missing");
-      return submitTriage(request, triageResult());
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult()),
+        catch: (error) => error,
+      });
+    });
     await runApplicationPromise(
       nativeTasks
         .runTriageTask(await createContext(), toNativeRetry({}))
@@ -139,24 +148,31 @@ describe("runAgentTask thinking profiles", () => {
     context.thinkingConfig.reviewB = "high";
     await writeReadyThroughPlan(context);
     const requests: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       requests.push(
         `${request.fileEditingToolsEnabled ? "write" : "read"}:${request.thinkingLevel}`,
       );
       if (request.display.phaseId === "refinementLog-0")
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (
         request.display.phaseId === "reviewA-0" ||
         request.display.phaseId === "reviewB-0"
       ) {
-        return submitReview(request, reviewResult());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, reviewResult()),
+          catch: (error) => error,
+        });
       }
-      return submitChangeReport(request, changeReport());
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitChangeReport(request, changeReport()),
+        catch: (error) => error,
+      });
+    });
     await runApplicationPromise(
       nativeTasks
         .runChangeReportTask(context, implementationTask, toNativeRetry({}))
@@ -216,14 +232,20 @@ describe("runAgentTask thinking profiles", () => {
           toNativeRetry({}),
         )
         .pipe(
-          provideTestAgent(async (request) => {
-            await Promise.resolve();
-            prompts.push(request.prompt);
-            return submitChangeReport(
-              request,
-              changeReport({ summary: "Refined restart." }),
-            );
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              yield* Effect.void;
+              prompts.push(request.prompt);
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitChangeReport(
+                    request,
+                    changeReport({ summary: "Refined restart." }),
+                  ),
+                catch: (error) => error,
+              });
+            }),
+          ),
         ),
     );
     expect(
@@ -243,11 +265,13 @@ describe("structured task failures", () => {
   test("preserves provider failures without creating a triage artifact", async () => {
     const context = await createContext();
     let calls = 0;
-    const runner: AgentRunner = async () => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* () {
+      yield* Effect.void;
       calls++;
-      throw new Error("openai-codex/gpt-5.5 failed: provider unavailable");
-    };
+      return yield* Effect.fail(
+        new Error("openai-codex/gpt-5.5 failed: provider unavailable"),
+      );
+    });
     let thrown: unknown;
     try {
       await runApplicationPromise(
@@ -268,11 +292,11 @@ describe("structured task failures", () => {
   test("classifies missing structured triage submission without creating an artifact", async () => {
     const context = await createContext();
     let calls = 0;
-    const runner: AgentRunner = async () => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* () {
+      yield* Effect.void;
       calls++;
       return "";
-    };
+    });
     let thrown: unknown;
     try {
       await runApplicationPromise(
@@ -299,10 +323,12 @@ describe("structured task failures", () => {
         nativeTasks
           .runChangeReportTask(context, implementationTask, toNativeRetry({}))
           .pipe(
-            provideTestAgent(async () => {
-              await Promise.resolve();
-              return "# Implementation Log\n\nLooks good.\n";
-            }),
+            provideTestAgent(
+              Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return "# Implementation Log\n\nLooks good.\n";
+              }),
+            ),
           ),
       );
     } catch (error) {
@@ -342,10 +368,12 @@ describe("runReviewTask failures", () => {
     try {
       await runApplicationPromise(
         nativeTasks.runReviewTask(context, reviewATask, toNativeRetry({})).pipe(
-          provideTestAgent(async () => {
-            await Promise.resolve();
-            throw new Error("provider quota exhausted");
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(new Error("provider quota exhausted"));
+            }),
+          ),
         ),
       );
     } catch (error) {
@@ -378,10 +406,12 @@ describe("runReviewTask failures", () => {
     try {
       await runApplicationPromise(
         nativeTasks.runReviewTask(context, reviewATask, toNativeRetry({})).pipe(
-          provideTestAgent(async () => {
-            await Promise.resolve();
-            return "Looks good.";
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return "Looks good.";
+            }),
+          ),
         ),
       );
     } catch (error) {
@@ -450,15 +480,20 @@ describe("runAgentTask transient agent retry", () => {
     const validTriage = triageResult();
     let calls = 0;
     const sleeps: number[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       calls++;
       if (calls === 1)
-        throw new Error(
-          "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+        return yield* Effect.fail(
+          new Error(
+            "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+          ),
         );
-      return submitTriage(request, validTriage);
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, validTriage),
+        catch: (error) => error,
+      });
+    });
     const result = await runApplicationPromise(
       nativeTasks
         .runTriageTask(
@@ -493,15 +528,20 @@ describe("runAgentTask transient agent retry", () => {
       ),
     );
     const prompts: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       prompts.push(request.prompt);
       if (prompts.length === 1)
-        throw new Error(
-          "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+        return yield* Effect.fail(
+          new Error(
+            "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+          ),
         );
-      return submitChangeReport(request, changeReport());
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitChangeReport(request, changeReport()),
+        catch: (error) => error,
+      });
+    });
     expect(
       runApplicationPromise(
         nativeTasks
@@ -526,18 +566,21 @@ describe("runAgentTask transient agent retry", () => {
     const context = await createContext();
     const validTriage = triageResult();
     let calls = 0;
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       calls++;
-      expect(
-        await runApplicationPromise(artifactExists(context, "triage")),
-      ).toBe(false);
+      expect(yield* artifactExists(context, "triage")).toBe(false);
       if (calls < 4)
-        throw new Error(
-          "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+        return yield* Effect.fail(
+          new Error(
+            "openai-codex/gpt-5.5 failed: WebSocket closed 1006 Connection ended",
+          ),
         );
-      return submitTriage(request, validTriage);
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, validTriage),
+        catch: (error) => error,
+      });
+    });
     expect(
       runApplicationPromise(
         nativeTasks
@@ -563,11 +606,13 @@ describe("runAgentTask transient agent retry", () => {
     const context = await createContext();
     let calls = 0;
     const sleeps: number[] = [];
-    const runner: AgentRunner = async () => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* () {
+      yield* Effect.void;
       calls++;
-      throw new Error("openai-codex/gpt-5.5 failed: fetch failed");
-    };
+      return yield* Effect.fail(
+        new Error("openai-codex/gpt-5.5 failed: fetch failed"),
+      );
+    });
     expect(
       runApplicationPromise(
         nativeTasks

@@ -1,7 +1,6 @@
 import {
   runApplicationPromise,
   applicationLayer,
-  fromLegacyPromise,
 } from "../runtime/application.ts";
 import {
   runProcess,
@@ -167,19 +166,16 @@ describe("Effect process execution", () => {
       const controller = new AbortController();
       let pid: number | undefined;
       const running = Effect.runPromiseExit(
-        fromLegacyPromise((application) =>
-          runApplicationPromise(
-            runProcess(
-              [
-                "sh",
-                "-c",
-                `sleep 30 & echo $! > child.pid; ${parentExit ? "exit 0" : "wait"}`,
-              ],
-              { cwd },
-            ),
-            application,
-          ),
-        ).pipe(Effect.provide(applicationLayer)),
+        Effect.gen(function* () {
+          return yield* runProcess(
+            [
+              "sh",
+              "-c",
+              `sleep 30 & echo $! > child.pid; ${parentExit ? "exit 0" : "wait"}`,
+            ],
+            { cwd },
+          );
+        }).pipe(Effect.provide(applicationLayer)),
         { signal: controller.signal },
       );
       try {

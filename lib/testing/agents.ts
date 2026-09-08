@@ -1,12 +1,12 @@
-import { Effect } from "effect";
+import { Context, Effect, Scope } from "effect";
 import { AgentExecution } from "../runtime/services.ts";
 import { AgentExecutionError } from "../pi/agent.ts";
-import {
-  fromLegacyPromise,
-  type ApplicationServices,
-  type ApplicationExecution,
-} from "../runtime/application.ts";
-import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+import type { ApplicationServices } from "../runtime/application.ts";
+import type { AgentRunRequest } from "../workflow/agent-runner.ts";
+
+export type AgentRunner = (
+  request: AgentRunRequest,
+) => Effect.Effect<string, unknown, ApplicationServices | Scope.Scope>;
 export const provideTestAgent =
   (runner?: AgentRunner) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -18,9 +18,7 @@ export const provideTestAgent =
             Effect.map(Effect.context<ApplicationServices>(), (services) =>
               AgentExecution.of({
                 run: (request) =>
-                  fromLegacyPromise((application) =>
-                    runner(request, application),
-                  ).pipe(
+                  runner(request).pipe(
                     Effect.mapError(
                       (cause) =>
                         new AgentExecutionError({
@@ -28,13 +26,10 @@ export const provideTestAgent =
                           cause,
                         }),
                     ),
-                    Effect.provide(services),
+                    Effect.provide(Context.omit(Scope.Scope)(services)),
+                    Effect.scoped,
                   ),
               }),
             ),
           ),
         );
-export type AgentRunner = (
-  request: AgentRunRequest,
-  application?: ApplicationExecution,
-) => Promise<string>;

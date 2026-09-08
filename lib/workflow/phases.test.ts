@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
   writeArtifact,
@@ -98,11 +99,16 @@ describe("review pass selection", () => {
     const phases: string[] = [];
     await runApplicationPromise(
       nativePhases.runSinglePhase(context, "review").pipe(
-        provideTestAgent(async (request) => {
-          await Promise.resolve();
-          phases.push(request.display.phaseId);
-          return submitReview(request, approveReview());
-        }),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
+            phases.push(request.display.phaseId);
+            return yield* Effect.tryPromise({
+              try: () => submitReview(request, approveReview()),
+              catch: (error) => error,
+            });
+          }),
+        ),
       ),
     );
     expect(phases).toEqual(["reviewA-0"]);
@@ -137,11 +143,20 @@ describe("review pass selection", () => {
     const startedPhases = new Set<string>();
     const run = runApplicationPromise(
       nativePhases.reviewPhase(context, 0).pipe(
-        provideTestAgent((request) => {
-          startedPhases.add(request.display.phaseId);
-          if (request.display.phaseId === "reviewA-0") return pendingReviewA;
-          return submitReview(request, approveReview());
-        }),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            startedPhases.add(request.display.phaseId);
+            if (request.display.phaseId === "reviewA-0")
+              return yield* Effect.tryPromise({
+                try: () => pendingReviewA,
+                catch: (error) => error,
+              });
+            return yield* Effect.tryPromise({
+              try: () => submitReview(request, approveReview()),
+              catch: (error) => error,
+            });
+          }),
+        ),
       ),
     );
     for (let turn = 0; turn < 50 && !startedPhases.has("reviewB-0"); turn++) {
@@ -197,8 +212,12 @@ describe("runFullWorkflow", () => {
         bodyDeclaredBlockers: [],
       },
     };
-    const runner: AgentRunner = async (request) =>
-      submitTriage(request, triageResult("blocked"));
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult("blocked")),
+        catch: (error) => error,
+      });
+    });
     const result = await runApplicationPromise(
       nativePhases
         .runFullWorkflow(context, { issueSnapshot })
@@ -224,11 +243,14 @@ describe("runFullWorkflow", () => {
   test("returns triage-stopped and does not run later agents after blocked triage", async () => {
     const context = await tempContext();
     const prompts: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       prompts.push(request.prompt);
-      return submitTriage(request, triageResult("blocked"));
-    };
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult("blocked")),
+        catch: (error) => error,
+      });
+    });
     const result = await runApplicationPromise(
       nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
     );
@@ -258,23 +280,32 @@ describe("runFullWorkflow", () => {
   test("returns planning-stopped and does not implement when plan is not ready", async () => {
     const context = await tempContext();
     const phases: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"')) {
         phases.push("triage");
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="implementation_plan_draft"')) {
         phases.push("plan-draft");
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="implementation_plan_refinement"')) {
         phases.push("plan");
-        return submitImplementationPlan(request, notReadyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, notReadyPlan()),
+          catch: (error) => error,
+        });
       }
       phases.push("unexpected");
-      throw new Error("unexpected prompt");
-    };
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
     expect(
       runApplicationPromise(
         nativePhases
@@ -295,27 +326,40 @@ describe("runFullWorkflow", () => {
   test("completed path returns completed", async () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, readyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="code_refinement"'))
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (
         request.prompt.includes('name="review_a"') ||
         request.prompt.includes('name="review_b"')
       ) {
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
-      throw new Error("unexpected prompt");
-    };
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
     expect(
       runApplicationPromise(
         nativePhases
@@ -349,25 +393,41 @@ describe("runFullWorkflow", () => {
         },
       ],
     });
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, plan);
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, plan),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="code_refinement"'))
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_a"'))
-        return submitReview(request, review);
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, review),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_b"'))
-        return submitReview(request, approveReview());
-      throw new Error("unexpected prompt");
-    };
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
     expect(
       runApplicationPromise(
         nativePhases
@@ -433,67 +493,97 @@ describe("runFullWorkflow", () => {
     const passZeroReviewsMayFinish = new Promise<void>((resolve) => {
       releasePassZeroReviews = resolve;
     });
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       const phase = request.display.phaseId;
       phases.push(phase);
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, readyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
       if (phase === "refinementLog-0")
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (phase === "reviewA-0") {
         passZeroReviewsStarted.add(phase);
         if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
-        await passZeroReviewsMayFinish;
-        return submitReview(request, reviewResult(reviewAFindings));
+        yield* Effect.tryPromise({
+          try: () => passZeroReviewsMayFinish,
+          catch: (error) => error,
+        });
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, reviewResult(reviewAFindings)),
+          catch: (error) => error,
+        });
       }
       if (phase === "reviewB-0") {
         passZeroReviewsStarted.add(phase);
         if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
-        await passZeroReviewsMayFinish;
-        return submitReview(request, reviewResult(reviewBFindings));
+        yield* Effect.tryPromise({
+          try: () => passZeroReviewsMayFinish,
+          catch: (error) => error,
+        });
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, reviewResult(reviewBFindings)),
+          catch: (error) => error,
+        });
       }
       if (phase === "fixLog-1") {
         fixRequest = request.prompt;
         const reviewA = parseReviewResultJson(
-          await runApplicationPromise(readArtifact(context, reviewARef(0))),
+          yield* readArtifact(context, reviewARef(0)),
           { allowRestart: true },
         );
         const reviewB = parseReviewResultJson(
-          await runApplicationPromise(readArtifact(context, reviewBRef(0))),
+          yield* readArtifact(context, reviewBRef(0)),
           { allowRestart: true },
         );
         fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(
           ({ title }) => title,
         );
-        return submitChangeReport(
-          request,
-          changeReport({
-            summary: "Fixed all required findings.",
-            addressedFindingIds: [
-              "review-a:reject-malformed-identifiers",
-              "review-a:seed-authorization-state",
-              "review-b:isolate-the-integration-fixture",
-            ],
-          }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(
+              request,
+              changeReport({
+                summary: "Fixed all required findings.",
+                addressedFindingIds: [
+                  "review-a:reject-malformed-identifiers",
+                  "review-a:seed-authorization-state",
+                  "review-b:isolate-the-integration-fixture",
+                ],
+              }),
+            ),
+          catch: (error) => error,
+        });
       }
       if (phase === "refinementLog-1")
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (phase === "reviewA-1" || phase === "reviewB-1")
-        return submitReview(request, approveReview());
-      throw new Error(`unexpected phase: ${phase}`);
-    };
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
+      return yield* Effect.fail(new Error(`unexpected phase: ${phase}`));
+    });
     const workflow = runApplicationPromise(
       nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
     );
@@ -562,36 +652,53 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, readyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="code_refinement"'))
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
-        return submitReview(
-          request,
-          reviewResult([
-            finding("F1", "follow-up"),
-            finding("S1", "suggestion"),
-          ]),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([
+                finding("F1", "follow-up"),
+                finding("S1", "suggestion"),
+              ]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
-      throw new Error("unexpected prompt");
-    };
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
     expect(
       runApplicationPromise(
         nativePhases
@@ -612,33 +719,50 @@ describe("runFullWorkflow", () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, readyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="code_refinement"'))
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
-        return submitReview(
-          request,
-          reviewResult([finding("B1", "external-blocker")]),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([finding("B1", "external-blocker")]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
-      throw new Error("unexpected prompt");
-    };
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
     const result = await runApplicationPromise(
       nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
     );
@@ -657,48 +781,73 @@ describe("runFullWorkflow", () => {
     );
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await Promise.resolve();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       const phase = request.display.phaseId;
       if (request.prompt.includes('name="triage"'))
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_draft"'))
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="implementation_plan_refinement"'))
-        return submitImplementationPlan(request, readyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="code_refinement"'))
-        return submitChangeReport(
-          request,
-          changeReport({ summary: "Refined." }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (phase === "reviewA-0") {
         phases.push("review-a-0");
-        return submitReview(
-          request,
-          reviewResult([
-            finding("LOCAL-FIX", "must-fix-current"),
-            finding("ACCESS", "external-blocker"),
-          ]),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([
+                finding("LOCAL-FIX", "must-fix-current"),
+                finding("ACCESS", "external-blocker"),
+              ]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (phase === "reviewA-1") {
         phases.push("review-a-1");
-        return submitReview(
-          request,
-          reviewResult([finding("ACCESS", "external-blocker")]),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([finding("ACCESS", "external-blocker")]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (phase === "reviewB-0" || phase === "reviewB-1")
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       if (phase === "fixLog-1") {
         phases.push("fix");
-        return submitChangeReport(
-          request,
-          changeReport({ addressedFindingIds: ["review-a:local-fix"] }),
-        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(
+              request,
+              changeReport({ addressedFindingIds: ["review-a:local-fix"] }),
+            ),
+          catch: (error) => error,
+        });
       }
-      throw new Error(`unexpected phase: ${phase}`);
-    };
+      return yield* Effect.fail(new Error(`unexpected phase: ${phase}`));
+    });
     const result = await runApplicationPromise(
       nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
     );

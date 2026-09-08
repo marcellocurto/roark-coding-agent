@@ -1,5 +1,5 @@
+import { Context, Scope } from "effect";
 import { Schema, Effect } from "effect";
-
 import {
   createIssuesFromCurationPlan,
   type CreateIssuesOptions,
@@ -11,72 +11,67 @@ import {
 } from "../issue-publishing/github.ts";
 import { GitHubResponseError } from "../github/errors.ts";
 import {
-  fromLegacyPromise,
   runApplicationPromise,
-  type ApplicationExecution,
   type ApplicationServices,
   applicationLayer,
 } from "../runtime/application.ts";
 import { type AgentRunner, provideTestAgent } from "../testing/agents.ts";
+type FixtureEffect<A> = Effect.Effect<
+  A,
+  unknown,
+  ApplicationServices | Scope.Scope
+>;
 type IssuePublisher = (
   request: IssuePublishRequest,
-  application?: ApplicationExecution,
-) => Promise<IssuePublishResult>;
-interface PromiseCreateIssuesOptions extends CreateIssuesOptions {
+) => FixtureEffect<IssuePublishResult>;
+interface TestCreateIssuesOptions extends CreateIssuesOptions {
   agentRunner?: AgentRunner | undefined;
   labelEnsurer?:
     | false
-    | ((
-        options: {
-          cwd: string;
-          repo?: string | undefined;
-        },
-        application?: ApplicationExecution,
-      ) => Promise<unknown>)
+    | ((options: {
+        cwd: string;
+        repo?: string | undefined;
+      }) => FixtureEffect<unknown>)
     | undefined;
   issuePublisher?: IssuePublisher | undefined;
 }
-function runIssueCreation(
-  options: PromiseCreateIssuesOptions,
-  application?: ApplicationExecution,
+const runIssueCreation = Effect.fnUntraced(function* (
+  options: TestCreateIssuesOptions,
 ) {
-  return runApplicationPromise(
-    Effect.gen(function* () {
-      const live = yield* IssuePublishing;
-      const services = yield* Effect.context<ApplicationServices>();
-      const labels = options.labelEnsurer;
-      const publish = options.issuePublisher;
-      return yield* createIssuesFromCurationPlan(options).pipe(
-        Effect.provideService(IssuePublishing, {
-          publish: publish
+  const live = yield* IssuePublishing;
+  const services = Context.omit(Scope.Scope)(
+    yield* Effect.context<ApplicationServices>(),
+  );
+  const publish = options.issuePublisher;
+  const labels = options.labelEnsurer;
+  return yield* createIssuesFromCurationPlan(options).pipe(
+    Effect.provideService(IssuePublishing, {
+      publish: publish
+        ? (request) =>
+            publish(request).pipe(
+              Effect.mapError((cause) => new GitHubResponseError({ cause })),
+              Effect.provide(services),
+              Effect.scoped,
+            )
+        : (request) => live.publish(request),
+      ensureLabels:
+        labels === false
+          ? () => Effect.void
+          : labels
             ? (request) =>
-                fromLegacyPromise((inner) => publish(request, inner)).pipe(
+                labels(request).pipe(
+                  Effect.asVoid,
                   Effect.mapError(
                     (cause) => new GitHubResponseError({ cause }),
                   ),
                   Effect.provide(services),
+                  Effect.scoped,
                 )
-            : (request) => live.publish(request),
-          ensureLabels:
-            labels === false
-              ? () => Effect.void
-              : labels
-                ? (request) =>
-                    fromLegacyPromise((inner) => labels(request, inner)).pipe(
-                      Effect.asVoid,
-                      Effect.mapError(
-                        (cause) => new GitHubResponseError({ cause }),
-                      ),
-                      Effect.provide(services),
-                    )
-                : (request) => live.ensureLabels(request),
-        }),
-        provideTestAgent(options.agentRunner),
-      );
+            : (request) => live.ensureLabels(request),
     }),
-    application,
+    provideTestAgent(options.agentRunner),
   );
-}
+});
 import {
   writeJsonArtifact,
   artifactExists,
@@ -96,15 +91,16 @@ import { type TerminalStream } from "../presentation/terminal.ts";
 import { issueDraft, submitIssueDrafts } from "../testing/publishing-drafts.ts";
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
-const successfulIssuePublisher: IssuePublisher = async (request) => {
-  await Promise.resolve();
-  const number =
-    request.title.includes("external-blocker") ||
-    request.title.includes("blocker")
-      ? 300
-      : 301;
-  return { url: `https://github.com/owner/repo/issues/${number}`, number };
-};
+const successfulIssuePublisher: IssuePublisher = Effect.fnUntraced(
+  function* (request) {
+    const number =
+      request.title.includes("external-blocker") ||
+      request.title.includes("blocker")
+        ? 300
+        : 301;
+    return { url: `https://github.com/owner/repo/issues/${number}`, number };
+  },
+);
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
@@ -124,14 +120,18 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
-    const result = await runIssueCreation({
-      context,
-      clock,
-      agentRunner: async () => {
-        await Promise.resolve();
-        throw new Error("dry-run should not invoke an agent");
-      },
-    });
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        agentRunner: Effect.fnUntraced(function* () {
+          yield* Effect.void;
+          return yield* Effect.fail(
+            new Error("dry-run should not invoke an agent"),
+          );
+        }),
+      }),
+    );
     expect(
       await runApplicationPromise(
         artifactExists(context, "issueCreationResults"),
@@ -160,7 +160,9 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
-    const result = await runIssueCreation({ context, clock });
+    const result = await runApplicationPromise(
+      runIssueCreation({ context, clock }),
+    );
     expect(result.wouldCreate[0]?.labels).toEqual([
       "needs-triage",
       "review:external-blocker",
@@ -181,7 +183,9 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
-    const result = await runIssueCreation({ context, clock });
+    const result = await runApplicationPromise(
+      runIssueCreation({ context, clock }),
+    );
     expect(result.wouldCreate).toEqual([]);
     expect(result.counts.acceptedPlanItems).toBe(0);
   });
@@ -196,7 +200,9 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
-    const result = await runIssueCreation({ context, clock });
+    const result = await runApplicationPromise(
+      runIssueCreation({ context, clock }),
+    );
     expect(result.wouldCreate).toEqual([]);
     expect(result.skipped).toEqual([
       {
@@ -221,31 +227,32 @@ describe("createIssuesFromCurationPlan", () => {
       repo?: string | undefined;
     }[] = [];
     const result = await Effect.runPromise(
-      fromLegacyPromise((application) =>
-        runIssueCreation(
-          {
-            context,
-            approved: true,
-            approvalReason: "autorun PR was opened",
-            clock,
-            labelEnsurer: async (options) => {
-              await Promise.resolve();
-              ensured.push(options);
-            },
-            issuePublisher: successfulIssuePublisher,
-            agentRunner: (request) => {
-              expect(request.prompt).toContain("autorun PR was opened");
-              return submitIssueDrafts(request, {
-                issues: [
-                  issueDraft("external-blocker-1"),
-                  issueDraft("follow-up-1"),
-                ],
-              });
-            },
-          },
-          application,
-        ),
-      ).pipe(Effect.provide(applicationLayer)),
+      Effect.gen(function* () {
+        return yield* runIssueCreation({
+          context,
+          approved: true,
+          approvalReason: "autorun PR was opened",
+          clock,
+          labelEnsurer: Effect.fnUntraced(function* (options) {
+            yield* Effect.void;
+            ensured.push(options);
+          }),
+          issuePublisher: successfulIssuePublisher,
+          agentRunner: Effect.fnUntraced(function* (request) {
+            expect(request.prompt).toContain("autorun PR was opened");
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitIssueDrafts(request, {
+                  issues: [
+                    issueDraft("external-blocker-1"),
+                    issueDraft("follow-up-1"),
+                  ],
+                }),
+              catch: (error) => error,
+            });
+          }),
+        });
+      }).pipe(Effect.provide(applicationLayer)),
     );
     expect(ensured).toEqual([{ cwd: context.agentCwd, repo: "owner/repo" }]);
     expect(result.approved).toBe(true);
@@ -261,31 +268,33 @@ describe("createIssuesFromCurationPlan", () => {
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
     let displayCommand: string | undefined;
-    await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      agentRunner: async (request) => {
-        await Promise.resolve();
-        displayCommand = request.display.command;
-        return JSON.stringify({
-          created: [
-            {
-              planItemId: "external-blocker-1",
-              url: "https://github.com/owner/repo/issues/300",
-              number: 300,
-            },
-            {
-              planItemId: "follow-up-1",
-              url: "https://github.com/owner/repo/issues/301",
-              number: 301,
-            },
-          ],
-          failed: [],
-          relationshipOutcomes: [],
-        });
-      },
-    });
+    await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          yield* Effect.void;
+          displayCommand = request.display.command;
+          return JSON.stringify({
+            created: [
+              {
+                planItemId: "external-blocker-1",
+                url: "https://github.com/owner/repo/issues/300",
+                number: 300,
+              },
+              {
+                planItemId: "follow-up-1",
+                url: "https://github.com/owner/repo/issues/301",
+                number: 301,
+              },
+            ],
+            failed: [],
+            relationshipOutcomes: [],
+          });
+        }),
+      }),
+    );
     expect(displayCommand).toBe("auto");
   });
   test("approved run uses the issue-authoring publishing agent without loading a skill", async () => {
@@ -296,24 +305,32 @@ describe("createIssuesFromCurationPlan", () => {
     );
     const requests: AgentRunRequest[] = [];
     const publishRequests: Parameters<IssuePublisher>[0][] = [];
-    const result = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: async (request) => {
-        publishRequests.push(request);
-        return successfulIssuePublisher(request);
-      },
-      agentRunner: (request) => {
-        requests.push(request);
-        return submitIssueDrafts(request, {
-          issues: [
-            issueDraft("external-blocker-1", { title: "Clear blocker title" }),
-            issueDraft("follow-up-1"),
-          ],
-        });
-      },
-    });
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: Effect.fnUntraced(function* (request) {
+          publishRequests.push(request);
+          return yield* successfulIssuePublisher(request);
+        }),
+        agentRunner: Effect.fnUntraced(function* (request) {
+          requests.push(request);
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1", {
+                    title: "Clear blocker title",
+                  }),
+                  issueDraft("follow-up-1"),
+                ],
+              }),
+            catch: (error) => error,
+          });
+        }),
+      }),
+    );
     expect(requests).toHaveLength(1);
     expect(requests[0]?.skillPaths).toBeUndefined();
     expect(requests[0]?.fileEditingToolsEnabled).toBe(false);
@@ -360,31 +377,35 @@ describe("createIssuesFromCurationPlan", () => {
           persistedAtCompletion = existsSync(resultPath);
       },
     };
-    return runWithPresenter(new Presenter({ stream }), async (application) => {
-      await runIssueCreation(
-        {
+    return runWithPresenter(
+      new Presenter({ stream }),
+      Effect.gen(function* () {
+        yield* runIssueCreation({
           context,
           clock,
           labelEnsurer: false,
           issuePublisher: successfulIssuePublisher,
-          agentRunner: async (request) => {
-            await Promise.resolve();
+          agentRunner: Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
             expectedArtifact = request.display.expectedArtifact;
-            return submitIssueDrafts(request, {
-              issues: [
-                issueDraft("external-blocker-1"),
-                issueDraft("follow-up-1"),
-              ],
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitIssueDrafts(request, {
+                  issues: [
+                    issueDraft("external-blocker-1"),
+                    issueDraft("follow-up-1"),
+                  ],
+                }),
+              catch: (error) => error,
             });
-          },
-        },
-        application,
-      );
-      expect(expectedArtifact).toBe(
-        ".roark/runs/issue/12/attempts/2/issue-creation-results.json",
-      );
-      expect(persistedAtCompletion).toBe(true);
-    });
+          }),
+        });
+        expect(expectedArtifact).toBe(
+          ".roark/runs/issue/12/attempts/2/issue-creation-results.json",
+        );
+        expect(persistedAtCompletion).toBe(true);
+      }),
+    );
   });
   test("approved publishing agent prompt uses artifact paths visible from a split agent workspace", async () => {
     const root = await mkdtemp(
@@ -402,18 +423,27 @@ describe("createIssuesFromCurationPlan", () => {
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
     const requests: AgentRunRequest[] = [];
-    await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) => {
-        requests.push(request);
-        return submitIssueDrafts(request, {
-          issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")],
-        });
-      },
-    });
+    await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          requests.push(request);
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1"),
+                  issueDraft("follow-up-1"),
+                ],
+              }),
+            catch: (error) => error,
+          });
+        }),
+      }),
+    );
     const expectedPlanPath = path.join(
       "..",
       "control",
@@ -439,18 +469,27 @@ describe("createIssuesFromCurationPlan", () => {
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
     const thinkingLevels: string[] = [];
-    await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) => {
-        thinkingLevels.push(request.thinkingLevel);
-        return submitIssueDrafts(request, {
-          issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")],
-        });
-      },
-    });
+    await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          thinkingLevels.push(request.thinkingLevel);
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1"),
+                  issueDraft("follow-up-1"),
+                ],
+              }),
+            catch: (error) => error,
+          });
+        }),
+      }),
+    );
     expect(thinkingLevels).toEqual(["minimal"]);
   });
   test("structured issue drafts must cover every creatable plan item exactly once", async () => {
@@ -458,16 +497,23 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
-    const result = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) =>
-        submitIssueDrafts(request, {
-          issues: [issueDraft("external-blocker-1")],
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [issueDraft("external-blocker-1")],
+              }),
+            catch: (error) => error,
+          });
         }),
-    });
+      }),
+    );
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
     expect(result.failed[0]?.message).toContain(
@@ -479,20 +525,27 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
-    const result = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) =>
-        submitIssueDrafts(request, {
-          issues: [
-            issueDraft("external-blocker-1"),
-            issueDraft("external-blocker-1"),
-            issueDraft("follow-up-1"),
-          ],
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1"),
+                  issueDraft("external-blocker-1"),
+                  issueDraft("follow-up-1"),
+                ],
+              }),
+            catch: (error) => error,
+          });
         }),
-    });
+      }),
+    );
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
     expect(result.failed[0]?.message).toContain(
@@ -506,16 +559,18 @@ describe("createIssuesFromCurationPlan", () => {
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
     let agentCalls = 0;
-    const result = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      agentRunner: async () => {
-        await Promise.resolve();
-        agentCalls += 1;
-        throw new Error("publishing agent failed");
-      },
-    });
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        agentRunner: Effect.fnUntraced(function* () {
+          yield* Effect.void;
+          agentCalls += 1;
+          return yield* Effect.fail(new Error("publishing agent failed"));
+        }),
+      }),
+    );
     expect(agentCalls).toBe(1);
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
@@ -531,24 +586,36 @@ describe("createIssuesFromCurationPlan", () => {
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", basePlan()),
     );
-    const result = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      agentRunner: (request) =>
-        submitIssueDrafts(request, {
-          issues: [
-            issueDraft("external-blocker-1", { title: "Blocking tracker" }),
-            issueDraft("follow-up-1", { title: "Follow-up tracker" }),
-          ],
+    const result = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1", {
+                    title: "Blocking tracker",
+                  }),
+                  issueDraft("follow-up-1", { title: "Follow-up tracker" }),
+                ],
+              }),
+            catch: (error) => error,
+          });
         }),
-      issuePublisher: async (request) => {
-        await Promise.resolve();
-        if (request.title === "Follow-up tracker")
-          throw new Error("rate limited");
-        return { url: "https://github.com/owner/repo/issues/200", number: 200 };
-      },
-    });
+        issuePublisher: Effect.fnUntraced(function* (request) {
+          yield* Effect.void;
+          if (request.title === "Follow-up tracker")
+            return yield* Effect.fail(new Error("rate limited"));
+          return {
+            url: "https://github.com/owner/repo/issues/200",
+            number: 200,
+          };
+        }),
+      }),
+    );
     expect(result.created.map((entry) => entry.planItemId)).toEqual([
       "external-blocker-1",
     ]);
@@ -594,18 +661,24 @@ describe("createIssuesFromCurationPlan", () => {
       }),
     );
     let agentCalls = 0;
-    const rerun = await runIssueCreation({
-      context,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) => {
-        agentCalls += 1;
-        return submitIssueDrafts(request, {
-          issues: [issueDraft("follow-up-1")],
-        });
-      },
-    });
+    const rerun = await runApplicationPromise(
+      runIssueCreation({
+        context,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          agentCalls += 1;
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [issueDraft("follow-up-1")],
+              }),
+            catch: (error) => error,
+          });
+        }),
+      }),
+    );
     expect(agentCalls).toBe(1);
     expect(
       rerun.created
@@ -621,18 +694,27 @@ describe("createIssuesFromCurationPlan", () => {
       reuseDir: context.controlCwd,
     });
     let forcedAgentCalls = 0;
-    const forced = await runIssueCreation({
-      context: forcedContext,
-      clock,
-      labelEnsurer: false,
-      issuePublisher: successfulIssuePublisher,
-      agentRunner: (request) => {
-        forcedAgentCalls += 1;
-        return submitIssueDrafts(request, {
-          issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")],
-        });
-      },
-    });
+    const forced = await runApplicationPromise(
+      runIssueCreation({
+        context: forcedContext,
+        clock,
+        labelEnsurer: false,
+        issuePublisher: successfulIssuePublisher,
+        agentRunner: Effect.fnUntraced(function* (request) {
+          forcedAgentCalls += 1;
+          return yield* Effect.tryPromise({
+            try: () =>
+              submitIssueDrafts(request, {
+                issues: [
+                  issueDraft("external-blocker-1"),
+                  issueDraft("follow-up-1"),
+                ],
+              }),
+            catch: (error) => error,
+          });
+        }),
+      }),
+    );
     expect(forcedAgentCalls).toBe(1);
     expect(forced.counts.createdCurrentRun).toBe(2);
   });

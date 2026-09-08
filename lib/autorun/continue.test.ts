@@ -197,11 +197,13 @@ describe("runAutoContinue", () => {
             }),
           },
         ).pipe(
-          provideTestAgent(async () => {
-            await Promise.resolve();
-            calls.push("runner");
-            throw new Error("triage failed");
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              calls.push("runner");
+              return yield* Effect.fail(new Error("triage failed"));
+            }),
+          ),
         ),
       ),
       (error: unknown) =>
@@ -342,10 +344,12 @@ describe("runAutoContinue", () => {
           { ...continueOptions, issue: "24", cwd, attempt: 2 },
           {},
         ).pipe(
-          provideTestAgent(async () => {
-            await Promise.resolve();
-            throw new Error("fix failed after reviews");
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(new Error("fix failed after reviews"));
+            }),
+          ),
         ),
       ),
       (error: unknown) =>
@@ -444,11 +448,16 @@ describe("runAutoContinue", () => {
           ...injected,
         },
       ).pipe(
-        provideTestAgent(async () => {
-          enteredFirst();
-          await release;
-          throw new Error("stop first continue");
-        }),
+        provideTestAgent(
+          Effect.fnUntraced(function* () {
+            enteredFirst();
+            yield* Effect.tryPromise({
+              try: () => release,
+              catch: (error) => error,
+            });
+            return yield* Effect.fail(new Error("stop first continue"));
+          }),
+        ),
       ),
     );
     await firstEntered;
@@ -460,10 +469,14 @@ describe("runAutoContinue", () => {
             ...injected,
           },
         ).pipe(
-          provideTestAgent(async () => {
-            await Promise.resolve();
-            throw new Error("second continue should not run lifecycle");
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(
+                new Error("second continue should not run lifecycle"),
+              );
+            }),
+          ),
         ),
       ),
       (error: unknown) =>

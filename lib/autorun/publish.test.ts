@@ -1,3 +1,5 @@
+import { Fiber, Exit } from "effect";
+import { Effect } from "effect";
 import {
   writeJsonArtifact,
   writeArtifact,
@@ -337,45 +339,41 @@ describe("PR body update presentation", () => {
         output += chunk;
       },
     };
-    return runWithPresenter(new Presenter({ stream }), async (application) => {
-      const missingCwd = path.join(
-        tmpdir(),
-        `roark-missing-pr-draft-${crypto.randomUUID()}`,
-      );
-      const update = runApplicationPromise(
-        updatePrBody({
-          cwd: missingCwd,
-          repo: "owner/repo",
-          pr: "https://github.com/owner/repo/pull/1",
-          issueNumber: 9,
-          workflowContext: {
-            controlCwd: missingCwd,
-            agentCwd: missingCwd,
-            outDir: path.join(missingCwd, ".roark/runs"),
-            runDir: path.join(missingCwd, ".roark/runs/issue/9/attempts/1"),
-            runDirRelative: ".roark/runs/issue/9/attempts/1",
-            issueInput: "9",
-            issueNumber: "9",
-            displayCommand: "continue",
-            attempt: 1,
-            force: false,
-            yes: false,
-            maxFixPasses: 1,
-            thinkingConfig: getWorkflowThinkingConfig(),
-          },
-        }),
-        application,
-      );
-      let failure: unknown;
-      try {
-        await update;
-      } catch (error) {
-        failure = error;
-      }
-      expect(failure).toBeInstanceOf(Error);
-      expect(output).toContain("PHASE #9 · Update PR body");
-      expect(output).toContain("FAILED #9 · Update PR body");
-    });
+    return runWithPresenter(
+      new Presenter({ stream }),
+      Effect.gen(function* () {
+        const missingCwd = path.join(
+          tmpdir(),
+          `roark-missing-pr-draft-${crypto.randomUUID()}`,
+        );
+        const update = yield* Effect.forkScoped(
+          updatePrBody({
+            cwd: missingCwd,
+            repo: "owner/repo",
+            pr: "https://github.com/owner/repo/pull/1",
+            issueNumber: 9,
+            workflowContext: {
+              controlCwd: missingCwd,
+              agentCwd: missingCwd,
+              outDir: path.join(missingCwd, ".roark/runs"),
+              runDir: path.join(missingCwd, ".roark/runs/issue/9/attempts/1"),
+              runDirRelative: ".roark/runs/issue/9/attempts/1",
+              issueInput: "9",
+              issueNumber: "9",
+              displayCommand: "continue",
+              attempt: 1,
+              force: false,
+              yes: false,
+              maxFixPasses: 1,
+              thinkingConfig: getWorkflowThinkingConfig(),
+            },
+          }),
+        );
+        expect(Exit.isFailure(yield* Fiber.await(update))).toBe(true);
+        expect(output).toContain("PHASE #9 · Update PR body");
+        expect(output).toContain("FAILED #9 · Update PR body");
+      }),
+    );
   });
 });
 describe("publishAutorunResult", () => {
@@ -390,12 +388,12 @@ describe("publishAutorunResult", () => {
     };
     return runWithPresenter(
       new Presenter({ stream, env: { TERM: "xterm" } }),
-      async (application) => {
+      Effect.gen(function* () {
         const missingCwd = path.join(
           tmpdir(),
           `roark-missing-publish-${crypto.randomUUID()}`,
         );
-        const publication = runApplicationPromise(
+        const publication = yield* Effect.forkScoped(
           publishAutorunResult({
             options: {
               cwd: missingCwd,
@@ -427,19 +425,15 @@ describe("publishAutorunResult", () => {
               thinkingConfig: getWorkflowThinkingConfig(),
             },
           }),
-          application,
         );
         expect(
-          await publication.then(
-            () => false,
-            () => true,
-          ),
+          yield* Fiber.await(publication).pipe(Effect.map(Exit.isFailure)),
         ).toBe(true);
         expect(output).toContain("PHASE #9 · Publish pull request");
         expect(output.indexOf("PHASE #9")).toBeLessThan(
           output.indexOf("FAILED #9"),
         );
-      },
+      }),
     );
   });
   test("uses agent cwd for git and control cwd for PR authoring agent and issue labels", async () => {
@@ -553,15 +547,21 @@ describe("publishAutorunResult", () => {
             thinkingConfig: getWorkflowThinkingConfig(),
           },
         }).pipe(
-          provideTestAgent((request) => {
-            agentRequests.push({
-              cwd: request.cwd,
-              prompt: request.prompt,
-              command: request.display.command,
-              skillPaths: request.skillPaths,
-            });
-            return submitPrDraft(request, prDraft({ title: "Fix bug" }));
-          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              agentRequests.push({
+                cwd: request.cwd,
+                prompt: request.prompt,
+                command: request.display.command,
+                skillPaths: request.skillPaths,
+              });
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitPrDraft(request, prDraft({ title: "Fix bug" })),
+                catch: (error) => error,
+              });
+            }),
+          ),
         ),
       );
       expect(publishedPr).toEqual({
@@ -718,8 +718,14 @@ describe("publishAutorunResult", () => {
             thinkingConfig: getWorkflowThinkingConfig(),
           },
         }).pipe(
-          provideTestAgent((request) =>
-            submitPrDraft(request, prDraft({ title: "Fix bug" })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              return yield* Effect.tryPromise({
+                try: () =>
+                  submitPrDraft(request, prDraft({ title: "Fix bug" })),
+                catch: (error) => error,
+              });
+            }),
           ),
         ),
       );

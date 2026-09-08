@@ -1,5 +1,4 @@
 import { Schema, Effect } from "effect";
-
 import { runApplicationPromise } from "../runtime/application.ts";
 import { runProcessOrThrow, runProcess } from "./process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
