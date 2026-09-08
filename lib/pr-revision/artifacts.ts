@@ -17,8 +17,6 @@ export type PrRevisionArtifactName =
   | "revisionReview"
   | "verification";
 export interface PrRevisionContext {
-  /** @deprecated Use agentCwd for mutation/agent work and controlCwd for control-plane work. */
-  cwd: string;
   controlCwd: string;
   agentCwd: string;
   outDir: string;
@@ -68,7 +66,6 @@ export const createPrRevisionContext = Effect.fn("createPrRevisionContext")(
     const revisionDir = path.join(prDir, `revision-${revision}`);
     const agentRevisionDir = path.join(agentPrDir, `revision-${revision}`);
     return {
-      cwd: agentCwd,
       controlCwd,
       agentCwd,
       outDir,

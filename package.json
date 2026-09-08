@@ -36,8 +36,8 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --cache --cache-strategy content --cache-location .eslintcache",
-    "lint:full": "eslint .",
+    "lint": "oxlint --disable-nested-config .",
+    "lint:full": "oxlint --disable-nested-config .",
     "check": "bun run typecheck && bun run lint && bun test",
     "release:check": "bun run check && bun run release:check-package",
     "release:check-package": "bun run scripts/check-package.ts",
@@ -54,10 +54,10 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "eslint": "^10.3.0",
     "oxfmt": "0.67.0",
-    "typescript": "^6.0.3",
-    "typescript-eslint": "^8.59.2"
+    "oxlint": "1.81.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "bun": ">=1.4.2"

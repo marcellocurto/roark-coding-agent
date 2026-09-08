@@ -122,3 +122,8 @@ bun install
 bun run roark.ts --help
 bun run check
 ```
+
+`bun run lint` runs type-aware Oxlint with the repository's import restrictions.
+`bun run lint:full` runs the same complete check. Both exclude `repos/`
+and disable nested lint configurations. Formatting is separate: use
+`bun run format` or `bun run format:check`.

@@ -29,7 +29,6 @@ function context(
   overrides: Partial<PrRevisionContext> = {},
 ): PrRevisionContext {
   return {
-    cwd: "/repo",
     prNumber: 12,
     revision: 1,
     repo: "owner/repo",

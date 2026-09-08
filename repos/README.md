@@ -41,7 +41,9 @@ lockfile, and run `bun run release:check`. Do not patch upstream files locally.
 
 ## Tooling and distribution
 
-- TypeScript, ESLint, and Bun test discovery exclude `repos/`.
+- TypeScript, Oxlint, oxfmt, and Bun test discovery exclude `repos/`.
+- Roark's lint commands disable nested configuration discovery so upstream lint
+  configurations cannot load their own development plugins.
 - VS Code excludes it from auto-import suggestions, watching, and default search.
   Agents can still search this directory explicitly.
 - The `package.json` files allowlist omits `repos/`, and the package check verifies
