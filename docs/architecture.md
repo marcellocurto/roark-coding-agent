@@ -49,18 +49,18 @@ bun run roark.ts --help
 
 The command lists every supported subcommand and option.
 
-| Path | What it does |
-| --- | --- |
-| `roark.ts` | Starts the CLI and delegates commands to library modules. |
-| `lib/cli/` | Parses arguments, loads configuration, runs preflight checks, and dispatches commands. |
-| `lib/autorun/` | Selects and claims issues, prepares branches and workspaces, runs gates, and opens pull requests. |
-| `lib/workflow/` | Defines phase artifacts and validates phase results. |
-| `lib/presentation/` | Formats terminal output, elapsed time, status summaries, and window titles. |
-| `lib/pi/` | Runs agent-backed phases through the Pi coding-agent SDK. |
-| `lib/github/` | Reads and changes GitHub issues, labels, comments, branches, and pull requests. |
-| `lib/pr-revision/` | Classifies pull request feedback, applies required fixes, verifies, commits, and pushes revisions. |
-| `lib/issue-curation/` | Converts reviewer findings into an issue plan. Only `create-issues --yes` publishes the plan. |
-| `lib/observability/` | Records events and status summaries for later inspection. |
+| Path                  | What it does                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `roark.ts`            | Starts the CLI and delegates commands to library modules.                                          |
+| `lib/cli/`            | Parses arguments, loads configuration, runs preflight checks, and dispatches commands.             |
+| `lib/autorun/`        | Selects and claims issues, prepares branches and workspaces, runs gates, and opens pull requests.  |
+| `lib/workflow/`       | Defines phase artifacts and validates phase results.                                               |
+| `lib/presentation/`   | Formats terminal output, elapsed time, status summaries, and window titles.                        |
+| `lib/pi/`             | Runs agent-backed phases through the Pi coding-agent SDK.                                          |
+| `lib/github/`         | Reads and changes GitHub issues, labels, comments, branches, and pull requests.                    |
+| `lib/pr-revision/`    | Classifies pull request feedback, applies required fixes, verifies, commits, and pushes revisions. |
+| `lib/issue-curation/` | Converts reviewer findings into an issue plan. Only `create-issues --yes` publishes the plan.      |
+| `lib/observability/`  | Records events and status summaries for later inspection.                                          |
 
 ## Workflow artifacts
 

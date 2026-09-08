@@ -26,22 +26,25 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   preImplementationBaseline: "pre-implementation-baseline.json",
   implementationLog: "implementation-log.json",
   implementationLogMarkdown: "implementation-log.md",
-      prDraft: "pr-draft.json",
-      prDraftMarkdown: "pr-draft.md",
+  prDraft: "pr-draft.json",
+  prDraftMarkdown: "pr-draft.md",
   readiness: "readiness.json",
   readinessMarkdown: "readiness.md",
   verification: "verification.md",
   verificationFull: "verification-full.md",
   metadata: "metadata.json",
-      issueCurationPlan: "issue-curation-plan.json",
-      issueDrafts: "issue-drafts.json",
-      issueDraftsMarkdown: "issue-drafts.md",
-      issueCreationResults: "issue-creation-results.json",
+  issueCurationPlan: "issue-curation-plan.json",
+  issueDrafts: "issue-drafts.json",
+  issueDraftsMarkdown: "issue-drafts.md",
+  issueCreationResults: "issue-creation-results.json",
 };
 
 describe("artifact catalog", () => {
   test("resolves persisted static artifact filenames", () => {
-    for (const [name, filename] of Object.entries(expectedStaticFilenames) as [StaticArtifactName, string][]) {
+    for (const [name, filename] of Object.entries(expectedStaticFilenames) as [
+      StaticArtifactName,
+      string,
+    ][]) {
       expect(artifactFilename(name)).toBe(filename);
     }
   });
@@ -49,11 +52,19 @@ describe("artifact catalog", () => {
   test("resolves persisted numbered artifact filenames", () => {
     expect(artifactFilename(fixLogRef(2))).toBe("fix-log-2.json");
     expect(artifactFilename(fixLogMarkdownRef(2))).toBe("fix-log-2.md");
-    expect(artifactFilename(verificationBeforeFixRef(1))).toBe("verification-before-fix-1.md");
-    expect(artifactFilename(verificationBeforeFixFullRef(1))).toBe("verification-before-fix-1-full.md");
-    expect(artifactFilename(implementationRestartLogRef(1))).toBe("implementation-restart-log-1.md");
+    expect(artifactFilename(verificationBeforeFixRef(1))).toBe(
+      "verification-before-fix-1.md",
+    );
+    expect(artifactFilename(verificationBeforeFixFullRef(1))).toBe(
+      "verification-before-fix-1-full.md",
+    );
+    expect(artifactFilename(implementationRestartLogRef(1))).toBe(
+      "implementation-restart-log-1.md",
+    );
     expect(artifactFilename(refinementLogRef(0))).toBe("refinement-log-0.json");
-    expect(artifactFilename(refinementLogMarkdownRef(0))).toBe("refinement-log-0.md");
+    expect(artifactFilename(refinementLogMarkdownRef(0))).toBe(
+      "refinement-log-0.md",
+    );
     expect(artifactFilename(reviewARef(2))).toBe("review-a-2.json");
     expect(artifactFilename(reviewAMarkdownRef(2))).toBe("review-a-2.md");
     expect(artifactFilename(reviewBMarkdownRef(2))).toBe("review-b-2.md");

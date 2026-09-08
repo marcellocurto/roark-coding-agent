@@ -1,6 +1,9 @@
 export type ReviewLensName = "correctness" | "maintainability";
 
-export function renderStructuredReviewContract(subject: string, allowRestart: boolean): string {
+export function renderStructuredReviewContract(
+  subject: string,
+  allowRestart: boolean,
+): string {
   return `  <structured_review_contract>
     <instruction>Complete the review only by calling <tool>submit_review</tool>. Do not return a Markdown review.</instruction>
     <instruction>Record at least one concrete item in evidenceReviewed. Do not claim a complete review without inspecting the relevant diff and requirements or repository guidance.</instruction>
@@ -15,9 +18,11 @@ export function renderStructuredReviewContract(subject: string, allowRestart: bo
     <instruction>Use additionalSections for material problem-specific synthesis, alternatives, positive observations, hypotheses, or non-blocking questions that do not fit the standard fields. Choose each heading freely.</instruction>
     <instruction>Additional sections are non-routing context. Every concern that can affect approval or workflow routing must still be represented as a finding or limitation; do not hide actionable work in an additional section.</instruction>
     <instruction>Roark derives the outcome from the submitted findings; do not provide a separate verdict.</instruction>
-    ${allowRestart
-      ? "<instruction>Set restartRecommendation only when resetting to the pre-implementation baseline is safer than incremental fixes. Reference every relevant unblocked must-fix finding by id.</instruction>"
-      : "<instruction>Do not set restartRecommendation in this workflow.</instruction>"}
+    ${
+      allowRestart
+        ? "<instruction>Set restartRecommendation only when resetting to the pre-implementation baseline is safer than incremental fixes. Reference every relevant unblocked must-fix finding by id.</instruction>"
+        : "<instruction>Do not set restartRecommendation in this workflow.</instruction>"
+    }
   </structured_review_contract>`;
 }
 
@@ -39,7 +44,8 @@ export const correctnessReviewLens: ReviewLensDefinition = {
   phase: "review_a",
   reviewerLabel: "A",
   role: "Review Agent A — Spec and Correctness",
-  successCriteria: "Spec and correctness review succeeds when the change is checked against the authoritative requirements, missing or extra behavior is identified, concrete defects cite file-level evidence, and non-defect concerns are not promoted to blockers.",
+  successCriteria:
+    "Spec and correctness review succeeds when the change is checked against the authoritative requirements, missing or extra behavior is identified, concrete defects cite file-level evidence, and non-defect concerns are not promoted to blockers.",
   focusName: "Spec and Correctness",
   focusItems: [
     "Missing, partial, or incorrect implementation of the requirements or acceptance criteria. Cite the relevant requirement for each finding.",
@@ -56,7 +62,8 @@ export const correctnessReviewLens: ReviewLensDefinition = {
     "Plans, logs, comments, and prior reviews are supporting evidence, not permission to change or broaden the requirements.",
     "For every spec finding, cite the authoritative requirement and explain how the diff is missing, partial, incorrect, or extra.",
   ],
-  requiredFixesPolicy: "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current review subject.",
+  requiredFixesPolicy:
+    "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current review subject.",
   extraConstraints: [],
 };
 
@@ -65,7 +72,8 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
   phase: "review_b",
   reviewerLabel: "B",
   role: "Review Agent B — Standards and Maintainability",
-  successCriteria: "Standards and maintainability review succeeds when documented repository-standard violations cite their source, concrete code-health harms cite file-level evidence, and subjective preferences remain clearly labelled suggestions.",
+  successCriteria:
+    "Standards and maintainability review succeeds when documented repository-standard violations cite their source, concrete code-health harms cite file-level evidence, and subjective preferences remain clearly labelled suggestions.",
   focusName: "Standards and Maintainability",
   focusItems: [
     "Documented standards: inspect applicable AGENTS.md files, CONTRIBUTING.md, and other repository guidance governing the touched files. Cite the standards file and rule for every violation.",
@@ -81,6 +89,7 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
     "Cite the governing standards file and exact rule for documented-standard violations. Label uncodified maintainability concerns as judgement calls, not hard violations.",
     "Skip formatting, style, and mechanical concerns already enforced by configured linting, formatting, typechecking, or other tooling.",
   ],
-  requiredFixesPolicy: "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
+  requiredFixesPolicy:
+    "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
   extraConstraints: ["Do not read Review Agent A's output."],
 };

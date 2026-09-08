@@ -18,15 +18,32 @@ describe("issuePublishingPrompt", () => {
 
     const prompt = issuePublishingPrompt({
       context,
-      allowedItems: [{ planItemId: "follow-up-1", kind: "follow-up", suggestedTitle: "Follow-up", labels: ["needs-triage"] }],
+      allowedItems: [
+        {
+          planItemId: "follow-up-1",
+          kind: "follow-up",
+          suggestedTitle: "Follow-up",
+          labels: ["needs-triage"],
+        },
+      ],
     });
 
-    expect(prompt).toContain("`.roark/runs/issue/12/attempts/2/issue-curation-plan.json`");
+    expect(prompt).toContain(
+      "`.roark/runs/issue/12/attempts/2/issue-curation-plan.json`",
+    );
     expect(prompt).toContain("<target_repo>owner/repo</target_repo>");
-    const encodedJson = /<allowed_plan_items_json>\n([\s\S]*?)\n  <\/allowed_plan_items_json>/.exec(prompt)?.[1];
+    const encodedJson =
+      /<allowed_plan_items_json>\n([\s\S]*?)\n  <\/allowed_plan_items_json>/.exec(
+        prompt,
+      )?.[1];
     expect(encodedJson).toBeDefined();
     expect(JSON.parse(decodeXmlText(encodedJson ?? ""))).toEqual([
-      { planItemId: "follow-up-1", kind: "follow-up", suggestedTitle: "Follow-up", labels: ["needs-triage"] },
+      {
+        planItemId: "follow-up-1",
+        kind: "follow-up",
+        suggestedTitle: "Follow-up",
+        labels: ["needs-triage"],
+      },
     ]);
   });
 
@@ -45,13 +62,20 @@ describe("issuePublishingPrompt", () => {
     });
     const sourcePlanPath = `.roark/${injection}/plan.json`;
     const approvalReason = `Approved by ${injection}`;
-    const allowedItems = [{
-      planItemId: `item-${injection}`,
-      kind: "follow-up" as const,
-      suggestedTitle: `Follow up ${injection}`,
-      labels: [`label-${injection}`],
-    }];
-    const prompt = issuePublishingPrompt({ context, sourcePlanPath, approvalReason, allowedItems });
+    const allowedItems = [
+      {
+        planItemId: `item-${injection}`,
+        kind: "follow-up" as const,
+        suggestedTitle: `Follow up ${injection}`,
+        labels: [`label-${injection}`],
+      },
+    ];
+    const prompt = issuePublishingPrompt({
+      context,
+      sourcePlanPath,
+      approvalReason,
+      allowedItems,
+    });
 
     expect(prompt.match(/<\/workflow_phase>/g)).toHaveLength(1);
     expect(prompt.match(/<\/allowed_plan_items_json>/g)).toHaveLength(1);
@@ -63,12 +87,18 @@ describe("issuePublishingPrompt", () => {
     expect(decoded).toContain(approvalReason);
     expect(decoded).toContain(`owner/${injection}`);
 
-    const encodedJson = /<allowed_plan_items_json>\n([\s\S]*?)\n  <\/allowed_plan_items_json>/.exec(prompt)?.[1];
+    const encodedJson =
+      /<allowed_plan_items_json>\n([\s\S]*?)\n  <\/allowed_plan_items_json>/.exec(
+        prompt,
+      )?.[1];
     expect(encodedJson).toBeDefined();
     expect(JSON.parse(decodeXmlText(encodedJson ?? ""))).toEqual(allowedItems);
   });
 });
 
 function decodeXmlText(value: string): string {
-  return value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 }

@@ -39,12 +39,18 @@ describe("decidePublish", () => {
   });
 
   test("publishes when readiness is ready and verification passed", () => {
-    const decision = decidePublish({ readinessStatus: "ready-for-pr", verification: okVerification });
+    const decision = decidePublish({
+      readinessStatus: "ready-for-pr",
+      verification: okVerification,
+    });
     expect(decision).toEqual({ publish: true });
   });
 
   test("blocks publish when verification failed", () => {
-    const decision = decidePublish({ readinessStatus: "ready-for-pr", verification: failedVerification });
+    const decision = decidePublish({
+      readinessStatus: "ready-for-pr",
+      verification: failedVerification,
+    });
     expect(decision).toEqual({
       publish: false,
       phase: "verification",

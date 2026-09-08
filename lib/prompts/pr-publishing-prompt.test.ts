@@ -19,18 +19,28 @@ describe("PR publishing prompts", () => {
     const prompt = prCreatePrompt({
       context,
       repo: "owner/repo",
-      sourceIssue: { number: 12, title: "Fix exports", url: "https://github.com/owner/repo/issues/12" },
+      sourceIssue: {
+        number: 12,
+        title: "Fix exports",
+        url: "https://github.com/owner/repo/issues/12",
+      },
       branchName: "roark/issue-12",
       baseBranch: "main",
-      artifactPaths: [".roark/runs/issue/12/attempts/2/implementation-log.json"],
+      artifactPaths: [
+        ".roark/runs/issue/12/attempts/2/implementation-log.json",
+      ],
       changedFiles: ["lib/exports.ts"],
     });
 
-    expect(prompt).toContain("<source_issue>#12 Fix exports (https://github.com/owner/repo/issues/12)</source_issue>");
+    expect(prompt).toContain(
+      "<source_issue>#12 Fix exports (https://github.com/owner/repo/issues/12)</source_issue>",
+    );
     expect(prompt).toContain("<target_repo>owner/repo</target_repo>");
     expect(prompt).toContain("<branch>roark/issue-12</branch>");
     expect(prompt).toContain("<base_branch>main</base_branch>");
-    expect(prompt).toContain("<path>.roark/runs/issue/12/attempts/2/implementation-log.json</path>");
+    expect(prompt).toContain(
+      "<path>.roark/runs/issue/12/attempts/2/implementation-log.json</path>",
+    );
     expect(prompt).toContain("<file>lib/exports.ts</file>");
   });
 
@@ -66,7 +76,13 @@ describe("PR publishing prompts", () => {
       baseBranch,
       artifactPaths: [artifactPath],
       changedFiles: [changedFile],
-      verification: { ok: false, command: verificationCommand, exitCode: 1, stdout: "", stderr: "" },
+      verification: {
+        ok: false,
+        command: verificationCommand,
+        exitCode: 1,
+        stdout: "",
+        stderr: "",
+      },
       attemptMetadata: {
         attempt: 2,
         issueNumber: 12,
@@ -88,12 +104,24 @@ describe("PR publishing prompts", () => {
     expect(prompt).toContain("&lt;/workflow_phase&gt;");
     expect(prompt).toContain("&amp;");
     const decoded = decodeXmlText(prompt);
-    for (const value of [sourceTitle, sourceUrl, branchName, baseBranch, artifactPath, changedFile, verificationCommand, attemptMetadataPath]) {
+    for (const value of [
+      sourceTitle,
+      sourceUrl,
+      branchName,
+      baseBranch,
+      artifactPath,
+      changedFile,
+      verificationCommand,
+      attemptMetadataPath,
+    ]) {
       expect(decoded).toContain(value);
     }
   });
 });
 
 function decodeXmlText(value: string): string {
-  return value.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&amp;", "&");
+  return value
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
 }

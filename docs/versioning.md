@@ -25,12 +25,15 @@ Keep `CHANGELOG.md` updated with one section per release:
 ## [0.2.0] - 2026-05-11
 
 ### Added
+
 - Added a new command.
 
 ### Changed
+
 - Changed an existing default.
 
 ### Fixed
+
 - Fixed a regression.
 ```
 

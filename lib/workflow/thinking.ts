@@ -19,9 +19,15 @@ export const workflowThinkingStages = [
 ] as const;
 
 export type WorkflowThinkingStage = (typeof workflowThinkingStages)[number];
-export type WorkflowThinkingConfig = Record<WorkflowThinkingStage, ThinkingLevel>;
+export type WorkflowThinkingConfig = Record<
+  WorkflowThinkingStage,
+  ThinkingLevel
+>;
 
-export const workflowThinkingProfiles: Record<ThinkingProfileName, WorkflowThinkingConfig> = {
+export const workflowThinkingProfiles: Record<
+  ThinkingProfileName,
+  WorkflowThinkingConfig
+> = {
   default: {
     triage: "medium",
     plan: "high",
@@ -66,14 +72,21 @@ export const workflowThinkingProfiles: Record<ThinkingProfileName, WorkflowThink
   },
 };
 
-export function getWorkflowThinkingConfig(input: {
-  profile?: ThinkingProfileName | undefined  ;
-  explicitThinkingLevel?: ThinkingLevel | undefined  ;
-} = {}): WorkflowThinkingConfig {
-  if (input.explicitThinkingLevel) return uniformWorkflowThinkingConfig(input.explicitThinkingLevel);
+export function getWorkflowThinkingConfig(
+  input: {
+    profile?: ThinkingProfileName | undefined;
+    explicitThinkingLevel?: ThinkingLevel | undefined;
+  } = {},
+): WorkflowThinkingConfig {
+  if (input.explicitThinkingLevel)
+    return uniformWorkflowThinkingConfig(input.explicitThinkingLevel);
   return { ...workflowThinkingProfiles[input.profile ?? "default"] };
 }
 
-function uniformWorkflowThinkingConfig(level: ThinkingLevel): WorkflowThinkingConfig {
-  return Object.fromEntries(workflowThinkingStages.map((stage) => [stage, level])) as WorkflowThinkingConfig;
+function uniformWorkflowThinkingConfig(
+  level: ThinkingLevel,
+): WorkflowThinkingConfig {
+  return Object.fromEntries(
+    workflowThinkingStages.map((stage) => [stage, level]),
+  ) as WorkflowThinkingConfig;
 }

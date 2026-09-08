@@ -1,5 +1,11 @@
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
-import { formatReviewResultMarkdown, reviewResultSchema, validateReviewResult, type ReviewFindingSource, type ReviewResult } from "./result.ts";
+import {
+  formatReviewResultMarkdown,
+  reviewResultSchema,
+  validateReviewResult,
+  type ReviewFindingSource,
+  type ReviewResult,
+} from "./result.ts";
 
 export interface RunReviewAgentOptions {
   allowRestart: boolean;
@@ -13,7 +19,10 @@ export class ReviewOutputContractError extends Error {
 }
 
 export function reviewArtifactDefinition(
-  options: RunReviewAgentOptions & { title: string; source: ReviewFindingSource },
+  options: RunReviewAgentOptions & {
+    title: string;
+    source: ReviewFindingSource;
+  },
 ): StructuredArtifactDefinition<ReviewResult> {
   return {
     toolName: "submit_review",

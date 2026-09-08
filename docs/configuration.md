@@ -84,21 +84,21 @@ It infers:
 
 ## Top-level keys
 
-| Key | Type | Default | CLI equivalent | Notes |
-| --- | --- | --- | --- | --- |
-| `repo` | string | inferred when possible | `--repo` | GitHub repository as `owner/repo`. |
-| `baseBranch` | string | `main` | `--base-branch` | Base branch for issue branches and PRs. |
-| `verify` | string | inferred for some repos | `--verify` | Shell command run by the verification gate through `sh -c`. |
-| `readyLabel` | string | `ready-for-agent` | `--label` | Label that opts an issue into autorun eligibility. |
-| `inProgressLabel` | string | `agent-in-progress` | `--in-progress-label` | Label applied when Roark claims an issue. |
-| `successLabel` | string | `agent-pr-opened` | `--success-label` | Label applied after PR creation. |
-| `failureLabel` | string | `agent-failed` | `--failure-label` | Label applied when readiness or verification fails. |
-| `skipLabels` | string[] | default skip set | `--skip-label`, `--skip-labels` | Labels that prevent autorun selection. |
-| `maxFixPasses` | number | `3` | `--max-fix-passes` | Maximum shared fix/review cycles, including review-driven fixes and verification repair. |
-| `workspace` | object | clone strategy defaults | none | Managed workspace configuration. |
-| `hooks` | object | no commands, default timeout | none | Lifecycle hook configuration. |
-| `sandbox` | object | `{ "provider": "host" }` | none | Currently host execution only. |
-| `notifications` | object | exit notifications disabled | none | Opt-in macOS exit notification configuration. |
+| Key               | Type     | Default                      | CLI equivalent                  | Notes                                                                                    |
+| ----------------- | -------- | ---------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `repo`            | string   | inferred when possible       | `--repo`                        | GitHub repository as `owner/repo`.                                                       |
+| `baseBranch`      | string   | `main`                       | `--base-branch`                 | Base branch for issue branches and PRs.                                                  |
+| `verify`          | string   | inferred for some repos      | `--verify`                      | Shell command run by the verification gate through `sh -c`.                              |
+| `readyLabel`      | string   | `ready-for-agent`            | `--label`                       | Label that opts an issue into autorun eligibility.                                       |
+| `inProgressLabel` | string   | `agent-in-progress`          | `--in-progress-label`           | Label applied when Roark claims an issue.                                                |
+| `successLabel`    | string   | `agent-pr-opened`            | `--success-label`               | Label applied after PR creation.                                                         |
+| `failureLabel`    | string   | `agent-failed`               | `--failure-label`               | Label applied when readiness or verification fails.                                      |
+| `skipLabels`      | string[] | default skip set             | `--skip-label`, `--skip-labels` | Labels that prevent autorun selection.                                                   |
+| `maxFixPasses`    | number   | `3`                          | `--max-fix-passes`              | Maximum shared fix/review cycles, including review-driven fixes and verification repair. |
+| `workspace`       | object   | clone strategy defaults      | none                            | Managed workspace configuration.                                                         |
+| `hooks`           | object   | no commands, default timeout | none                            | Lifecycle hook configuration.                                                            |
+| `sandbox`         | object   | `{ "provider": "host" }`     | none                            | Currently host execution only.                                                           |
+| `notifications`   | object   | exit notifications disabled  | none                            | Opt-in macOS exit notification configuration.                                            |
 
 ## Exit notifications
 
@@ -124,14 +124,14 @@ Notification failures produce a warning but do not change the command's result. 
 
 ## Workspace keys
 
-| Key | Type | Default | Notes |
-| --- | --- | --- | --- |
-| `root` | string | `~/.roark/workspaces` | Parent directory for managed clone workspaces. |
-| `strategy` | string | `clone` | Managed workspace strategy. |
-| `cloneRemote` | string | `origin` | Remote used for clone and fetch behavior. |
-| `clone.filter` | string or null | `blob:none` | Partial clone filter. |
-| `clone.depth` | number or null | `null` | Clone depth. `null` means full history. |
-| `copyToWorktree` | string[] | `[]` | Ignored local paths copied from the control checkout into managed workspaces, including PR review and revision workspaces. |
+| Key              | Type           | Default               | Notes                                                                                                                      |
+| ---------------- | -------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `root`           | string         | `~/.roark/workspaces` | Parent directory for managed clone workspaces.                                                                             |
+| `strategy`       | string         | `clone`               | Managed workspace strategy.                                                                                                |
+| `cloneRemote`    | string         | `origin`              | Remote used for clone and fetch behavior.                                                                                  |
+| `clone.filter`   | string or null | `blob:none`           | Partial clone filter.                                                                                                      |
+| `clone.depth`    | number or null | `null`                | Clone depth. `null` means full history.                                                                                    |
+| `copyToWorktree` | string[]       | `[]`                  | Ignored local paths copied from the control checkout into managed workspaces, including PR review and revision workspaces. |
 
 Use `copyToWorktree` for path names only, not secret values:
 
@@ -147,14 +147,14 @@ See [Managed workspaces](managed-workspaces.md).
 
 ## Hook keys
 
-| Key | Type | Failure behavior | Notes |
-| --- | --- | --- | --- |
-| `afterCreate` | string | fails run | Runs after a new workspace is cloned and checked out. |
-| `beforeRun` | string | fails run | Runs before agent workflow execution. |
-| `beforeVerify` | string | fails run | Runs immediately before verification. |
-| `afterRun` | string | warning | Runs after workflow completion. |
-| `beforeRemove` | string | warning | Runs before workspace removal. |
-| `timeoutMs` | number | n/a | Hook timeout. Defaults to `600000`. |
+| Key            | Type   | Failure behavior | Notes                                                 |
+| -------------- | ------ | ---------------- | ----------------------------------------------------- |
+| `afterCreate`  | string | fails run        | Runs after a new workspace is cloned and checked out. |
+| `beforeRun`    | string | fails run        | Runs before agent workflow execution.                 |
+| `beforeVerify` | string | fails run        | Runs immediately before verification.                 |
+| `afterRun`     | string | warning          | Runs after workflow completion.                       |
+| `beforeRemove` | string | warning          | Runs before workspace removal.                        |
+| `timeoutMs`    | number | n/a              | Hook timeout. Defaults to `600000`.                   |
 
 Hooks must be non-interactive. See [Lifecycle hooks](lifecycle-hooks.md).
 

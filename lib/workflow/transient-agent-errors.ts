@@ -32,8 +32,11 @@ const transientAgentConnectionErrorPatterns = [
 export function isTransientAgentConnectionError(error: unknown): boolean {
   const message = formatError(error);
   if (!message) return false;
-  if (nonTransientAgentErrorPatterns.some((pattern) => pattern.test(message))) return false;
-  return transientAgentConnectionErrorPatterns.some((pattern) => pattern.test(message));
+  if (nonTransientAgentErrorPatterns.some((pattern) => pattern.test(message)))
+    return false;
+  return transientAgentConnectionErrorPatterns.some((pattern) =>
+    pattern.test(message),
+  );
 }
 
 function formatError(error: unknown): string {

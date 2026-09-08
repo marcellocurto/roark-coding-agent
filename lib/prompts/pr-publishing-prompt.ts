@@ -1,4 +1,7 @@
-import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import {
+  artifactRelativePath,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import type { AttemptMetadata } from "../autorun/attempts.ts";
 import type { VerificationResult } from "../autorun/verification.ts";
 import { escapePromptXmlText } from "./xml.ts";
@@ -52,24 +55,50 @@ ${formatChangedFiles(input.changedFiles)}
 </workflow_phase>`;
 }
 
-function formatSourceIssue(issue: { number: number; title: string; url?: string | undefined }): string {
-  return escapePromptXmlText(`#${issue.number} ${issue.title}${issue.url ? ` (${issue.url})` : ""}`);
+function formatSourceIssue(issue: {
+  number: number;
+  title: string;
+  url?: string | undefined;
+}): string {
+  return escapePromptXmlText(
+    `#${issue.number} ${issue.title}${issue.url ? ` (${issue.url})` : ""}`,
+  );
 }
 
 function formatArtifactPaths(paths: string[]): string {
-  return paths.length > 0 ? paths.map((artifactPath) => `    <path>${escapePromptXmlText(artifactPath)}</path>`).join("\n") : "    <none />";
+  return paths.length > 0
+    ? paths
+        .map(
+          (artifactPath) =>
+            `    <path>${escapePromptXmlText(artifactPath)}</path>`,
+        )
+        .join("\n")
+    : "    <none />";
 }
 
 function formatChangedFiles(paths: string[]): string {
-  return paths.length > 0 ? paths.map((file) => `      <file>${escapePromptXmlText(file)}</file>`).join("\n") : "      <none />";
+  return paths.length > 0
+    ? paths
+        .map((file) => `      <file>${escapePromptXmlText(file)}</file>`)
+        .join("\n")
+    : "      <none />";
 }
 
-function formatVerification(verification: VerificationResult | undefined): string {
+function formatVerification(
+  verification: VerificationResult | undefined,
+): string {
   if (!verification) return "not run";
-  return escapePromptXmlText(`${verification.ok ? "passed" : "failed"}: ${verification.command} (exit ${verification.exitCode})`);
+  return escapePromptXmlText(
+    `${verification.ok ? "passed" : "failed"}: ${verification.command} (exit ${verification.exitCode})`,
+  );
 }
 
-function formatAttempt(attempt: AttemptMetadata | undefined, attemptMetadataPath: string | undefined): string {
+function formatAttempt(
+  attempt: AttemptMetadata | undefined,
+  attemptMetadataPath: string | undefined,
+): string {
   if (!attempt) return "not recorded";
-  return escapePromptXmlText(`attempt ${attempt.attempt}; branch ${attempt.branch}; started ${attempt.startedAt}; ended ${attempt.endedAt ?? "not recorded"}${attemptMetadataPath ? `; metadata ${attemptMetadataPath}` : ""}`);
+  return escapePromptXmlText(
+    `attempt ${attempt.attempt}; branch ${attempt.branch}; started ${attempt.startedAt}; ended ${attempt.endedAt ?? "not recorded"}${attemptMetadataPath ? `; metadata ${attemptMetadataPath}` : ""}`,
+  );
 }

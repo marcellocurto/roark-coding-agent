@@ -26,11 +26,14 @@ function issue(
 describe("autorun issue selection", () => {
   test("requires the configured ready label", () => {
     expect(
-      isEligibleIssue(issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]), {
-        readyLabel: defaultAutorunReadyLabel,
-        skipLabels: defaultAutorunSkipLabels,
-        limit: 1,
-      }),
+      isEligibleIssue(
+        issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+        {
+          readyLabel: defaultAutorunReadyLabel,
+          skipLabels: defaultAutorunSkipLabels,
+          limit: 1,
+        },
+      ),
     ).toBe(true);
 
     expect(
@@ -45,11 +48,17 @@ describe("autorun issue selection", () => {
   test("skips issues with configured skip labels", () => {
     for (const skipLabel of defaultAutorunSkipLabels) {
       expect(
-        isEligibleIssue(issue(1, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, skipLabel]), {
-          readyLabel: defaultAutorunReadyLabel,
-          skipLabels: defaultAutorunSkipLabels,
-          limit: 1,
-        }),
+        isEligibleIssue(
+          issue(1, "2026-01-01T00:00:00Z", [
+            defaultAutorunReadyLabel,
+            skipLabel,
+          ]),
+          {
+            readyLabel: defaultAutorunReadyLabel,
+            skipLabels: defaultAutorunSkipLabels,
+            limit: 1,
+          },
+        ),
       ).toBe(false);
     }
   });
@@ -60,7 +69,10 @@ describe("autorun issue selection", () => {
         issue(1, "2026-01-03T00:00:00Z", [defaultAutorunReadyLabel]),
         issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
         issue(3, "2026-01-02T00:00:00Z", [defaultAutorunReadyLabel]),
-        issue(4, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel, "agent-in-progress"]),
+        issue(4, "2026-01-01T00:00:00Z", [
+          defaultAutorunReadyLabel,
+          "agent-in-progress",
+        ]),
       ],
       {
         readyLabel: defaultAutorunReadyLabel,
@@ -117,9 +129,17 @@ describe("autorun issue selection", () => {
   });
 
   test("finds targeted auto skip labels without requiring the ready label", () => {
-    expect(findMatchingSkipLabel(issue(1, "2026-01-01T00:00:00Z", ["Agent-In-Progress"]), defaultAutorunSkipLabels)).toBe(
-      "Agent-In-Progress",
-    );
-    expect(findMatchingSkipLabel(issue(2, "2026-01-01T00:00:00Z", ["enhancement"]), defaultAutorunSkipLabels)).toBeUndefined();
+    expect(
+      findMatchingSkipLabel(
+        issue(1, "2026-01-01T00:00:00Z", ["Agent-In-Progress"]),
+        defaultAutorunSkipLabels,
+      ),
+    ).toBe("Agent-In-Progress");
+    expect(
+      findMatchingSkipLabel(
+        issue(2, "2026-01-01T00:00:00Z", ["enhancement"]),
+        defaultAutorunSkipLabels,
+      ),
+    ).toBeUndefined();
   });
 });

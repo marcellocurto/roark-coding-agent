@@ -1,8 +1,17 @@
 import { parseIssueRef } from "../github/issue.ts";
 
-export function displayIssueTarget(issue: string | undefined, fallback: string): string;
-export function displayIssueTarget(issue: string | undefined, fallback?: undefined): string | undefined;
-export function displayIssueTarget(issue: string | undefined, fallback?: string): string | undefined {
+export function displayIssueTarget(
+  issue: string | undefined,
+  fallback: string,
+): string;
+export function displayIssueTarget(
+  issue: string | undefined,
+  fallback?: undefined,
+): string | undefined;
+export function displayIssueTarget(
+  issue: string | undefined,
+  fallback?: string,
+): string | undefined {
   if (!issue) return fallback;
   try {
     return `#${parseIssueRef(issue).issueNumber}`;

@@ -1,4 +1,7 @@
-import { artifactRelativePath, type WorkflowContext } from "../workflow/artifacts.ts";
+import {
+  artifactRelativePath,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import { escapePromptXmlText } from "./xml.ts";
 
 export interface IssuePublishingPromptItem {
@@ -18,9 +21,13 @@ export function issuePublishingPrompt(input: {
   approvalReason?: string | undefined;
   allowedItems: IssuePublishingPromptItem[];
 }): string {
-  const sourcePlanPath = input.sourcePlanPath ?? artifactRelativePath(input.context, "issueCurationPlan");
+  const sourcePlanPath =
+    input.sourcePlanPath ??
+    artifactRelativePath(input.context, "issueCurationPlan");
   const escapedSourcePlanPath = escapePromptXmlText(sourcePlanPath);
-  const allowedItemsJson = escapePromptXmlText(JSON.stringify(input.allowedItems, null, 2));
+  const allowedItemsJson = escapePromptXmlText(
+    JSON.stringify(input.allowedItems, null, 2),
+  );
 
   return `<workflow_phase name="author_reviewer_generated_issues">
   <role>You are the approved issue-authoring agent for Roark.</role>

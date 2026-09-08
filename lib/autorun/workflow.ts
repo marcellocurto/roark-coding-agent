@@ -1,5 +1,8 @@
 import type { AutoCliOptions, IssueCliOptions } from "../cli/args.ts";
-import { createWorkflowContext, type WorkflowContext } from "../workflow/artifacts.ts";
+import {
+  createWorkflowContext,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import { autorunWorktreePath, type AutorunBranchPlan } from "./branch.ts";
 

@@ -44,12 +44,12 @@ Poor candidates:
 
 Generated issues use:
 
-| Label | Meaning |
-| --- | --- |
-| `needs-triage` | Newly generated issue awaiting maintainer triage |
+| Label                     | Meaning                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| `needs-triage`            | Newly generated issue awaiting maintainer triage                                     |
 | `review:external-blocker` | Generated from outside information, access, dependency, or decision blocker findings |
-| `review:follow-up` | Valid non-blocking work discovered during review |
-| `review:suggestion` | Optional improvement work discovered during review |
+| `review:follow-up`        | Valid non-blocking work discovered during review                                     |
+| `review:suggestion`       | Optional improvement work discovered during review                                   |
 
 `needs-human` is added only when a concrete decision, clarification, or approval is required; it is not applied to every generated issue.
 

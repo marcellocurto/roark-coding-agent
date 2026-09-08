@@ -3,7 +3,14 @@ import { parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
   test("parses init command options", () => {
-    const parsed = parseArgs(["init", "--cwd", "/tmp/repo", "--repo", "owner/repo", "--force"]);
+    const parsed = parseArgs([
+      "init",
+      "--cwd",
+      "/tmp/repo",
+      "--repo",
+      "owner/repo",
+      "--force",
+    ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
@@ -15,8 +22,12 @@ describe("parseArgs", () => {
   });
 
   test("rejects unexpected init arguments", () => {
-    expect(() => parseArgs(["init", "extra"])).toThrow("Unexpected argument 'extra'");
-    expect(() => parseArgs(["init", "--out", "runs"])).toThrow("Unknown option '--out'");
+    expect(() => parseArgs(["init", "extra"])).toThrow(
+      "Unexpected argument 'extra'",
+    );
+    expect(() => parseArgs(["init", "--out", "runs"])).toThrow(
+      "Unknown option '--out'",
+    );
   });
 
   test("parses raw auto command without applying defaults", () => {
@@ -78,7 +89,9 @@ describe("parseArgs", () => {
     expect(parsed.assignee).toBe("roark-codes");
     expect(parsed.dryRun).toBe(true);
     expect(parsed.baseBranch).toBe("develop");
-    expect(parsed.verifyCommand).toBe("bun install --frozen-lockfile && bun run typecheck");
+    expect(parsed.verifyCommand).toBe(
+      "bun install --frozen-lockfile && bun run typecheck",
+    );
     expect(parsed.failureLabel).toBe("custom-failed");
     expect(parsed.successLabel).toBe("custom-pr-opened");
     expect(parsed.remote).toBe("upstream");
@@ -102,12 +115,19 @@ describe("parseArgs", () => {
       expect("verbose" in parsed && parsed.verbose).toBe(true);
       expect("noTitle" in parsed && parsed.noTitle).toBe(true);
     }
-    expect(() => parseArgs(["status", "123", "--verbose"])).toThrow("Unknown option '--verbose'");
+    expect(() => parseArgs(["status", "123", "--verbose"])).toThrow(
+      "Unknown option '--verbose'",
+    );
     expect(() => parseArgs(["do", "123", "-v"])).toThrow("Unknown option '-v'");
   });
 
   test("parses targeted auto issue refs", () => {
-    for (const issue of ["123", "#123", "https://github.com/owner/repo/issues/123", "owner/repo#123"]) {
+    for (const issue of [
+      "123",
+      "#123",
+      "https://github.com/owner/repo/issues/123",
+      "owner/repo#123",
+    ]) {
       const parsed = parseArgs(["auto", issue]);
       expect("help" in parsed).toBe(false);
       if ("help" in parsed) return;
@@ -117,8 +137,20 @@ describe("parseArgs", () => {
   });
 
   test("parses targeted auto issue before or after options", () => {
-    const before = parseArgs(["auto", "123", "--repo", "owner/repo", "--dry-run"]);
-    const after = parseArgs(["auto", "--repo", "owner/repo", "--dry-run", "123"]);
+    const before = parseArgs([
+      "auto",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--dry-run",
+    ]);
+    const after = parseArgs([
+      "auto",
+      "--repo",
+      "owner/repo",
+      "--dry-run",
+      "123",
+    ]);
 
     for (const parsed of [before, after]) {
       expect("help" in parsed).toBe(false);
@@ -131,17 +163,30 @@ describe("parseArgs", () => {
   });
 
   test("rejects multiple targeted auto issue refs", () => {
-    expect(() => parseArgs(["auto", "123", "456"])).toThrow("accepts at most one issue argument");
-  });
-
-  test("rejects conflicting auto assignment options", () => {
-    expect(() => parseArgs(["auto", "--assignee", "roark-codes", "--no-assign"])).toThrow(
-      "--assignee cannot be combined with --no-assign",
+    expect(() => parseArgs(["auto", "123", "456"])).toThrow(
+      "accepts at most one issue argument",
     );
   });
 
+  test("rejects conflicting auto assignment options", () => {
+    expect(() =>
+      parseArgs(["auto", "--assignee", "roark-codes", "--no-assign"]),
+    ).toThrow("--assignee cannot be combined with --no-assign");
+  });
+
   test("parses status command options", () => {
-    const parsed = parseArgs(["status", "123", "--repo", "owner/repo", "--attempt", "2", "--cwd", "/tmp/repo", "--out", "runs"]);
+    const parsed = parseArgs([
+      "status",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--attempt",
+      "2",
+      "--cwd",
+      "/tmp/repo",
+      "--out",
+      "runs",
+    ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
     expect(parsed.command).toBe("status");
@@ -189,7 +234,8 @@ describe("parseArgs", () => {
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
     expect(parsed.command).toBe("continue");
-    if (parsed.command !== "continue") throw new Error("expected continue options");
+    if (parsed.command !== "continue")
+      throw new Error("expected continue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);
@@ -203,27 +249,64 @@ describe("parseArgs", () => {
   });
 
   test("parses workspace maintenance commands", () => {
-    const list = parseArgs(["workspace", "list", "--cwd", "/repo", "--repo", "owner/repo"]);
+    const list = parseArgs([
+      "workspace",
+      "list",
+      "--cwd",
+      "/repo",
+      "--repo",
+      "owner/repo",
+    ]);
     expect("help" in list).toBe(false);
     if ("help" in list) return;
-    expect(list).toEqual({ command: "workspace", action: "list", cwd: "/repo", repo: "owner/repo" });
+    expect(list).toEqual({
+      command: "workspace",
+      action: "list",
+      cwd: "/repo",
+      repo: "owner/repo",
+    });
 
     const remove = parseArgs(["remove", "207", "--force"]);
     expect("help" in remove).toBe(false);
     if ("help" in remove) return;
-    expect(remove).toEqual({ command: "remove", targets: [{ kind: "issue", number: 207 }], cwd: undefined, repo: undefined, force: true });
+    expect(remove).toEqual({
+      command: "remove",
+      targets: [{ kind: "issue", number: 207 }],
+      cwd: undefined,
+      repo: undefined,
+      force: true,
+    });
 
     const removePr = parseArgs(["remove", "--pr", "98"]);
     expect("help" in removePr).toBe(false);
     if ("help" in removePr) return;
-    expect(removePr).toEqual({ command: "remove", targets: [{ kind: "pr", number: 98 }], cwd: undefined, repo: undefined, force: undefined });
+    expect(removePr).toEqual({
+      command: "remove",
+      targets: [{ kind: "pr", number: 98 }],
+      cwd: undefined,
+      repo: undefined,
+      force: undefined,
+    });
 
     const interactiveRemove = parseArgs(["remove"]);
     expect("help" in interactiveRemove).toBe(false);
     if ("help" in interactiveRemove) return;
-    expect(interactiveRemove).toEqual({ command: "remove", targets: [], cwd: undefined, repo: undefined, force: undefined });
+    expect(interactiveRemove).toEqual({
+      command: "remove",
+      targets: [],
+      cwd: undefined,
+      repo: undefined,
+      force: undefined,
+    });
 
-    const shorthandRemove = parseArgs(["remove", "207", "208", "--pr", "98", "207"]);
+    const shorthandRemove = parseArgs([
+      "remove",
+      "207",
+      "208",
+      "--pr",
+      "98",
+      "207",
+    ]);
     expect("help" in shorthandRemove).toBe(false);
     if ("help" in shorthandRemove) return;
     expect(shorthandRemove).toEqual({
@@ -241,17 +324,36 @@ describe("parseArgs", () => {
     const prune = parseArgs(["workspace", "prune", "--older-than", "30d"]);
     expect("help" in prune).toBe(false);
     if ("help" in prune) return;
-    expect(prune).toEqual({ command: "workspace", action: "prune", olderThan: "30d", cwd: undefined, repo: undefined, force: undefined });
+    expect(prune).toEqual({
+      command: "workspace",
+      action: "prune",
+      olderThan: "30d",
+      cwd: undefined,
+      repo: undefined,
+      force: undefined,
+    });
   });
 
   test("rejects invalid workspace maintenance arguments", () => {
     expect(() => parseArgs(["workspace"])).toThrow("workspace requires one of");
-    expect(() => parseArgs(["workspace", "remove"])).toThrow("workspace requires one of: list, prune");
-    expect(() => parseArgs(["remove", "--issue", "1"])).toThrow("Unknown option '--issue'");
-    expect(() => parseArgs(["remove", "nope"])).toThrow("issue number must be a positive integer");
-    expect(() => parseArgs(["workspace", "prune"])).toThrow("workspace prune requires --older-than");
-    expect(() => parseArgs(["workspace", "prune", "--pr", "2", "--older-than", "30d"])).toThrow("Unknown option '--pr'");
-    expect(() => parseArgs(["workspace", "list", "--force"])).toThrow("workspace list only accepts");
+    expect(() => parseArgs(["workspace", "remove"])).toThrow(
+      "workspace requires one of: list, prune",
+    );
+    expect(() => parseArgs(["remove", "--issue", "1"])).toThrow(
+      "Unknown option '--issue'",
+    );
+    expect(() => parseArgs(["remove", "nope"])).toThrow(
+      "issue number must be a positive integer",
+    );
+    expect(() => parseArgs(["workspace", "prune"])).toThrow(
+      "workspace prune requires --older-than",
+    );
+    expect(() =>
+      parseArgs(["workspace", "prune", "--pr", "2", "--older-than", "30d"]),
+    ).toThrow("Unknown option '--pr'");
+    expect(() => parseArgs(["workspace", "list", "--force"])).toThrow(
+      "workspace list only accepts",
+    );
   });
 
   test("parses revise-pr defaults and options", () => {
@@ -281,7 +383,8 @@ describe("parseArgs", () => {
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
     expect(parsed.command).toBe("revise-pr");
-    if (parsed.command !== "revise-pr") throw new Error("expected revise-pr options");
+    if (parsed.command !== "revise-pr")
+      throw new Error("expected revise-pr options");
     expect(parsed.prNumber).toBe(123);
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.cwd).toBe("/tmp/repo");
@@ -297,18 +400,38 @@ describe("parseArgs", () => {
   });
 
   test("parses inspection-only review-pr options independently from revise-pr", () => {
-    const parsed = parseArgs(["review-pr", "#123", "--repo", "owner/repo", "--verify", "bun test", "--no-comment"]);
+    const parsed = parseArgs([
+      "review-pr",
+      "#123",
+      "--repo",
+      "owner/repo",
+      "--verify",
+      "bun test",
+      "--no-comment",
+    ]);
     expect("help" in parsed).toBe(false);
-    if ("help" in parsed || parsed.command !== "review-pr") throw new Error("expected review-pr options");
+    if ("help" in parsed || parsed.command !== "review-pr")
+      throw new Error("expected review-pr options");
     expect(parsed.prNumber).toBe(123);
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.verifyCommand).toBe("bun test");
     expect(parsed.comment).toBe(false);
-    expect(() => parseArgs(["review-pr", "123", "--force"])).toThrow("Unknown option '--force'");
+    expect(() => parseArgs(["review-pr", "123", "--force"])).toThrow(
+      "Unknown option '--force'",
+    );
   });
 
   test("still parses issue workflow commands", () => {
-    const parsed = parseArgs(["do", "123", "--repo", "owner/repo", "--max-fix-passes", "3", "--attempt", "2"]);
+    const parsed = parseArgs([
+      "do",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--max-fix-passes",
+      "3",
+      "--attempt",
+      "2",
+    ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
@@ -321,24 +444,41 @@ describe("parseArgs", () => {
   });
 
   test("parses curate-issues as a standalone issue workflow command", () => {
-    const parsed = parseArgs(["curate-issues", "123", "--repo", "owner/repo", "--attempt", "2"]);
+    const parsed = parseArgs([
+      "curate-issues",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--attempt",
+      "2",
+    ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("curate-issues");
-    if (parsed.command !== "curate-issues") throw new Error("expected issue options");
+    if (parsed.command !== "curate-issues")
+      throw new Error("expected issue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);
   });
 
   test("parses create-issues with repo, attempt, and approval", () => {
-    const parsed = parseArgs(["create-issues", "123", "--repo", "owner/repo", "--attempt", "2", "--yes"]);
+    const parsed = parseArgs([
+      "create-issues",
+      "123",
+      "--repo",
+      "owner/repo",
+      "--attempt",
+      "2",
+      "--yes",
+    ]);
     expect("help" in parsed).toBe(false);
     if ("help" in parsed) return;
 
     expect(parsed.command).toBe("create-issues");
-    if (parsed.command !== "create-issues") throw new Error("expected issue options");
+    if (parsed.command !== "create-issues")
+      throw new Error("expected issue options");
     expect(parsed.issue).toBe("123");
     expect(parsed.repo).toBe("owner/repo");
     expect(parsed.attempt).toBe(2);
@@ -347,7 +487,8 @@ describe("parseArgs", () => {
 
   test("parses max thinking", () => {
     const parsed = parseArgs(["do", "123", "--thinking", "max"]);
-    if ("help" in parsed || parsed.command !== "do") throw new Error("expected issue options");
+    if ("help" in parsed || parsed.command !== "do")
+      throw new Error("expected issue options");
     expect(parsed.thinkingLevel).toBe("max");
   });
 
@@ -357,7 +498,13 @@ describe("parseArgs", () => {
     const autoFast = parseArgs(["auto", "--fast"]);
     const continueDeep = parseArgs(["continue", "123", "--deep"]);
 
-    if ("help" in doFast || "help" in doDeep || "help" in autoFast || "help" in continueDeep) throw new Error("expected options");
+    if (
+      "help" in doFast ||
+      "help" in doDeep ||
+      "help" in autoFast ||
+      "help" in continueDeep
+    )
+      throw new Error("expected options");
     expect(doFast.command).toBe("do");
     if (doFast.command !== "do") throw new Error("expected issue options");
     expect(doFast.thinkingProfile).toBe("fast");
@@ -368,13 +515,20 @@ describe("parseArgs", () => {
     if (autoFast.command !== "auto") throw new Error("expected auto options");
     expect(autoFast.thinkingProfile).toBe("fast");
     expect(continueDeep.command).toBe("continue");
-    if (continueDeep.command !== "continue") throw new Error("expected continue options");
+    if (continueDeep.command !== "continue")
+      throw new Error("expected continue options");
     expect(continueDeep.thinkingProfile).toBe("deep");
   });
 
   test("rejects ambiguous thinking profile combinations", () => {
-    expect(() => parseArgs(["do", "123", "--fast", "--deep"])).toThrow("--fast cannot be combined with --deep");
-    expect(() => parseArgs(["do", "123", "--fast", "--thinking", "high"])).toThrow("--thinking cannot be combined");
-    expect(() => parseArgs(["do", "123", "--deep", "--thinking", "high"])).toThrow("--thinking cannot be combined");
+    expect(() => parseArgs(["do", "123", "--fast", "--deep"])).toThrow(
+      "--fast cannot be combined with --deep",
+    );
+    expect(() =>
+      parseArgs(["do", "123", "--fast", "--thinking", "high"]),
+    ).toThrow("--thinking cannot be combined");
+    expect(() =>
+      parseArgs(["do", "123", "--deep", "--thinking", "high"]),
+    ).toThrow("--thinking cannot be combined");
   });
 });

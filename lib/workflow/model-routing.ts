@@ -21,6 +21,9 @@ export const workflowModelRoutes: Record<WorkflowThinkingStage, string> = {
   revisionFix: models.gpt6Astra,
 };
 
-export function effectiveModelForStage(explicitModel: string | undefined, stage: WorkflowThinkingStage): string {
+export function effectiveModelForStage(
+  explicitModel: string | undefined,
+  stage: WorkflowThinkingStage,
+): string {
   return explicitModel ?? workflowModelRoutes[stage];
 }

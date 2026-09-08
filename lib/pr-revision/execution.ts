@@ -11,9 +11,13 @@ import {
   normalizeAdditionalSections,
   renderAdditionalSectionsMarkdown,
 } from "../structured-output/additional-sections.ts";
-import type { RevisionFeedbackClassification, RevisionPlanResult } from "./plan.ts";
+import type {
+  RevisionFeedbackClassification,
+  RevisionPlanResult,
+} from "./plan.ts";
 
-const nonEmptyString = (description: string) => Type.String({ minLength: 1, description });
+const nonEmptyString = (description: string) =>
+  Type.String({ minLength: 1, description });
 const feedbackDispositionStatusSchema = Type.Union([
   Type.Literal("addressed"),
   Type.Literal("already-addressed"),
@@ -22,20 +26,35 @@ const feedbackDispositionStatusSchema = Type.Union([
   Type.Literal("skipped"),
 ]);
 
-export const revisionExecutionResultSchema = Type.Object({
-  summary: nonEmptyString("Concise account of the completed revision work."),
-  feedbackDispositions: Type.Array(Type.Object({
-    feedbackId: nonEmptyString("Stable id of the corresponding revision-plan feedback item."),
-    status: feedbackDispositionStatusSchema,
-    details: nonEmptyString("Concrete resolution or reason for the final disposition."),
-  }, { additionalProperties: false })),
-  changedFiles: Type.Array(changedFileSchema),
-  validation: Type.Array(validationEntrySchema, { minItems: 1 }),
-  additionalSections: Type.Optional(additionalSectionsSchema),
-}, { additionalProperties: false });
+export const revisionExecutionResultSchema = Type.Object(
+  {
+    summary: nonEmptyString("Concise account of the completed revision work."),
+    feedbackDispositions: Type.Array(
+      Type.Object(
+        {
+          feedbackId: nonEmptyString(
+            "Stable id of the corresponding revision-plan feedback item.",
+          ),
+          status: feedbackDispositionStatusSchema,
+          details: nonEmptyString(
+            "Concrete resolution or reason for the final disposition.",
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    changedFiles: Type.Array(changedFileSchema),
+    validation: Type.Array(validationEntrySchema, { minItems: 1 }),
+    additionalSections: Type.Optional(additionalSectionsSchema),
+  },
+  { additionalProperties: false },
+);
 
-export type RevisionExecutionResult = Static<typeof revisionExecutionResultSchema>;
-export type RevisionFeedbackDispositionStatus = RevisionExecutionResult["feedbackDispositions"][number]["status"];
+export type RevisionExecutionResult = Static<
+  typeof revisionExecutionResultSchema
+>;
+export type RevisionFeedbackDispositionStatus =
+  RevisionExecutionResult["feedbackDispositions"][number]["status"];
 
 export interface RevisionFeedbackDisposition {
   feedbackId: string;
@@ -53,11 +72,17 @@ export class RevisionExecutionOutputContractError extends Error {
   }
 }
 
-export function validateRevisionExecutionResult(value: unknown, plan?: RevisionPlanResult): RevisionExecutionResult {
+export function validateRevisionExecutionResult(
+  value: unknown,
+  plan?: RevisionPlanResult,
+): RevisionExecutionResult {
   if (!Value.Check(revisionExecutionResultSchema, value)) {
     const first = Value.Errors(revisionExecutionResultSchema, value)[0];
-    const location = first?.instancePath ?? first?.schemaPath ?? "revision execution result";
-    throw new RevisionExecutionOutputContractError(`Revision execution result does not satisfy the structured contract at ${location}.`);
+    const location =
+      first?.instancePath ?? first?.schemaPath ?? "revision execution result";
+    throw new RevisionExecutionOutputContractError(
+      `Revision execution result does not satisfy the structured contract at ${location}.`,
+    );
   }
 
   try {
@@ -69,22 +94,32 @@ export function validateRevisionExecutionResult(value: unknown, plan?: RevisionP
       addressedFindingIds: [],
       remainingConcerns: [],
     });
-    const additionalSections = normalizeAdditionalSections(value.additionalSections, {
-      artifactLabel: "Revision execution",
-      reservedHeadings: [
-        "Summary",
-        "Feedback Dispositions",
-        "Changed Files",
-        "Validation Performed",
-      ],
-      createError: (message) => new RevisionExecutionOutputContractError(message),
-    });
+    const additionalSections = normalizeAdditionalSections(
+      value.additionalSections,
+      {
+        artifactLabel: "Revision execution",
+        reservedHeadings: [
+          "Summary",
+          "Feedback Dispositions",
+          "Changed Files",
+          "Validation Performed",
+        ],
+        createError: (message) =>
+          new RevisionExecutionOutputContractError(message),
+      },
+    );
     const result = {
       summary: common.summary,
       feedbackDispositions: value.feedbackDispositions.map((entry, index) => ({
-        feedbackId: requireTrimmed(entry.feedbackId, `feedbackDispositions[${index}].feedbackId`),
+        feedbackId: requireTrimmed(
+          entry.feedbackId,
+          `feedbackDispositions[${index}].feedbackId`,
+        ),
         status: entry.status,
-        details: requireTrimmed(entry.details, `feedbackDispositions[${index}].details`),
+        details: requireTrimmed(
+          entry.details,
+          `feedbackDispositions[${index}].details`,
+        ),
       })),
       changedFiles: common.changedFiles,
       validation: common.validation,
@@ -95,21 +130,30 @@ export function validateRevisionExecutionResult(value: unknown, plan?: RevisionP
     return result;
   } catch (error) {
     if (error instanceof RevisionExecutionOutputContractError) throw error;
-    throw new RevisionExecutionOutputContractError(error instanceof Error ? error.message : String(error));
+    throw new RevisionExecutionOutputContractError(
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
-export function parseRevisionExecutionResultJson(content: string): RevisionExecutionResult {
+export function parseRevisionExecutionResultJson(
+  content: string,
+): RevisionExecutionResult {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
   } catch (error) {
-    throw new RevisionExecutionOutputContractError(`Revision execution artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new RevisionExecutionOutputContractError(
+      `Revision execution artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   return validateRevisionExecutionResult(parsed);
 }
 
-export function formatRevisionExecutionMarkdown(result: RevisionExecutionResult, title: string): string {
+export function formatRevisionExecutionMarkdown(
+  result: RevisionExecutionResult,
+  title: string,
+): string {
   return [
     `# ${title}`,
     "",
@@ -122,10 +166,14 @@ export function formatRevisionExecutionMarkdown(result: RevisionExecutionResult,
     "## Changed Files",
     ...(result.changedFiles.length === 0
       ? ["None."]
-      : result.changedFiles.map((file) => `- \`${file.path}\` — ${file.description}`)),
+      : result.changedFiles.map(
+          (file) => `- \`${file.path}\` — ${file.description}`,
+        )),
     "",
     "## Validation Performed",
-    ...result.validation.map((entry) => `- \`${entry.command}\` — ${entry.status}: ${entry.details}`),
+    ...result.validation.map(
+      (entry) => `- \`${entry.command}\` — ${entry.status}: ${entry.details}`,
+    ),
     "",
     ...renderAdditionalSectionsMarkdown(result.additionalSections),
   ].join("\n");
@@ -150,7 +198,9 @@ export function revisionFeedbackDispositions(
   plan: RevisionPlanResult,
   execution?: RevisionExecutionResult,
 ): RevisionFeedbackDisposition[] {
-  const byId = new Map(execution?.feedbackDispositions.map((item) => [item.feedbackId, item]));
+  const byId = new Map(
+    execution?.feedbackDispositions.map((item) => [item.feedbackId, item]),
+  );
   return plan.feedbackItems.map((item) => {
     const executed = byId.get(item.id);
     return {
@@ -158,7 +208,8 @@ export function revisionFeedbackDispositions(
       sourceIds: item.sourceIds,
       summary: item.summary,
       classification: item.classification,
-      status: executed?.status ?? expectedNonExecutionStatus(item.classification),
+      status:
+        executed?.status ?? expectedNonExecutionStatus(item.classification),
       details: executed?.details ?? item.rationale,
     };
   });
@@ -166,20 +217,32 @@ export function revisionFeedbackDispositions(
 
 function requireTrimmed(value: string, field: string): string {
   const trimmed = value.trim();
-  if (!trimmed) throw new RevisionExecutionOutputContractError(`Revision execution ${field} must not be blank.`);
+  if (!trimmed)
+    throw new RevisionExecutionOutputContractError(
+      `Revision execution ${field} must not be blank.`,
+    );
   return trimmed;
 }
 
 function assertUniqueDispositionIds(result: RevisionExecutionResult): void {
   const ids = result.feedbackDispositions.map((item) => item.feedbackId);
   if (new Set(ids).size !== ids.length) {
-    throw new RevisionExecutionOutputContractError("Revision execution feedback disposition ids must be unique.");
+    throw new RevisionExecutionOutputContractError(
+      "Revision execution feedback disposition ids must be unique.",
+    );
   }
 }
 
-function assertCompleteDispositionLinkage(result: RevisionExecutionResult, plan: RevisionPlanResult): void {
-  const expected = new Map(plan.feedbackItems.map((item) => [item.id, item.classification]));
-  const actual = new Set(result.feedbackDispositions.map((item) => item.feedbackId));
+function assertCompleteDispositionLinkage(
+  result: RevisionExecutionResult,
+  plan: RevisionPlanResult,
+): void {
+  const expected = new Map(
+    plan.feedbackItems.map((item) => [item.id, item.classification]),
+  );
+  const actual = new Set(
+    result.feedbackDispositions.map((item) => item.feedbackId),
+  );
   const missing = [...expected.keys()].filter((id) => !actual.has(id));
   const unknown = [...actual].filter((id) => !expected.has(id));
   if (missing.length > 0 || unknown.length > 0) {
@@ -189,7 +252,10 @@ function assertCompleteDispositionLinkage(result: RevisionExecutionResult, plan:
   }
   for (const disposition of result.feedbackDispositions) {
     const classification = expected.get(disposition.feedbackId);
-    if (classification && !statusMatchesClassification(disposition.status, classification)) {
+    if (
+      classification &&
+      !statusMatchesClassification(disposition.status, classification)
+    ) {
       throw new RevisionExecutionOutputContractError(
         `Revision execution disposition '${disposition.status}' conflicts with classification '${classification}' for '${disposition.feedbackId}'.`,
       );
@@ -197,12 +263,18 @@ function assertCompleteDispositionLinkage(result: RevisionExecutionResult, plan:
   }
 }
 
-function statusMatchesClassification(status: RevisionFeedbackDispositionStatus, classification: RevisionFeedbackClassification): boolean {
-  if (classification === "must-fix-current") return status === "addressed" || status === "skipped";
+function statusMatchesClassification(
+  status: RevisionFeedbackDispositionStatus,
+  classification: RevisionFeedbackClassification,
+): boolean {
+  if (classification === "must-fix-current")
+    return status === "addressed" || status === "skipped";
   return status === expectedNonExecutionStatus(classification);
 }
 
-function expectedNonExecutionStatus(classification: RevisionFeedbackClassification): RevisionFeedbackDispositionStatus {
+function expectedNonExecutionStatus(
+  classification: RevisionFeedbackClassification,
+): RevisionFeedbackDispositionStatus {
   if (classification === "already-addressed") return "already-addressed";
   if (classification === "needs-human") return "needs-human";
   if (classification === "must-fix-current") return "skipped";
@@ -211,5 +283,7 @@ function expectedNonExecutionStatus(classification: RevisionFeedbackClassificati
 
 function renderDispositions(result: RevisionExecutionResult): string[] {
   if (result.feedbackDispositions.length === 0) return ["None."];
-  return result.feedbackDispositions.map((item) => `- \`${item.feedbackId}\` [${item.status}] ${item.details}`);
+  return result.feedbackDispositions.map(
+    (item) => `- \`${item.feedbackId}\` [${item.status}] ${item.details}`,
+  );
 }

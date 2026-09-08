@@ -8,14 +8,6 @@
     "type": "git",
     "url": "git+https://github.com/marcellocurto/roark-coding-agent.git"
   },
-  "engines": {
-    "bun": ">=1.4.2"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "module": "roark.ts",
-  "type": "module",
   "bin": {
     "roark": "./roark.ts"
   },
@@ -29,6 +21,11 @@
     "CHANGELOG.md",
     "tsconfig.json"
   ],
+  "type": "module",
+  "module": "roark.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "bun run roark.ts",
     "agent": "bun run roark.ts",
@@ -48,6 +45,13 @@
     "version:minor": "bun run release:check && bun pm version minor",
     "version:major": "bun run release:check && bun pm version major"
   },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "typebox": "1.1.38"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "eslint": "^10.3.0",
@@ -55,11 +59,7 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.2"
   },
-  "dependencies": {
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@effect/platform-bun": "4.0.0-rc.112",
-    "effect": "4.0.0-rc.112",
-    "typebox": "1.1.38"
+  "engines": {
+    "bun": ">=1.4.2"
   }
 }

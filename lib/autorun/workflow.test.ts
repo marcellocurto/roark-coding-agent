@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
-import { createAutorunWorkflowContext, createAutorunWorkflowOptions } from "./workflow.ts";
+import {
+  createAutorunWorkflowContext,
+  createAutorunWorkflowOptions,
+} from "./workflow.ts";
 import { createBranchPlan } from "./branch.ts";
 import type { AutoCliOptions } from "../cli/args.ts";
 
@@ -40,9 +43,15 @@ describe("autorun workflow context", () => {
     );
 
     expect(context.controlCwd).toBe(path.resolve("/repo"));
-    expect(context.agentCwd).toBe(path.resolve("/repo/.roark/worktrees/issue-123"));
-    expect(context.runDir).toBe(path.resolve("/repo/.roark/runs/issue/123/attempts/2"));
-    expect(context.runDirRelative).toBe(path.join(".roark/runs", "issue", "123", "attempts", "2"));
+    expect(context.agentCwd).toBe(
+      path.resolve("/repo/.roark/worktrees/issue-123"),
+    );
+    expect(context.runDir).toBe(
+      path.resolve("/repo/.roark/runs/issue/123/attempts/2"),
+    );
+    expect(context.runDirRelative).toBe(
+      path.join(".roark/runs", "issue", "123", "attempts", "2"),
+    );
   });
 
   test("runs the existing issue workflow on the issue branch checkout", () => {

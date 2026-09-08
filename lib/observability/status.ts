@@ -12,19 +12,39 @@ export async function renderStatus(options: StatusCliOptions): Promise<string> {
   if (!options.issue) throw new Error("Missing issue for status command.");
 
   const parsed = parseIssueRef(options.issue, options.repo);
-  const summary = options.attempt !== undefined
-    ? await readAttemptSummary(outDir, parsed.issueNumber, options.attempt)
-    : await readLatestIssueSummary(outDir, parsed.issueNumber);
-  if (!summary) return `No observability summary found for issue #${parsed.issueNumber}.`;
+  const summary =
+    options.attempt !== undefined
+      ? await readAttemptSummary(outDir, parsed.issueNumber, options.attempt)
+      : await readLatestIssueSummary(outDir, parsed.issueNumber);
+  if (!summary)
+    return `No observability summary found for issue #${parsed.issueNumber}.`;
   return renderOneStatus(summary);
 }
 
-export async function readLatestIssueSummary(outDir: string, issueNumber: string): Promise<RunSummary | undefined> {
-  return (await readIssueSummaries(outDir, issueNumber)).sort(compareSummaryRecency).at(-1);
+export async function readLatestIssueSummary(
+  outDir: string,
+  issueNumber: string,
+): Promise<RunSummary | undefined> {
+  return (await readIssueSummaries(outDir, issueNumber))
+    .sort(compareSummaryRecency)
+    .at(-1);
 }
 
-export async function readAttemptSummary(outDir: string, issueNumber: string, attempt: number): Promise<RunSummary | undefined> {
-  return readSummary(path.join(outDir, "issue", issueNumber, "attempts", String(attempt), "summary.json"));
+export async function readAttemptSummary(
+  outDir: string,
+  issueNumber: string,
+  attempt: number,
+): Promise<RunSummary | undefined> {
+  return readSummary(
+    path.join(
+      outDir,
+      "issue",
+      issueNumber,
+      "attempts",
+      String(attempt),
+      "summary.json",
+    ),
+  );
 }
 
 export function renderOneStatus(summary: RunSummary): string {
@@ -33,10 +53,12 @@ export function renderOneStatus(summary: RunSummary): string {
     `Status: ${summary.status}`,
     `Run directory: ${summary.runDir}`,
   ];
-  if (summary.durationMs !== undefined) lines.push(`Duration: ${formatDuration(summary.durationMs)}`);
+  if (summary.durationMs !== undefined)
+    lines.push(`Duration: ${formatDuration(summary.durationMs)}`);
   lines.push(formatTotals(summary));
   if (summary.lastError) lines.push(`Last error: ${summary.lastError}`);
-  if (summary.recoveryCommand && summary.status !== "completed") lines.push(`Recovery: ${summary.recoveryCommand}`);
+  if (summary.recoveryCommand && summary.status !== "completed")
+    lines.push(`Recovery: ${summary.recoveryCommand}`);
   lines.push("", "Phases:");
   const phases = Object.values(summary.phases).sort(comparePhases);
   if (phases.length === 0) lines.push("- none");
@@ -47,10 +69,15 @@ export function renderOneStatus(summary: RunSummary): string {
 function renderAllStatus(summaries: readonly RunSummary[]): string {
   if (summaries.length === 0) return "No observability summaries found.";
   const lines = ["Known Roark runs:"];
-  for (const summary of [...summaries].sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber))) {
-    const attempt = summary.attempt !== undefined ? ` attempt ${summary.attempt}` : "";
+  for (const summary of [...summaries].sort(
+    (a, b) => Number(a.issueNumber) - Number(b.issueNumber),
+  )) {
+    const attempt =
+      summary.attempt !== undefined ? ` attempt ${summary.attempt}` : "";
     const error = summary.lastError ? ` last_error=${summary.lastError}` : "";
-    lines.push(`- #${summary.issueNumber}${attempt}: ${summary.status}, ${formatDuration(summary.durationMs ?? 0)}, tokens=${summary.totals.totalTokens}, cost=${formatCost(summary.totals.cost)}${error}`);
+    lines.push(
+      `- #${summary.issueNumber}${attempt}: ${summary.status}, ${formatDuration(summary.durationMs ?? 0)}, tokens=${summary.totals.totalTokens}, cost=${formatCost(summary.totals.cost)}${error}`,
+    );
   }
   return lines.join("\n");
 }
@@ -61,27 +88,36 @@ async function readAllSummaries(outDir: string): Promise<RunSummary[]> {
   const summaries: RunSummary[] = [];
   for (const entry of await readdir(issuesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    summaries.push(...await readIssueSummaries(outDir, entry.name));
+    summaries.push(...(await readIssueSummaries(outDir, entry.name)));
   }
   return summaries;
 }
 
-async function readIssueSummaries(outDir: string, issueNumber: string): Promise<RunSummary[]> {
+async function readIssueSummaries(
+  outDir: string,
+  issueNumber: string,
+): Promise<RunSummary[]> {
   const summaries: RunSummary[] = [];
-  const direct = await readSummary(path.join(outDir, "issue", issueNumber, "summary.json"));
+  const direct = await readSummary(
+    path.join(outDir, "issue", issueNumber, "summary.json"),
+  );
   if (direct) summaries.push(direct);
   const attemptsDir = path.join(outDir, "issue", issueNumber, "attempts");
   if (existsSync(attemptsDir)) {
     for (const entry of await readdir(attemptsDir, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue;
-      const summary = await readSummary(path.join(attemptsDir, entry.name, "summary.json"));
+      const summary = await readSummary(
+        path.join(attemptsDir, entry.name, "summary.json"),
+      );
       if (summary) summaries.push(summary);
     }
   }
   return summaries;
 }
 
-async function readSummary(summaryPath: string): Promise<RunSummary | undefined> {
+async function readSummary(
+  summaryPath: string,
+): Promise<RunSummary | undefined> {
   try {
     return JSON.parse(await readFile(summaryPath, "utf8")) as RunSummary;
   } catch {
@@ -105,7 +141,9 @@ function comparePhases(a: PhaseSummary, b: PhaseSummary): number {
 
 function formatPhase(phase: PhaseSummary): string {
   const details = [
-    phase.durationMs !== undefined ? formatDuration(phase.durationMs) : undefined,
+    phase.durationMs !== undefined
+      ? formatDuration(phase.durationMs)
+      : undefined,
     phase.artifactPath,
     phase.model ? `model=${phase.model}` : undefined,
     phase.thinkingLevel ? `thinking=${phase.thinkingLevel}` : undefined,
@@ -113,7 +151,9 @@ function formatPhase(phase: PhaseSummary): string {
     phase.totals ? `tokens=${phase.totals.totalTokens}` : undefined,
     phase.totals ? `cost=${formatCost(phase.totals.cost)}` : undefined,
     phase.errorMessage ? `error=${phase.errorMessage}` : undefined,
-  ].filter(Boolean).join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
   return `- ${phase.label ?? phase.phase}: ${phase.status}${details ? ` (${details})` : ""}`;
 }
 

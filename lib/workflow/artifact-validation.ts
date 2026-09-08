@@ -1,4 +1,8 @@
-import { artifactContract, formatArtifactRef, type ArtifactRef } from "./artifact-catalog.ts";
+import {
+  artifactContract,
+  formatArtifactRef,
+  type ArtifactRef,
+} from "./artifact-catalog.ts";
 import { parseReviewResultJson } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
@@ -20,7 +24,10 @@ export class ArtifactValidationError extends Error {
   }
 }
 
-export function validateAgentArtifact(artifact: ArtifactRef, content: string): ArtifactValidationResult {
+export function validateAgentArtifact(
+  artifact: ArtifactRef,
+  content: string,
+): ArtifactValidationResult {
   const trimmed = content.trim();
   if (!trimmed) return invalid("artifact is empty");
 
@@ -33,11 +40,16 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
     }
   }
 
-  if (artifact === "triage") return validateStructured(() => parseTriageResultJson(trimmed));
-  if (artifact === "implementationPlanDraft" || artifact === "implementationPlan") {
+  if (artifact === "triage")
+    return validateStructured(() => parseTriageResultJson(trimmed));
+  if (
+    artifact === "implementationPlanDraft" ||
+    artifact === "implementationPlan"
+  ) {
     return validateStructured(() => parseImplementationPlanResultJson(trimmed));
   }
-  if (isChangeReportArtifact(artifact)) return validateStructured(() => parseChangeReportJson(trimmed));
+  if (isChangeReportArtifact(artifact))
+    return validateStructured(() => parseChangeReportJson(trimmed));
 
   const priorError = parseDiagnosticArtifactError(trimmed);
   if (priorError) return invalid(priorError);
@@ -45,7 +57,10 @@ export function validateAgentArtifact(artifact: ArtifactRef, content: string): A
   const contract = artifactContract(artifact);
   if (!contract) return ok();
 
-  if (contract.requiredHeading && !requiredHeadingRegex(contract.requiredHeading).test(content)) {
+  if (
+    contract.requiredHeading &&
+    !requiredHeadingRegex(contract.requiredHeading).test(content)
+  ) {
     return invalid(`missing # ${contract.requiredHeading} heading`);
   }
 
@@ -62,12 +77,18 @@ function validateStructured(parse: () => unknown): ArtifactValidationResult {
 }
 
 function isReviewArtifact(artifact: ArtifactRef): boolean {
-  return typeof artifact !== "string" && (artifact.name === "reviewA" || artifact.name === "reviewB");
+  return (
+    typeof artifact !== "string" &&
+    (artifact.name === "reviewA" || artifact.name === "reviewB")
+  );
 }
 
 function isChangeReportArtifact(artifact: ArtifactRef): boolean {
-  return artifact === "implementationLog"
-    || (typeof artifact !== "string" && (artifact.name === "fixLog" || artifact.name === "refinementLog"));
+  return (
+    artifact === "implementationLog" ||
+    (typeof artifact !== "string" &&
+      (artifact.name === "fixLog" || artifact.name === "refinementLog"))
+  );
 }
 
 function requiredHeadingRegex(heading: string): RegExp {
@@ -80,13 +101,17 @@ function escapeRegExp(value: string): string {
 }
 
 function parseDiagnosticArtifactError(markdown: string): string | undefined {
-  const heading = (/^#\s+(.+ Error)\s*$/im.exec(markdown))?.[1]?.trim();
+  const heading = /^#\s+(.+ Error)\s*$/im.exec(markdown)?.[1]?.trim();
   if (!heading) return undefined;
 
-  const phase = (/##\s*Phase\s*\n+([^\n]+)/i.exec(markdown))?.[1]?.trim();
-  const error = (/##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i.exec(markdown))?.[1]?.trim();
+  const phase = /##\s*Phase\s*\n+([^\n]+)/i.exec(markdown)?.[1]?.trim();
+  const error = /##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i
+    .exec(markdown)?.[1]
+    ?.trim();
   const summary = [phase, error].filter(Boolean).join(": ");
-  return summary ? `previous ${heading} diagnostic: ${summary}` : `previous ${heading} diagnostic`;
+  return summary
+    ? `previous ${heading} diagnostic: ${summary}`
+    : `previous ${heading} diagnostic`;
 }
 
 function ok(): ArtifactValidationResult {

@@ -1,19 +1,32 @@
 import { Type, type Static } from "typebox";
 
-const sectionText = (description: string, maxLength: number) => Type.String({
-  minLength: 1,
-  maxLength,
-  pattern: "\\S",
-  description,
-});
+const sectionText = (description: string, maxLength: number) =>
+  Type.String({
+    minLength: 1,
+    maxLength,
+    pattern: "\\S",
+    description,
+  });
 
-export const additionalSectionsSchema = Type.Array(Type.Object({
-  heading: sectionText("Freely chosen heading for material content that does not fit the standard fields.", 160),
-  items: Type.Array(
-    sectionText("Problem-specific observation, rationale, alternative, question, or other material context.", 2_000),
-    { minItems: 1, maxItems: 12 },
+export const additionalSectionsSchema = Type.Array(
+  Type.Object(
+    {
+      heading: sectionText(
+        "Freely chosen heading for material content that does not fit the standard fields.",
+        160,
+      ),
+      items: Type.Array(
+        sectionText(
+          "Problem-specific observation, rationale, alternative, question, or other material context.",
+          2_000,
+        ),
+        { minItems: 1, maxItems: 12 },
+      ),
+    },
+    { additionalProperties: false },
   ),
-}, { additionalProperties: false }), { maxItems: 8 });
+  { maxItems: 8 },
+);
 
 export type AdditionalSection = Static<typeof additionalSectionsSchema>[number];
 
@@ -33,10 +46,14 @@ export function normalizeAdditionalSections(
     const heading = normalizeStructuredMarkdownText(section.heading);
     const key = headingKey(heading);
     if (reserved.has(key)) {
-      throw input.createError(`${input.artifactLabel} additionalSections[${index}] duplicates reserved heading '${heading}'.`);
+      throw input.createError(
+        `${input.artifactLabel} additionalSections[${index}] duplicates reserved heading '${heading}'.`,
+      );
     }
     if (seen.has(key)) {
-      throw input.createError(`${input.artifactLabel} contains repeated additional section heading '${heading}'.`);
+      throw input.createError(
+        `${input.artifactLabel} contains repeated additional section heading '${heading}'.`,
+      );
     }
     seen.add(key);
     return {
@@ -66,7 +83,10 @@ export function escapeStructuredMarkdownText(value: string): string {
 }
 
 function normalizeStructuredMarkdownText(value: string): string {
-  return value.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  return value
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function headingKey(value: string): string {

@@ -6,9 +6,23 @@ export function revisionExecutionResult(
 ): RevisionExecutionResult {
   return {
     summary: "Completed the requested PR revision.",
-    feedbackDispositions: [{ feedbackId: "pr:12", status: "addressed", details: "Implemented the requested change." }],
-    changedFiles: [{ path: "fixed.txt", description: "Applied the requested revision." }],
-    validation: [{ command: "bun test", status: "passed", details: "Relevant tests passed." }],
+    feedbackDispositions: [
+      {
+        feedbackId: "pr:12",
+        status: "addressed",
+        details: "Implemented the requested change.",
+      },
+    ],
+    changedFiles: [
+      { path: "fixed.txt", description: "Applied the requested revision." },
+    ],
+    validation: [
+      {
+        command: "bun test",
+        status: "passed",
+        details: "Relevant tests passed.",
+      },
+    ],
     ...overrides,
   };
 }
@@ -17,8 +31,17 @@ export async function submitRevisionExecution(
   request: AgentRunRequest,
   result: RevisionExecutionResult,
 ): Promise<string> {
-  const tool = request.customTools?.find((candidate) => candidate.name === "submit_revision_execution");
-  if (!tool) throw new Error("Request did not expose submit_revision_execution.");
-  await tool.execute("test-submit-revision-execution", result, undefined, undefined, {} as never);
+  const tool = request.customTools?.find(
+    (candidate) => candidate.name === "submit_revision_execution",
+  );
+  if (!tool)
+    throw new Error("Request did not expose submit_revision_execution.");
+  await tool.execute(
+    "test-submit-revision-execution",
+    result,
+    undefined,
+    undefined,
+    {} as never,
+  );
   return "";
 }

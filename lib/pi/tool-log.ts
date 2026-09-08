@@ -7,7 +7,11 @@ const maxCommandLength = 96;
 const maxPatternLength = 64;
 const maxGenericLength = 72;
 
-export function summarizeToolCall(toolName: string, args: unknown, roots: readonly string[] = []): string {
+export function summarizeToolCall(
+  toolName: string,
+  args: unknown,
+  roots: readonly string[] = [],
+): string {
   switch (toolName) {
     case "read":
       return summarizeRead(args, roots);
@@ -38,7 +42,11 @@ function summarizeRead(args: unknown, roots: readonly string[]): string {
 function summarizeGrep(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
   const pattern = formatSlashPattern(objectArgs?.["pattern"]);
-  const target = formatTarget(objectArgs?.["path"], objectArgs?.["glob"], roots);
+  const target = formatTarget(
+    objectArgs?.["path"],
+    objectArgs?.["glob"],
+    roots,
+  );
   return `grep ${pattern}${target ? ` in ${target}` : ""}`;
 }
 
@@ -52,19 +60,24 @@ function summarizeEdit(args: unknown, roots: readonly string[]): string {
   const path = formatPath(objectArgs?.["path"], roots);
   const edits = objectArgs?.["edits"];
   const editCount = Array.isArray(edits) ? edits.length : undefined;
-  return editCount === undefined ? `edit ${path}` : `edit ${path} (${editCount} ${editCount === 1 ? "edit" : "edits"})`;
+  return editCount === undefined
+    ? `edit ${path}`
+    : `edit ${path} (${editCount} ${editCount === 1 ? "edit" : "edits"})`;
 }
 
 function summarizeWrite(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
   const path = formatPath(objectArgs?.["path"], roots);
   const content = objectArgs?.["content"];
-  return typeof content === "string" ? `write ${path} (${content.length} chars)` : `write ${path}`;
+  return typeof content === "string"
+    ? `write ${path} (${content.length} chars)`
+    : `write ${path}`;
 }
 
 function summarizeFind(args: unknown, roots: readonly string[]): string {
   const objectArgs = asRecord(args);
-  const pattern = sanitizeInline(objectArgs?.["pattern"], maxPatternLength) || "<pattern>";
+  const pattern =
+    sanitizeInline(objectArgs?.["pattern"], maxPatternLength) || "<pattern>";
   const path = formatPath(objectArgs?.["path"] ?? ".", roots);
   return `find ${pattern} in ${path}`;
 }
@@ -74,20 +87,28 @@ function summarizeLs(args: unknown, roots: readonly string[]): string {
   return `ls ${formatPath(objectArgs?.["path"] ?? ".", roots)}`;
 }
 
-function formatTarget(path: unknown, glob: unknown, roots: readonly string[]): string {
+function formatTarget(
+  path: unknown,
+  glob: unknown,
+  roots: readonly string[],
+): string {
   const formattedPath = formatPath(path, roots, "");
   if (formattedPath) return formattedPath;
   return sanitizeInline(glob, maxPathLength);
 }
 
-function formatPath(value: unknown, roots: readonly string[], fallback = "<path>"): string {
+function formatPath(
+  value: unknown,
+  roots: readonly string[],
+  fallback = "<path>",
+): string {
   const clean = sanitizeInline(value, Number.MAX_SAFE_INTEGER);
   return clean ? shortenPath(clean, roots, maxPathLength) : fallback;
 }
 
 function formatQuoted(value: unknown, maxLength: number): string {
   const text = sanitizeInline(value, maxLength) || "";
-  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function formatSlashPattern(value: unknown): string {
@@ -105,7 +126,12 @@ function formatReadRange(offset: unknown, limit: unknown): string {
 }
 
 function sanitizeInline(value: unknown, maxLength: number): string {
-  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return "";
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  )
+    return "";
   const normalized = String(value).replace(/\s+/g, " ").trim();
   return truncate(normalized, maxLength);
 }
@@ -117,7 +143,9 @@ function truncate(value: string, maxLength: number): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function toPositiveInteger(value: unknown): number | undefined {

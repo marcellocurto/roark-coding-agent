@@ -26,17 +26,29 @@ describe("bundled skills", () => {
   });
 
   test("resolves bundled skills from the installed package instead of the user home directory", () => {
-    expect(bundledSkillPaths()).toEqual(bundledSkillNames.map((name) => path.join(bundledSkillsRoot, name)));
-    expect(bundledSkillsRoot).toBe(path.resolve(import.meta.dir, "../../skills"));
+    expect(bundledSkillPaths()).toEqual(
+      bundledSkillNames.map((name) => path.join(bundledSkillsRoot, name)),
+    );
+    expect(bundledSkillsRoot).toBe(
+      path.resolve(import.meta.dir, "../../skills"),
+    );
   });
 
   test("keeps bundled skills when explicit additional skills are supplied", () => {
     const additional = path.resolve("custom-skills/project-specific");
-    expect(agentSkillPaths([additional])).toEqual([...bundledSkillPaths(), additional]);
+    expect(agentSkillPaths([additional])).toEqual([
+      ...bundledSkillPaths(),
+      additional,
+    ]);
   });
 
   test("includes skills in the published package manifest", async () => {
-    const packageJson = JSON.parse(await readFile(path.resolve(import.meta.dir, "../../package.json"), "utf8")) as {
+    const packageJson = JSON.parse(
+      await readFile(
+        path.resolve(import.meta.dir, "../../package.json"),
+        "utf8",
+      ),
+    ) as {
       files?: string[];
     };
     expect(packageJson.files).toContain("skills");

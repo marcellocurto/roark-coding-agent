@@ -71,17 +71,17 @@ PR revisions use the same filenames in their revision directory.
 
 ## Example commands
 
-| Stack | Example |
-| --- | --- |
-| Bun | `{ "verify": "bun run check" }` |
-| Bun tests only | `{ "verify": "bun test" }` |
-| npm | `{ "verify": "npm test" }` |
-| pnpm | `{ "verify": "pnpm test" }` |
-| Makefile | `{ "verify": "make test" }` |
-| Python | `{ "verify": "pytest" }` |
-| Go | `{ "verify": "go test ./..." }` |
-| Rust | `{ "verify": "cargo test" }` |
-| TypeScript | `{ "verify": "npx tsc --noEmit" }` |
+| Stack          | Example                            |
+| -------------- | ---------------------------------- |
+| Bun            | `{ "verify": "bun run check" }`    |
+| Bun tests only | `{ "verify": "bun test" }`         |
+| npm            | `{ "verify": "npm test" }`         |
+| pnpm           | `{ "verify": "pnpm test" }`        |
+| Makefile       | `{ "verify": "make test" }`        |
+| Python         | `{ "verify": "pytest" }`           |
+| Go             | `{ "verify": "go test ./..." }`    |
+| Rust           | `{ "verify": "cargo test" }`       |
+| TypeScript     | `{ "verify": "npx tsc --noEmit" }` |
 
 Choose a deterministic, non-interactive command that finishes quickly. A repository check is usually more useful here than a full deployment pipeline.
 

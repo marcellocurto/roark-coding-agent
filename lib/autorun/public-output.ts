@@ -2,7 +2,10 @@ const redactedLocalPath = "[local path redacted]";
 const redactedSecret = "[redacted]";
 const fileUriPrefix = "file://";
 
-export function sanitizePublicMarkdown(value: string, options: { localRoots?: readonly string[] | undefined } = {}): string {
+export function sanitizePublicMarkdown(
+  value: string,
+  options: { localRoots?: readonly string[] | undefined } = {},
+): string {
   return redactSecrets(redactLocalPaths(value, options.localRoots));
 }
 
@@ -10,14 +13,41 @@ export function redactSecrets(value: string): string {
   const secretValuePattern = `(?:"[^"\\r\\n]*(?:"|(?=\\r?\\n|$))|'[^'\\r\\n]*(?:'|(?=\\r?\\n|$))|[^\\s\`'"<>]+)`;
   const secretNamePattern = `[A-Z0-9_]*(?:TOKEN|SECRET|API[_-]?KEY|PASSWORD)[A-Z0-9_]*`;
   return value
-    .replace(new RegExp(`\\b(authorization\\s*:\\s*bearer\\s+)${secretValuePattern}`, "gi"), `$1${redactedSecret}`)
-    .replace(new RegExp(`\\b((${secretNamePattern})\\s*=\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`)
-    .replace(new RegExp(`\\b((${secretNamePattern})\\s*:\\s*)${secretValuePattern}`, "gi"), `$1${redactedSecret}`);
+    .replace(
+      new RegExp(
+        `\\b(authorization\\s*:\\s*bearer\\s+)${secretValuePattern}`,
+        "gi",
+      ),
+      `$1${redactedSecret}`,
+    )
+    .replace(
+      new RegExp(
+        `\\b((${secretNamePattern})\\s*=\\s*)${secretValuePattern}`,
+        "gi",
+      ),
+      `$1${redactedSecret}`,
+    )
+    .replace(
+      new RegExp(
+        `\\b((${secretNamePattern})\\s*:\\s*)${secretValuePattern}`,
+        "gi",
+      ),
+      `$1${redactedSecret}`,
+    );
 }
 
-export function redactLocalPaths(value: string, localRoots: readonly string[] = []): string {
+export function redactLocalPaths(
+  value: string,
+  localRoots: readonly string[] = [],
+): string {
   let source = value;
-  for (const root of [...new Set(localRoots.map((entry) => entry.replace(/[\\/]+$/, "")).filter((entry) => entry.length > 1))].toSorted((a, b) => b.length - a.length)) {
+  for (const root of [
+    ...new Set(
+      localRoots
+        .map((entry) => entry.replace(/[\\/]+$/, ""))
+        .filter((entry) => entry.length > 1),
+    ),
+  ].toSorted((a, b) => b.length - a.length)) {
     source = source.replaceAll(root, redactedLocalPath);
   }
   let result = "";
@@ -41,7 +71,10 @@ export function redactLocalPaths(value: string, localRoots: readonly string[] = 
 function localPathEnd(value: string, index: number): number | undefined {
   if (!isPathBoundary(value[index - 1])) return undefined;
 
-  if (value.slice(index, index + fileUriPrefix.length).toLowerCase() === fileUriPrefix) {
+  if (
+    value.slice(index, index + fileUriPrefix.length).toLowerCase() ===
+    fileUriPrefix
+  ) {
     const pathStart = index + fileUriPrefix.length;
     const end = scanPathEnd(value, pathStart);
     const path = value.slice(pathStart, end);
@@ -49,7 +82,12 @@ function localPathEnd(value: string, index: number): number | undefined {
   }
 
   if (isWindowsPathStart(value, index)) return scanPathEnd(value, index);
-  if (value[index] === "/" && value[index + 1] !== "/" && isLikelyLocalPathPrefix(value.slice(index))) return scanPathEnd(value, index);
+  if (
+    value[index] === "/" &&
+    value[index + 1] !== "/" &&
+    isLikelyLocalPathPrefix(value.slice(index))
+  )
+    return scanPathEnd(value, index);
 
   return undefined;
 }
@@ -60,14 +98,19 @@ function scanPathEnd(value: string, start: number): number {
   while (index < value.length) {
     const char = value[index] ?? "";
     if (isPathTerminator(char)) break;
-    if (/\s/.test(char) && !continuesPathAfterWhitespace(value, start, index)) break;
+    if (/\s/.test(char) && !continuesPathAfterWhitespace(value, start, index))
+      break;
     index += 1;
   }
 
   return index;
 }
 
-function continuesPathAfterWhitespace(value: string, pathStart: number, whitespaceIndex: number): boolean {
+function continuesPathAfterWhitespace(
+  value: string,
+  pathStart: number,
+  whitespaceIndex: number,
+): boolean {
   if (value[whitespaceIndex] !== " ") return false;
 
   let nextIndex = whitespaceIndex;
@@ -96,20 +139,32 @@ function scanPathTokenEnd(value: string, start: number): number {
 }
 
 function isLikelyLocalPathPrefix(value: string): boolean {
-  return /^\/(?:Users|home|tmp|var|private|opt)(?:\/|$)/i.test(value) || /^[A-Za-z]:[\\/]/.test(value);
+  return (
+    /^\/(?:Users|home|tmp|var|private|opt)(?:\/|$)/i.test(value) ||
+    /^[A-Za-z]:[\\/]/.test(value)
+  );
 }
 
 function isSentenceBoundaryToken(value: string): boolean {
-  return /^(?:after|and|at|before|because|but|exit|exited|failed|failure|fails|for|from|in|on|or|then|to|when|while|with)$/i.test(value);
+  return /^(?:after|and|at|before|because|but|exit|exited|failed|failure|fails|for|from|in|on|or|then|to|when|while|with)$/i.test(
+    value,
+  );
 }
 
 function isWindowsPathStart(value: string, index: number): boolean {
   const first = value[index] ?? "";
-  return /^[A-Za-z]$/.test(first) && value[index + 1] === ":" && /[\\/]/.test(value[index + 2] ?? "");
+  return (
+    /^[A-Za-z]$/.test(first) &&
+    value[index + 1] === ":" &&
+    /[\\/]/.test(value[index + 2] ?? "")
+  );
 }
 
 function isPathBoundary(char: string | undefined): boolean {
-  return char === undefined || (char !== "/" && char !== "\\" && /[^A-Za-z0-9_]/.test(char));
+  return (
+    char === undefined ||
+    (char !== "/" && char !== "\\" && /[^A-Za-z0-9_]/.test(char))
+  );
 }
 
 function isPathTerminator(char: string): boolean {

@@ -32,10 +32,14 @@ Do not return Markdown or prose after calling submit_revision_plan.
 </pr_revision_planning>`;
 }
 
-export function revisionImplementationPrompt(context: PrRevisionContext, pass: number): string {
-  const priorReviewInput = pass > 0
-    ? `For fix pass ${pass}, inspect ${context.agentRevisionDirRelative}/${priorRevisionReviewArtifact(pass)} as the canonical review input, and ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.`
-    : "";
+export function revisionImplementationPrompt(
+  context: PrRevisionContext,
+  pass: number,
+): string {
+  const priorReviewInput =
+    pass > 0
+      ? `For fix pass ${pass}, inspect ${context.agentRevisionDirRelative}/${priorRevisionReviewArtifact(pass)} as the canonical review input, and ${context.agentRevisionDirRelative}/verification-before-fix-${pass}.md if that artifact exists.`
+      : "";
   return `<pr_revision_implementation>
 You are implementing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` fix pass ${pass}` : ""}.
 Use ${context.agentRevisionDirRelative}/revision-plan.json as the canonical revision plan.
@@ -57,12 +61,19 @@ The tool schema is authoritative. Do not return Markdown or prose after calling 
 }
 
 function priorRevisionReviewArtifact(fixPass: number): string {
-  return fixPass === 1 ? "revision-review.json" : `revision-review-pass-${fixPass - 1}.json`;
+  return fixPass === 1
+    ? "revision-review.json"
+    : `revision-review-pass-${fixPass - 1}.json`;
 }
 
-export function revisionReviewPrompt(context: PrRevisionContext, pass: number): string {
-  const executionArtifact = pass === 0 ? "revision-log.json" : `revision-log-fix-pass-${pass}.json`;
-  const priorReviewArtifact = pass === 0 ? undefined : priorRevisionReviewArtifact(pass);
+export function revisionReviewPrompt(
+  context: PrRevisionContext,
+  pass: number,
+): string {
+  const executionArtifact =
+    pass === 0 ? "revision-log.json" : `revision-log-fix-pass-${pass}.json`;
+  const priorReviewArtifact =
+    pass === 0 ? undefined : priorRevisionReviewArtifact(pass);
   return `<pr_revision_review>
 You are reviewing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` after fix pass ${pass}` : ""}.
 Review the current working tree diff and artifacts in ${context.agentRevisionDirRelative}.

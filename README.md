@@ -62,19 +62,19 @@ The [Quickstart](docs/quickstart.md) covers repository setup, labels, verificati
 
 Run `roark` without arguments to open an interactive menu.
 
-| Command | What it does |
-| --- | --- |
-| `roark init` | Create `.roark/config.json` in the current repository. |
-| `roark do 123 --repo owner/repo` | Work on issue 123 in the current checkout without publishing. |
-| `roark auto --repo owner/repo` | Claim and run the next eligible issue. |
-| `roark auto 123 --repo owner/repo` | Run a specific issue with autorun's labels and publishing behavior. |
-| `roark auto --repo owner/repo --dry-run` | Show eligible issues without claiming or running them. |
-| `roark continue 123 --repo owner/repo` | Resume a stopped autorun attempt. |
-| `roark review-pr 456 --repo owner/repo` | Post separate correctness and maintainability reviews on a PR. |
-| `roark revise-pr 456 --repo owner/repo` | Apply required PR feedback, verify the changes, and push one revision commit. |
-| `roark status 123 --repo owner/repo` | Show the saved status for an issue run. |
-| `roark remove` | List and remove managed workspaces. |
-| `roark --help` | List all commands and options. |
+| Command                                  | What it does                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `roark init`                             | Create `.roark/config.json` in the current repository.                        |
+| `roark do 123 --repo owner/repo`         | Work on issue 123 in the current checkout without publishing.                 |
+| `roark auto --repo owner/repo`           | Claim and run the next eligible issue.                                        |
+| `roark auto 123 --repo owner/repo`       | Run a specific issue with autorun's labels and publishing behavior.           |
+| `roark auto --repo owner/repo --dry-run` | Show eligible issues without claiming or running them.                        |
+| `roark continue 123 --repo owner/repo`   | Resume a stopped autorun attempt.                                             |
+| `roark review-pr 456 --repo owner/repo`  | Post separate correctness and maintainability reviews on a PR.                |
+| `roark revise-pr 456 --repo owner/repo`  | Apply required PR feedback, verify the changes, and push one revision commit. |
+| `roark status 123 --repo owner/repo`     | Show the saved status for an issue run.                                       |
+| `roark remove`                           | List and remove managed workspaces.                                           |
+| `roark --help`                           | List all commands and options.                                                |
 
 See [Usage](docs/usage.md) and the [CLI reference](docs/cli-reference.md) for flags and detailed behavior.
 
