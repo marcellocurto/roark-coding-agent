@@ -1,25 +1,23 @@
 #!/usr/bin/env bun
+import * as nativeWorkspace from "./lib/autorun/workspace.ts";
+import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
+import { runAutoContinue } from "./lib/autorun/continue.ts";
+import { runPrReview } from "./lib/pr-review/workflow.ts";
+import * as nativePhases from "./lib/workflow/phases.ts";
 import {
   CommandExecution,
   ExitNotifications,
   Presentation,
 } from "./lib/runtime/services.ts";
-import type { ApplicationExecution } from "./lib/runtime/application.ts";
-import * as BunRuntime from "@effect/platform-bun/BunRuntime";
-import * as BunServices from "@effect/platform-bun/BunServices";
-import { Effect, Layer } from "effect";
 import {
+  type ApplicationExecution,
   applicationServicesLayer,
   fromLegacyPromise,
   runApplicationPromise,
 } from "./lib/runtime/application.ts";
-import { runAutoContinuePromise } from "./lib/autorun/continue-promise.ts";
-import { runAutoDiscoveryPromise } from "./lib/autorun/discovery-promise.ts";
-import {
-  listManagedWorkspacesPromise as listManagedWorkspaces,
-  runRemoveCommandPromise as runRemoveCommand,
-  runWorkspaceCommandPromise as runWorkspaceCommand,
-} from "./lib/autorun/workspace-promise.ts";
+import * as BunRuntime from "@effect/platform-bun/BunRuntime";
+import * as BunServices from "@effect/platform-bun/BunServices";
+import { Effect, Layer } from "effect";
 import { isLongRunningCommand, parseArgs, usage } from "./lib/cli/args.ts";
 import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
@@ -27,22 +25,16 @@ import {
   resolveInteractiveArgv,
   resolveInteractiveWorkspaceRemoval,
 } from "./lib/cli/interactive.ts";
-import { runPrRevisionPromise } from "./lib/pr-revision/workflow.ts";
-import { runPrReviewPromise } from "./lib/pr-review/workflow-promise.ts";
+import { runPrRevision } from "./lib/pr-revision/workflow.ts";
 import {
   formatDoLocalModeStartMessage,
   printDoLocalModeReadyMessageIfReady,
 } from "./lib/cli/local-mode.ts";
 import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
-import {
-  runFullWorkflowPromise as runFullWorkflow,
-  runSinglePhasePromise as runSinglePhase,
-} from "./lib/workflow/phases-promise.ts";
 import { presenter, presentationLayer } from "./lib/presentation/presenter.ts";
-import type { AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
+import { type AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
 import { displayArgvTarget, displayCommandTarget } from "./lib/cli/target.ts";
-
 export async function main(
   argv = Bun.argv.slice(2),
   application?: ApplicationExecution,
@@ -52,26 +44,24 @@ export async function main(
       fromLegacyPromise((application) => main(argv, application)),
       application,
     );
-
   const cliArgv =
     argv.length === 0
       ? await resolveInteractiveArgv({ signal: application.signal })
       : argv;
   if (!cliArgv) return;
-
   if (isVersionArgv(cliArgv)) {
     console.log(await readPackageVersion());
     return;
   }
-
   const rawParsed = parseArgs(cliArgv);
   if ("help" in rawParsed) {
     console.log(usage);
     return;
   }
-
-  const parsed = await hydrateCliOptions(rawParsed, undefined, application);
-
+  const parsed = await runApplicationPromise(
+    hydrateCliOptions(rawParsed),
+    application,
+  );
   if (isLongRunningCommand(parsed.command)) {
     presenter(application).setRoots([parsed.cwd]);
     presenter(application).run({
@@ -80,17 +70,18 @@ export async function main(
       target: displayCommandTarget(parsed),
     });
   }
-
   if (parsed.command === "init") {
-    const result = await runInit(parsed, undefined, application);
+    const result = await runApplicationPromise(runInit(parsed), application);
     console.log(`Initialized Roark in ${result.root}`);
     for (const file of result.files) console.log(`- ${file}`);
     for (const line of result.guidance) console.log(line);
     return;
   }
-
   if (parsed.command === "auto") {
-    const result = await runAutoDiscoveryPromise(parsed, application);
+    const result = await runApplicationPromise(
+      runAutoDiscovery(parsed),
+      application,
+    );
     if (result.kind === "dry-run")
       presenter(application).outcome(
         "SUCCESS",
@@ -114,17 +105,18 @@ export async function main(
         presentAutorunOutcome(attempt, application);
     return;
   }
-
   if (parsed.command === "continue") {
     presentAutorunOutcome(
-      await runAutoContinuePromise(parsed, application),
+      await runApplicationPromise(runAutoContinue(parsed), application),
       application,
     );
     return;
   }
-
   if (parsed.command === "revise-pr") {
-    const result = await runPrRevisionPromise(parsed, undefined, application);
+    const result = await runApplicationPromise(
+      runPrRevision(parsed),
+      application,
+    );
     presenter(application).outcome(
       outcomeStatus(result.outcome),
       `PR #${parsed.prNumber}`,
@@ -133,9 +125,11 @@ export async function main(
     presenter(application).artifact(result.context.revisionDirRelative);
     return;
   }
-
   if (parsed.command === "review-pr") {
-    const result = await runPrReviewPromise(parsed, application);
+    const result = await runApplicationPromise(
+      runPrReview(parsed),
+      application,
+    );
     presenter(application).outcome(
       result.outcome === "blocked" ? "BLOCKED" : "SUCCESS",
       `PR #${parsed.prNumber}`,
@@ -144,28 +138,32 @@ export async function main(
     presenter(application).artifact(result.context.reviewDirRelative);
     return;
   }
-
   if (parsed.command === "status") {
     console.log(await renderStatus(parsed));
     return;
   }
-
   if (parsed.command === "workspace") {
-    await runWorkspaceCommand(parsed, application);
+    await runApplicationPromise(
+      nativeWorkspace.runWorkspaceCommand(parsed),
+      application,
+    );
     return;
   }
-
   if (parsed.command === "remove") {
     if (parsed.targets.length > 0) {
-      await runRemoveCommand(parsed, application);
+      await runApplicationPromise(
+        nativeWorkspace.runRemoveCommand(parsed),
+        application,
+      );
       return;
     }
-
-    const managedWorkspaces = await listManagedWorkspaces({
-      workspace: parsed.workspace,
-      repo: parsed.repo,
-      cwd: parsed.cwd,
-    });
+    const managedWorkspaces = await runApplicationPromise(
+      nativeWorkspace.listManagedWorkspaces({
+        workspace: parsed.workspace,
+        repo: parsed.repo,
+        cwd: parsed.cwd,
+      }),
+    );
     if (managedWorkspaces.length === 0) {
       console.log("No managed workspaces found.");
       return;
@@ -185,27 +183,25 @@ export async function main(
         );
       return managedWorkspace.target;
     });
-    await runRemoveCommand({ ...parsed, targets }, application);
+    await runApplicationPromise(
+      nativeWorkspace.runRemoveCommand({ ...parsed, targets }),
+      application,
+    );
     return;
   }
-
   const context = createWorkflowContext(parsed);
   presenter(application).line(`Run directory: ${context.runDirRelative}`);
-
   if (parsed.command === "do") {
     for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n"))
       presenter(application).line(line);
-    const result = await runFullWorkflow(
-      context,
-      undefined,
-      undefined,
+    const result = await runApplicationPromise(
+      nativePhases.runFullWorkflow(context, {}),
       application,
     );
-    await printDoLocalModeReadyMessageIfReady(
-      context,
-      (message) => {
+    await runApplicationPromise(
+      printDoLocalModeReadyMessageIfReady(context, (message) => {
         presenter(application).line(message);
-      },
+      }),
       application,
     );
     presenter(application).outcome(
@@ -214,17 +210,18 @@ export async function main(
       result.status,
     );
   } else {
-    await runSinglePhase(context, parsed.command, undefined, application);
+    await runApplicationPromise(
+      nativePhases.runSinglePhase(context, parsed.command),
+      application,
+    );
     presenter(application).outcome(
       "SUCCESS",
       `#${context.issueNumber}`,
       `${parsed.command} complete`,
     );
   }
-
   presenter(application).artifact(context.runDirRelative);
 }
-
 export function presentAutorunOutcome(
   result: AutorunAttemptResult,
   application: ApplicationExecution,
@@ -241,7 +238,6 @@ export function presentAutorunOutcome(
     result.outcomeDetail ?? result.outcome,
   );
 }
-
 export function workflowOutcomeStatus(
   status:
     | "completed"
@@ -253,7 +249,6 @@ export function workflowOutcomeStatus(
   if (status === "review-blocked") return "BLOCKED";
   return "STOPPED";
 }
-
 function outcomeStatus(
   outcome: string,
 ): "SUCCESS" | "FAILED" | "BLOCKED" | "STOPPED" {
@@ -267,20 +262,19 @@ function outcomeStatus(
     return "BLOCKED";
   return "FAILED";
 }
-
 function isVersionArgv(argv: string[]): boolean {
   return argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v");
 }
-
 async function readPackageVersion(): Promise<string> {
   const packageJson = (await Bun.file(
     new URL("./package.json", import.meta.url),
-  ).json()) as { version?: unknown };
+  ).json()) as {
+    version?: unknown;
+  };
   if (typeof packageJson.version !== "string")
     throw new Error("package.json is missing a string version.");
   return packageJson.version;
 }
-
 const commandExecutionLayer = Layer.succeed(
   CommandExecution,
   CommandExecution.of({
@@ -288,7 +282,6 @@ const commandExecutionLayer = Layer.succeed(
       fromLegacyPromise((application) => main(argv, application)),
   }),
 );
-
 export const cliLayer = (argv: string[]) =>
   Layer.mergeAll(applicationServicesLayer, commandExecutionLayer).pipe(
     Layer.provideMerge(
@@ -301,7 +294,6 @@ export const cliLayer = (argv: string[]) =>
       ),
     ),
   );
-
 export const runCli = Effect.fn("runCli")(function* (
   argv: string[] = Bun.argv.slice(2),
 ) {
@@ -337,7 +329,6 @@ export const runCli = Effect.fn("runCli")(function* (
   );
   return exitCode;
 });
-
 export function runCliPromise(
   argv = Bun.argv.slice(2),
   application?: ApplicationExecution,
@@ -349,7 +340,6 @@ export function runCliPromise(
     );
   return Effect.runPromise(runCli(argv).pipe(Effect.provide(cliLayer(argv))));
 }
-
 if (import.meta.main) {
   const argv = Bun.argv.slice(2);
   BunRuntime.runMain(

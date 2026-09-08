@@ -1,24 +1,22 @@
-import { runApplicationPromise } from "../runtime/application.ts";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import {
+  writeArtifact,
+  writeJsonArtifact,
   createWorkflowContext,
   fixLogRef,
   refinementLogRef,
   reviewARef,
   reviewBRef,
 } from "../workflow/artifacts.ts";
-import {
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
 import { planContinuation } from "./continue-plan.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import type {
-  ReviewConcernClassification,
-  ReviewFinding,
+import {
+  type ReviewConcernClassification,
+  type ReviewFinding,
 } from "../review/result.ts";
 import {
   implementationPlanResult,
@@ -49,20 +47,30 @@ describe("planContinuation", () => {
   test("ignores review Markdown artifacts from earlier runs", async () => {
     const context = await tempContext();
     await writeReadyThroughPlan(context, "yes");
-    await writeArtifact(
-      context,
-      "preImplementationBaseline",
-      JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "preImplementationBaseline",
+        JSON.stringify({
+          head: "abc",
+          capturedAt: "now",
+          excludes: [".roark"],
+        }),
+      ),
     );
-    await writeArtifact(
-      context,
-      "implementationLog",
-      JSON.stringify(changeReport()),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "implementationLog",
+        JSON.stringify(changeReport()),
+      ),
     );
-    await writeArtifact(
-      context,
-      refinementLogRef(0),
-      JSON.stringify(changeReport({ summary: "Refined." })),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        refinementLogRef(0),
+        JSON.stringify(changeReport({ summary: "Refined." })),
+      ),
     );
     await Bun.write(
       path.join(context.runDir, "review-a-0.md"),
@@ -91,7 +99,7 @@ describe("planContinuation", () => {
   test("reruns only invalid latest Review B before readiness and publish gate", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context);
-    await writeArtifact(context, reviewBRef(0), "");
+    await runApplicationPromise(writeArtifact(context, reviewBRef(0), ""));
     const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       { type: "run", phase: "review-b", pass: 0, reason: "artifact is empty" },
@@ -101,11 +109,15 @@ describe("planContinuation", () => {
   });
   test("treats non-proceed triage as terminal", async () => {
     const context = await tempContext();
-    await writeArtifact(context, "issue", issueArtifact());
-    await writeJsonArtifact(
-      context,
-      "triage",
-      triageResult("needs-human-decision"),
+    await runApplicationPromise(
+      writeArtifact(context, "issue", issueArtifact()),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "triage",
+        triageResult("needs-human-decision"),
+      ),
     );
     const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
@@ -138,10 +150,12 @@ describe("planContinuation", () => {
   test("continues from a missing refinement after an existing fix pass", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required");
-    await writeArtifact(
-      context,
-      fixLogRef(1),
-      JSON.stringify(changeReport({ summary: "Fixed." })),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        fixLogRef(1),
+        JSON.stringify(changeReport({ summary: "Fixed." })),
+      ),
     );
     const steps = await runApplicationPromise(planContinuation(context));
     expect(steps[0]).toEqual({
@@ -154,18 +168,26 @@ describe("planContinuation", () => {
   test("writes readiness and runs the gate when latest review cycle is approved", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context, "fixes-required");
-    await writeArtifact(
-      context,
-      fixLogRef(1),
-      JSON.stringify(changeReport({ summary: "Fixed." })),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        fixLogRef(1),
+        JSON.stringify(changeReport({ summary: "Fixed." })),
+      ),
     );
-    await writeArtifact(
-      context,
-      refinementLogRef(1),
-      JSON.stringify(changeReport({ summary: "Refined." })),
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        refinementLogRef(1),
+        JSON.stringify(changeReport({ summary: "Refined." })),
+      ),
     );
-    await writeArtifact(context, reviewARef(1), JSON.stringify(reviewResult()));
-    await writeArtifact(context, reviewBRef(1), JSON.stringify(reviewResult()));
+    await runApplicationPromise(
+      writeArtifact(context, reviewARef(1), JSON.stringify(reviewResult())),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewBRef(1), JSON.stringify(reviewResult())),
+    );
     const steps = await runApplicationPromise(planContinuation(context));
     expect(steps).toEqual([
       {
@@ -213,15 +235,15 @@ describe("planContinuation", () => {
     const context = await tempContext();
     context.maxFixPasses = 2;
     await writeHappyPathThroughReviews(context);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
-    await writeArtifact(
-      context,
-      "verification",
-      "# Verification\n\n## Exit Code\n1\n",
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "verification",
+        "# Verification\n\n## Exit Code\n1\n",
+      ),
     );
     const steps = await runApplicationPromise(
       planContinuation(context, {
@@ -267,10 +289,12 @@ describe("planContinuation", () => {
     const context = await tempContext();
     context.maxFixPasses = 2;
     await writeHappyPathThroughReviews(context);
-    await writeArtifact(
-      context,
-      "verification",
-      "# Verification\n\n## Command\n`bun run typecheck`\n\n## Exit Code\n127\n\n## Stdout (tail)\n```\n\n```\n\n## Stderr (tail)\n```\n/bin/bash: tsc: command not found\n```\n",
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "verification",
+        "# Verification\n\n## Command\n`bun run typecheck`\n\n## Exit Code\n127\n\n## Stdout (tail)\n```\n\n```\n\n## Stderr (tail)\n```\n/bin/bash: tsc: command not found\n```\n",
+      ),
     );
     const steps = await runApplicationPromise(
       planContinuation(context, {
@@ -290,17 +314,23 @@ async function writeReadyThroughPlan(
   context: Awaited<ReturnType<typeof tempContext>>,
   ready: "yes" | "no",
 ) {
-  await writeArtifact(context, "issue", issueArtifact());
-  await writeJsonArtifact(context, "triage", triageResult());
-  await writeJsonArtifact(
-    context,
-    "implementationPlanDraft",
-    implementationPlanResult(),
+  await runApplicationPromise(writeArtifact(context, "issue", issueArtifact()));
+  await runApplicationPromise(
+    writeJsonArtifact(context, "triage", triageResult()),
   );
-  await writeJsonArtifact(
-    context,
-    "implementationPlan",
-    implementationPlanResult(ready === "yes"),
+  await runApplicationPromise(
+    writeJsonArtifact(
+      context,
+      "implementationPlanDraft",
+      implementationPlanResult(),
+    ),
+  );
+  await runApplicationPromise(
+    writeJsonArtifact(
+      context,
+      "implementationPlan",
+      implementationPlanResult(ready === "yes"),
+    ),
   );
 }
 async function writeHappyPathThroughReviews(
@@ -309,31 +339,37 @@ async function writeHappyPathThroughReviews(
   reviewAContent?: string,
 ) {
   await writeReadyThroughPlan(context, "yes");
-  await writeArtifact(
-    context,
-    "preImplementationBaseline",
-    JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "preImplementationBaseline",
+      JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+    ),
   );
-  await writeArtifact(
-    context,
-    "implementationLog",
-    JSON.stringify(changeReport()),
+  await runApplicationPromise(
+    writeArtifact(context, "implementationLog", JSON.stringify(changeReport())),
   );
-  await writeArtifact(
-    context,
-    refinementLogRef(0),
-    JSON.stringify(changeReport({ summary: "Refined." })),
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      refinementLogRef(0),
+      JSON.stringify(changeReport({ summary: "Refined." })),
+    ),
   );
   const findings =
     reviewVerdict === "fixes-required"
       ? [finding("Required fix", "must-fix-current")]
       : [];
-  await writeArtifact(
-    context,
-    reviewARef(0),
-    reviewAContent ?? reviewResultJson(findings),
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      reviewARef(0),
+      reviewAContent ?? reviewResultJson(findings),
+    ),
   );
-  await writeArtifact(context, reviewBRef(0), reviewResultJson(findings));
+  await runApplicationPromise(
+    writeArtifact(context, reviewBRef(0), reviewResultJson(findings)),
+  );
 }
 function issueArtifact(): string {
   return '# GitHub Issue #11\n\n<github_issue_relationships source="gh">\n  <blocking_status active_blockers="0" total_blockers="0" />\n</github_issue_relationships>\n';

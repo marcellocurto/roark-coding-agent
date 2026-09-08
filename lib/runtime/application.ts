@@ -1,4 +1,8 @@
 import {
+  type RevisionReporting,
+  revisionReportingLayer,
+} from "../pr-revision/comments.ts";
+import {
   type Workspace,
   workspaceLayer,
 } from "../autorun/workspace-service.ts";
@@ -17,12 +21,12 @@ import {
 } from "../workflow/artifact-store.ts";
 import { agentExecutionLayer } from "../pi/agent.ts";
 import { type GitHub, gitHubLayer } from "../github/service.ts";
-import type {
-  Presentation,
-  AgentExecution,
-  RepositoryConfiguration,
-  Verification,
-  ExitNotifications,
+import {
+  type Presentation,
+  type AgentExecution,
+  type RepositoryConfiguration,
+  type Verification,
+  type ExitNotifications,
 } from "./services.ts";
 import { presentationLayer } from "../presentation/presenter.ts";
 import { repositoryConfigurationLayer } from "../cli/config.ts";
@@ -40,7 +44,6 @@ import {
   type Context,
   Scope,
 } from "effect";
-
 export const applicationServicesLayer = Layer.suspend(() =>
   Layer.mergeAll(
     exitNotificationsLayer.pipe(
@@ -48,6 +51,7 @@ export const applicationServicesLayer = Layer.suspend(() =>
     ),
     verificationLayer,
     workspaceLayer,
+    revisionReportingLayer.pipe(Layer.provide(gitHubLayer)),
     gitHubLayer,
     agentExecutionLayer,
     artifactStoreLayer,
@@ -73,8 +77,8 @@ export type ApplicationServices =
   | AttemptStore
   | RunObservation
   | IssuePublishing
-  | Workspace;
-
+  | Workspace
+  | RevisionReporting;
 // Only internal Promise hops use this carrier. A rejection value alone cannot
 // distinguish typed failure from defect, interruption, or combined failures.
 class EffectPromiseFailure extends Schema.TaggedError<EffectPromiseFailure>()(
@@ -92,14 +96,12 @@ class EffectPromiseFailure extends Schema.TaggedError<EffectPromiseFailure>()(
     );
   }
 }
-
 /** Explicit runtime boundary for callers that still return Promises. */
 export interface ApplicationExecution {
   readonly services: Context.Context<ApplicationServices>;
   readonly scope: Scope.Scope;
   readonly signal: AbortSignal;
 }
-
 export const fromLegacyPromise = Effect.fnUntraced(function* <A>(
   work: (application: ApplicationExecution) => Promise<A>,
 ): Effect.fn.Return<A, unknown, ApplicationServices | Scope.Scope> {
@@ -131,7 +133,6 @@ export const fromLegacyPromise = Effect.fnUntraced(function* <A>(
     );
   });
 }, Effect.scoped);
-
 export function runApplicationPromise<A, E>(
   effect: Effect.Effect<A, E, ApplicationServices>,
   application?: ApplicationExecution,
@@ -155,7 +156,6 @@ export function runApplicationPromise<A, E>(
     return exit.value;
   });
 }
-
 /** Inspect legacy diagnostics without discarding the carrier when rethrowing. */
 export function applicationFailureCause(error: unknown): Cause.Cause<unknown> {
   return error instanceof EffectPromiseFailure

@@ -1,15 +1,13 @@
+import { runProcess, ProcessExecutionError } from "../cli/process.ts";
 import { describe, expect, test } from "bun:test";
 import { Cause, Context, Deferred, Effect, Exit, PlatformError } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { ProcessExecutionError } from "../cli/process.ts";
-import { runProcessPromise } from "../cli/process-promise.ts";
 import {
   applicationLayer,
   fromLegacyPromise,
   runApplicationPromise,
   type ApplicationExecution,
 } from "./application.ts";
-
 describe("explicit application scope", () => {
   test("a Promise workflow uses its caller's process service", async () => {
     const failure = PlatformError.systemError({
@@ -20,7 +18,10 @@ describe("explicit application scope", () => {
     const spawner = ChildProcessSpawner.make(() => Effect.fail(failure));
     const exit = await Effect.runPromiseExit(
       fromLegacyPromise((application) =>
-        runProcessPromise(["unused"], { cwd: process.cwd() }, application),
+        runApplicationPromise(
+          runProcess(["unused"], { cwd: process.cwd() }),
+          application,
+        ),
       ).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provide(applicationLayer),
@@ -34,7 +35,6 @@ describe("explicit application scope", () => {
         expect(error.cause).toBe(failure);
     }
   });
-
   test("scope completion interrupts and joins a child even when its Promise was not awaited", async () => {
     const started = Deferred.makeUnsafe<undefined>();
     let released = false;
@@ -57,7 +57,6 @@ describe("explicit application scope", () => {
     );
     expect(released).toBe(true);
   });
-
   test("work cannot start through an execution value after its owner scope closes", async () => {
     let application: ApplicationExecution | undefined;
     await Effect.runPromise(
@@ -81,7 +80,6 @@ describe("explicit application scope", () => {
     expect(started).toBe(false);
   });
 });
-
 describe("Effect causes across Promise boundaries", () => {
   test("preserves defects across nested bridges and bypasses ordinary error recovery", async () => {
     const defect = new Error("unexpected defect");
@@ -107,7 +105,6 @@ describe("Effect causes across Promise boundaries", () => {
     expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
     if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(defect);
   });
-
   test("preserves combined reasons and their annotations", async () => {
     const phase = Context.Reference<string>("test/phase", {
       defaultValue: () => "",
@@ -128,7 +125,6 @@ describe("Effect causes across Promise boundaries", () => {
     if (Exit.isFailure(exit))
       expect(exit.cause.reasons).toEqual(original.reasons);
   });
-
   test("preserves interruption as interruption rather than an ordinary failure", async () => {
     const exit = await Effect.runPromiseExit(
       fromLegacyPromise((application) =>
@@ -144,7 +140,6 @@ describe("Effect causes across Promise boundaries", () => {
     if (Exit.isFailure(exit))
       expect(exit.cause.reasons).toEqual(Cause.interrupt(321).reasons);
   });
-
   test("retains both the operation failure and a finalizer defect", async () => {
     const failure = new Error("operation failure");
     const defect = new Error("finalizer defect");
@@ -167,7 +162,6 @@ describe("Effect causes across Promise boundaries", () => {
       expect(Cause.hasDies(bridged.cause)).toBe(true);
     }
   });
-
   test("preserves ordinary typed error identity through the round trip", async () => {
     const error = new ProcessExecutionError({
       args: ["test"],
@@ -184,7 +178,6 @@ describe("Effect causes across Promise boundaries", () => {
     ).catch((failure: unknown) => failure);
     expect(received).toBe(error);
   });
-
   test("keeps unrelated Promise rejections in the typed error channel", async () => {
     const error = new Error("foreign rejection", {
       cause: Cause.die("not a bridge carrier"),
@@ -199,7 +192,6 @@ describe("Effect causes across Promise boundaries", () => {
     if (Exit.isFailure(exit)) expect(Cause.squash(exit.cause)).toBe(error);
   });
 });
-
 test("interruption waits for the Promise cancellation acknowledgement after child cleanup", async () => {
   const started = Deferred.makeUnsafe<undefined>();
   const cleanupStarted = Deferred.makeUnsafe<undefined>();

@@ -1,4 +1,17 @@
-import { AgentExecutionError } from "./agent.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
+import { AgentExecution } from "../runtime/services.ts";
+import {
+  AgentExecutionError,
+  assertNoResourceLoadErrors,
+  assertRequestedSkillsLoaded,
+  buildRoarkResourceLoaderSecurityOptions,
+  createRoarkResourceLoader,
+  extractAgentErrorMessage,
+  requestedModelSpec,
+  resolveModel,
+  roarkPiSettings,
+  toolsForFileEditingMode,
+} from "./agent.ts";
 import { Deferred, Effect } from "effect";
 import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -17,23 +30,9 @@ import {
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
-import {
-  assertNoResourceLoadErrors,
-  assertRequestedSkillsLoaded,
-  buildRoarkResourceLoaderSecurityOptions,
-  createRoarkResourceLoader,
-  extractAgentErrorMessage,
-  requestedModelSpec,
-  resolveModel,
-  roarkPiSettings,
-  toolsForFileEditingMode,
-} from "./agent.ts";
-import { runAgentPromise } from "../workflow/agent-runner.ts";
 import { agentSkillPaths, bundledSkillNames } from "./bundled-skills.ts";
-
 const agentContextSentinel = "AGENT_CONTEXT_SENTINEL";
 const ancestorContextSentinel = "ANCESTOR_CONTEXT_SENTINEL";
-
 async function createPromptFixture() {
   const root = await mkdtemp(path.join(tmpdir(), "roark-prompt-test-"));
   const cwd = path.join(root, "project");
@@ -66,7 +65,6 @@ description: PROMPT_SKILL_SENTINEL
   );
   return { root, cwd, agentDir, skillPath };
 }
-
 async function createPromptTestSession(options: {
   cwd: string;
   agentDir: string;
@@ -91,7 +89,6 @@ async function createPromptTestSession(options: {
     [options.skillPath],
     loadedSkills.diagnostics,
   );
-
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
     modelsPath: null,
@@ -109,16 +106,13 @@ async function createPromptTestSession(options: {
   });
   return session;
 }
-
 function occurrenceCount(value: string, search: string): number {
   return value.split(search).length - 1;
 }
-
 describe("Pi agent settings", () => {
   test("forces SSE transport for automated Roark sessions", () => {
     expect(roarkPiSettings.transport).toBe("sse");
   });
-
   test("disables ambient skills, extensions, and prompt templates", () => {
     expect(buildRoarkResourceLoaderSecurityOptions()).toEqual({
       noExtensions: true,
@@ -127,7 +121,6 @@ describe("Pi agent settings", () => {
       additionalSkillPaths: [],
     });
   });
-
   test("shell inspection mode retains bash without dedicated file-editing tools", () => {
     expect(toolsForFileEditingMode(false)).toEqual([
       "read",
@@ -139,7 +132,6 @@ describe("Pi agent settings", () => {
     expect(toolsForFileEditingMode(false)).not.toContain("edit");
     expect(toolsForFileEditingMode(false)).not.toContain("write");
   });
-
   test("explicit skill paths do not re-enable ambient skill discovery", () => {
     expect(
       buildRoarkResourceLoaderSecurityOptions(["/repo/skills/example-skill"]),
@@ -150,7 +142,6 @@ describe("Pi agent settings", () => {
       additionalSkillPaths: ["/repo/skills/example-skill"],
     });
   });
-
   test("surfaces resource loading errors before an agent session starts", () => {
     expect(() => {
       assertNoResourceLoadErrors(
@@ -167,7 +158,6 @@ describe("Pi agent settings", () => {
       "Pi skill loading failed: error: missing skill (/repo/skills/example-skill)",
     );
   });
-
   test("fails before an agent session starts when a requested skill path did not load", () => {
     expect(() => {
       assertRequestedSkillsLoaded(
@@ -186,7 +176,6 @@ describe("Pi agent settings", () => {
       "requested skill path(s) did not load: /repo/skills/example-skill",
     );
   });
-
   test("accepts requested skill paths that loaded at least one skill", () => {
     expect(() => {
       assertRequestedSkillsLoaded(
@@ -204,7 +193,6 @@ describe("Pi agent settings", () => {
       );
     }).not.toThrow();
   });
-
   test("loads every bundled skill without enabling ambient discovery", async () => {
     const skillPaths = agentSkillPaths();
     const settingsManager = SettingsManager.inMemory(roarkPiSettings);
@@ -214,7 +202,6 @@ describe("Pi agent settings", () => {
       settingsManager,
       ...buildRoarkResourceLoaderSecurityOptions(skillPaths),
     });
-
     await loader.reload();
     const loaded = loader.getSkills();
     assertNoResourceLoadErrors(loaded.diagnostics, "skill");
@@ -224,7 +211,6 @@ describe("Pi agent settings", () => {
     );
   });
 });
-
 describe("Roark effective system prompt", () => {
   test("uses the isolated production loader for read, write, and publishing sessions", async () => {
     const fixture = await createPromptFixture();
@@ -237,7 +223,6 @@ describe("Roark effective system prompt", () => {
         fileEditingToolsEnabled: false,
       },
     ];
-
     try {
       for (const sessionCase of sessionCases) {
         const session = await createPromptTestSession({
@@ -250,7 +235,6 @@ describe("Roark effective system prompt", () => {
         const readTool = session.agent.state.tools.find(
           (tool) => tool.name === "read",
         );
-
         expect(prompt.startsWith(sessionCase.systemPrompt)).toBe(true);
         expect(occurrenceCount(prompt, sessionCase.systemPrompt)).toBe(1);
         expect(prompt).toContain("PROJECT_CONTEXT_SENTINEL");
@@ -278,7 +262,6 @@ describe("Roark effective system prompt", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("excludes the agent-directory context when it is nested under the project", async () => {
     const fixture = await createPromptFixture();
     const nestedAgentDir = path.join(fixture.cwd, ".pi-agent");
@@ -297,7 +280,6 @@ describe("Roark effective system prompt", () => {
         systemPrompt: sharedSystemPrompt,
         fileEditingToolsEnabled: false,
       });
-
       expect(session.agent.state.systemPrompt).toContain(
         "PROJECT_CONTEXT_SENTINEL",
       );
@@ -309,7 +291,6 @@ describe("Roark effective system prompt", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("does not read project SYSTEM.md and APPEND_SYSTEM.md", async () => {
     const fixture = await createPromptFixture();
     const errorSpy = spyOn(console, "error").mockImplementation(
@@ -328,7 +309,6 @@ describe("Roark effective system prompt", () => {
         systemPrompt: sharedSystemPrompt,
         fileEditingToolsEnabled: false,
       });
-
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
@@ -336,7 +316,6 @@ describe("Roark effective system prompt", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-
   test("does not read agent-directory SYSTEM.md and APPEND_SYSTEM.md", async () => {
     const fixture = await createPromptFixture();
     const errorSpy = spyOn(console, "error").mockImplementation(
@@ -353,7 +332,6 @@ describe("Roark effective system prompt", () => {
         systemPrompt: sharedSystemPrompt,
         fileEditingToolsEnabled: false,
       });
-
       expect(errorSpy).not.toHaveBeenCalled();
     } finally {
       errorSpy.mockRestore();
@@ -362,7 +340,6 @@ describe("Roark effective system prompt", () => {
     }
   });
 });
-
 describe("Pi custom tool boundary", () => {
   test("passes custom tools to the production session factory", async () => {
     const stop = new Error("stop after session options are captured");
@@ -371,32 +348,34 @@ describe("Pi custom tool boundary", () => {
       "createAgentSession",
     ).mockRejectedValue(stop);
     const submitReview = { name: "submit_review" } as never;
-
     try {
       let thrown: unknown;
       try {
-        await runAgentPromise({
-          cwd: import.meta.dir,
-          thinkingLevel: "minimal",
-          systemPrompt: "Review the change.",
-          prompt: "Inspect the diff.",
-          fileEditingToolsEnabled: false,
-          customTools: [submitReview],
-          display: {
-            command: "review-pr",
-            target: "PR #1",
-            phaseId: "pr-review-a",
-            phaseLabel: "PR review A",
-            operation: "review",
-          },
-        });
+        await runApplicationPromise(
+          Effect.flatMap(AgentExecution, (agent) =>
+            agent.run({
+              cwd: import.meta.dir,
+              thinkingLevel: "minimal",
+              systemPrompt: "Review the change.",
+              prompt: "Inspect the diff.",
+              fileEditingToolsEnabled: false,
+              customTools: [submitReview],
+              display: {
+                command: "review-pr",
+                target: "PR #1",
+                phaseId: "pr-review-a",
+                phaseLabel: "PR review A",
+                operation: "review",
+              },
+            }),
+          ),
+        );
       } catch (error) {
         thrown = error;
       }
       expect(thrown).toBeInstanceOf(AgentExecutionError);
       if (thrown instanceof AgentExecutionError)
         expect(thrown.cause).toBe(stop);
-
       const options = createSession.mock.calls[0]?.[0];
       expect(options?.customTools).toEqual([submitReview]);
       expect(options?.tools).toContain("submit_review");
@@ -405,7 +384,6 @@ describe("Pi custom tool boundary", () => {
     }
   });
 });
-
 describe("Pi agent model selection", () => {
   test("defaults to the built-in GPT-6 Astra catalog entry", async () => {
     expect(requestedModelSpec()).toBe("openai-codex/gpt-6-astra");
@@ -416,7 +394,6 @@ describe("Pi agent model selection", () => {
     });
     expect(resolveModel(registry, requestedModelSpec()).id).toBe("gpt-6-astra");
   });
-
   test("fails clearly for an unavailable model", async () => {
     const registry = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
@@ -427,14 +404,12 @@ describe("Pi agent model selection", () => {
       resolveModel(registry, "openai-codex/not-a-real-model"),
     ).toThrow("Model not found");
   });
-
   test("still honors an explicit model override", () => {
     expect(requestedModelSpec("openrouter/deepseek/deepseek-v4-pro")).toBe(
       "openrouter/deepseek/deepseek-v4-pro",
     );
   });
 });
-
 describe("extractAgentErrorMessage", () => {
   test("surfaces provider errors instead of letting them become empty artifacts", () => {
     const error = extractAgentErrorMessage([
@@ -447,10 +422,8 @@ describe("extractAgentErrorMessage", () => {
         content: [],
       },
     ]);
-
     expect(error).toBe("anthropic/claude-opus-4-7 failed: quota exhausted");
   });
-
   test("returns undefined when the last assistant message did not error", () => {
     expect(
       extractAgentErrorMessage([
@@ -459,7 +432,6 @@ describe("extractAgentErrorMessage", () => {
     ).toBeUndefined();
   });
 });
-
 test("agent interruption waits for SDK abort and session disposal", async () => {
   const fixture = await createPromptFixture();
   const entered = Deferred.makeUnsafe<undefined>();
@@ -508,21 +480,23 @@ test("agent interruption waits for SDK abort and session disposal", async () => 
   let finished = false;
   const running = Effect.runPromiseExit(
     fromLegacyPromise((application) =>
-      runAgentPromise(
-        {
-          cwd: fixture.cwd,
-          thinkingLevel: "high",
-          systemPrompt: "Cancellation test",
-          prompt: "Test only",
-          fileEditingToolsEnabled: false,
-          display: {
-            command: "do",
-            target: "#1",
-            phaseId: "cancellation",
-            phaseLabel: "Cancellation",
-            operation: "inspect",
-          },
-        },
+      runApplicationPromise(
+        Effect.flatMap(AgentExecution, (agent) =>
+          agent.run({
+            cwd: fixture.cwd,
+            thinkingLevel: "high",
+            systemPrompt: "Cancellation test",
+            prompt: "Test only",
+            fileEditingToolsEnabled: false,
+            display: {
+              command: "do",
+              target: "#1",
+              phaseId: "cancellation",
+              phaseLabel: "Cancellation",
+              operation: "inspect",
+            },
+          }),
+        ),
         application,
       ),
     ).pipe(Effect.provide(applicationLayer)),

@@ -1,32 +1,102 @@
+import { Effect } from "effect";
+import {
+  createIssuesFromCurationPlan,
+  type CreateIssuesOptions,
+} from "./create-issues.ts";
+import { IssuePublishing } from "../issue-publishing/service.ts";
+import {
+  type IssuePublishRequest,
+  type IssuePublishResult,
+} from "../issue-publishing/github.ts";
+import { GitHubResponseError } from "../github/errors.ts";
+import {
+  fromLegacyPromise,
+  runApplicationPromise,
+  type ApplicationExecution,
+  type ApplicationServices,
+  applicationLayer,
+} from "../runtime/application.ts";
+import { type AgentRunner, provideTestAgent } from "../testing/agents.ts";
+type IssuePublisher = (
+  request: IssuePublishRequest,
+  application?: ApplicationExecution,
+) => Promise<IssuePublishResult>;
+interface PromiseCreateIssuesOptions extends CreateIssuesOptions {
+  agentRunner?: AgentRunner | undefined;
+  labelEnsurer?:
+    | false
+    | ((
+        options: {
+          cwd: string;
+          repo?: string | undefined;
+        },
+        application?: ApplicationExecution,
+      ) => Promise<unknown>)
+    | undefined;
+  issuePublisher?: IssuePublisher | undefined;
+}
+function runIssueCreation(
+  options: PromiseCreateIssuesOptions,
+  application?: ApplicationExecution,
+) {
+  return runApplicationPromise(
+    Effect.gen(function* () {
+      const live = yield* IssuePublishing;
+      const services = yield* Effect.context<ApplicationServices>();
+      const labels = options.labelEnsurer;
+      const publish = options.issuePublisher;
+      return yield* createIssuesFromCurationPlan(options).pipe(
+        Effect.provideService(IssuePublishing, {
+          publish: publish
+            ? (request) =>
+                fromLegacyPromise((inner) => publish(request, inner)).pipe(
+                  Effect.mapError(
+                    (cause) => new GitHubResponseError({ cause }),
+                  ),
+                  Effect.provide(services),
+                )
+            : (request) => live.publish(request),
+          ensureLabels:
+            labels === false
+              ? () => Effect.void
+              : labels
+                ? (request) =>
+                    fromLegacyPromise((inner) => labels(request, inner)).pipe(
+                      Effect.asVoid,
+                      Effect.mapError(
+                        (cause) => new GitHubResponseError({ cause }),
+                      ),
+                      Effect.provide(services),
+                    )
+                : (request) => live.ensureLabels(request),
+        }),
+        provideTestAgent(options.agentRunner),
+      );
+    }),
+    application,
+  );
+}
+import {
+  writeJsonArtifact,
+  artifactExists,
+  readArtifact,
+  createWorkflowContext,
+} from "../workflow/artifacts.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { Effect } from "effect";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import { createWorkflowContext } from "../workflow/artifacts.ts";
-import { artifactExistsPromise as artifactExists } from "../workflow/artifacts-promise.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
-import type { IssueCurationPlan } from "../workflow/issue-curation.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
-
-import { createIssuesFromCurationPlanPromise as createIssuesFromCurationPlan } from "./create-issues-promise.ts";
-import { noopAsync } from "../utils/async.ts";
+import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+import { type IssueCurationPlan } from "../workflow/issue-curation.ts";
+import { type TerminalStream } from "../presentation/terminal.ts";
 import { issueDraft, submitIssueDrafts } from "../testing/publishing-drafts.ts";
-import type { IssuePublisher } from "./create-issues-promise.ts";
-
 const tempDirs: string[] = [];
 const clock = { now: () => new Date("2026-05-07T00:00:00.000Z") };
 const successfulIssuePublisher: IssuePublisher = async (request) => {
-  await noopAsync();
+  await Promise.resolve();
   const number =
     request.title.includes("external-blocker") ||
     request.title.includes("blocker")
@@ -34,33 +104,35 @@ const successfulIssuePublisher: IssuePublisher = async (request) => {
       : 301;
   return { url: `https://github.com/owner/repo/issues/${number}`, number };
 };
-
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-
 describe("createIssuesFromCurationPlan", () => {
   test("dry-run reports approved plan items without calling GitHub or writing results", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const context = await tempContext({ yes: false });
     const plan = basePlan();
     plan.issuesToCreate.push({
       planItemId: "bad",
       proposedTitle: "Bad",
     } as never);
-    await writeJsonArtifact(context, "issueCurationPlan", plan);
-
-    const result = await createIssuesFromCurationPlan({
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", plan),
+    );
+    const result = await runIssueCreation({
       context,
       clock,
       agentRunner: async () => {
-        await noopAsync();
+        await Promise.resolve();
         throw new Error("dry-run should not invoke an agent");
       },
     });
-
-    expect(await artifactExists(context, "issueCreationResults")).toBe(false);
+    expect(
+      await runApplicationPromise(
+        artifactExists(context, "issueCreationResults"),
+      ),
+    ).toBe(false);
     expect(result.dryRun).toBe(true);
     expect(result.wouldCreate.map((item) => item.planItemId)).toEqual([
       "external-blocker-1",
@@ -75,23 +147,21 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.counts.skippedDuplicateSourceFindings).toBe(2);
     expect(result.counts.skippedMalformed).toBe(1);
   });
-
   test("derives classification labels when proposed labels are incomplete", async () => {
     const context = await tempContext({ yes: false });
     const plan = basePlan();
     const first = plan.issuesToCreate[0];
     if (!first) throw new Error("expected base plan item");
     first.proposedLabels = [];
-    await writeJsonArtifact(context, "issueCurationPlan", plan);
-
-    const result = await createIssuesFromCurationPlan({ context, clock });
-
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", plan),
+    );
+    const result = await runIssueCreation({ context, clock });
     expect(result.wouldCreate[0]?.labels).toEqual([
       "needs-triage",
       "review:external-blocker",
     ]);
   });
-
   test("empty normalized plan does not fall back to legacy arrays", async () => {
     const context = await tempContext({ yes: false });
     const plan = basePlan();
@@ -104,14 +174,13 @@ describe("createIssuesFromCurationPlan", () => {
         "external-blocker",
       ),
     ];
-    await writeJsonArtifact(context, "issueCurationPlan", plan);
-
-    const result = await createIssuesFromCurationPlan({ context, clock });
-
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", plan),
+    );
+    const result = await runIssueCreation({ context, clock });
     expect(result.wouldCreate).toEqual([]);
     expect(result.counts.acceptedPlanItems).toBe(0);
   });
-
   test("invalid normalized classifications are skipped as malformed instead of defaulting to follow-up", async () => {
     const context = await tempContext({ yes: false });
     const plan = basePlan();
@@ -123,10 +192,10 @@ describe("createIssuesFromCurationPlan", () => {
     ) as unknown as Record<string, unknown>;
     invalidItem["classification"] = "blocking";
     plan.issuesToCreate = [invalidItem as never];
-    await writeJsonArtifact(context, "issueCurationPlan", plan);
-
-    const result = await createIssuesFromCurationPlan({ context, clock });
-
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", plan),
+    );
+    const result = await runIssueCreation({ context, clock });
     expect(result.wouldCreate).toEqual([]);
     expect(result.skipped).toEqual([
       {
@@ -141,22 +210,25 @@ describe("createIssuesFromCurationPlan", () => {
     expect(result.counts.acceptedPlanItems).toBe(1);
     expect(result.counts.skippedMalformed).toBe(1);
   });
-
   test("internal approval can publish with label preflight while context.yes is false", async () => {
     const context = await tempContext({ yes: false });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-    const ensured: { cwd: string; repo?: string | undefined }[] = [];
-
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
+    const ensured: {
+      cwd: string;
+      repo?: string | undefined;
+    }[] = [];
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
-        createIssuesFromCurationPlan(
+        runIssueCreation(
           {
             context,
             approved: true,
             approvalReason: "autorun PR was opened",
             clock,
             labelEnsurer: async (options) => {
-              await noopAsync();
+              await Promise.resolve();
               ensured.push(options);
             },
             issuePublisher: successfulIssuePublisher,
@@ -174,7 +246,6 @@ describe("createIssuesFromCurationPlan", () => {
         ),
       ).pipe(Effect.provide(applicationLayer)),
     );
-
     expect(ensured).toEqual([{ cwd: context.agentCwd, repo: "owner/repo" }]);
     expect(result.approved).toBe(true);
     expect(result.dryRun).toBe(false);
@@ -183,18 +254,18 @@ describe("createIssuesFromCurationPlan", () => {
       "follow-up-1",
     ]);
   });
-
   test("preserves the parent workflow command in issue-publishing display context", async () => {
     const context = await tempContext({ yes: true, displayCommand: "auto" });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     let displayCommand: string | undefined;
-
-    await createIssuesFromCurationPlan({
+    await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
       agentRunner: async (request) => {
-        await noopAsync();
+        await Promise.resolve();
         displayCommand = request.display.command;
         return JSON.stringify({
           created: [
@@ -214,18 +285,17 @@ describe("createIssuesFromCurationPlan", () => {
         });
       },
     });
-
     expect(displayCommand).toBe("auto");
   });
-
   test("approved run uses the issue-authoring publishing agent without loading a skill", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     const requests: AgentRunRequest[] = [];
     const publishRequests: Parameters<IssuePublisher>[0][] = [];
-
-    const result = await createIssuesFromCurationPlan({
+    const result = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -243,7 +313,6 @@ describe("createIssuesFromCurationPlan", () => {
         });
       },
     });
-
     expect(requests).toHaveLength(1);
     expect(requests[0]?.skillPaths).toBeUndefined();
     expect(requests[0]?.fileEditingToolsEnabled).toBe(false);
@@ -266,16 +335,19 @@ describe("createIssuesFromCurationPlan", () => {
     expect(publishRequests[0]?.body).not.toContain("Roark run artifacts");
     expect(publishRequests[0]?.body).not.toContain("## Source\n");
     expect(
-      JSON.parse(await readArtifact(context, "issueDrafts")),
+      JSON.parse(
+        await runApplicationPromise(readArtifact(context, "issueDrafts")),
+      ),
     ).toHaveProperty("issues.0.planItemId", "external-blocker-1");
-    expect(await readArtifact(context, "issueDraftsMarkdown")).toContain(
-      "# Clear blocker title",
-    );
+    expect(
+      await runApplicationPromise(readArtifact(context, "issueDraftsMarkdown")),
+    ).toContain("# Clear blocker title");
   });
-
   test("publishing context names the result artifact and completes only after it is persisted", async () => {
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     const resultPath = path.join(context.runDir, "issue-creation-results.json");
     let persistedAtCompletion = false;
     let expectedArtifact: string | undefined;
@@ -288,14 +360,14 @@ describe("createIssuesFromCurationPlan", () => {
       },
     };
     return runWithPresenter(new Presenter({ stream }), async (application) => {
-      await createIssuesFromCurationPlan(
+      await runIssueCreation(
         {
           context,
           clock,
           labelEnsurer: false,
           issuePublisher: successfulIssuePublisher,
           agentRunner: async (request) => {
-            await noopAsync();
+            await Promise.resolve();
             expectedArtifact = request.display.expectedArtifact;
             return submitIssueDrafts(request, {
               issues: [
@@ -307,14 +379,12 @@ describe("createIssuesFromCurationPlan", () => {
         },
         application,
       );
-
       expect(expectedArtifact).toBe(
         ".roark/runs/issue/12/attempts/2/issue-creation-results.json",
       );
       expect(persistedAtCompletion).toBe(true);
     });
   });
-
   test("approved publishing agent prompt uses artifact paths visible from a split agent workspace", async () => {
     const root = await mkdtemp(
       path.join(tmpdir(), "roark-create-issues-split-"),
@@ -327,10 +397,11 @@ describe("createIssuesFromCurationPlan", () => {
       reuseDir: controlCwd,
       agentCwd,
     });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     const requests: AgentRunRequest[] = [];
-
-    await createIssuesFromCurationPlan({
+    await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -342,7 +413,6 @@ describe("createIssuesFromCurationPlan", () => {
         });
       },
     });
-
     const expectedPlanPath = path.join(
       "..",
       "control",
@@ -360,15 +430,15 @@ describe("createIssuesFromCurationPlan", () => {
       `The curation plan at \`${expectedPlanPath}\``,
     );
   });
-
   test("approved publishing agent uses the issue-publishing thinking stage", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const context = await tempContext({ yes: true });
     context.thinkingConfig.issuePublishing = "minimal";
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     const thinkingLevels: string[] = [];
-
-    await createIssuesFromCurationPlan({
+    await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -380,15 +450,14 @@ describe("createIssuesFromCurationPlan", () => {
         });
       },
     });
-
     expect(thinkingLevels).toEqual(["minimal"]);
   });
-
   test("structured issue drafts must cover every creatable plan item exactly once", async () => {
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-
-    const result = await createIssuesFromCurationPlan({
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
+    const result = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -398,19 +467,18 @@ describe("createIssuesFromCurationPlan", () => {
           issues: [issueDraft("external-blocker-1")],
         }),
     });
-
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
     expect(result.failed[0]?.message).toContain(
       "Issue drafts omit planItemId(s): follow-up-1",
     );
   });
-
   test("structured issue drafts reject duplicate plan item IDs", async () => {
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-
-    const result = await createIssuesFromCurationPlan({
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
+    const result = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -424,43 +492,45 @@ describe("createIssuesFromCurationPlan", () => {
           ],
         }),
     });
-
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
     expect(result.failed[0]?.message).toContain(
       "Issue drafts contain duplicate planItemId(s): external-blocker-1",
     );
   });
-
   test("publishing agent failures are recorded for every creatable issue", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
     let agentCalls = 0;
-
-    const result = await createIssuesFromCurationPlan({
+    const result = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
       agentRunner: async () => {
-        await noopAsync();
+        await Promise.resolve();
         agentCalls += 1;
         throw new Error("publishing agent failed");
       },
     });
-
     expect(agentCalls).toBe(1);
     expect(result.created).toEqual([]);
     expect(result.failed).toHaveLength(2);
     expect(result.failed[0]?.message).toContain("publishing agent failed");
-    expect(await artifactExists(context, "issueCreationResults")).toBe(true);
+    expect(
+      await runApplicationPromise(
+        artifactExists(context, "issueCreationResults"),
+      ),
+    ).toBe(true);
   });
-
   test("records partial GitHub publishing failures while preserving successes", async () => {
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-
-    const result = await createIssuesFromCurationPlan({
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
+    const result = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -472,13 +542,12 @@ describe("createIssuesFromCurationPlan", () => {
           ],
         }),
       issuePublisher: async (request) => {
-        await noopAsync();
+        await Promise.resolve();
         if (request.title === "Follow-up tracker")
           throw new Error("rate limited");
         return { url: "https://github.com/owner/repo/issues/200", number: 200 };
       },
     });
-
     expect(result.created.map((entry) => entry.planItemId)).toEqual([
       "external-blocker-1",
     ]);
@@ -491,29 +560,36 @@ describe("createIssuesFromCurationPlan", () => {
       },
     ]);
     const written = JSON.parse(
-      await readArtifact(context, "issueCreationResults"),
-    ) as { created: unknown[]; failed: unknown[] };
+      await runApplicationPromise(
+        readArtifact(context, "issueCreationResults"),
+      ),
+    ) as {
+      created: unknown[];
+      failed: unknown[];
+    };
     expect(written.created).toHaveLength(1);
     expect(written.failed).toHaveLength(1);
   });
-
   test("rerun skips already-created plan item IDs unless forced", async () => {
     const context = await tempContext({ yes: true });
-    await writeJsonArtifact(context, "issueCurationPlan", basePlan());
-    await writeJsonArtifact(context, "issueCreationResults", {
-      version: 1,
-      created: [
-        {
-          planItemId: "external-blocker-1",
-          kind: "external-blocker",
-          title: "Blocking tracker",
-          url: "https://github.com/owner/repo/issues/10",
-        },
-      ],
-    });
-
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCurationPlan", basePlan()),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "issueCreationResults", {
+        version: 1,
+        created: [
+          {
+            planItemId: "external-blocker-1",
+            kind: "external-blocker",
+            title: "Blocking tracker",
+            url: "https://github.com/owner/repo/issues/10",
+          },
+        ],
+      }),
+    );
     let agentCalls = 0;
-    const rerun = await createIssuesFromCurationPlan({
+    const rerun = await runIssueCreation({
       context,
       clock,
       labelEnsurer: false,
@@ -534,14 +610,13 @@ describe("createIssuesFromCurationPlan", () => {
     expect(rerun.skipped.map((entry) => entry.planItemId)).toContain(
       "external-blocker-1",
     );
-
     const forcedContext = await tempContext({
       yes: true,
       force: true,
       reuseDir: context.controlCwd,
     });
     let forcedAgentCalls = 0;
-    const forced = await createIssuesFromCurationPlan({
+    const forced = await runIssueCreation({
       context: forcedContext,
       clock,
       labelEnsurer: false,
@@ -557,7 +632,6 @@ describe("createIssuesFromCurationPlan", () => {
     expect(forced.counts.createdCurrentRun).toBe(2);
   });
 });
-
 async function tempContext(options: {
   yes: boolean;
   force?: boolean;
@@ -589,7 +663,6 @@ async function tempContext(options: {
     },
   );
 }
-
 function basePlan(): IssueCurationPlan {
   return {
     version: 2,
@@ -637,7 +710,6 @@ function basePlan(): IssueCurationPlan {
     warnings: ["source artifact was unavailable"],
   };
 }
-
 function planItem(
   id: string,
   title: string,

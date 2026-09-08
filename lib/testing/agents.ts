@@ -4,13 +4,13 @@ import { AgentExecutionError } from "../pi/agent.ts";
 import {
   fromLegacyPromise,
   type ApplicationServices,
+  type ApplicationExecution,
 } from "../runtime/application.ts";
-import { runAgentPromise, type AgentRunner } from "./agent-runner.ts";
-
-export const providePromiseAgent =
-  (runner: AgentRunner = runAgentPromise) =>
+import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+export const provideTestAgent =
+  (runner?: AgentRunner) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    runner === runAgentPromise
+    runner === undefined
       ? effect
       : effect.pipe(
           Effect.provideServiceEffect(
@@ -34,3 +34,7 @@ export const providePromiseAgent =
             ),
           ),
         );
+export type AgentRunner = (
+  request: AgentRunRequest,
+  application?: ApplicationExecution,
+) => Promise<string>;

@@ -1,3 +1,5 @@
+import { runApplicationPromise } from "../runtime/application.ts";
+import * as nativeGithub from "./github.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmod,
@@ -9,8 +11,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { publishIssueWithGitHubPromise as publishIssueWithGitHub } from "./github-promise.ts";
-
 const tempDirs: string[] = [];
 const originalEnv = {
   path: process.env["PATH"],
@@ -18,7 +18,6 @@ const originalEnv = {
   body: process.env["ROARK_GH_BODY"],
   list: process.env["ROARK_GH_LIST"],
 };
-
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -32,18 +31,18 @@ afterEach(async () => {
   if (originalEnv.list === undefined) delete process.env["ROARK_GH_LIST"];
   else process.env["ROARK_GH_LIST"] = originalEnv.list;
 });
-
 describe("publishIssueWithGitHub", () => {
   test("checks exact-title duplicates and publishes the rendered body through stdin", async () => {
     const fixture = await githubFixture("[]");
-    const result = await publishIssueWithGitHub({
-      cwd: fixture.cwd,
-      repo: "owner/repo",
-      title: "Track structured publishing",
-      body: "## Simple summary\n\nRendered by Roark.\n",
-      labels: ["needs-triage", "follow-up"],
-    });
-
+    const result = await runApplicationPromise(
+      nativeGithub.publishIssueWithGitHub({
+        cwd: fixture.cwd,
+        repo: "owner/repo",
+        title: "Track structured publishing",
+        body: "## Simple summary\n\nRendered by Roark.\n",
+        labels: ["needs-triage", "follow-up"],
+      }),
+    );
     expect(result).toMatchObject({
       url: "https://github.com/owner/repo/issues/42",
       number: 42,
@@ -59,7 +58,6 @@ describe("publishIssueWithGitHub", () => {
       "issue create --title Track structured publishing --body-file - --label needs-triage --label follow-up --repo owner/repo",
     );
   });
-
   test("does not create when the duplicate search returns the same normalized title", async () => {
     const fixture = await githubFixture(
       JSON.stringify([
@@ -70,14 +68,15 @@ describe("publishIssueWithGitHub", () => {
         },
       ]),
     );
-
     expect(
-      publishIssueWithGitHub({
-        cwd: fixture.cwd,
-        title: "Track structured publishing",
-        body: "body",
-        labels: [],
-      }),
+      runApplicationPromise(
+        nativeGithub.publishIssueWithGitHub({
+          cwd: fixture.cwd,
+          title: "Track structured publishing",
+          body: "body",
+          labels: [],
+        }),
+      ),
     ).rejects.toThrow(
       "An issue with the same title already exists: https://github.com/owner/repo/issues/7",
     );
@@ -86,10 +85,11 @@ describe("publishIssueWithGitHub", () => {
     );
   });
 });
-
-async function githubFixture(
-  listResponse: string,
-): Promise<{ cwd: string; bodyPath: string; logPath: string }> {
+async function githubFixture(listResponse: string): Promise<{
+  cwd: string;
+  bodyPath: string;
+  logPath: string;
+}> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-issue-publisher-"));
   tempDirs.push(cwd);
   const binDir = path.join(cwd, "bin");

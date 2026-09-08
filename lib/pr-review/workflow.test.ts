@@ -1,33 +1,75 @@
+import type * as nativeWorkspace from "../autorun/workspace.ts";
+import {
+  type ProcessOptions,
+  type ProcessResult,
+  runProcessOrThrow,
+} from "../cli/process.ts";
+import {
+  type PreparedPrReviewWorkspace,
+  WorkspaceCommandError,
+  defaultWorkspaceConfig,
+} from "../autorun/workspace.ts";
 import { runPrReview } from "./workflow.ts";
 import {
   runApplicationPromise,
   type ApplicationExecution,
+  applicationLayer,
+  fromLegacyPromise,
 } from "../runtime/application.ts";
 import { GitHub } from "../github/service.ts";
 import { GitHubResponseError } from "../github/errors.ts";
 import { Workspace } from "../autorun/workspace-service.ts";
-import { WorkspaceCommandError } from "../autorun/workspace.ts";
-import {
-  type preparePrReviewWorkspacePromise,
-  type runLifecycleHookPromise,
-  type assertPinnedPrReviewWorkspacePromise,
-} from "../autorun/workspace-promise.ts";
-import {
-  type fetchPullRequestFeedbackPromise,
-  type postIssueCommentPromise,
-} from "../github/promise.ts";
-import { providePromiseAgent } from "../workflow/promise-boundary.ts";
-import { runAgentPromise, type AgentRunner } from "../workflow/agent-runner.ts";
-
+import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
 interface RunPrReviewDependencies {
-  fetchFeedback?: typeof fetchPullRequestFeedbackPromise | undefined;
-  prepareWorkspace?: typeof preparePrReviewWorkspacePromise | undefined;
-  runLifecycleHookPromise?: typeof runLifecycleHookPromise | undefined;
+  fetchFeedback?:
+    | ((
+        input: Parameters<GitHub["Service"]["fetchPullRequestFeedback"]>[0],
+        application?: ApplicationExecution,
+      ) => Promise<PullRequestFeedback>)
+    | undefined;
+  prepareWorkspace?:
+    | ((
+        input: Parameters<Workspace["Service"]["preparePrReview"]>[0],
+        application?: ApplicationExecution,
+      ) => Promise<
+        PreparedPrReviewWorkspace & {
+          releaseLock: () => Promise<void>;
+        }
+      >)
+    | undefined;
+  runLifecycleHookPromise?:
+    | ((
+        name: Parameters<typeof nativeWorkspace.runLifecycleHook>[0],
+        hooks: Parameters<typeof nativeWorkspace.runLifecycleHook>[1],
+        cwd: string,
+        runner?: TestProcessRunner,
+        application?: ApplicationExecution,
+      ) => Promise<
+        Effect.Success<ReturnType<typeof nativeWorkspace.runLifecycleHook>>
+      >)
+    | undefined;
   agentRunner?: AgentRunner | undefined;
-  postComment?: typeof postIssueCommentPromise | undefined;
-  assertWorkspace?: typeof assertPinnedPrReviewWorkspacePromise | undefined;
+  postComment?:
+    | ((
+        input: Parameters<GitHub["Service"]["postIssueComment"]>[0],
+        application?: ApplicationExecution,
+      ) => Promise<
+        Effect.Success<ReturnType<GitHub["Service"]["postIssueComment"]>>
+      >)
+    | undefined;
+  assertWorkspace?:
+    | ((
+        input: Input<
+          Parameters<typeof nativeWorkspace.assertPinnedPrReviewWorkspace>[0]
+        >,
+        application?: ApplicationExecution,
+      ) => Promise<
+        Effect.Success<
+          ReturnType<typeof nativeWorkspace.assertPinnedPrReviewWorkspace>
+        >
+      >)
+    | undefined;
 }
-
 function reviewWithDependencies(
   options: Parameters<typeof runPrReview>[0],
   deps: RunPrReviewDependencies = {},
@@ -111,15 +153,13 @@ function reviewWithDependencies(
               }
             : {}),
         }),
-        providePromiseAgent(deps.agentRunner ?? runAgentPromise),
+        provideTestAgent(deps.agentRunner),
       );
     }),
     application,
   );
 }
-
 import { rejects as assertRejects } from "node:assert/strict";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -128,13 +168,9 @@ import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defaultWorkspaceConfig } from "../autorun/workspace.ts";
-import type { PullRequestFeedback } from "../github/pr.ts";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import { noopAsync } from "../utils/async.ts";
-import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
+import { type PullRequestFeedback } from "../github/pr.ts";
+import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+import { type TerminalStream } from "../presentation/terminal.ts";
 describe("reviewWithDependencies", () => {
   test("sets the preparation title while workspace preparation is pending", async () => {
     let output = "";
@@ -168,7 +204,10 @@ describe("reviewWithDependencies", () => {
             workspace: defaultWorkspaceConfig,
           },
           {
-            fetchFeedback: async () => (await noopAsync(), reviewFeedback()),
+            fetchFeedback: async () => (
+              await Promise.resolve(),
+              reviewFeedback()
+            ),
             prepareWorkspace: async () => {
               preparationStarted?.();
               return pendingPreparation;
@@ -213,11 +252,11 @@ describe("reviewWithDependencies", () => {
           },
           {
             fetchFeedback: async () => {
-              await noopAsync();
+              await Promise.resolve();
               return feedback;
             },
             prepareWorkspace: async () => {
-              await noopAsync();
+              await Promise.resolve();
               return {
                 path: agent,
                 metadata: {
@@ -235,24 +274,24 @@ describe("reviewWithDependencies", () => {
                   inspectionCommand: `git diff merge123..${feedback.pr.headRefOid} --`,
                 },
                 releaseLock: async () => {
-                  await noopAsync();
+                  await Promise.resolve();
                 },
               };
             },
             runLifecycleHookPromise: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
             assertWorkspace: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               return request.display.phaseId.endsWith("a")
                 ? "## Review A: Spec and Correctness\n\n**Changes requested.**\n\nFix malformed IDs."
                 : "## Review B: Standards and Maintainability\n\n**Approved.**";
             },
             postComment: async (input) => {
-              await noopAsync();
+              await Promise.resolve();
               publishedComments.push(input.body);
               return { id: publishedComments.length, marker: "" };
             },
@@ -331,9 +370,9 @@ describe("reviewWithDependencies", () => {
             },
           },
           {
-            fetchFeedback: async () => (await noopAsync(), feedback),
+            fetchFeedback: async () => (await Promise.resolve(), feedback),
             prepareWorkspace: async (input) => {
-              await noopAsync();
+              await Promise.resolve();
               preparedCopyToWorktree = input.workspace.copyToWorktree;
               preparedRepositoryUrl = input.repositoryUrl;
               preparedBeforeVerifyHook = input.hooks.beforeVerify;
@@ -354,19 +393,19 @@ describe("reviewWithDependencies", () => {
                   inspectionCommand: `git diff merge123..${feedback.pr.headRefOid} --`,
                 },
                 releaseLock: async () => {
-                  await noopAsync();
+                  await Promise.resolve();
                 },
               };
             },
             runLifecycleHookPromise: async (name, hooks) => {
-              await noopAsync();
+              await Promise.resolve();
               lifecycleCalls.push(`${name}:${String(hooks?.timeoutMs)}`);
             },
             assertWorkspace: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               agentCalls.push(request);
               return approvedReview(request.display.phaseId);
             },
@@ -496,9 +535,9 @@ describe("reviewWithDependencies", () => {
         workspace: defaultWorkspaceConfig,
       },
       {
-        fetchFeedback: async () => (await noopAsync(), feedback),
+        fetchFeedback: async () => (await Promise.resolve(), feedback),
         prepareWorkspace: async () => (
-          await noopAsync(),
+          await Promise.resolve(),
           {
             path: agent,
             metadata: {
@@ -516,18 +555,18 @@ describe("reviewWithDependencies", () => {
               inspectionCommand: "git diff merge123..head123 --",
             },
             releaseLock: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
           }
         ),
         runLifecycleHookPromise: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         assertWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         agentRunner: async (request) => (
-          await noopAsync(),
+          await Promise.resolve(),
           approvedReview(request.display.phaseId)
         ),
       },
@@ -574,9 +613,9 @@ describe("reviewWithDependencies", () => {
             workspace: defaultWorkspaceConfig,
           },
           {
-            fetchFeedback: async () => (await noopAsync(), feedback),
+            fetchFeedback: async () => (await Promise.resolve(), feedback),
             prepareWorkspace: async () => (
-              await noopAsync(),
+              await Promise.resolve(),
               {
                 path: agent,
                 metadata: {
@@ -594,18 +633,18 @@ describe("reviewWithDependencies", () => {
                   inspectionCommand: "git diff merge123..head123 --",
                 },
                 releaseLock: async () => {
-                  await noopAsync();
+                  await Promise.resolve();
                 },
               }
             ),
             runLifecycleHookPromise: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
             assertWorkspace: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
             agentRunner: async (request) => (
-              await noopAsync(),
+              await Promise.resolve(),
               approvedReview(request.display.phaseId)
             ),
           },
@@ -664,7 +703,7 @@ describe("reviewWithDependencies", () => {
       },
       {
         fetchFeedback: async () => {
-          await noopAsync();
+          await Promise.resolve();
           fetches++;
           return fetches === 1
             ? initial
@@ -678,7 +717,7 @@ describe("reviewWithDependencies", () => {
               };
         },
         prepareWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
           return {
             path: agent,
             metadata: {
@@ -696,22 +735,22 @@ describe("reviewWithDependencies", () => {
               inspectionCommand: "git diff merge123..head123 --",
             },
             releaseLock: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
           };
         },
         runLifecycleHookPromise: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         assertWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         agentRunner: async () => {
-          await noopAsync();
+          await Promise.resolve();
           return approvedReview("R1");
         },
         postComment: async () => {
-          await noopAsync();
+          await Promise.resolve();
           publications++;
           return { id: publications, marker: "" };
         },
@@ -760,11 +799,11 @@ describe("reviewWithDependencies", () => {
       },
       {
         fetchFeedback: async () => {
-          await noopAsync();
+          await Promise.resolve();
           return feedback;
         },
         prepareWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
           return {
             path: agent,
             metadata: {
@@ -782,22 +821,22 @@ describe("reviewWithDependencies", () => {
               inspectionCommand: "git diff merge123..head123 --",
             },
             releaseLock: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
           };
         },
         runLifecycleHookPromise: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         assertWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         agentRunner: async () => {
-          await noopAsync();
+          await Promise.resolve();
           return approvedReview("R1");
         },
         postComment: async () => {
-          await noopAsync();
+          await Promise.resolve();
           throw new Error("GitHub unavailable");
         },
       },
@@ -842,9 +881,9 @@ describe("reviewWithDependencies", () => {
         workspace: defaultWorkspaceConfig,
       },
       {
-        fetchFeedback: async () => (await noopAsync(), feedback),
+        fetchFeedback: async () => (await Promise.resolve(), feedback),
         prepareWorkspace: async () => (
-          await noopAsync(),
+          await Promise.resolve(),
           {
             path: agent,
             metadata: {
@@ -862,16 +901,16 @@ describe("reviewWithDependencies", () => {
               inspectionCommand: "git diff merge123..head123 --",
             },
             releaseLock: async () => {
-              await noopAsync();
+              await Promise.resolve();
               lockReleasedEarly = !secondReviewerFinished;
             },
           }
         ),
         runLifecycleHookPromise: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         assertWorkspace: async () => {
-          await noopAsync();
+          await Promise.resolve();
         },
         agentRunner: async (request) => {
           if (request.display.phaseId === "pr-review-a")
@@ -931,5 +970,15 @@ function approvedReview(id: string): string {
   return `## Review\n\n**Approved.**\n\n${id}`;
 }
 async function initAgentRepo(cwd: string): Promise<void> {
-  await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "init", "-b", "main"], { cwd }),
+  );
 }
+type TestProcessRunner = (
+  args: string[],
+  options?: ProcessOptions,
+  application?: ApplicationExecution,
+) => Promise<ProcessResult>;
+type Input<T> = Omit<T, "runner"> & {
+  runner?: TestProcessRunner | undefined;
+};

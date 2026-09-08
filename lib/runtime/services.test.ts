@@ -1,21 +1,31 @@
-import { runApplicationPromise } from "./application.ts";
+import * as nativeVerification from "../autorun/verification.ts";
+import {
+  runApplicationPromise,
+  applicationLayer,
+  fromLegacyPromise,
+} from "./application.ts";
 import { reviewATaskForPass } from "../workflow/tasks.ts";
-import { verificationBeforeFixRef } from "../workflow/artifact-catalog.ts";
+import {
+  verificationBeforeFixRef,
+  artifactFilename,
+} from "../workflow/artifact-catalog.ts";
 import * as BunServices from "@effect/platform-bun/BunServices";
-import { Deferred, FileSystem } from "effect";
+import {
+  Deferred,
+  FileSystem,
+  Cause,
+  Effect,
+  Exit,
+  PlatformError,
+} from "effect";
 import {
   AttemptStore,
   attemptStoreLayer,
   formatAttemptMetadata,
 } from "../autorun/attempts.ts";
-import { writeVerificationArtifactPromise as writeVerificationArtifact } from "../autorun/verification-promise.ts";
-import { artifactFilename } from "../workflow/artifact-catalog.ts";
 import { describe, expect, test } from "bun:test";
-import { Cause, Effect, Exit, PlatformError } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { AgentExecution, Presentation } from "./services.ts";
-import { applicationLayer, fromLegacyPromise } from "./application.ts";
-import { runAgentPromise } from "../workflow/agent-runner.ts";
 import { ArtifactStore } from "../workflow/artifact-store.ts";
 import {
   createWorkflowContext,
@@ -24,29 +34,29 @@ import {
 } from "../workflow/artifacts.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import { GitHub, gitHubLayer } from "../github/service.ts";
-
 const silentPresenter = () =>
   new Presenter({ stream: { isTTY: false, write: () => undefined } });
-
 describe("application service boundaries", () => {
   test("agent callers use the supplied service without constructing a Pi session", async () => {
     const output = await Effect.runPromise(
       fromLegacyPromise((application) =>
-        runAgentPromise(
-          {
-            cwd: process.cwd(),
-            thinkingLevel: "low",
-            systemPrompt: "",
-            prompt: "request",
-            fileEditingToolsEnabled: false,
-            display: {
-              command: "do",
-              target: "#1",
-              phaseId: "test",
-              phaseLabel: "Test",
-              operation: "inspect",
-            },
-          },
+        runApplicationPromise(
+          Effect.flatMap(AgentExecution, (agent) =>
+            agent.run({
+              cwd: process.cwd(),
+              thinkingLevel: "low",
+              systemPrompt: "",
+              prompt: "request",
+              fileEditingToolsEnabled: false,
+              display: {
+                command: "do",
+                target: "#1",
+                phaseId: "test",
+                phaseLabel: "Test",
+                operation: "inspect",
+              },
+            }),
+          ),
           application,
         ),
       ).pipe(
@@ -58,7 +68,6 @@ describe("application service boundaries", () => {
     );
     expect(output).toBe("request");
   });
-
   test("artifact reuse and writing are owned by the supplied store", async () => {
     const context = createWorkflowContext({
       command: "do",
@@ -113,7 +122,6 @@ describe("application service boundaries", () => {
     expect(produced).toBe(1);
     expect(contents.get(artifactFilename("issue"))).toBe("fresh");
   });
-
   test("GitHub best-effort lookup recovers expected failures while preserving defects", async () => {
     const defect = new Error("spawner defect");
     const failure = PlatformError.systemError({
@@ -150,7 +158,6 @@ describe("application service boundaries", () => {
     }
   });
 });
-
 test("verification artifact helpers retain the caller's store", async () => {
   const context = createWorkflowContext({
     command: "do",
@@ -164,15 +171,14 @@ test("verification artifact helpers retain the caller's store", async () => {
   const writes: string[] = [];
   await Effect.runPromise(
     fromLegacyPromise((application) =>
-      writeVerificationArtifact(
-        context,
-        {
+      runApplicationPromise(
+        nativeVerification.writeVerificationArtifact(context, {
           command: "test",
           ok: true,
           exitCode: 0,
           stdout: "done",
           stderr: "",
-        },
+        }),
         application,
       ),
     ).pipe(
@@ -193,7 +199,6 @@ test("verification artifact helpers retain the caller's store", async () => {
     artifactFilename("verificationFull"),
   ]);
 });
-
 test("interruption waits for an attempt write before owner finalization", async () => {
   const started = Deferred.makeUnsafe<undefined>();
   const allowWrite = Deferred.makeUnsafe<undefined>();
@@ -250,7 +255,6 @@ test("interruption waits for an attempt write before owner finalization", async 
   }
   expect(events).toEqual(["written", "finalized"]);
 });
-
 test("prebuilt task prompts use the storage service from their execution", async () => {
   const task = reviewATaskForPass(1);
   const context = createWorkflowContext({

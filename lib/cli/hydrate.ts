@@ -1,8 +1,8 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
+import { Effect, Schema, type FileSystem } from "effect";
+import { runProcess, type ProcessResult } from "./process.ts";
+import * as nativeVerification from "../autorun/verification.ts";
 import { loadRoarkConfig, type RoarkConfig } from "./config.ts";
 export type { RoarkConfig } from "./config.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
@@ -18,7 +18,6 @@ import {
   defaultAutorunSkipLabels,
 } from "../autorun/selection.ts";
 import { defaultAutorunVerifyCommand } from "../autorun/verification.ts";
-import { inferVerificationCommandPromise as inferVerificationCommand } from "../autorun/verification-promise.ts";
 import {
   defaultMaxFixPasses,
   type AutoCliOptions,
@@ -35,41 +34,31 @@ import {
   defaultWorkspaceConfig,
   type RemoveCommandOptions,
 } from "../autorun/workspace.ts";
-import { type ProcessResult } from "./process.ts";
-import { runProcessPromise } from "./process-promise.ts";
-
-type ProcessRunner = (
-  args: string[],
-  options?: { cwd?: string | undefined },
-  application?: ApplicationExecution,
-) => Promise<ProcessResult>;
-
+type ProcessRunner = typeof runProcess;
 interface HydrateDependencies {
   cwd?: string | undefined;
   runner?: ProcessRunner | undefined;
-  promptRepo?: (cwd: string) => Promise<string | undefined>;
+  promptRepo?: (
+    cwd: string,
+  ) => Effect.Effect<string | undefined, CliConfigurationError>;
 }
-
-export async function hydrateCliOptions(
+export const hydrateCliOptions = Effect.fn("hydrateCliOptions")(function* (
   raw: RawCliOptions,
   deps: HydrateDependencies = {},
-  application?: ApplicationExecution,
-): Promise<CliOptions> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        hydrateCliOptions(raw, deps, application),
-      ),
-      application,
-    );
-
-  const runner = deps.runner ?? runProcessPromise;
-  const workspace = await resolveWorkspace(
+): Effect.fn.Return<
+  CliOptions,
+  | CliConfigurationError
+  | Effect.Error<ReturnType<typeof loadRoarkConfig>>
+  | Effect.Error<ReturnType<typeof runProcess>>,
+  | Effect.Services<ReturnType<typeof loadRoarkConfig>>
+  | Effect.Services<ReturnType<typeof runProcess>>
+  | FileSystem.FileSystem
+> {
+  const runner = deps.runner ?? runProcess;
+  const workspace = yield* resolveWorkspace(
     raw.cwd ?? deps.cwd ?? process.cwd(),
     runner,
-    application,
   );
-
   if (raw.command === "init") {
     return {
       command: "init",
@@ -78,19 +67,16 @@ export async function hydrateCliOptions(
       force: raw.force ?? false,
     } satisfies InitCliOptions;
   }
-
-  const config = await loadRoarkConfigPromise(workspace, application);
-  const repo = await hydrateRepo(
+  const config = yield* loadRoarkConfig(workspace);
+  const repo = yield* hydrateRepo(
     raw,
     config,
     workspace,
     runner,
     deps.promptRepo,
-    application,
   );
   const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
   const hooks = config.hooks ?? defaultLifecycleHooks;
-
   if (raw.command === "remove") {
     return {
       command: "remove",
@@ -102,7 +88,6 @@ export async function hydrateCliOptions(
       hooks,
     } satisfies RemoveCommandOptions;
   }
-
   if (raw.command === "workspace") {
     if (raw.action === "list")
       return {
@@ -124,13 +109,11 @@ export async function hydrateCliOptions(
       hooks,
     };
   }
-
   if (raw.command === "auto") {
-    const verifyCommand = await hydrateRequiredVerifyCommand(
+    const verifyCommand = yield* hydrateRequiredVerifyCommand(
       raw.verifyCommand,
       config,
       workspace,
-      runner,
       raw.command,
     );
     const inProgressLabel =
@@ -178,13 +161,11 @@ export async function hydrateCliOptions(
       hooks,
     } satisfies AutoCliOptions;
   }
-
   if (raw.command === "continue") {
-    const verifyCommand = await hydrateRequiredVerifyCommand(
+    const verifyCommand = yield* hydrateRequiredVerifyCommand(
       raw.verifyCommand,
       config,
       workspace,
-      runner,
       raw.command,
     );
     return {
@@ -216,7 +197,6 @@ export async function hydrateCliOptions(
       hooks,
     } satisfies ContinueCliOptions;
   }
-
   if (raw.command === "revise-pr") {
     return {
       command: "revise-pr",
@@ -239,7 +219,6 @@ export async function hydrateCliOptions(
       hooks,
     } satisfies RevisePrCliOptions;
   }
-
   if (raw.command === "review-pr") {
     return {
       command: "review-pr",
@@ -257,7 +236,6 @@ export async function hydrateCliOptions(
       hooks,
     } satisfies ReviewPrCliOptions;
   }
-
   if (raw.command === "status") {
     return {
       command: "status",
@@ -269,7 +247,6 @@ export async function hydrateCliOptions(
       attempt: raw.attempt,
     } satisfies StatusCliOptions;
   }
-
   return {
     command: raw.command,
     issue: raw.issue,
@@ -286,54 +263,34 @@ export async function hydrateCliOptions(
     fixPass: raw.fixPass,
     attempt: raw.attempt,
   };
-}
-
-export async function resolveWorkspace(
+});
+export const resolveWorkspace = Effect.fn("resolveWorkspace")(function* (
   startCwd: string,
-  runner: ProcessRunner = runProcessPromise,
-  application?: ApplicationExecution,
-): Promise<string> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        resolveWorkspace(startCwd, runner, application),
-      ),
-      application,
-    );
-
+  runner: ProcessRunner = runProcess,
+) {
   const absoluteStart = path.resolve(startCwd);
-  const result = await runner(
-    ["git", "rev-parse", "--show-toplevel"],
-    { cwd: absoluteStart },
-    application,
-  );
-  return workspaceFromGitResult(absoluteStart, result);
-}
-
-export function workspaceFromGitResult(
+  const result = yield* runner(["git", "rev-parse", "--show-toplevel"], {
+    cwd: absoluteStart,
+  });
+  return yield* workspaceFromGitResult(absoluteStart, result);
+});
+export const workspaceFromGitResult = Effect.fnUntraced(function* (
   absoluteStart: string,
   result: ProcessResult,
-): string {
+) {
   if (result.exitCode !== 0) {
-    throw new Error(
-      `Roark commands must be run inside a git repository. '${absoluteStart}' is not inside a git work tree.`,
-    );
+    return yield* new CliConfigurationError({
+      message: `Roark commands must be run inside a git repository. '${absoluteStart}' is not inside a git work tree.`,
+    });
   }
   const gitRoot = result.stdout.trim();
   if (!gitRoot)
-    throw new Error(
-      "git rev-parse --show-toplevel returned an empty workspace path.",
-    );
+    return yield* new CliConfigurationError({
+      message:
+        "git rev-parse --show-toplevel returned an empty workspace path.",
+    });
   return path.resolve(gitRoot);
-}
-
-export function loadRoarkConfigPromise(
-  workspace: string,
-  application?: ApplicationExecution,
-): Promise<RoarkConfig> {
-  return runApplicationPromise(loadRoarkConfig(workspace), application);
-}
-
+});
 export function parseGithubRepoFromOrigin(
   originUrl: string,
 ): string | undefined {
@@ -349,39 +306,35 @@ export function parseGithubRepoFromOrigin(
   if (!match?.[1] || !match[2]) return undefined;
   return `${match[1]}/${match[2]}`;
 }
-
-async function hydrateRepo(
+const hydrateRepo = Effect.fn("hydrateRepo")(function* (
   raw: RawCliOptions,
   config: RoarkConfig,
   workspace: string,
   runner: ProcessRunner,
-  promptRepo?: (cwd: string) => Promise<string | undefined>,
-  application?: ApplicationExecution,
-): Promise<string | undefined> {
+  promptRepo?: (
+    cwd: string,
+  ) => Effect.Effect<string | undefined, CliConfigurationError>,
+) {
   if (raw.repo) return raw.repo;
-
   const issueRepo = repoFromQualifiedIssueRef(
     "issue" in raw && typeof raw.issue === "string" ? raw.issue : undefined,
   );
   if (issueRepo) return issueRepo;
-
   if (config.repo) return config.repo;
-
-  const inferred = await inferRepoFromOrigin(workspace, runner, application);
+  const inferred = yield* inferRepoFromOrigin(workspace, runner);
   if (inferred) return inferred;
-
   if (raw.command === "status" || raw.command === "workspace") return undefined;
-
   const prompted = promptRepo
-    ? await promptRepo(workspace)
-    : await promptForRepoIfInteractive(workspace, application?.signal);
+    ? yield* promptRepo(workspace)
+    : yield* promptForRepoIfInteractive(workspace);
   if (prompted) return prompted;
-
-  throw new Error(
-    "Could not determine GitHub repository. Pass --repo, add .roark/config.json with a repo value, or set GitHub origin remote.",
+  return yield* Effect.fail(
+    new CliConfigurationError({
+      message:
+        "Could not determine GitHub repository. Pass --repo, add .roark/config.json with a repo value, or set GitHub origin remote.",
+    }),
   );
-}
-
+});
 function repoFromQualifiedIssueRef(
   issue: string | undefined,
 ): string | undefined {
@@ -389,72 +342,65 @@ function repoFromQualifiedIssueRef(
     /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i,
   );
   if (urlMatch?.[1]) return urlMatch[1];
-
   const shorthandMatch = issue?.match(/^([^/\s]+\/[^#\s]+)#\d+$/);
   if (shorthandMatch?.[1]) return shorthandMatch[1];
-
   return undefined;
 }
-
-export async function inferRepoFromOrigin(
+export const inferRepoFromOrigin = Effect.fn("inferRepoFromOrigin")(function* (
   workspace: string,
-  runner: ProcessRunner = runProcessPromise,
-  application?: ApplicationExecution,
-): Promise<string | undefined> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        inferRepoFromOrigin(workspace, runner, application),
-      ),
-      application,
-    );
-
-  const result = await runner(
-    ["git", "remote", "get-url", "origin"],
-    { cwd: workspace },
-    application,
-  );
+  runner: ProcessRunner = runProcess,
+) {
+  const result = yield* runner(["git", "remote", "get-url", "origin"], {
+    cwd: workspace,
+  });
   if (result.exitCode !== 0) return undefined;
   return parseGithubRepoFromOrigin(result.stdout);
-}
-
-async function hydrateRequiredVerifyCommand(
-  cliVerify: string | undefined,
-  config: RoarkConfig,
+});
+const hydrateRequiredVerifyCommand = Effect.fn("hydrateRequiredVerifyCommand")(
+  function* (
+    cliVerify: string | undefined,
+    config: RoarkConfig,
+    workspace: string,
+    command: "auto" | "continue",
+  ) {
+    const verifyCommand =
+      cliVerify ??
+      config.verify ??
+      (yield* nativeVerification.inferVerificationCommand(workspace));
+    if (verifyCommand) return verifyCommand;
+    return yield* Effect.fail(
+      new CliConfigurationError({
+        message: `Could not determine verification command for '${command}'. Pass --verify, add .roark/config.json with a verify value, or add package.json scripts.typecheck/scripts.test or a Makefile test target.`,
+      }),
+    );
+  },
+);
+const promptForRepoIfInteractive = Effect.fnUntraced(function* (
   workspace: string,
-  runner: ProcessRunner,
-  command: "auto" | "continue",
-): Promise<string> {
-  const verifyCommand =
-    cliVerify ?? config.verify ?? (await inferVerifyCommand(workspace, runner));
-  if (verifyCommand) return verifyCommand;
-  throw new Error(
-    `Could not determine verification command for '${command}'. Pass --verify, add .roark/config.json with a verify value, or add package.json scripts.typecheck/scripts.test or a Makefile test target.`,
-  );
-}
-
-export async function inferVerifyCommand(
-  workspace: string,
-  runner: ProcessRunner = runProcessPromise,
-): Promise<string | undefined> {
-  void runner;
-  return inferVerificationCommand(workspace);
-}
-
-async function promptForRepoIfInteractive(
-  workspace: string,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
+) {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (
-      await rl.question(`GitHub repository for ${workspace} (owner/repo): `, {
-        signal,
-      })
-    ).trim();
-    return answer || undefined;
-  } finally {
-    rl.close();
-  }
-}
+  return yield* Effect.acquireUseRelease(
+    Effect.sync(() =>
+      createInterface({ input: process.stdin, output: process.stdout }),
+    ),
+    (rl) =>
+      Effect.tryPromise({
+        try: (signal) =>
+          rl.question(`GitHub repository for ${workspace} (owner/repo): `, {
+            signal,
+          }),
+        catch: (cause) =>
+          new CliConfigurationError({
+            message: cause instanceof Error ? cause.message : String(cause),
+          }),
+      }).pipe(Effect.map((answer) => answer.trim() || undefined)),
+    (rl) =>
+      Effect.sync(() => {
+        rl.close();
+      }),
+  );
+});
+export class CliConfigurationError extends Schema.TaggedError<CliConfigurationError>()(
+  "CliConfigurationError",
+  { message: Schema.String },
+) {}

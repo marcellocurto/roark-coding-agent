@@ -1,16 +1,20 @@
+import * as nativePhases from "../workflow/phases.ts";
+import { AttemptStore } from "./attempts.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { WorkspaceError } from "./workspace.ts";
 import { GitWorkspaceError } from "../workflow/git.ts";
 import { Effect } from "effect";
-import { runApplicationPromise } from "../runtime/application.ts";
+import {
+  runApplicationPromise,
+  type ApplicationExecution,
+} from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AutoCliOptions } from "../cli/args.ts";
+import { type AutoCliOptions } from "../cli/args.ts";
 import { defaultAutorunBaseBranch } from "./branch.ts";
 import { defaultAutorunFailureLabel } from "./failure.ts";
 import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "./publish.ts";
@@ -20,11 +24,7 @@ import {
   defaultAutorunSkipLabels,
 } from "./selection.ts";
 import { defaultAutorunVerifyCommand } from "./verification.ts";
-import { readAttemptMetadataPromise as readAttemptMetadata } from "./attempts-promise.ts";
 import { runAutoDiscovery } from "./discovery.ts";
-import { noopAsync } from "../utils/async.ts";
-import {} from "../presentation/presenter.ts";
-import { fetchIssuePhasePromise as fetchIssuePhase } from "../workflow/phases-promise.ts";
 const tempDirs: string[] = [];
 const noOpLabelContract = {
   ensureAutorunLabelContract: Effect.fnUntraced(function* () {
@@ -39,7 +39,7 @@ describe("runAutoDiscovery", () => {
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
@@ -152,10 +152,10 @@ describe("runAutoDiscovery", () => {
     expect(output).toContain("INJECTED");
   });
   test("discovery auto skips active body-declared blockers and selects the next eligible issue", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const checkedBodies: string[] = [];
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
@@ -199,7 +199,7 @@ describe("runAutoDiscovery", () => {
   });
   test("discovery auto keeps issues whose body-declared blockers are closed eligible", async () => {
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
@@ -238,10 +238,10 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
   });
   test("discovery auto skips active native-blocked issues and selects the next eligible issue", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const checked: number[] = [];
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
@@ -279,10 +279,10 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("Selected issue(s):\n- #2 Issue 2");
   });
   test("discovery auto keeps issues whose native blockers are all closed eligible", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const checked: number[] = [];
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true },
@@ -318,10 +318,10 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("Selected issue(s):\n- #1 Issue 1");
   });
   test("discovery auto selection limit counts unblocked issues", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const checked: number[] = [];
     const logs = await captureLogs(async (application) => {
-      await noopAsync();
+      await Promise.resolve();
       await runApplicationPromise(
         runAutoDiscovery(
           { ...baseOptions(), dryRun: true, limit: 2 },
@@ -359,7 +359,7 @@ describe("runAutoDiscovery", () => {
     expect(logText).toContain("- #3 Issue 3");
   });
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
-    await noopAsync();
+    await Promise.resolve();
     let preflighted = false;
     let claimed = false;
     await assertRejects(
@@ -411,7 +411,7 @@ describe("runAutoDiscovery", () => {
     expect(claimed).toBe(false);
   });
   test("targeted auto ensures labels before fetching the requested issue", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const calls: string[] = [];
     await runApplicationPromise(
       runAutoDiscovery(
@@ -440,7 +440,7 @@ describe("runAutoDiscovery", () => {
     expect(calls).toEqual(["ensure-labels", "fetch:owner/repo#29"]);
   });
   test("targeted auto refuses skip labels before claim", async () => {
-    await noopAsync();
+    await Promise.resolve();
     let claimed = false;
     let preflighted = false;
     await assertRejects(
@@ -476,7 +476,7 @@ describe("runAutoDiscovery", () => {
     expect(claimed).toBe(false);
   });
   test("dirty autorun preflight runs before claim", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const order: string[] = [];
     await assertRejects(
       runApplicationPromise(
@@ -510,7 +510,7 @@ describe("runAutoDiscovery", () => {
     expect(order).toEqual(["preflight"]);
   });
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(
       path.join(tmpdir(), "roark-targeted-auto-recheck-"),
     );
@@ -572,7 +572,7 @@ describe("runAutoDiscovery", () => {
     expect(calls).toEqual(["preflight", "workspace"]);
   });
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-targeted-auto-"));
     tempDirs.push(cwd);
     const workspacePath = await mkdtemp(
@@ -653,7 +653,9 @@ describe("runAutoDiscovery", () => {
                 ),
               ).toBe("before");
               yield* Effect.promise(() =>
-                fetchIssuePhase(context, suppliedSnapshot),
+                runApplicationPromise(
+                  nativePhases.fetchIssuePhase(context, suppliedSnapshot),
+                ),
               );
               return { status: "completed" as const };
             },
@@ -681,9 +683,10 @@ describe("runAutoDiscovery", () => {
     );
     expect(issueArtifact).toContain("Fresh issue title");
     expect(issueArtifact).not.toContain("Initial issue title");
-    const metadata = await readAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/29"),
-      1,
+    const metadata = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(path.join(cwd, ".roark/runs/issue/29"), 1),
+      ),
     );
     expect(metadata.worktreePath).toBe(workspacePath);
     expect(metadata.workspace).toEqual({

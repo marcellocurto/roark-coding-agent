@@ -9,25 +9,20 @@ import { runProcess } from "./process.ts";
 import path from "node:path";
 import { isWorkflowCommand } from "./args.ts";
 import { workspaceFromGitResult } from "./hydrate.ts";
-
-export const notificationTimeoutMs = 2_000;
-
+export const notificationTimeoutMs = 2000;
 const notificationScript = `on run argv
   set notificationTitle to item 1 of argv
   set notificationBody to item 2 of argv
   display notification notificationBody with title notificationTitle
 end run`;
-
 export interface ExitNotificationRequest {
   argv: string[];
   succeeded: boolean;
 }
-
 export interface NotificationContent {
   title: "Roark finished" | "Roark failed";
   body: string;
 }
-
 export const NotificationSettings = Context.Reference<{
   platform: NodeJS.Platform;
   cwd: string;
@@ -39,14 +34,12 @@ export const NotificationSettings = Context.Reference<{
     timeoutMs: notificationTimeoutMs,
   }),
 });
-
 export const exitNotificationsLayer = Layer.effect(
   ExitNotifications,
   Effect.gen(function* () {
     const configuration = yield* RepositoryConfiguration;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const presentation = yield* Presentation;
-
     const deliver = Effect.fn("deliverMacNotification")(function* (
       content: NotificationContent,
     ) {
@@ -78,7 +71,6 @@ export const exitNotificationsLayer = Layer.effect(
           "Warning: Roark could not deliver the exit notification.",
         );
     });
-
     const send = Effect.fn("sendExitNotification")(function* (
       request: ExitNotificationRequest,
     ) {
@@ -95,9 +87,7 @@ export const exitNotificationsLayer = Layer.effect(
             spawner,
           ),
         );
-        const workspace = yield* Effect.try(() =>
-          workspaceFromGitResult(cwd, result),
-        );
+        const workspace = yield* workspaceFromGitResult(cwd, result);
         const config = yield* configuration.load(workspace);
         return { workspace, config };
       }).pipe(Effect.option);
@@ -113,21 +103,18 @@ export const exitNotificationsLayer = Layer.effect(
     return ExitNotifications.of({ send, deliver });
   }),
 );
-
 export const sendExitNotification = Effect.fnUntraced(function* (
   request: ExitNotificationRequest,
 ) {
   const notifications = yield* ExitNotifications;
   yield* notifications.send(request);
 });
-
 export const deliverMacNotification = Effect.fnUntraced(function* (
   content: NotificationContent,
 ) {
   const notifications = yield* ExitNotifications;
   yield* notifications.deliver(content);
 });
-
 export function formatNotificationContent(
   request: ExitNotificationRequest,
   workspace: string,
@@ -138,7 +125,6 @@ export function formatNotificationContent(
   const repository = repositoryIdentity(workspace);
   return { title, body: `${command}${target} · ${repository}` };
 }
-
 function notificationCwd(argv: string[], fallback: string): string {
   for (let index = argv.length - 2; index >= 0; index--) {
     if (argv[index] !== "--cwd") continue;
@@ -147,7 +133,6 @@ function notificationCwd(argv: string[], fallback: string): string {
   }
   return fallback;
 }
-
 function commandIdentity(argv: string[]): string {
   if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
     return "version";
@@ -155,20 +140,17 @@ function commandIdentity(argv: string[]): string {
   const command = argv[0];
   return command && isWorkflowCommand(command) ? command : "roark";
 }
-
 function targetIdentity(command: string, argv: string[]): string {
   if (command === "review-pr" || command === "revise-pr") {
     const number = normalizedNumber(argv[1]);
     return number ? ` #${number}` : "";
   }
-
   if (command === "workspace" && argv[1] === "remove") {
     const issue = valueAfter(argv, "--issue");
     const pr = valueAfter(argv, "--pr");
     const number = normalizedNumber(issue ?? pr);
     return number ? ` #${number}` : "";
   }
-
   if (
     isWorkflowCommand(command) &&
     !["init", "workspace", "review-pr", "revise-pr"].includes(command)
@@ -176,26 +158,21 @@ function targetIdentity(command: string, argv: string[]): string {
     const number = normalizedIssueNumber(argv[1]);
     return number ? ` #${number}` : "";
   }
-
   return "";
 }
-
 function normalizedIssueNumber(value: string | undefined): string | undefined {
   if (!value || value.startsWith("--")) return undefined;
   const match = /(?:^|#|\/issues\/)(\d+)$/.exec(value);
   return match?.[1];
 }
-
 function normalizedNumber(value: string | undefined): string | undefined {
   const match = /^#?(\d+)$/.exec(value ?? "");
   return match?.[1];
 }
-
 function valueAfter(argv: string[], flag: string): string | undefined {
   const index = argv.indexOf(flag);
   return index >= 0 ? argv[index + 1] : undefined;
 }
-
 function repositoryIdentity(workspace: string): string {
   const basename = path.basename(path.resolve(workspace));
   const normalized = basename

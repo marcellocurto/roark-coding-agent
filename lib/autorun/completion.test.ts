@@ -7,7 +7,6 @@ import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
 import { formatAttemptMetadata } from "./attempts.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { noopAsync } from "../utils/async.ts";
 const options: AutorunGateOptions = {
   cwd: "/repo",
   repo: "owner/repo",
@@ -55,7 +54,7 @@ const attemptMetadata = formatAttemptMetadata({
 });
 describe("completeAutorunWorkflow", () => {
   test("marks triage-stopped and does not run the publish gate", async () => {
-    await noopAsync();
+    await Promise.resolve();
     let publishCalls = 0;
     const marked: unknown[] = [];
     const outcome = await Effect.runPromise(
@@ -108,7 +107,7 @@ describe("completeAutorunWorkflow", () => {
     });
   });
   test("delegates completed workflow results to the publish gate unchanged", async () => {
-    await noopAsync();
+    await Promise.resolve();
     let marked = false;
     const outcome = await runApplicationPromise(
       completeAutorunWorkflow(

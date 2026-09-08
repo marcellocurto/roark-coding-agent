@@ -1,41 +1,36 @@
-import { rejects as assertRejects } from "node:assert/strict";
-import { GitWorkspaceError } from "../workflow/git.ts";
-import { WorkspaceError } from "./workspace.ts";
-import * as artifactEffects from "../workflow/artifacts.ts";
-import { providePromiseAgent } from "../workflow/promise-boundary.ts";
-import { Effect } from "effect";
-import { readRunSummary } from "../observability/summary.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import { applicationLayer } from "../runtime/application.ts";
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
 import {
+  readArtifact,
+  writeArtifact,
+  writeJsonArtifact,
   refinementLogRef,
   reviewARef,
   reviewBRef,
   verificationBeforeFixRef,
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
+import { rejects as assertRejects } from "node:assert/strict";
+import { GitWorkspaceError } from "../workflow/git.ts";
+import { WorkspaceError } from "./workspace.ts";
+import * as artifactEffects from "../workflow/artifacts.ts";
+import { provideTestAgent } from "../testing/agents.ts";
+import { Effect } from "effect";
+import { readRunSummary } from "../observability/summary.ts";
 import {
-  readArtifactPromise as readArtifact,
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
+  runApplicationPromise,
+  applicationLayer,
+} from "../runtime/application.ts";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
-import { formatAttemptMetadata } from "./attempts.ts";
-import {
-  readAttemptIndexPromise as readAttemptIndex,
-  readAttemptMetadataPromise as readAttemptMetadata,
-} from "./attempts-promise.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
-import type { AutorunBranchPlan } from "./branch.ts";
-import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
-import type { AutorunGateOptions } from "./publish-flow.ts";
-import { noopAsync } from "../utils/async.ts";
+import { type AutorunBranchPlan } from "./branch.ts";
+import { type AutorunGateOptions } from "./publish-flow.ts";
 import {
   reviewFinding,
   reviewResult,
@@ -55,7 +50,7 @@ afterEach(async () => {
 });
 describe("runAutorunAttemptLifecycle", () => {
   test("marks attempts in-progress before workflow and records terminal completion outcomes", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
     await runApplicationPromise(
       runAutorunAttemptLifecycle(
@@ -72,13 +67,21 @@ describe("runAutorunAttemptLifecycle", () => {
           runFullWorkflow: Effect.fnUntraced(function* () {
             yield* Effect.void;
             const duringWorkflow = yield* Effect.promise(() =>
-              readAttemptMetadata(fixture.issueDir, 1),
+              runApplicationPromise(
+                Effect.flatMap(AttemptStore, (store) =>
+                  store.read(fixture.issueDir, 1),
+                ),
+              ),
             );
             expect(duringWorkflow.outcome).toBe("in-progress");
             expect(duringWorkflow.endedAt).toBeNull();
             expect(
               (yield* Effect.promise(() =>
-                readAttemptIndex(fixture.issueDir),
+                runApplicationPromise(
+                  Effect.flatMap(AttemptStore, (store) =>
+                    store.list(fixture.issueDir),
+                  ),
+                ),
               ))[0]?.outcome,
             ).toBe("in-progress");
             return { status: "completed" as const };
@@ -98,16 +101,22 @@ describe("runAutorunAttemptLifecycle", () => {
         },
       ),
     );
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("failed-verification");
     expect(terminal.outcomeDetail).toBe("verification failed");
     expect(terminal.endedAt).toBe("2026-05-07T01:00:00.000Z");
-    expect((await readAttemptIndex(fixture.issueDir))[0]?.outcome).toBe(
-      "failed-verification",
-    );
+    expect(
+      (
+        await runApplicationPromise(
+          Effect.flatMap(AttemptStore, (store) => store.list(fixture.issueDir)),
+        )
+      )[0]?.outcome,
+    ).toBe("failed-verification");
   });
   test("runs fix, refinement, reviews, readiness, and completion again for verification repair", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -148,8 +157,8 @@ describe("runAutorunAttemptLifecycle", () => {
           }),
         },
       ).pipe(
-        providePromiseAgent(async (request) => {
-          await noopAsync();
+        provideTestAgent(async (request) => {
+          await Promise.resolve();
           phases.push(request.display.phaseId);
           expect(request.prompt).toContain("failed_verification");
           if (request.display.phaseId === "fixLog-1") {
@@ -185,14 +194,18 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(phases.slice(2).toSorted()).toEqual(["reviewA-1", "reviewB-1"]);
     expect(
       parseReadinessResultJson(
-        await readArtifact(fixture.workflowContext, "readiness"),
+        await runApplicationPromise(
+          readArtifact(fixture.workflowContext, "readiness"),
+        ),
       ).decision.status,
     ).toBe("ready-for-pr");
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("published");
   });
   test("continues verification repair when the numbered review requests another fix pass", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
     await writeCompletedWorkflowArtifacts(fixture.workflowContext);
     const phases: string[] = [];
@@ -233,8 +246,8 @@ describe("runAutorunAttemptLifecycle", () => {
           }),
         },
       ).pipe(
-        providePromiseAgent(async (request) => {
-          await noopAsync();
+        provideTestAgent(async (request) => {
+          await Promise.resolve();
           phases.push(request.display.phaseId);
           if (request.display.phaseId === "fixLog-1") {
             return submitChangeReport(
@@ -314,19 +327,25 @@ describe("runAutorunAttemptLifecycle", () => {
     }
     expect(
       parseReadinessResultJson(
-        await readArtifact(fixture.workflowContext, "readiness"),
+        await runApplicationPromise(
+          readArtifact(fixture.workflowContext, "readiness"),
+        ),
       ).decision.status,
     ).toBe("ready-for-pr");
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("published");
   });
   test("classifies output-contract failures and includes failing artifact details in the failure comment", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
-    await writeArtifact(
-      fixture.workflowContext,
-      "implementationLog",
-      "# Implementation Log\n\ninvalid output\n",
+    await runApplicationPromise(
+      writeArtifact(
+        fixture.workflowContext,
+        "implementationLog",
+        "# Implementation Log\n\ninvalid output\n",
+      ),
     );
     const comments: string[] = [];
     const error = new AgentTaskRunError({
@@ -373,7 +392,9 @@ describe("runAutorunAttemptLifecycle", () => {
           "Implementation failed: missing Summary section",
         ),
     );
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("failed-output-contract");
     expect(terminal.outcomeDetail).toBe(
       "Implementation failed: missing Summary section",
@@ -391,12 +412,14 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(comment).not.toContain(fixture.gateOptions.cwd);
   });
   test("includes direct artifact validation error artifact details in the failure comment", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
-    await writeArtifact(
-      fixture.workflowContext,
-      "implementationLog",
-      "# Implementation Log\n\ninvalid direct validation output\n",
+    await runApplicationPromise(
+      writeArtifact(
+        fixture.workflowContext,
+        "implementationLog",
+        "# Implementation Log\n\ninvalid direct validation output\n",
+      ),
     );
     const comments: string[] = [];
     const error = new ArtifactValidationError(
@@ -440,7 +463,9 @@ describe("runAutorunAttemptLifecycle", () => {
           "implementationLog failed output contract: missing Summary section",
         ),
     );
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("failed-output-contract");
     expect(terminal.outcomeDetail).toBe(
       "implementationLog failed output contract: missing Summary section",
@@ -451,7 +476,7 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(comment).toContain("invalid direct validation output");
   });
   test("runs fatal beforeRun after metadata is persisted and before workflow", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
     const calls: string[] = [];
     await assertRejects(
@@ -463,7 +488,11 @@ describe("runAutorunAttemptLifecycle", () => {
             beforeRun: Effect.fnUntraced(function* () {
               yield* Effect.void;
               const persisted = yield* Effect.promise(() =>
-                readAttemptMetadata(fixture.issueDir, 1),
+                runApplicationPromise(
+                  Effect.flatMap(AttemptStore, (store) =>
+                    store.read(fixture.issueDir, 1),
+                  ),
+                ),
               );
               expect(persisted.outcome).toBe("in-progress");
               calls.push("beforeRun");
@@ -495,13 +524,15 @@ describe("runAutorunAttemptLifecycle", () => {
         error instanceof Error && error.message.includes("setup failed"),
     );
     expect(calls).toEqual(["beforeRun"]);
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("errored");
     expect(terminal.outcomeDetail).toBe("setup failed");
     expect(terminal.endedAt).toBe("2026-05-07T02:45:00.000Z");
   });
   test("classifies generic failures as errored and records terminal metadata from finally", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const fixture = await createFixture();
     const comments: string[] = [];
     await assertRejects(
@@ -536,7 +567,9 @@ describe("runAutorunAttemptLifecycle", () => {
       (error: unknown) =>
         error instanceof Error && error.message.includes("workflow exploded"),
     );
-    const terminal = await readAttemptMetadata(fixture.issueDir, 1);
+    const terminal = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+    );
     expect(terminal.outcome).toBe("errored");
     expect(terminal.outcomeDetail).toBe("workflow exploded");
     expect(terminal.endedAt).toBe("2026-05-07T03:00:00.000Z");
@@ -546,39 +579,53 @@ describe("runAutorunAttemptLifecycle", () => {
 async function writeCompletedWorkflowArtifacts(
   context: WorkflowContext,
 ): Promise<void> {
-  await writeArtifact(
-    context,
-    "issue",
-    '# GitHub Issue #44\n\n<github_issue_relationships source="gh" />\n',
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "issue",
+      '# GitHub Issue #44\n\n<github_issue_relationships source="gh" />\n',
+    ),
   );
-  await writeJsonArtifact(context, "triage", triageResult());
-  await writeJsonArtifact(
-    context,
-    "implementationPlanDraft",
-    implementationPlanResult(),
+  await runApplicationPromise(
+    writeJsonArtifact(context, "triage", triageResult()),
   );
-  await writeJsonArtifact(
-    context,
-    "implementationPlan",
-    implementationPlanResult(),
+  await runApplicationPromise(
+    writeJsonArtifact(
+      context,
+      "implementationPlanDraft",
+      implementationPlanResult(),
+    ),
   );
-  await writeArtifact(
-    context,
-    "preImplementationBaseline",
-    JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+  await runApplicationPromise(
+    writeJsonArtifact(
+      context,
+      "implementationPlan",
+      implementationPlanResult(),
+    ),
   );
-  await writeArtifact(
-    context,
-    "implementationLog",
-    JSON.stringify(changeReport()),
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "preImplementationBaseline",
+      JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+    ),
   );
-  await writeArtifact(
-    context,
-    refinementLogRef(0),
-    JSON.stringify(changeReport({ summary: "Refined." })),
+  await runApplicationPromise(
+    writeArtifact(context, "implementationLog", JSON.stringify(changeReport())),
   );
-  await writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult()));
-  await writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult()));
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      refinementLogRef(0),
+      JSON.stringify(changeReport({ summary: "Refined." })),
+    ),
+  );
+  await runApplicationPromise(
+    writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult())),
+  );
+  await runApplicationPromise(
+    writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult())),
+  );
 }
 async function createFixture(): Promise<{
   issueDir: string;
@@ -589,7 +636,7 @@ async function createFixture(): Promise<{
 }> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-lifecycle-"));
   tempDirs.push(cwd);
-  await runProcessOrThrowPromise(["git", "init"], { cwd });
+  await runApplicationPromise(runProcessOrThrow(["git", "init"], { cwd }));
   const issueDir = path.join(cwd, ".roark/runs/issue/44");
   const runDirRelative = ".roark/runs/issue/44/attempts/1";
   const runDir = path.join(cwd, runDirRelative);
@@ -669,7 +716,9 @@ test("attempt finalization persists metadata and observability even when afterRu
       },
     ).pipe(Effect.provide(applicationLayer)),
   );
-  const metadata = await readAttemptMetadata(fixture.issueDir, 1);
+  const metadata = await runApplicationPromise(
+    Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
+  );
   expect(metadata.outcome).toBe("failed-readiness");
   expect(typeof metadata.endedAt).toBe("string");
   expect(finalized).toBe(true);

@@ -1,8 +1,7 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
+import { decodeArtifact } from "../workflow/validation.ts";
+import { Effect } from "effect";
+import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseReadinessResultJson } from "../workflow/readiness.ts";
-
 export function formatDoLocalModeStartMessage(issue: string): string {
   return [
     `Local/manual do mode for issue ${issue}.`,
@@ -10,24 +9,17 @@ export function formatDoLocalModeStartMessage(issue: string): string {
     `For the managed branch/PR flow, use: bun run auto ${issue}`,
   ].join("\n");
 }
-
 export function formatDoLocalModeReadyMessage(issue: string): string {
   return `Issue ${issue} is ready for PR, but no PR was opened because this was local/manual do mode. Use 'bun run auto ${issue}' for the managed branch/PR flow.`;
 }
-
-export async function printDoLocalModeReadyMessageIfReady(
+export const printDoLocalModeReadyMessageIfReady = Effect.fnUntraced(function* (
   context: WorkflowContext,
   log: (message: string) => void = console.log,
-  application?: ApplicationExecution,
-): Promise<void> {
-  try {
-    const readiness = parseReadinessResultJson(
-      await readArtifact(context, "readiness", application),
-    );
-    if (readiness.decision.status === "ready-for-pr") {
-      log(`\n${formatDoLocalModeReadyMessage(context.issueInput)}`);
-    }
-  } catch {
-    // Some stopped/error paths may not have a readiness artifact. Nothing to announce.
-  }
-}
+) {
+  const readiness = yield* readArtifact(context, "readiness").pipe(
+    Effect.flatMap((raw) => decodeArtifact(parseReadinessResultJson, raw)),
+    Effect.catch(() => Effect.succeed(undefined)),
+  );
+  if (readiness?.decision.status === "ready-for-pr")
+    log(`\n${formatDoLocalModeReadyMessage(context.issueInput)}`);
+});

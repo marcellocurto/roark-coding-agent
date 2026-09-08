@@ -1,8 +1,26 @@
+import {
+  type ProcessResult,
+  runProcessOrThrow,
+  runProcess,
+  type ProcessOptions,
+} from "../cli/process.ts";
+import {
+  Scope,
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+} from "effect";
+import {
+  runApplicationPromise,
+  type ApplicationExecution,
+  applicationLayer,
+} from "../runtime/application.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { Workspace } from "./workspace-service.ts";
 import * as nativeWorkspace from "./workspace.ts";
-import { Cause, Deferred, Effect, Exit, Fiber, FileSystem } from "effect";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { Presentation } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -29,36 +47,13 @@ import {
   workspacePathForPrRevision,
   workspaceStateFile,
 } from "./workspace.ts";
-import {
-  runLifecycleHookPromise,
-  type ProcessRunner,
-} from "./workspace-promise.ts";
-import {
-  assertWorkspacePathSafePromise as assertWorkspacePathSafe,
-  listManagedWorkspacesPromise as listManagedWorkspaces,
-  listWorkspacesPromise as listWorkspaces,
-  prepareCloneWorkspacePromise as prepareCloneWorkspace,
-  preparePrReviewWorkspacePromise as preparePrReviewWorkspace,
-  preparePrRevisionWorkspacePromise as preparePrRevisionWorkspace,
-  refreshCopyToWorktreePromise as refreshCopyToWorktree,
-  removeWorkspacePromise as removeWorkspace,
-  resolveCloneRemotePromise as resolveCloneRemote,
-  resolvePrReviewCloneRemotePromise as resolvePrReviewCloneRemote,
-  runRemoveCommandPromise as runRemoveCommand,
-} from "./workspace-promise.ts";
-import {
-  runProcessPromise,
-  runProcessOrThrowPromise,
-} from "../cli/process-promise.ts";
-import { noopAsync } from "../utils/async.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
-const ok = (stdout = ""): Awaited<ReturnType<ProcessRunner>> => ({
+import { type TerminalStream } from "../presentation/terminal.ts";
+const ok = (stdout = ""): Awaited<ReturnType<TestProcessRunner>> => ({
   stdout,
   stderr: "",
   exitCode: 0,
 });
-const fail = (stderr = "failed"): Awaited<ReturnType<ProcessRunner>> => ({
+const fail = (stderr = "failed"): Awaited<ReturnType<TestProcessRunner>> => ({
   stdout: "",
   stderr,
   exitCode: 1,
@@ -85,19 +80,21 @@ describe("managed clone workspaces", () => {
   test("rejects workspace path escapes", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "roark-workspace-root-"));
     await assertRejects(
-      assertWorkspacePathSafe({
-        root,
-        workspacePath: path.join(root, "../escape"),
-      }),
+      runApplicationPromise(
+        nativeWorkspace.assertWorkspacePathSafe({
+          root,
+          workspacePath: path.join(root, "../escape"),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error && error.message.includes("must stay inside"),
     );
   });
   test("resolves remote names and preflights the resulting URL", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       calls.push(args);
       if (args.join(" ") === "git remote get-url upstream")
         return ok("git@github.com:owner/repo.git\n");
@@ -106,7 +103,13 @@ describe("managed clone workspaces", () => {
       return fail();
     };
     expect(
-      resolveCloneRemote({ cwd: "/repo", cloneRemote: "upstream", runner }),
+      runApplicationPromise(
+        nativeWorkspace.resolveCloneRemote({
+          cwd: "/repo",
+          cloneRemote: "upstream",
+          runner: adaptRunner(runner),
+        }),
+      ),
     ).resolves.toEqual({
       remote: "upstream",
       url: "git@github.com:owner/repo.git",
@@ -117,10 +120,10 @@ describe("managed clone workspaces", () => {
     ]);
   });
   test("resolves a PR review clone from the requested repository instead of the control checkout", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       calls.push(args);
       return args.join(" ") ===
         "git ls-remote https://github.com/target/repo HEAD"
@@ -128,12 +131,14 @@ describe("managed clone workspaces", () => {
         : fail(`unexpected command: ${args.join(" ")}`);
     };
     expect(
-      resolvePrReviewCloneRemote({
-        cwd: "/unrelated-control-checkout",
-        repo: "target/repo",
-        repositoryUrl: "https://github.com/target/repo",
-        runner,
-      }),
+      runApplicationPromise(
+        nativeWorkspace.resolvePrReviewCloneRemote({
+          cwd: "/unrelated-control-checkout",
+          repo: "target/repo",
+          repositoryUrl: "https://github.com/target/repo",
+          runner: adaptRunner(runner),
+        }),
+      ),
     ).resolves.toEqual({
       remote: "origin",
       url: "https://github.com/target/repo",
@@ -153,7 +158,7 @@ describe("managed clone workspaces", () => {
       issueNumber: 75,
     });
     await mkdir(`${workspacePath}.lock`, { recursive: true });
-    const runner: ProcessRunner = async (args) => {
+    const runner: TestProcessRunner = async (args) => {
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote")
@@ -164,20 +169,22 @@ describe("managed clone workspaces", () => {
       }
       return ok();
     };
-    const prepared = await prepareCloneWorkspace({
-      controlCwd: root,
-      repo: "owner/repo",
-      issueNumber: 75,
-      plan: {
+    const prepared = await runApplicationPromise(
+      nativeWorkspace.prepareCloneWorkspace({
+        controlCwd: root,
+        repo: "owner/repo",
         issueNumber: 75,
-        branchName: "roark/issue-75",
-        baseBranch: "main",
-      },
-      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-      hooks: defaultLifecycleHooks,
-      mode: "auto",
-      runner,
-    });
+        plan: {
+          issueNumber: 75,
+          branchName: "roark/issue-75",
+          baseBranch: "main",
+        },
+        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+        hooks: defaultLifecycleHooks,
+        mode: "auto",
+        runner: adaptRunner(runner),
+      }),
+    );
     expect(prepared.path).toBe(workspacePath);
     expect((await lstat(`${workspacePath}.lock`)).isDirectory()).toBe(true);
     await rm(root, { recursive: true, force: true });
@@ -194,8 +201,8 @@ describe("managed clone workspaces", () => {
     });
     await mkdir(path.join(workspacePath, ".git"), { recursive: true });
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
@@ -211,20 +218,22 @@ describe("managed clone workspaces", () => {
         return fail(`${args[1] ?? "git command"} should not run`);
       return ok();
     };
-    const prepared = await prepareCloneWorkspace({
-      controlCwd: root,
-      repo: "owner/repo",
-      issueNumber: 77,
-      plan: {
+    const prepared = await runApplicationPromise(
+      nativeWorkspace.prepareCloneWorkspace({
+        controlCwd: root,
+        repo: "owner/repo",
         issueNumber: 77,
-        branchName: "roark/issue-77",
-        baseBranch: "main",
-      },
-      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-      hooks: defaultLifecycleHooks,
-      mode: "continue",
-      runner,
-    });
+        plan: {
+          issueNumber: 77,
+          branchName: "roark/issue-77",
+          baseBranch: "main",
+        },
+        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+        hooks: defaultLifecycleHooks,
+        mode: "continue",
+        runner: adaptRunner(runner),
+      }),
+    );
     expect(prepared.path).toBe(workspacePath);
     expect(
       calls.some(
@@ -255,16 +264,20 @@ describe("managed clone workspaces", () => {
     await mkdir(`${workspacePath}.lock`, { recursive: true });
     await mkdir(`${prWorkspacePath}.lock`, { recursive: true });
     expect(
-      await listWorkspaces({
-        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-        repo: "owner/repo",
-      }),
+      await runApplicationPromise(
+        nativeWorkspace.listWorkspaces({
+          workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+          repo: "owner/repo",
+        }),
+      ),
     ).toEqual([workspacePath, prWorkspacePath].toSorted());
-    await removeWorkspace({
-      workspacePath,
-      force: true,
-      hooks: defaultLifecycleHooks,
-    });
+    await runApplicationPromise(
+      nativeWorkspace.removeWorkspace({
+        workspacePath,
+        force: true,
+        hooks: defaultLifecycleHooks,
+      }),
+    );
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     expect(Bun.file(`${workspacePath}.lock`).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
@@ -280,15 +293,17 @@ describe("managed clone workspaces", () => {
       prNumber: 98,
     });
     await mkdir(workspacePath, { recursive: true });
-    await runRemoveCommand({
-      command: "remove",
-      targets: [{ kind: "pr", number: 98 }],
-      cwd: root,
-      repo: "owner/repo",
-      force: true,
-      workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-      hooks: defaultLifecycleHooks,
-    });
+    await runApplicationPromise(
+      nativeWorkspace.runRemoveCommand({
+        command: "remove",
+        targets: [{ kind: "pr", number: 98 }],
+        cwd: root,
+        repo: "owner/repo",
+        force: true,
+        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+        hooks: defaultLifecycleHooks,
+      }),
+    );
     expect(Bun.file(workspacePath).exists()).resolves.toBe(false);
     await rm(root, { recursive: true, force: true });
   });
@@ -310,11 +325,13 @@ describe("managed clone workspaces", () => {
     await mkdir(issuePath, { recursive: true });
     await mkdir(prPath, { recursive: true });
     expect(
-      await listManagedWorkspaces({
-        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-        repo: "owner/repo",
-        cwd: root,
-      }),
+      await runApplicationPromise(
+        nativeWorkspace.listManagedWorkspaces({
+          workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+          repo: "owner/repo",
+          cwd: root,
+        }),
+      ),
     ).toEqual([
       { path: issuePath, target: { kind: "issue" as const, number: 12 } },
       { path: prPath, target: { kind: "pr" as const, number: 34 } },
@@ -338,22 +355,28 @@ describe("managed clone workspaces", () => {
     });
     await mkdir(cleanPath, { recursive: true });
     await mkdir(dirtyPath, { recursive: true });
-    await runProcessOrThrowPromise(["git", "init"], { cwd: cleanPath });
-    await runProcessOrThrowPromise(["git", "init"], { cwd: dirtyPath });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init"], { cwd: cleanPath }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init"], { cwd: dirtyPath }),
+    );
     await writeFile(path.join(dirtyPath, "recoverable.txt"), "keep me\n");
     await assertRejects(
-      runRemoveCommand({
-        command: "remove",
-        targets: [
-          { kind: "issue", number: 12 },
-          { kind: "issue", number: 34 },
-        ],
-        cwd: root,
-        repo: "owner/repo",
-        force: false,
-        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-        hooks: defaultLifecycleHooks,
-      }),
+      runApplicationPromise(
+        nativeWorkspace.runRemoveCommand({
+          command: "remove",
+          targets: [
+            { kind: "issue", number: 12 },
+            { kind: "issue", number: 34 },
+          ],
+          cwd: root,
+          repo: "owner/repo",
+          force: false,
+          workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+          hooks: defaultLifecycleHooks,
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes("Refusing to remove dirty workspace"),
@@ -373,15 +396,17 @@ describe("managed clone workspaces", () => {
       issueNumber: 404,
     });
     await assertRejects(
-      runRemoveCommand({
-        command: "remove",
-        targets: [{ kind: "issue", number: 404 }],
-        cwd: root,
-        repo: "owner/repo",
-        force: false,
-        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-        hooks: defaultLifecycleHooks,
-      }),
+      runApplicationPromise(
+        nativeWorkspace.runRemoveCommand({
+          command: "remove",
+          targets: [{ kind: "issue", number: 404 }],
+          cwd: root,
+          repo: "owner/repo",
+          force: false,
+          workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+          hooks: defaultLifecycleHooks,
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes(`Managed workspace not found:\n${missingPath}`),
@@ -397,7 +422,7 @@ describe("managed clone workspaces", () => {
       issueNumber: 74,
     });
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args, options) => {
+    const runner: TestProcessRunner = async (args, options) => {
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
@@ -413,20 +438,22 @@ describe("managed clone workspaces", () => {
       return ok(options?.cwd ?? "");
     };
     await assertRejects(
-      prepareCloneWorkspace({
-        controlCwd: root,
-        repo: "owner/repo",
-        issueNumber: 74,
-        plan: {
+      runApplicationPromise(
+        nativeWorkspace.prepareCloneWorkspace({
+          controlCwd: root,
+          repo: "owner/repo",
           issueNumber: 74,
-          branchName: "roark/issue-74",
-          baseBranch: "main",
-        },
-        workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
-        hooks: { ...defaultLifecycleHooks, afterCreate: "false" },
-        mode: "auto",
-        runner,
-      }),
+          plan: {
+            issueNumber: 74,
+            branchName: "roark/issue-74",
+            baseBranch: "main",
+          },
+          workspace: { ...defaultWorkspaceConfig, root: workspaceRoot },
+          hooks: { ...defaultLifecycleHooks, afterCreate: "false" },
+          mode: "auto",
+          runner: adaptRunner(runner),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes("afterCreate hook failed"),
@@ -449,8 +476,8 @@ describe("managed clone workspaces", () => {
       repo: "owner/repo",
       prNumber: 12,
     });
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote")
@@ -505,8 +532,8 @@ describe("managed clone workspaces", () => {
     });
     await mkdir(path.join(workspacePath, ".git"), { recursive: true });
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
@@ -627,8 +654,8 @@ describe("managed clone workspaces", () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-failed-lock-",
     );
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${fixture.root}/remote.git\n`);
       if (args[0] === "git" && args[1] === "ls-remote")
@@ -690,11 +717,14 @@ describe("managed clone workspaces", () => {
       "stale\n",
       "utf8",
     );
-    await refreshCopyToWorktree({
-      controlCwd: control,
-      worktreePath: worktree,
-      copyToWorktree: [".secrets/env"],
-    });
+    await runApplicationPromise(
+      nativeWorkspace.refreshCopyToWorktree({
+        controlCwd: control,
+        worktreePath: worktree,
+        copyToWorktree: [".secrets/env"],
+        runner: adaptRunner(undefined),
+      }),
+    );
     expect(
       await readFile(
         path.join(worktree, ".secrets", "env", "local.env"),
@@ -749,11 +779,14 @@ describe("managed clone workspaces", () => {
     );
     await symlink(outside, path.join(worktree, ".secrets"));
     await assertRejects(
-      refreshCopyToWorktree({
-        controlCwd: control,
-        worktreePath: worktree,
-        copyToWorktree: [".secrets/env"],
-      }),
+      runApplicationPromise(
+        nativeWorkspace.refreshCopyToWorktree({
+          controlCwd: control,
+          worktreePath: worktree,
+          copyToWorktree: [".secrets/env"],
+          runner: adaptRunner(undefined),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error && error.message.includes("destination parent"),
     );
@@ -773,11 +806,14 @@ describe("managed clone workspaces", () => {
     await writeFile(path.join(control, "ignored"), "copy me\n", "utf8");
     await initGitRepo(worktree, "ignored\nmissing\n");
     await assertRejects(
-      refreshCopyToWorktree({
-        controlCwd: control,
-        worktreePath: worktree,
-        copyToWorktree: ["ignored", "missing"],
-      }),
+      runApplicationPromise(
+        nativeWorkspace.refreshCopyToWorktree({
+          controlCwd: control,
+          worktreePath: worktree,
+          copyToWorktree: ["ignored", "missing"],
+          runner: adaptRunner(undefined),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes("source 'missing' is missing"),
@@ -788,11 +824,14 @@ describe("managed clone workspaces", () => {
     await writeFile(path.join(worktree, "ignored"), "stale\n", "utf8");
     await initGitRepo(worktree, "");
     await assertRejects(
-      refreshCopyToWorktree({
-        controlCwd: control,
-        worktreePath: worktree,
-        copyToWorktree: ["ignored"],
-      }),
+      runApplicationPromise(
+        nativeWorkspace.refreshCopyToWorktree({
+          controlCwd: control,
+          worktreePath: worktree,
+          copyToWorktree: ["ignored"],
+          runner: adaptRunner(undefined),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error &&
         error.message.includes("destination must be ignored"),
@@ -809,19 +848,21 @@ describe("managed clone workspaces", () => {
     await mkdir(control, { recursive: true });
     await mkdir(worktree, { recursive: true });
     await writeFile(path.join(control, "visible"), "copy me\n", "utf8");
-    const runner: ProcessRunner = async (args) => {
-      await noopAsync();
+    const runner: TestProcessRunner = async (args) => {
+      await Promise.resolve();
       if (args[1] === "check-ignore") return ok();
       if (args[1] === "status") return ok("?? visible\n");
       return ok();
     };
     await assertRejects(
-      refreshCopyToWorktree({
-        controlCwd: control,
-        worktreePath: worktree,
-        copyToWorktree: ["visible"],
-        runner,
-      }),
+      runApplicationPromise(
+        nativeWorkspace.refreshCopyToWorktree({
+          controlCwd: control,
+          worktreePath: worktree,
+          copyToWorktree: ["visible"],
+          runner: adaptRunner(runner),
+        }),
+      ),
       (error: unknown) =>
         error instanceof Error && error.message.includes("visible to Git"),
     );
@@ -839,7 +880,7 @@ describe("managed clone workspaces", () => {
     await mkdir(control, { recursive: true });
     await writeFile(path.join(control, "local.env"), "ready\n", "utf8");
     const calls: string[][] = [];
-    const runner: ProcessRunner = async (args) => {
+    const runner: TestProcessRunner = async (args) => {
       calls.push(args);
       if (args[0] === "git" && args[1] === "remote")
         return ok(`${root}/remote.git\n`);
@@ -859,24 +900,26 @@ describe("managed clone workspaces", () => {
           : fail("missing local.env");
       return ok();
     };
-    await prepareCloneWorkspace({
-      controlCwd: control,
-      repo: "owner/repo",
-      issueNumber: 88,
-      plan: {
+    await runApplicationPromise(
+      nativeWorkspace.prepareCloneWorkspace({
+        controlCwd: control,
+        repo: "owner/repo",
         issueNumber: 88,
-        branchName: "roark/issue-88",
-        baseBranch: "main",
-      },
-      workspace: {
-        ...defaultWorkspaceConfig,
-        root: workspaceRoot,
-        copyToWorktree: ["local.env"],
-      },
-      hooks: { ...defaultLifecycleHooks, afterCreate: "test -f local.env" },
-      mode: "auto",
-      runner,
-    });
+        plan: {
+          issueNumber: 88,
+          branchName: "roark/issue-88",
+          baseBranch: "main",
+        },
+        workspace: {
+          ...defaultWorkspaceConfig,
+          root: workspaceRoot,
+          copyToWorktree: ["local.env"],
+        },
+        hooks: { ...defaultLifecycleHooks, afterCreate: "test -f local.env" },
+        mode: "auto",
+        runner: adaptRunner(runner),
+      }),
+    );
     expect(calls.some((args) => args[0] === "sh")).toBe(true);
     await rm(root, { recursive: true, force: true });
   });
@@ -895,11 +938,16 @@ describe("managed clone workspaces", () => {
       new Presenter({ stream, errorStream: stream }),
       async (application) => {
         try {
-          const hook = runLifecycleHookPromise(
-            "afterRun",
-            { timeoutMs: 1000, afterRun: "hostile\u001b]0;owned\rcommand" },
-            root,
-            () => Promise.resolve(fail("after\nfailed\u0007")),
+          const hook = runApplicationPromise(
+            nativeWorkspace.runLifecycleHook(
+              "afterRun",
+              { timeoutMs: 1000, afterRun: "hostile\u001b]0;owned\rcommand" },
+              root,
+              adaptRunner(
+                () => Promise.resolve(fail("after\nfailed\u0007")),
+                application,
+              ),
+            ),
             application,
           );
           await hook;
@@ -919,55 +967,77 @@ describe("managed clone workspaces", () => {
     const remote = path.join(root, "remote.git");
     await initGitRepo(source, ".roark\n");
     const initial = (
-      await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], {
-        cwd: source,
-      })
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "rev-parse", "HEAD"], {
+          cwd: source,
+        }),
+      )
     ).trim();
-    await runProcessOrThrowPromise(
-      ["git", "checkout", "-b", "contributor/change"],
-      { cwd: source },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "checkout", "-b", "contributor/change"], {
+        cwd: source,
+      }),
     );
     await writeFile(path.join(source, "feature.txt"), "feature\n", "utf8");
-    await runProcessOrThrowPromise(["git", "add", "feature.txt"], {
-      cwd: source,
-    });
-    await runProcessOrThrowPromise(["git", "commit", "-m", "feature"], {
-      cwd: source,
-    });
-    const headOid = (
-      await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], {
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "feature.txt"], {
         cwd: source,
-      })
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "feature"], {
+        cwd: source,
+      }),
+    );
+    const headOid = (
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "rev-parse", "HEAD"], {
+          cwd: source,
+        }),
+      )
     ).trim();
-    await runProcessOrThrowPromise(["git", "checkout", "main"], {
-      cwd: source,
-    });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "checkout", "main"], {
+        cwd: source,
+      }),
+    );
     await writeFile(
       path.join(source, "base-only.txt"),
       "base advance\n",
       "utf8",
     );
-    await runProcessOrThrowPromise(["git", "add", "base-only.txt"], {
-      cwd: source,
-    });
-    await runProcessOrThrowPromise(["git", "commit", "-m", "advance base"], {
-      cwd: source,
-    });
-    const baseOid = (
-      await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], {
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "base-only.txt"], {
         cwd: source,
-      })
-    ).trim();
-    await runProcessOrThrowPromise(["git", "clone", "--bare", source, remote], {
-      cwd: root,
-    });
-    await runProcessOrThrowPromise(
-      ["git", "update-ref", "refs/pull/12/head", headOid],
-      { cwd: remote },
+      }),
     );
-    await runProcessOrThrowPromise(
-      ["git", "remote", "add", "origin", `file://${remote}`],
-      { cwd: source },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "advance base"], {
+        cwd: source,
+      }),
+    );
+    const baseOid = (
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "rev-parse", "HEAD"], {
+          cwd: source,
+        }),
+      )
+    ).trim();
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "clone", "--bare", source, remote], {
+        cwd: root,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "update-ref", "refs/pull/12/head", headOid], {
+        cwd: remote,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(
+        ["git", "remote", "add", "origin", `file://${remote}`],
+        { cwd: source },
+      ),
     );
     const calls: string[][] = [];
     const prepared = await preparePrReviewWorkspace({
@@ -986,7 +1056,7 @@ describe("managed clone workspaces", () => {
       hooks: defaultLifecycleHooks,
       runner: async (args, options) => {
         calls.push(args);
-        return runProcessPromise(args, options);
+        return runApplicationPromise(runProcess(args, options));
       },
     });
     expect(prepared.comparison.mergeBaseOid).toBe(initial);
@@ -996,9 +1066,11 @@ describe("managed clone workspaces", () => {
     );
     expect(
       (
-        await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], {
-          cwd: prepared.path,
-        })
+        await runApplicationPromise(
+          runProcessOrThrow(["git", "rev-parse", "HEAD"], {
+            cwd: prepared.path,
+          }),
+        )
       ).trim(),
     ).toBe(headOid);
     expect(
@@ -1014,9 +1086,11 @@ describe("managed clone workspaces", () => {
       ),
     ).toBe(false);
     await prepared.releaseLock();
-    await runProcessOrThrowPromise(
-      ["git", "remote", "set-url", "origin", `file://${source}`],
-      { cwd: prepared.path },
+    await runApplicationPromise(
+      runProcessOrThrow(
+        ["git", "remote", "set-url", "origin", `file://${source}`],
+        { cwd: prepared.path },
+      ),
     );
     await Effect.runPromise(
       Effect.gen(function* () {
@@ -1074,8 +1148,8 @@ async function createPrRevisionWorkspaceFixture(prefix: string): Promise<{
     repo: "owner/repo",
     prNumber: 12,
   });
-  const runner: ProcessRunner = async (args) => {
-    await noopAsync();
+  const runner: TestProcessRunner = async (args) => {
+    await Promise.resolve();
     if (args[0] === "git" && args[1] === "remote")
       return ok(`${root}/remote.git\n`);
     if (args[0] === "git" && args[1] === "ls-remote") return ok("abc\tHEAD\n");
@@ -1134,20 +1208,29 @@ function findDeadPid(): number {
 }
 async function initGitRepo(cwd: string, gitignore: string): Promise<void> {
   await mkdir(cwd, { recursive: true });
-  await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
-  await runProcessOrThrowPromise(
-    ["git", "config", "user.email", "roark@example.com"],
-    { cwd },
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "init", "-b", "main"], { cwd }),
   );
-  await runProcessOrThrowPromise(["git", "config", "user.name", "Roark Test"], {
-    cwd,
-  });
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "config", "user.email", "roark@example.com"], {
+      cwd,
+    }),
+  );
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "config", "user.name", "Roark Test"], {
+      cwd,
+    }),
+  );
   await writeFile(path.join(cwd, ".gitignore"), gitignore, "utf8");
   await writeFile(path.join(cwd, "README.md"), "test\n", "utf8");
-  await runProcessOrThrowPromise(["git", "add", ".gitignore", "README.md"], {
-    cwd,
-  });
-  await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], { cwd });
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "add", ".gitignore", "README.md"], {
+      cwd,
+    }),
+  );
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd }),
+  );
 }
 for (const name of ["beforeRun", "afterRun"] as const) {
   test(`${name} treats a descendant timeout as failure after the shell exits zero`, async () => {
@@ -1257,46 +1340,76 @@ test("interrupted workspace initialization records poison before returning", asy
     await rm(root, { recursive: true, force: true });
   }
 });
-
-test("legacy workspace ownership lasts through its caller's finalizer", async () => {
-  const fixture = await createPrRevisionWorkspaceFixture(
-    "roark-legacy-workspace-owner-",
-  );
-  let prepared:
-    | Awaited<ReturnType<typeof preparePrRevisionWorkspace>>
-    | undefined;
+type Input<T> = Omit<T, "runner"> & {
+  runner?: TestProcessRunner | undefined;
+};
+function adaptRunner(
+  runner: TestProcessRunner | undefined,
+  application?: ApplicationExecution,
+): nativeWorkspace.ProcessRunner | undefined {
+  if (!runner) return undefined;
+  return (args, options) =>
+    Effect.tryPromise({
+      try: () => runner([...args], options, application),
+      catch: (cause) => new nativeWorkspace.WorkspaceCommandError({ cause }),
+    });
+}
+async function preparePrRevisionWorkspace(
+  input: Input<
+    Parameters<typeof nativeWorkspace.preparePrRevisionWorkspace>[0]
+  >,
+  application?: ApplicationExecution,
+) {
+  // This Promise API transfers the lock to its caller's workflow finalizer.
+  // Closing the intervening Promise bridge must not release that lock early.
+  const scope = await Effect.runPromise(Scope.make());
   try {
-    await Effect.runPromise(
-      fromLegacyPromise(async (application) => {
-        prepared = await preparePrRevisionWorkspace(
-          fixture.prepareInput,
-          application,
-        );
-      }).pipe(
-        Effect.onExit(() =>
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            expect(yield* fs.exists(fixture.lockDir)).toBe(true);
-          }).pipe(
-            Effect.ensuring(
-              Effect.suspend(() => {
-                const workspace = prepared;
-                return workspace
-                  ? Effect.promise(() => workspace.releaseLock())
-                  : Effect.void;
-              }),
-            ),
-          ),
-        ),
-        Effect.provide(applicationLayer),
-      ),
+    const prepared = await runApplicationPromise(
+      nativeWorkspace
+        .preparePrRevisionWorkspace({
+          ...input,
+          runner: adaptRunner(input.runner, application),
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+      application,
     );
-    await assertRejects(
-      stat(fixture.lockDir),
-      (error: unknown) =>
-        error instanceof Error && "code" in error && error.code === "ENOENT",
-    );
-  } finally {
-    await rm(fixture.root, { recursive: true, force: true });
+    return {
+      ...prepared,
+      releaseLock: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+    };
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    throw error;
   }
-});
+}
+async function preparePrReviewWorkspace(
+  input: Input<Parameters<typeof nativeWorkspace.preparePrReviewWorkspace>[0]>,
+  application?: ApplicationExecution,
+) {
+  // This Promise API transfers the lock to its caller's workflow finalizer.
+  // Closing the intervening Promise bridge must not release that lock early.
+  const scope = await Effect.runPromise(Scope.make());
+  try {
+    const prepared = await runApplicationPromise(
+      nativeWorkspace
+        .preparePrReviewWorkspace({
+          ...input,
+          runner: adaptRunner(input.runner, application),
+        })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+      application,
+    );
+    return {
+      ...prepared,
+      releaseLock: () => Effect.runPromise(Scope.close(scope, Exit.void)),
+    };
+  } catch (error) {
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    throw error;
+  }
+}
+type TestProcessRunner = (
+  args: string[],
+  options?: ProcessOptions,
+  application?: ApplicationExecution,
+) => Promise<ProcessResult>;

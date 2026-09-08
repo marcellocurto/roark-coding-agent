@@ -2,14 +2,13 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import { Presentation } from "../runtime/services.ts";
 import { Context, Effect, FileSystem, Layer } from "effect";
 import * as workspace from "./workspace.ts";
-
 const operations = {
   prepareClone: workspace.prepareCloneWorkspace,
   preparePrReview: workspace.preparePrReviewWorkspace,
+  preparePrRevision: workspace.preparePrRevisionWorkspace,
   refreshCopy: workspace.refreshCopyToWorktree,
   assertPinnedReview: workspace.assertPinnedPrReviewWorkspace,
 };
-
 type WorkspaceOperations = {
   [K in keyof typeof operations]: (
     input: Omit<Parameters<(typeof operations)[K]>[0], "runner">,
@@ -22,7 +21,6 @@ type WorkspaceOperations = {
     >
   >;
 };
-
 export class Workspace extends Context.Service<
   Workspace,
   WorkspaceOperations & {
@@ -36,7 +34,6 @@ export class Workspace extends Context.Service<
     >;
   }
 >()("roark/autorun/Workspace") {}
-
 export const workspaceLayer = Layer.effect(
   Workspace,
   Effect.gen(function* () {
@@ -48,6 +45,10 @@ export const workspaceLayer = Layer.effect(
       Context.add(Presentation, yield* Presentation),
     );
     return Workspace.of({
+      preparePrRevision: (input) =>
+        workspace
+          .preparePrRevisionWorkspace(input)
+          .pipe(Effect.provide(services)),
       prepareClone: (input) =>
         workspace.prepareCloneWorkspace(input).pipe(Effect.provide(services)),
       preparePrReview: (input) =>

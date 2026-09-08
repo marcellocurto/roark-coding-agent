@@ -1,3 +1,9 @@
+import {
+  runApplicationPromise,
+  applicationServicesLayer,
+  type ApplicationServices,
+} from "../runtime/application.ts";
+import { runProcessOrThrow } from "./process.ts";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,11 +13,6 @@ import { Presenter } from "../presentation/presenter.ts";
 import { CommandExecution, Presentation } from "../runtime/services.ts";
 import { Cause, Effect, Exit } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import {
-  applicationServicesLayer,
-  type ApplicationServices,
-} from "../runtime/application.ts";
-import { runProcessOrThrowPromise } from "./process-promise.ts";
 import { runCli } from "../../roark.ts";
 import { singlePhaseCommands } from "../workflow/phase-vocabulary.ts";
 import {
@@ -21,12 +22,10 @@ import {
   NotificationSettings,
   type NotificationContent,
 } from "./notifications.ts";
-
 const content: NotificationContent = {
   title: "Roark finished",
   body: "status · repository",
 };
-
 function runWithNotifier<A, E>(
   effect: Effect.Effect<A, E, ApplicationServices>,
   options: {
@@ -84,14 +83,13 @@ function runWithNotifier<A, E>(
         Effect.provideService(NotificationSettings, {
           platform: options.platform ?? "darwin",
           cwd: options.cwd ?? process.cwd(),
-          timeoutMs: options.timeoutMs ?? 2_000,
+          timeoutMs: options.timeoutMs ?? 2000,
         }),
       );
     }).pipe(Effect.provide(BunServices.layer)),
     { signal: options.signal },
   );
 }
-
 describe("sendExitNotification", () => {
   test("is silent outside a repository and on non-macOS hosts", async () => {
     const args: string[][] = [];
@@ -110,11 +108,12 @@ describe("sendExitNotification", () => {
     expect(args).toEqual([]);
     expect(warnings).toEqual([]);
   });
-
   test("CLI notification uses native workspace and config lookup with the provided process service", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-native-notify-"));
     try {
-      await runProcessOrThrowPromise(["git", "init", "--quiet", cwd]);
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "init", "--quiet", cwd], {}),
+      );
       await mkdir(path.join(cwd, ".roark"));
       await mkdir(path.join(cwd, "nested"));
       const configPath = path.join(cwd, ".roark", "config.json");
@@ -155,7 +154,6 @@ describe("sendExitNotification", () => {
     }
   });
 });
-
 describe("notification content", () => {
   test("recognizes remove and every single-phase command", () => {
     for (const command of ["remove", ...singlePhaseCommands]) {
@@ -170,7 +168,6 @@ describe("notification content", () => {
       });
     }
   });
-
   test("uses fixed titles and only normalized command, target, and repository context", () => {
     const success = formatNotificationContent(
       {
@@ -192,7 +189,6 @@ describe("notification content", () => {
     });
     expect(success.body).not.toContain("SECRET");
     expect(success.body).not.toContain("/private/");
-
     const failure = formatNotificationContent(
       {
         argv: ["review-pr", "#42", "raw error: password=hunter2"],
@@ -205,7 +201,6 @@ describe("notification content", () => {
       body: "review-pr #42 · répo",
     });
     expect(failure.body).not.toContain("password");
-
     const malformed = formatNotificationContent(
       { argv: ["unknown", "AppleScript-looking content"], succeeded: false },
       "/work/repository",
@@ -213,7 +208,6 @@ describe("notification content", () => {
     expect(malformed.body).toBe("roark · repository");
   });
 });
-
 describe("deliverMacNotification", () => {
   test("passes quotes, newlines, Unicode, and AppleScript-looking text only as data arguments", async () => {
     const special: NotificationContent = {
@@ -228,7 +222,6 @@ describe("deliverMacNotification", () => {
     expect(args[0]?.slice(-2)).toEqual([special.title, special.body]);
     expect(args[0]?.[2]).not.toContain("sound name");
   });
-
   test("warns once for launch failure or a nonzero exit", async () => {
     for (const options of [
       { executable: "roark-notifier-does-not-exist" },
@@ -244,7 +237,6 @@ describe("deliverMacNotification", () => {
       ]);
     }
   });
-
   test("timeout kills and reaps the notifier and warns once", async () => {
     const warnings: string[] = [];
     let pid: number | undefined;
@@ -261,12 +253,11 @@ describe("deliverMacNotification", () => {
     if (pid === undefined) throw new Error("Notifier did not start");
     const notifierPid = pid;
     expect(() => process.kill(notifierPid, 0)).toThrow();
-    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(Date.now() - started).toBeLessThan(1000);
     expect(warnings).toEqual([
       "Warning: Roark could not deliver the exit notification.",
     ]);
   });
-
   test("interruption reaps the notifier without turning it into a delivery warning", async () => {
     const controller = new AbortController();
     const warnings: string[] = [];

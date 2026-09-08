@@ -1,32 +1,24 @@
+import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
+import {
+  writeArtifact,
+  writeJsonArtifact,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import { rejects as assertRejects } from "node:assert/strict";
-import { providePromiseAgent } from "../workflow/promise-boundary.ts";
+import { provideTestAgent } from "../testing/agents.ts";
 import { Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ContinueCliOptions } from "../cli/args.ts";
-import {
-  refinementLogRef,
-  reviewARef,
-  reviewBRef,
-  type WorkflowContext,
-} from "../workflow/artifacts.ts";
-import {
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
+import { type ContinueCliOptions } from "../cli/args.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { formatAttemptMetadata } from "./attempts.ts";
-import {
-  readAttemptMetadataPromise as readAttemptMetadata,
-  writeAttemptMetadataPromise as writeAttemptMetadata,
-} from "./attempts-promise.ts";
 import { autorunWorktreePath } from "./branch.ts";
-import { createContinueWorkflowOptions } from "./continue.ts";
-import { runAutoContinue } from "./continue.ts";
-import { noopAsync } from "../utils/async.ts";
+import { createContinueWorkflowOptions, runAutoContinue } from "./continue.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import {
   implementationPlanResult,
@@ -65,26 +57,30 @@ describe("runAutoContinue", () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-published-"));
     tempDirs.push(cwd);
     await installFailingGh(cwd);
-    await writeAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      formatAttemptMetadata({
-        attempt: 2,
-        issueNumber: 24,
-        branch: "roark/issue-24",
-        baseBranch: "main",
-        worktreePath: path.join(cwd, ".roark/worktrees/issue-24"),
-        runArtifactPath: ".roark/runs/issue/24/attempts/2",
-        startedAt: "2026-05-07T00:00:00.000Z",
-        endedAt: "2026-05-07T00:10:00.000Z",
-        outcome: "published",
-      }),
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, ".roark/worktrees/issue-24"),
+            runArtifactPath: ".roark/runs/issue/24/attempts/2",
+            startedAt: "2026-05-07T00:00:00.000Z",
+            endedAt: "2026-05-07T00:10:00.000Z",
+            outcome: "published",
+          }),
+        ),
+      ),
     );
     await runApplicationPromise(
       runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }),
     );
   });
   test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
     const workspacePath = await mkdtemp(
       path.join(tmpdir(), "roark-continue-managed-"),
@@ -106,28 +102,34 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(
-      workflowContext,
-      "issue",
-      "# Issue\n\n<github_issue_relationships />\n",
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
+      ),
     );
-    await writeAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      formatAttemptMetadata({
-        attempt: 2,
-        issueNumber: 24,
-        branch: "roark/issue-24",
-        baseBranch: "main",
-        worktreePath: path.join(cwd, "legacy-worktree"),
-        workspace: {
-          path: workspacePath,
-          strategy: "clone",
-          cloneRemote: "upstream",
-          createdNow: false,
-        },
-        runArtifactPath: workflowContext.runDirRelative,
-        startedAt: "2026-05-07T00:00:00.000Z",
-      }),
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, "legacy-worktree"),
+            workspace: {
+              path: workspacePath,
+              strategy: "clone",
+              cloneRemote: "upstream",
+              createdNow: false,
+            },
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
     );
     const calls: string[] = [];
     await assertRejects(
@@ -195,8 +197,8 @@ describe("runAutoContinue", () => {
             }),
           },
         ).pipe(
-          providePromiseAgent(async () => {
-            await noopAsync();
+          provideTestAgent(async () => {
+            await Promise.resolve();
             calls.push("runner");
             throw new Error("triage failed");
           }),
@@ -209,16 +211,17 @@ describe("runAutoContinue", () => {
     expect(
       await Bun.file(path.join(workspacePath, "before-run.txt")).text(),
     ).toBe("before");
-    const metadata = await readAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      2,
+    const metadata = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+      ),
     );
     expect(metadata.worktreePath).toBe(workspacePath);
     expect(metadata.workspace?.path).toBe(workspacePath);
     expect(metadata.outcome).toBe("errored");
   });
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(
       path.join(tmpdir(), "roark-continue-error-ledger-"),
     );
@@ -240,70 +243,98 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(
-      workflowContext,
-      "issue",
-      "# Issue\n\n<github_issue_relationships />\n",
-    );
-    await writeJsonArtifact(workflowContext, "metadata", {
-      issue: {
-        number: 24,
-        title: "Ledger comments",
-        url: "https://github.com/owner/repo/issues/24",
-        labels: [],
-      },
-    });
-    await writeJsonArtifact(workflowContext, "triage", triageResult());
-    await writeJsonArtifact(
-      workflowContext,
-      "implementationPlanDraft",
-      implementationPlanResult(),
-    );
-    await writeJsonArtifact(
-      workflowContext,
-      "implementationPlan",
-      implementationPlanResult(),
-    );
-    await writeArtifact(
-      workflowContext,
-      "preImplementationBaseline",
-      JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
-    );
-    await writeArtifact(
-      workflowContext,
-      "implementationLog",
-      JSON.stringify(changeReport()),
-    );
-    await writeArtifact(
-      workflowContext,
-      refinementLogRef(0),
-      JSON.stringify(changeReport({ summary: "Refined." })),
-    );
-    await writeArtifact(
-      workflowContext,
-      reviewARef(0),
-      JSON.stringify(
-        reviewResult([
-          reviewFinding("must-fix-current", "Fix failed after reviews"),
-        ]),
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
       ),
     );
-    await writeArtifact(
-      workflowContext,
-      reviewBRef(0),
-      JSON.stringify(reviewResult()),
-    );
-    await writeAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      formatAttemptMetadata({
-        attempt: 2,
-        issueNumber: 24,
-        branch: "roark/issue-24",
-        baseBranch: "main",
-        worktreePath: path.join(cwd, "deleted-worktree"),
-        runArtifactPath: workflowContext.runDirRelative,
-        startedAt: "2026-05-07T00:00:00.000Z",
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "metadata", {
+        issue: {
+          number: 24,
+          title: "Ledger comments",
+          url: "https://github.com/owner/repo/issues/24",
+          labels: [],
+        },
       }),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "triage", triageResult()),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        workflowContext,
+        "implementationPlanDraft",
+        implementationPlanResult(),
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        workflowContext,
+        "implementationPlan",
+        implementationPlanResult(),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "preImplementationBaseline",
+        JSON.stringify({
+          head: "abc",
+          capturedAt: "now",
+          excludes: [".roark"],
+        }),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "implementationLog",
+        JSON.stringify(changeReport()),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        refinementLogRef(0),
+        JSON.stringify(changeReport({ summary: "Refined." })),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewARef(0),
+        JSON.stringify(
+          reviewResult([
+            reviewFinding("must-fix-current", "Fix failed after reviews"),
+          ]),
+        ),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewBRef(0),
+        JSON.stringify(reviewResult()),
+      ),
+    );
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, "deleted-worktree"),
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
     );
     await assertRejects(
       runApplicationPromise(
@@ -311,8 +342,8 @@ describe("runAutoContinue", () => {
           { ...continueOptions, issue: "24", cwd, attempt: 2 },
           {},
         ).pipe(
-          providePromiseAgent(async () => {
-            await noopAsync();
+          provideTestAgent(async () => {
+            await Promise.resolve();
             throw new Error("fix failed after reviews");
           }),
         ),
@@ -320,9 +351,10 @@ describe("runAutoContinue", () => {
       (error: unknown) =>
         error instanceof Error && error.message.includes("Fix pass 1 failed"),
     );
-    const metadata = await readAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      2,
+    const metadata = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+      ),
     );
     expect(metadata.outcome).toBe("errored");
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
@@ -351,28 +383,34 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(
-      workflowContext,
-      "issue",
-      "# Issue\n\n<github_issue_relationships />\n",
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
+      ),
     );
-    await writeAttemptMetadata(
-      path.join(cwd, ".roark/runs/issue/24"),
-      formatAttemptMetadata({
-        attempt: 2,
-        issueNumber: 24,
-        branch: "roark/issue-24",
-        baseBranch: "main",
-        worktreePath: workspacePath,
-        workspace: {
-          path: workspacePath,
-          strategy: "clone",
-          cloneRemote: "origin",
-          createdNow: false,
-        },
-        runArtifactPath: workflowContext.runDirRelative,
-        startedAt: "2026-05-07T00:00:00.000Z",
-      }),
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: workspacePath,
+            workspace: {
+              path: workspacePath,
+              strategy: "clone",
+              cloneRemote: "origin",
+              createdNow: false,
+            },
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
     );
     let releaseFirst!: () => void;
     let enteredFirst!: () => void;
@@ -406,7 +444,7 @@ describe("runAutoContinue", () => {
           ...injected,
         },
       ).pipe(
-        providePromiseAgent(async () => {
+        provideTestAgent(async () => {
           enteredFirst();
           await release;
           throw new Error("stop first continue");
@@ -422,8 +460,8 @@ describe("runAutoContinue", () => {
             ...injected,
           },
         ).pipe(
-          providePromiseAgent(async () => {
-            await noopAsync();
+          provideTestAgent(async () => {
+            await Promise.resolve();
             throw new Error("second continue should not run lifecycle");
           }),
         ),

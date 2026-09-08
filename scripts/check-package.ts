@@ -1,23 +1,23 @@
+import { runApplicationPromise } from "../lib/runtime/application.ts";
+import { runProcessOrThrow } from "../lib/cli/process.ts";
 import assert from "node:assert/strict";
 import { cp, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { runProcessOrThrowPromise } from "../lib/cli/process-promise.ts";
 import packageJson from "../package.json";
-
 const projectRoot = fileURLToPath(new URL("../", import.meta.url));
 const temporaryRoot = await mkdtemp(
   path.join(tmpdir(), "roark-package-check-"),
 );
-
 try {
   console.log(
     "Packing Roark and installing into a temporary npm global prefix...",
   );
-  await runProcessOrThrowPromise(
-    ["npm", "pack", "--pack-destination", temporaryRoot],
-    { cwd: projectRoot },
+  await runApplicationPromise(
+    runProcessOrThrow(["npm", "pack", "--pack-destination", temporaryRoot], {
+      cwd: projectRoot,
+    }),
   );
   const tarballs = (await readdir(temporaryRoot)).filter((file) =>
     file.endsWith(".tgz"),
@@ -27,25 +27,25 @@ try {
     tarballs.length === 1 && tarball,
     "Expected exactly one package tarball",
   );
-
   const prefix = path.join(temporaryRoot, "install");
-  await runProcessOrThrowPromise(
-    [
-      "npm",
-      "install",
-      "--global",
-      "--prefix",
-      prefix,
-      path.join(temporaryRoot, tarball),
-    ],
-    { cwd: temporaryRoot },
+  await runApplicationPromise(
+    runProcessOrThrow(
+      [
+        "npm",
+        "install",
+        "--global",
+        "--prefix",
+        prefix,
+        path.join(temporaryRoot, tarball),
+      ],
+      { cwd: temporaryRoot },
+    ),
   );
   const globalRoot = (
-    await runProcessOrThrowPromise(
-      ["npm", "root", "--global", "--prefix", prefix],
-      {
+    await runApplicationPromise(
+      runProcessOrThrow(["npm", "root", "--global", "--prefix", prefix], {
         cwd: temporaryRoot,
-      },
+      }),
     )
   ).trim();
   const installedRoot = path.join(globalRoot, packageJson.name);
@@ -56,39 +56,45 @@ try {
   const executable = path.join(prefix, "bin", "roark");
   const target = path.join(temporaryRoot, "target");
   await mkdir(target);
-  await runProcessOrThrowPromise(["git", "init", "--quiet", target], {
-    cwd: temporaryRoot,
-  });
-
+  await runApplicationPromise(
+    runProcessOrThrow(["git", "init", "--quiet", target], {
+      cwd: temporaryRoot,
+    }),
+  );
   console.log("Checking the installed CLI outside the source checkout...");
   assert.equal(
     (
-      await runProcessOrThrowPromise([executable, "--version"], { cwd: target })
+      await runApplicationPromise(
+        runProcessOrThrow([executable, "--version"], { cwd: target }),
+      )
     ).trim(),
     packageJson.version,
   );
   assert.match(
-    await runProcessOrThrowPromise([executable, "--help"], { cwd: target }),
+    await runApplicationPromise(
+      runProcessOrThrow([executable, "--help"], { cwd: target }),
+    ),
     /roark <command>/,
   );
   assert.equal(
     (
-      await runProcessOrThrowPromise(
-        [
-          executable,
-          "status",
-          "--all",
-          "--cwd",
-          target,
-          "--repo",
-          "owner/repo",
-        ],
-        { cwd: target },
+      await runApplicationPromise(
+        runProcessOrThrow(
+          [
+            executable,
+            "status",
+            "--all",
+            "--cwd",
+            target,
+            "--repo",
+            "owner/repo",
+          ],
+          { cwd: target },
+        ),
       )
     ).trim(),
     "No observability summaries found.",
   );
-
   // Copy only development fixtures, preserving their relative imports into the
   // installed package. Product code and dependencies come exclusively from npm.
   const installedChecks = path.join(installedRoot, "scripts", "package-checks");
@@ -106,26 +112,29 @@ try {
     ],
   ] as const) {
     console.log(`Checking installed ${description}...`);
-    await runProcessOrThrowPromise(
-      [process.execPath, path.join(installedChecks, fixture)],
-      { cwd: target },
+    await runApplicationPromise(
+      runProcessOrThrow(
+        [process.execPath, path.join(installedChecks, fixture)],
+        { cwd: target },
+      ),
     );
   }
-
   // Compare all supporting files, so npm ignore rules cannot silently truncate a skill.
   // Include new, uncommitted resources while excluding ignored local files such as .DS_Store.
-  const skillFiles = await runProcessOrThrowPromise(
-    [
-      "git",
-      "ls-files",
-      "--cached",
-      "--others",
-      "--exclude-standard",
-      "-z",
-      "--",
-      "skills/",
-    ],
-    { cwd: projectRoot },
+  const skillFiles = await runApplicationPromise(
+    runProcessOrThrow(
+      [
+        "git",
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+        "-z",
+        "--",
+        "skills/",
+      ],
+      { cwd: projectRoot },
+    ),
   );
   const resources = ["LICENSE", ...skillFiles.split("\0").filter(Boolean)];
   for (const resource of resources) {

@@ -1,12 +1,7 @@
-import { Effect } from "effect";
-import { AgentExecution } from "../runtime/services.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import type { ThinkingLevel } from "../cli/args.ts";
-import type { RunObserver } from "../observability/observer.ts";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { AgentDisplayContext } from "../presentation/presenter.ts";
-
+import { type ThinkingLevel } from "../cli/args.ts";
+import { type RunObserver } from "../observability/observer.ts";
+import { type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type AgentDisplayContext } from "../presentation/presenter.ts";
 export interface AgentRunRequest {
   cwd: string;
   model?: string | undefined;
@@ -18,19 +13,4 @@ export interface AgentRunRequest {
   observer?: RunObserver | undefined;
   customTools?: ToolDefinition[] | undefined;
   display: AgentDisplayContext;
-}
-
-export type AgentRunner = (
-  request: AgentRunRequest,
-  application?: ApplicationExecution,
-) => Promise<string>;
-
-export function runAgentPromise(
-  request: AgentRunRequest,
-  application?: ApplicationExecution,
-): Promise<string> {
-  return runApplicationPromise(
-    Effect.flatMap(AgentExecution, (agent) => agent.run(request)),
-    application,
-  );
 }

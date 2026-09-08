@@ -14,7 +14,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import { noopAsync } from "../utils/async.ts";
 const tempDirs: string[] = [];
 const lockDirs: string[] = [];
 afterEach(async () => {
@@ -65,7 +64,7 @@ describe("withCheckoutLock", () => {
         Effect.tryPromise({
           try: () => {
             entered = true;
-            return noopAsync();
+            return Promise.resolve();
           },
           catch: (error) => error,
         }),
@@ -92,7 +91,7 @@ describe("withCheckoutLock", () => {
         Effect.tryPromise({
           try: () => {
             entered = true;
-            return noopAsync();
+            return Promise.resolve();
           },
           catch: (error) => error,
         }),

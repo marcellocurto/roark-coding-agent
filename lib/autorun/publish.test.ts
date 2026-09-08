@@ -1,4 +1,11 @@
-import { providePromiseAgent } from "../workflow/promise-boundary.ts";
+import {
+  writeJsonArtifact,
+  writeArtifact,
+  readArtifact,
+  createWorkflowContext,
+} from "../workflow/artifacts.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
+import { provideTestAgent } from "../testing/agents.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -13,15 +20,12 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
 import {
   buildCommitArgv,
   buildPushArgv,
   buildStageAllArgv,
   buildSuccessLabelArgv,
   formatCommitMessage,
-} from "./publish.ts";
-import {
   collectPrBodyArtifactPaths,
   collectPrChangedFiles,
   hasUncommittedChanges,
@@ -29,16 +33,9 @@ import {
   updatePrBody,
 } from "./publish.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { createWorkflowContext } from "../workflow/artifacts.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
 import { triageResult } from "../testing/workflow-results.ts";
 import { prDraft, submitPrDraft } from "../testing/publishing-drafts.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
+import { type TerminalStream } from "../presentation/terminal.ts";
 const tempDirs: string[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -136,7 +133,9 @@ describe("collectPrBodyArtifactPaths", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeJsonArtifact(context, "triage", triageResult());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "triage", triageResult()),
+    );
     await Bun.write(path.join(context.runDir, "review-a.json"), "{}\n");
     await Bun.write(path.join(context.runDir, "review-b.json"), "{}\n");
     const paths = await runApplicationPromise(
@@ -154,21 +153,29 @@ describe("PR changed files", () => {
   test("derives the complete PR file list from Git relative to the base branch", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-pr-changed-files-"));
     tempDirs.push(cwd);
-    await runProcessOrThrowPromise(["git", "init", "-b", "main", cwd]);
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.email", "test@example.com"],
-      { cwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main", cwd], {}),
     );
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.name", "Test User"],
-      { cwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.email", "test@example.com"], {
+        cwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd }),
     );
     await writeFile(path.join(cwd, "README.md"), "before\n", "utf8");
-    await runProcessOrThrowPromise(["git", "add", "README.md"], { cwd });
-    await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], { cwd });
-    await runProcessOrThrowPromise(["git", "switch", "-c", "roark/issue-9"], {
-      cwd,
-    });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "README.md"], { cwd }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], {
+        cwd,
+      }),
+    );
     await writeFile(path.join(cwd, "README.md"), "after\n", "utf8");
     await writeFile(path.join(cwd, "feature.ts"), "export {};\n", "utf8");
     await writeFile(
@@ -176,11 +183,15 @@ describe("PR changed files", () => {
       "export {};\n",
       "utf8",
     );
-    await runProcessOrThrowPromise(
-      ["git", "add", "README.md", "feature.ts", "path with spaces.ts"],
-      { cwd },
+    await runApplicationPromise(
+      runProcessOrThrow(
+        ["git", "add", "README.md", "feature.ts", "path with spaces.ts"],
+        { cwd },
+      ),
     );
-    await runProcessOrThrowPromise(["git", "commit", "-m", "change"], { cwd });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "change"], { cwd }),
+    );
     expect(
       await runApplicationPromise(
         collectPrChangedFiles({ cwd, baseBranch: "main" }),
@@ -214,15 +225,15 @@ if [ "$1" = "pr" ] && [ "$2" = "edit" ]; then cat > "$ROARK_GH_BODY"; fi
       maxFixPasses: 1,
       attempt: 1,
     });
-    await writeJsonArtifact(
-      context,
-      "prDraft",
-      prDraft({ title: "Canonical title" }),
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "prDraft",
+        prDraft({ title: "Canonical title" }),
+      ),
     );
-    await writeArtifact(
-      context,
-      "prDraftMarkdown",
-      "MALICIOUS STALE MARKDOWN\n",
+    await runApplicationPromise(
+      writeArtifact(context, "prDraftMarkdown", "MALICIOUS STALE MARKDOWN\n"),
     );
     const oldPath = process.env["PATH"];
     const oldBody = process.env["ROARK_GH_BODY"];
@@ -256,7 +267,9 @@ if [ "$1" = "pr" ] && [ "$2" = "edit" ]; then cat > "$ROARK_GH_BODY"; fi
     );
     expect(body).toContain("Closes #9");
     expect(body).not.toContain("MALICIOUS STALE MARKDOWN");
-    expect(await readArtifact(context, "prDraftMarkdown")).toBe(body);
+    expect(
+      await runApplicationPromise(readArtifact(context, "prDraftMarkdown")),
+    ).toBe(body);
   });
 });
 describe("publish git staging", () => {
@@ -265,25 +278,32 @@ describe("publish git staging", () => {
       path.join(tmpdir(), "roark-publish-stage-test-"),
     );
     tempDirs.push(repo);
-    await runProcessOrThrowPromise(["git", "init", "-b", "main", repo]);
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.email", "test@example.com"],
-      { cwd: repo },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main", repo], {}),
     );
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.name", "Test User"],
-      { cwd: repo },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.email", "test@example.com"], {
+        cwd: repo,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.name", "Test User"], {
+        cwd: repo,
+      }),
     );
     await writeFile(path.join(repo, "README.md"), "hello\n", "utf8");
     await mkdir(path.join(repo, ".roark"), { recursive: true });
     await writeFile(path.join(repo, ".roark/.gitignore"), "runs/\n", "utf8");
-    await runProcessOrThrowPromise(
-      ["git", "add", "README.md", ".roark/.gitignore"],
-      { cwd: repo },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "README.md", ".roark/.gitignore"], {
+        cwd: repo,
+      }),
     );
-    await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], {
-      cwd: repo,
-    });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "initial"], {
+        cwd: repo,
+      }),
+    );
     await mkdir(path.join(repo, ".roark/runs/issue/9/attempts/1"), {
       recursive: true,
     });
@@ -299,7 +319,9 @@ describe("publish git staging", () => {
     expect(
       await runApplicationPromise(hasUncommittedChanges({ cwd: repo })),
     ).toBe(true);
-    await runProcessOrThrowPromise(buildStageAllArgv(), { cwd: repo });
+    await runApplicationPromise(
+      runProcessOrThrow(buildStageAllArgv(), { cwd: repo }),
+    );
     const cached = await gitOutput(repo, ["diff", "--cached", "--name-only"]);
     expect(cached).toContain("feature.txt");
     expect(cached).not.toContain(".roark/runs");
@@ -437,32 +459,47 @@ describe("publishAutorunResult", () => {
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
-    await runProcessOrThrowPromise(["git", "init", "-b", "main", agentCwd]);
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.email", "test@example.com"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main", agentCwd], {}),
     );
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.name", "Test User"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.email", "test@example.com"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.name", "Test User"], {
+        cwd: agentCwd,
+      }),
     );
     await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
-    await runProcessOrThrowPromise(["git", "add", "README.md"], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(["git", "switch", "-c", "roark/issue-9"], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(["git", "init", "--bare", remote]);
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", remote], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(
-      ["git", "push", "-u", "origin", "roark/issue-9"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "README.md"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "initial"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "--bare", remote], {}),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "remote", "add", "origin", remote], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], {
+        cwd: agentCwd,
+      }),
     );
     const oldPath = process.env["PATH"];
     const oldGhLog = process.env["ROARK_GH_LOG"];
@@ -516,7 +553,7 @@ describe("publishAutorunResult", () => {
             thinkingConfig: getWorkflowThinkingConfig(),
           },
         }).pipe(
-          providePromiseAgent((request) => {
+          provideTestAgent((request) => {
             agentRequests.push({
               cwd: request.cwd,
               prompt: request.prompt,
@@ -584,14 +621,18 @@ describe("publishAutorunResult", () => {
       "utf8",
     );
     await chmod(path.join(binDir, "gh"), 0o755);
-    await runProcessOrThrowPromise(["git", "init", "-b", "main", agentCwd]);
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.email", "test@example.com"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main", agentCwd], {}),
     );
-    await runProcessOrThrowPromise(
-      ["git", "config", "user.name", "Test User"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.email", "test@example.com"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "config", "user.name", "Test User"], {
+        cwd: agentCwd,
+      }),
     );
     await writeFile(path.join(agentCwd, "README.md"), "hello\n", "utf8");
     await mkdir(path.join(agentCwd, ".roark"), { recursive: true });
@@ -600,23 +641,33 @@ describe("publishAutorunResult", () => {
       "runs/\n",
       "utf8",
     );
-    await runProcessOrThrowPromise(
-      ["git", "add", "README.md", ".roark/.gitignore"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "add", "README.md", ".roark/.gitignore"], {
+        cwd: agentCwd,
+      }),
     );
-    await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(["git", "switch", "-c", "roark/issue-9"], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(["git", "init", "--bare", remote]);
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", remote], {
-      cwd: agentCwd,
-    });
-    await runProcessOrThrowPromise(
-      ["git", "push", "-u", "origin", "roark/issue-9"],
-      { cwd: agentCwd },
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "commit", "-m", "initial"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "switch", "-c", "roark/issue-9"], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "--bare", remote], {}),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "remote", "add", "origin", remote], {
+        cwd: agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "push", "-u", "origin", "roark/issue-9"], {
+        cwd: agentCwd,
+      }),
     );
     const beforeCommitCount = Number(
       await gitOutput(agentCwd, ["rev-list", "--count", "HEAD"]),
@@ -667,7 +718,7 @@ describe("publishAutorunResult", () => {
             thinkingConfig: getWorkflowThinkingConfig(),
           },
         }).pipe(
-          providePromiseAgent((request) =>
+          provideTestAgent((request) =>
             submitPrDraft(request, prDraft({ title: "Fix bug" })),
           ),
         ),
@@ -698,5 +749,7 @@ describe("publishAutorunResult", () => {
   }, 10000);
 });
 async function gitOutput(cwd: string, args: string[]): Promise<string> {
-  return (await runProcessOrThrowPromise(["git", ...args], { cwd })).trim();
+  return (
+    await runApplicationPromise(runProcessOrThrow(["git", ...args], { cwd }))
+  ).trim();
 }

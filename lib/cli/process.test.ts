@@ -1,22 +1,23 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { Effect, Result } from "effect";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import {
+  runApplicationPromise,
+  applicationLayer,
+  fromLegacyPromise,
+} from "../runtime/application.ts";
+import {
+  runProcess,
+  runProcessOrThrow,
   executeProcess,
   InvalidProcessCommandError,
   ProcessExecutionError,
   ProcessExitError,
 } from "./process.ts";
-import {
-  runProcessPromise,
-  runProcessOrThrowPromise,
-} from "./process-promise.ts";
-
+import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { Effect, Result } from "effect";
 async function waitForPid(file: string): Promise<number> {
-  const deadline = Date.now() + 3_000;
+  const deadline = Date.now() + 3000;
   while (Date.now() < deadline) {
     const value = await readFile(file, "utf8").catch(() => "");
     if (/^\d+\n$/.test(value)) return Number(value);
@@ -24,7 +25,6 @@ async function waitForPid(file: string): Promise<number> {
   }
   throw new Error(`Child did not start: ${file}`);
 }
-
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -33,13 +33,11 @@ function isAlive(pid: number): boolean {
     return false;
   }
 }
-
 async function expectStopped(pid: number): Promise<void> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + 1000;
   while (isAlive(pid) && Date.now() < deadline) await Bun.sleep(10);
   expect(isAlive(pid)).toBe(false);
 }
-
 function killIfAlive(pid: number | undefined): void {
   if (pid === undefined) return;
   try {
@@ -48,23 +46,24 @@ function killIfAlive(pid: number | undefined): void {
     /* Already reaped. */
   }
 }
-
 describe("Effect process execution", () => {
   test("preserves stdin, Unicode output, stderr, inherited environment and cwd", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-process-"));
-    const input = "hello 🦊\n".repeat(20_000);
+    const input = "hello 🦊\n".repeat(20000);
     try {
-      const result = await runProcessPromise(
-        [
-          process.execPath,
-          "-e",
-          `
+      const result = await runApplicationPromise(
+        runProcess(
+          [
+            process.execPath,
+            "-e",
+            `
         const input = await Bun.stdin.text();
         process.stdout.write(JSON.stringify({ input, cwd: process.cwd(), path: process.env.PATH }));
         process.stderr.write("diagnostic 🦊");
       `,
-        ],
-        { cwd, input },
+          ],
+          { cwd, input },
+        ),
       );
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({
@@ -77,34 +76,40 @@ describe("Effect process execution", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
-
   test("closes absent stdin and retains nonzero exits until explicitly rejected", async () => {
     expect(
-      await runProcessPromise(["sh", "-c", "cat; printf failure >&2; exit 7"]),
+      await runApplicationPromise(
+        runProcess(["sh", "-c", "cat; printf failure >&2; exit 7"], {}),
+      ),
     ).toEqual({ stdout: "", stderr: "failure", exitCode: 7 });
     expect(
-      runProcessOrThrowPromise(["sh", "-c", "printf failure >&2; exit 7"], {
-        label: "verification",
-      }),
+      runApplicationPromise(
+        runProcessOrThrow(["sh", "-c", "printf failure >&2; exit 7"], {
+          label: "verification",
+        }),
+      ),
     ).rejects.toBeInstanceOf(ProcessExitError);
   });
-
   test("rejects when the child exits before stdin can be delivered", async () => {
-    const result = await runProcessPromise(["sh", "-c", "exit 0"], {
-      input: "x".repeat(10_000_000),
-    }).then(
+    const result = await runApplicationPromise(
+      runProcess(["sh", "-c", "exit 0"], {
+        input: "x".repeat(10000000),
+      }),
+    ).then(
       () => undefined,
       (error: unknown) => error,
     );
     expect(result).toBeInstanceOf(ProcessExecutionError);
   });
-
   test("returns signal exit codes", async () => {
     expect(
-      (await runProcessPromise(["sh", "-c", "kill -TERM $$"])).exitCode,
+      (
+        await runApplicationPromise(
+          runProcess(["sh", "-c", "kill -TERM $$"], {}),
+        )
+      ).exitCode,
     ).toBe(143);
   });
-
   test("distinguishes invalid input from a missing executable with typed platform details", async () => {
     for (const args of [[], [""], ["roark-command-that-does-not-exist"]]) {
       const result = await Effect.runPromise(
@@ -129,7 +134,6 @@ describe("Effect process execution", () => {
       }
     }
   });
-
   test("retains both output streams on timeout and kills the descendant", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-timeout-"));
     let pid: number | undefined;
@@ -157,7 +161,6 @@ describe("Effect process execution", () => {
       await rm(cwd, { recursive: true, force: true });
     }
   });
-
   for (const parentExit of [false, true]) {
     test(`interruption through a legacy caller cleans descendants when parent ${parentExit ? "has exited" : "is alive"}`, async () => {
       const cwd = await mkdtemp(path.join(tmpdir(), "roark-interrupt-"));
@@ -165,13 +168,15 @@ describe("Effect process execution", () => {
       let pid: number | undefined;
       const running = Effect.runPromiseExit(
         fromLegacyPromise((application) =>
-          runProcessPromise(
-            [
-              "sh",
-              "-c",
-              `sleep 30 & echo $! > child.pid; ${parentExit ? "exit 0" : "wait"}`,
-            ],
-            { cwd },
+          runApplicationPromise(
+            runProcess(
+              [
+                "sh",
+                "-c",
+                `sleep 30 & echo $! > child.pid; ${parentExit ? "exit 0" : "wait"}`,
+              ],
+              { cwd },
+            ),
             application,
           ),
         ).pipe(Effect.provide(applicationLayer)),

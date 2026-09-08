@@ -22,6 +22,18 @@ export default tseslint.config(
       },
     },
     rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/*-promise.ts", "**/github/promise.ts"],
+              message:
+                "Call native operations directly and place runtime conversion at an imperative boundary; do not add forwarding adapter modules.",
+            },
+          ],
+        },
+      ],
       "@typescript-eslint/consistent-type-imports": [
         "error",
         {
@@ -88,16 +100,40 @@ export default tseslint.config(
     },
   },
   {
+    files: ["roark.ts", "lib/**/*.ts"],
+    ignores: ["lib/**/*.test.ts", "lib/testing/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/*-promise.ts",
+                "**/github/promise.ts",
+                "**/testing/**",
+              ],
+              message:
+                "Production code must not depend on forwarding adapters or test fixtures.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: [
       "lib/workflow/{phases,tasks,git,readiness,progression,issue-curation}.ts",
       "lib/prompts/workflow-prompts.ts",
       "lib/presentation/phase.ts",
+      "lib/cli/{hydrate,init,local-mode}.ts",
       "lib/structured-output/runner.ts",
       "lib/observability/{observer,events,summary}.ts",
       "lib/issue-curation/{create-issues,labels}.ts",
       "lib/issue-publishing/{github,service}.ts",
       "lib/autorun/{discovery,continue,continue-plan,copy-path,observability,attempt-lifecycle,completion,publish-flow,publish,branch,labels,failure,triage-stop,ledger-comments,lock,verification,workspace,workspace-service}.ts",
       "lib/pr-review/{workflow,artifacts}.ts",
+      "lib/pr-revision/{workflow,artifacts,branch,comments}.ts",
       "lib/github/{labels,pr-publishing,service}.ts",
     ],
     rules: {
@@ -110,6 +146,8 @@ export default tseslint.config(
                 "**/*-promise.ts",
                 "**/promise-boundary.ts",
                 "**/runtime/application.ts",
+                "**/github/promise.ts",
+                "**/testing/**",
               ],
               message:
                 "Workflow internals compose native Effects; Promise adapters belong at entry points.",

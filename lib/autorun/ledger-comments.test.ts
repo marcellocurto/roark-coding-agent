@@ -1,29 +1,26 @@
+import {
+  writeJsonArtifact,
+  writeArtifact,
+  reviewARef,
+  reviewBRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  reviewARef,
-  reviewBRef,
-  type WorkflowContext,
-} from "../workflow/artifacts.ts";
-import {
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import {
   recordAttemptIssueComment,
   formatAttemptMetadata,
 } from "./attempts.ts";
-import { formatReadinessLedgerComment } from "./ledger-comments.ts";
 import {
+  formatReadinessLedgerComment,
   publishPlanningLedgerComments,
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
-import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import {
   implementationPlanResult,
@@ -62,7 +59,7 @@ ${evidence}
 `);
   });
   test("publishes existing triage and implementation plan artifacts through the injected ledger publisher", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-planning-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -85,17 +82,25 @@ ${evidence}
     const plan = implementationPlanResult(true, {
       proposedChanges: ["Unique plan action with TOKEN=secret."],
     });
-    await writeJsonArtifact(workflowContext, "triage", triage);
-    await writeArtifact(
-      workflowContext,
-      "triageMarkdown",
-      formatTriageMarkdown(triage),
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "triage", triage),
     );
-    await writeJsonArtifact(workflowContext, "implementationPlan", plan);
-    await writeArtifact(
-      workflowContext,
-      "implementationPlanMarkdown",
-      formatImplementationPlanMarkdown(plan, "final"),
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "triageMarkdown",
+        formatTriageMarkdown(triage),
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "implementationPlan", plan),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "implementationPlanMarkdown",
+        formatImplementationPlanMarkdown(plan, "final"),
+      ),
     );
     const attemptMetadata = formatAttemptMetadata({
       attempt: 2,
@@ -140,7 +145,7 @@ ${evidence}
     expect(published[1]?.body).not.toContain("TOKEN=secret");
   });
   test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
     const workflowContext: WorkflowContext = {
@@ -157,24 +162,28 @@ ${evidence}
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(
-      workflowContext,
-      reviewARef(0),
-      JSON.stringify(
-        reviewResult([
-          reviewFinding("must-fix-current", "Unique review A finding", {
-            evidence: ["Unique review A evidence at /Users/alice/private."],
-          }),
-        ]),
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewARef(0),
+        JSON.stringify(
+          reviewResult([
+            reviewFinding("must-fix-current", "Unique review A finding", {
+              evidence: ["Unique review A evidence at /Users/alice/private."],
+            }),
+          ]),
+        ),
       ),
     );
-    await writeArtifact(
-      workflowContext,
-      reviewBRef(0),
-      JSON.stringify(
-        reviewResult([], {
-          evidenceReviewed: ["Unique review B evidence with TOKEN=secret."],
-        }),
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewBRef(0),
+        JSON.stringify(
+          reviewResult([], {
+            evidenceReviewed: ["Unique review B evidence with TOKEN=secret."],
+          }),
+        ),
       ),
     );
     const attemptMetadata = formatAttemptMetadata({
@@ -248,7 +257,9 @@ ${evidence}
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeJsonArtifact(workflowContext, "triage", triageResult());
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "triage", triageResult()),
+    );
     await Bun.write(
       path.join(workflowContext.runDir, "review-a.json"),
       JSON.stringify(

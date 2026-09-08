@@ -1,13 +1,18 @@
+import {
+  runApplicationPromise,
+  applicationLayer,
+  fromLegacyPromise,
+} from "../runtime/application.ts";
+import * as nativeVerification from "../autorun/verification.ts";
+import { runProcess, runProcessOrThrow } from "./process.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
-import { runVerificationPromise as runVerificationPromise } from "../autorun/verification-promise.ts";
 import {
   Verification,
   CommandExecution,
   ExitNotifications,
   Presentation,
 } from "../runtime/services.ts";
-import type { ExitNotificationRequest } from "./notifications.ts";
+import { type ExitNotificationRequest } from "./notifications.ts";
 import { Cause, Effect, Exit } from "effect";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -19,21 +24,14 @@ import {
   workflowOutcomeStatus,
 } from "../../roark.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import {
-  runProcessPromise,
-  runProcessOrThrowPromise,
-} from "./process-promise.ts";
-
 const projectRoot = path.resolve(import.meta.dir, "../..");
 const entrypoint = path.join(projectRoot, "roark.ts");
 const tempDirs: string[] = [];
-
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
-
 describe("CLI lifecycle services", () => {
   test("verification defects survive the Promise route and bypass ordinary CLI failure handling", async () => {
     const defect = new Error("verification service defect");
@@ -50,8 +48,11 @@ describe("CLI lifecycle services", () => {
         Effect.provideService(CommandExecution, {
           execute: () =>
             fromLegacyPromise(async (application) => {
-              await runVerificationPromise(
-                { command: "unused", cwd: process.cwd() },
+              await runApplicationPromise(
+                nativeVerification.runVerification({
+                  command: "unused",
+                  cwd: process.cwd(),
+                }),
                 application,
               );
             }),
@@ -83,7 +84,6 @@ describe("CLI lifecycle services", () => {
     expect(output).not.toContain(defect.message);
     expect(notified).toBe(false);
   });
-
   test("presents published and stopped outcomes distinctly", async () => {
     let output = "";
     await runWithPresenter(
@@ -115,7 +115,6 @@ describe("CLI lifecycle services", () => {
     expect(output).toContain("SUCCESS #1 · published");
     expect(output).toContain("STOPPED #2 · not actionable");
   });
-
   test("preserves a discovered target and notifies once after an execution failure", async () => {
     let output = "";
     const presentation = new Presenter({
@@ -157,7 +156,6 @@ describe("CLI lifecycle services", () => {
     expect(output).toContain("FAILED #140 · run failed");
     expect(notices).toEqual([{ argv: ["auto"], succeeded: false }]);
   });
-
   test("notification failures preserve the command exit status and warn once", async () => {
     for (const succeeds of [true, false]) {
       let errors = "";
@@ -202,7 +200,6 @@ describe("CLI lifecycle services", () => {
       expect(errors.match(/could not deliver/g)).toHaveLength(1);
     }
   });
-
   test("preserves multiline errors and reports non-Error failures", async () => {
     for (const failure of [
       new Error("Invalid input\n\nUsage:\n  roark do <issue>"),
@@ -245,58 +242,58 @@ describe("CLI lifecycle services", () => {
     }
   });
 });
-
 describe("roark executable", () => {
   test("prints the package version", async () => {
     const packageJson = (await Bun.file(
       path.join(projectRoot, "package.json"),
-    ).json()) as { version: string };
-    const result = await runProcessPromise([entrypoint, "--version"], {
-      cwd: projectRoot,
-    });
-
+    ).json()) as {
+      version: string;
+    };
+    const result = await runApplicationPromise(
+      runProcess([entrypoint, "--version"], {
+        cwd: projectRoot,
+      }),
+    );
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout.trim()).toBe(packageJson.version);
   });
-
   test("prints help successfully", async () => {
-    const result = await runProcessPromise([entrypoint, "--help"], {
-      cwd: projectRoot,
-    });
-
+    const result = await runApplicationPromise(
+      runProcess([entrypoint, "--help"], {
+        cwd: projectRoot,
+      }),
+    );
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout).toContain("roark <command> [issue] [options]");
   });
-
   test("reports invalid commands on stderr with a nonzero exit", async () => {
-    const result = await runProcessPromise([entrypoint, "not-a-command"], {
-      cwd: projectRoot,
-    });
-
+    const result = await runApplicationPromise(
+      runProcess([entrypoint, "not-a-command"], {
+        cwd: projectRoot,
+      }),
+    );
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
       "Unknown command 'not-a-command'.\n\nroark <command> [issue] [options]\n\nCommands:",
     );
   });
-
   test("dispatches a hydrated status command", async () => {
     const repo = await mkdtemp(path.join(tmpdir(), "roark-entrypoint-"));
     tempDirs.push(repo);
-    await runProcessOrThrowPromise(["git", "init", repo]);
-
-    const result = await runProcessPromise(
-      [entrypoint, "status", "--all", "--cwd", repo, "--repo", "owner/repo"],
-      { cwd: projectRoot },
+    await runApplicationPromise(runProcessOrThrow(["git", "init", repo], {}));
+    const result = await runApplicationPromise(
+      runProcess(
+        [entrypoint, "status", "--all", "--cwd", repo, "--repo", "owner/repo"],
+        { cwd: projectRoot },
+      ),
     );
-
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout.trim()).toBe("No observability summaries found.");
   });
 });
-
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`runtime ${signal} interrupts verification through the Promise boundary and reaps its descendants`, async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-runtime-signal-"));
@@ -314,7 +311,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     const stdout = new Response(child.stdout).text();
     let descendant: number | undefined;
     try {
-      const deadline = Date.now() + 4_000;
+      const deadline = Date.now() + 4000;
       while (Date.now() < deadline) {
         const value = await readFile(path.join(cwd, "child.pid"), "utf8").catch(
           () => "",
@@ -333,7 +330,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       expect(await stdout).toContain("VERIFY RUNNING");
       if (descendant !== undefined) {
         // Allow init to reap an orphan after the scoped group kill.
-        const deadline = Date.now() + 1_000;
+        const deadline = Date.now() + 1000;
         let alive = true;
         while (alive && Date.now() < deadline) {
           try {

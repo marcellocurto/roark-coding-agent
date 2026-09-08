@@ -1,26 +1,27 @@
+import {
+  readArtifact,
+  writeArtifact,
+  writeJsonArtifact,
+  fixLogRef,
+  reviewARef,
+  reviewBRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
 import { PrReviewError } from "../pr-review/workflow.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
+import {
+  runApplicationPromise,
+  applicationLayer,
+  fromLegacyPromise,
+} from "../runtime/application.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { Effect, PlatformError } from "effect";
 import { ProcessExecutionError } from "../cli/process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  fixLogRef,
-  reviewARef,
-  reviewBRef,
-  type WorkflowContext,
-} from "../workflow/artifacts.ts";
-import {
-  readArtifactPromise as readArtifact,
-  writeArtifactPromise as writeArtifact,
-  writeJsonArtifactPromise as writeJsonArtifact,
-} from "../workflow/artifacts-promise.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import {
   createReviewerIssuesAfterPr,
@@ -28,14 +29,12 @@ import {
   runPublishGate,
 } from "./publish-flow.ts";
 import { runVerification, type VerificationResult } from "./verification.ts";
-import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import type { ReviewFinding } from "../review/result.ts";
+import { type ReviewFinding } from "../review/result.ts";
 import { readinessResult } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
-import type { ReviewPrCliOptions } from "../cli/args.ts";
+import { type TerminalStream } from "../presentation/terminal.ts";
+import { type ReviewPrCliOptions } from "../cli/args.ts";
 const tempDirs: string[] = [];
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
@@ -49,24 +48,32 @@ describe("verification repair planning", () => {
     );
     expect(repair).toEqual({ pass: 1 });
     expect(
-      await readArtifact(context, { name: "verificationBeforeFix", pass: 1 }),
+      await runApplicationPromise(
+        readArtifact(context, { name: "verificationBeforeFix", pass: 1 }),
+      ),
     ).toContain("## Exit Code\n1");
   });
   test("uses the next pass after reviewer-driven fixes", async () => {
     const context = await tempContext(2);
-    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
+    await runApplicationPromise(
+      writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport())),
+    );
     expect(
       await runApplicationPromise(
         planVerificationRepair(context, failedVerification(1)),
       ),
     ).toEqual({ pass: 2 });
     expect(
-      await readArtifact(context, { name: "verificationBeforeFix", pass: 2 }),
+      await runApplicationPromise(
+        readArtifact(context, { name: "verificationBeforeFix", pass: 2 }),
+      ),
     ).toContain("## Exit Code\n1");
   });
   test("does not schedule repair when fix budget is exhausted", async () => {
     const context = await tempContext(1);
-    await writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport()));
+    await runApplicationPromise(
+      writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport())),
+    );
     expect(
       await runApplicationPromise(
         planVerificationRepair(context, failedVerification(1)),
@@ -88,15 +95,15 @@ describe("verification repair planning", () => {
     const context = await tempContext(1);
     context.model = "provider/reviewer";
     context.thinkingProfile = "deep";
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
-    await writeArtifact(
-      context,
-      "readinessMarkdown",
-      "# PR Readiness\n\n## Status\nnot-ready\n",
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "readinessMarkdown",
+        "# PR Readiness\n\n## Status\nnot-ready\n",
+      ),
     );
     const postPrCalls: string[] = [];
     const prBodyUpdates: {
@@ -231,10 +238,8 @@ describe("verification repair planning", () => {
   });
   test("automatic PR review failures do not turn an opened PR into a failed attempt", async () => {
     const context = await tempContext(1);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
     let warningOutput = "";
     const stream: TerminalStream = {
@@ -291,10 +296,8 @@ describe("verification repair planning", () => {
   });
   test("a stale automatic PR review preserves the published outcome and review artifact", async () => {
     const context = await tempContext(1);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
     let warningOutput = "";
     const stream: TerminalStream = {
@@ -352,7 +355,9 @@ describe("verification repair planning", () => {
   });
   test("failed readiness does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(1);
-    await writeJsonArtifact(context, "readiness", readinessResult("not-ready"));
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("not-ready")),
+    );
     let postPrCalled = false;
     let reviewPrCalled = false;
     const outcome = await runApplicationPromise(
@@ -409,10 +414,8 @@ describe("verification repair planning", () => {
   });
   test("failed verification does not trigger post-PR reviewer issue creation", async () => {
     const context = await tempContext(0);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
     let postPrCalled = false;
     let reviewPrCalled = false;
@@ -494,15 +497,15 @@ describe("verification repair planning", () => {
   });
   test("verification runner exceptions propagate through the publish gate", async () => {
     const context = await tempContext(1);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
-    await writeArtifact(
-      context,
-      "readinessMarkdown",
-      "# PR Readiness\n\n## Status\nready-for-pr\n",
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "readinessMarkdown",
+        "# PR Readiness\n\n## Status\nready-for-pr\n",
+      ),
     );
     const failure = new ProcessExecutionError({
       args: ["bun", "test"],
@@ -569,42 +572,50 @@ describe("verification repair planning", () => {
   });
   test("post-PR reviewer issue creation curates numbered autorun review artifacts", async () => {
     const context = await tempContext(1);
-    await writeArtifact(
-      context,
-      "issue",
-      `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`,
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "issue",
+        `<github_issue number="1">\n  <title>Issue</title>\n  <url>https://github.com/owner/repo/issues/1</url>\n</github_issue>`,
+      ),
     );
-    await writeArtifact(
-      context,
-      reviewARef(0),
-      structuredReview([
-        reviewFinding("follow-up", "Document numbered review curation", {
-          severity: "low",
-          evidence: [
-            "lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact.",
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        reviewARef(0),
+        structuredReview([
+          reviewFinding("follow-up", "Document numbered review curation", {
+            severity: "low",
+            evidence: [
+              "lib/workflow/issue-curation.ts:116 selects the latest numbered review artifact.",
+            ],
+            currentIssueImpact:
+              "Reviewer findings from normal autorun attempts are promoted after PR publication.",
+            recommendedHandling:
+              "Use numbered review artifacts when curating reviewer-generated issues.",
+            suggestedIssueTitle: "Document numbered review curation",
+          }),
+        ]),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewBRef(0), structuredReview()),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "issueCreationResults",
+        JSON.stringify({
+          created: [
+            {
+              planItemId: "follow-up-1",
+              kind: "follow-up",
+              title: "Document numbered review curation",
+              url: "https://github.com/owner/repo/issues/100",
+            },
           ],
-          currentIssueImpact:
-            "Reviewer findings from normal autorun attempts are promoted after PR publication.",
-          recommendedHandling:
-            "Use numbered review artifacts when curating reviewer-generated issues.",
-          suggestedIssueTitle: "Document numbered review curation",
         }),
-      ]),
-    );
-    await writeArtifact(context, reviewBRef(0), structuredReview());
-    await writeArtifact(
-      context,
-      "issueCreationResults",
-      JSON.stringify({
-        created: [
-          {
-            planItemId: "follow-up-1",
-            kind: "follow-up",
-            title: "Document numbered review curation",
-            url: "https://github.com/owner/repo/issues/100",
-          },
-        ],
-      }),
+      ),
     );
     await runApplicationPromise(
       createReviewerIssuesAfterPr({
@@ -613,7 +624,7 @@ describe("verification repair planning", () => {
       }),
     );
     const plan = JSON.parse(
-      await readArtifact(context, "issueCurationPlan"),
+      await runApplicationPromise(readArtifact(context, "issueCurationPlan")),
     ) as {
       run: {
         prUrl?: string;
@@ -641,12 +652,10 @@ describe("verification repair planning", () => {
     );
   });
   test("terminal command-unavailable failures include setup guidance", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const context = await tempContext(1);
-    await writeJsonArtifact(
-      context,
-      "readiness",
-      readinessResult("ready-for-pr"),
+    await runApplicationPromise(
+      writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr")),
     );
     let failureComment = "";
     let output = "";

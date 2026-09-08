@@ -1,16 +1,150 @@
-import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
+import type * as nativeWorkspace from "../autorun/workspace.ts";
+import {
+  type ProcessOptions,
+  type ProcessResult,
+  ProcessExecutionError,
+} from "../cli/process.ts";
+import { rejects as assertRejects } from "node:assert/strict";
+import { runPrRevision } from "./workflow.ts";
+import {
+  runApplicationPromise,
+  type ApplicationExecution,
+  applicationLayer,
+  fromLegacyPromise,
+} from "../runtime/application.ts";
+import { GitHub } from "../github/service.ts";
+import { GitHubResponseError } from "../github/errors.ts";
+import { Workspace } from "../autorun/workspace-service.ts";
+import {
+  WorkspaceCommandError,
+  type PreparedPrRevisionWorkspace,
+} from "../autorun/workspace.ts";
+import { RevisionReporting, type RevisionSummaryInput } from "./comments.ts";
+import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
+interface RunPrRevisionDependencies {
+  fetchFeedback?:
+    | ((
+        input: Parameters<GitHub["Service"]["fetchPullRequestFeedback"]>[0],
+        application?: ApplicationExecution,
+      ) => Promise<PullRequestFeedback>)
+    | undefined;
+  prepareWorkspace?:
+    | ((
+        input: Parameters<Workspace["Service"]["preparePrRevision"]>[0],
+        application?: ApplicationExecution,
+      ) => Promise<
+        PreparedPrRevisionWorkspace & {
+          releaseLock: () => Promise<void>;
+        }
+      >)
+    | undefined;
+  runLifecycleHookPromise?:
+    | ((
+        name: Parameters<typeof nativeWorkspace.runLifecycleHook>[0],
+        hooks: Parameters<typeof nativeWorkspace.runLifecycleHook>[1],
+        cwd: string,
+        runner?: TestProcessRunner,
+        application?: ApplicationExecution,
+      ) => Promise<
+        Effect.Success<ReturnType<typeof nativeWorkspace.runLifecycleHook>>
+      >)
+    | undefined;
+  agentRunner?: AgentRunner | undefined;
+  postSummaryComment?:
+    | ((
+        input: RevisionSummaryInput,
+        application?: ApplicationExecution,
+      ) => Promise<void>)
+    | undefined;
+}
+function runPrRevisionPromise(
+  options: RevisePrCliOptions,
+  deps: RunPrRevisionDependencies = {},
+  application?: ApplicationExecution,
+) {
+  return runApplicationPromise(
+    Effect.gen(function* () {
+      const github = yield* GitHub;
+      const workspace = yield* Workspace;
+      const reporting = yield* RevisionReporting;
+      const fetch = deps.fetchFeedback;
+      const prepare = deps.prepareWorkspace;
+      const hook = deps.runLifecycleHookPromise;
+      const summary = deps.postSummaryComment;
+      const githubService = {
+        ...github,
+        ...(fetch
+          ? {
+              fetchPullRequestFeedback: (input: Parameters<typeof fetch>[0]) =>
+                Effect.tryPromise({
+                  try: () => fetch(input, application),
+                  catch: (cause) => new GitHubResponseError({ cause }),
+                }),
+            }
+          : {}),
+      };
+      return yield* runPrRevision(options).pipe(
+        Effect.provideService(GitHub, githubService),
+        Effect.provideService(Workspace, {
+          ...workspace,
+          ...(prepare
+            ? {
+                preparePrRevision: Effect.fnUntraced(function* (
+                  input: Parameters<typeof workspace.preparePrRevision>[0],
+                ) {
+                  return yield* Effect.acquireRelease(
+                    Effect.tryPromise({
+                      try: () => prepare(input, application),
+                      catch: (cause) => new WorkspaceCommandError({ cause }),
+                    }),
+                    (result) => Effect.promise(() => result.releaseLock()),
+                  );
+                }),
+              }
+            : {}),
+          ...(hook
+            ? {
+                runHook: (
+                  name: Parameters<typeof hook>[0],
+                  hooks: Parameters<typeof hook>[1],
+                  cwd: string,
+                ) =>
+                  Effect.tryPromise({
+                    try: () => hook(name, hooks, cwd, undefined, application),
+                    catch: (cause) => new WorkspaceCommandError({ cause }),
+                  }),
+              }
+            : {}),
+        }),
+        Effect.provideService(
+          RevisionReporting,
+          summary
+            ? {
+                postSummary: (input) =>
+                  Effect.tryPromise({
+                    try: () => summary(input, application),
+                    catch: (cause) => new GitHubResponseError({ cause }),
+                  }),
+              }
+            : reporting,
+        ),
+        provideTestAgent(deps.agentRunner),
+      );
+    }),
+    application,
+  );
+}
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { ProcessExecutionError } from "../cli/process.ts";
 import { Effect, PlatformError } from "effect";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
-import type { RevisePrCliOptions } from "../cli/args.ts";
-import type { PullRequestFeedback } from "../github/pr.ts";
+import { type RevisePrCliOptions } from "../cli/args.ts";
+import { type PullRequestFeedback } from "../github/pr.ts";
 import {
   reviewFinding,
   reviewResult,
@@ -24,29 +158,19 @@ import {
   revisionExecutionResult,
   submitRevisionExecution,
 } from "../testing/revision-executions.ts";
-import { noopAsync } from "../utils/async.ts";
-import {} from "../presentation/presenter.ts";
-import type { TerminalStream } from "../presentation/terminal.ts";
-import {
-  runPrRevisionPromise,
-  type RunPrRevisionDependencies,
-} from "./workflow.ts";
+import { type TerminalStream } from "../presentation/terminal.ts";
 import { parseRevisionExecutionResultJson } from "./execution.ts";
-
 const tempDirs: string[] = [];
-
 afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
-
 async function trackedTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
   tempDirs.push(dir);
   return dir;
 }
-
 async function tempGitRepo(): Promise<string> {
   const cwd = await trackedTempDir("roark-pr-workflow-");
   await Bun.spawn(["git", "init"], { cwd }).exited;
@@ -56,7 +180,6 @@ async function tempGitRepo(): Promise<string> {
   await Bun.spawn(["git", "config", "user.name", "Roark Test"], { cwd }).exited;
   return cwd;
 }
-
 async function isolatedWorkspace(
   setup?: (workspace: string) => Promise<void>,
 ): Promise<{
@@ -68,7 +191,7 @@ async function isolatedWorkspace(
   return {
     workspace,
     prepareWorkspace: async () => {
-      await noopAsync();
+      await Promise.resolve();
       return {
         path: workspace,
         metadata: {
@@ -77,12 +200,11 @@ async function isolatedWorkspace(
           cloneRemote: "origin",
           createdNow: false,
         },
-        releaseLock: noopAsync,
+        releaseLock: () => Promise.resolve(),
       };
     },
   };
 }
-
 async function run(args: string[], cwd: string): Promise<void> {
   const process = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -93,7 +215,6 @@ async function run(args: string[], cwd: string): Promise<void> {
   if (exitCode !== 0)
     throw new Error(`${args.join(" ")} failed\n${stderr || stdout}`);
 }
-
 async function runOutput(args: string[], cwd: string): Promise<string> {
   const process = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -105,7 +226,6 @@ async function runOutput(args: string[], cwd: string): Promise<string> {
     throw new Error(`${args.join(" ")} failed\n${stderr || stdout}`);
   return stdout;
 }
-
 function options(
   cwd: string,
   overrides: Partial<RevisePrCliOptions> = {},
@@ -125,7 +245,6 @@ function options(
     ...overrides,
   };
 }
-
 function feedback(): PullRequestFeedback {
   return {
     repo: "owner/repo",
@@ -148,7 +267,6 @@ function feedback(): PullRequestFeedback {
     excludedRoarkSummaryCommentIds: [],
   };
 }
-
 function freshReviewComment(): string {
   return [
     "<!-- roark:pr=12 phase=pr-review reviewer=a -->",
@@ -162,7 +280,6 @@ function freshReviewComment(): string {
     "",
   ].join("\n");
 }
-
 describe("runPrRevisionPromise", () => {
   test("sets the preparation title while workspace preparation is pending", async () => {
     const cwd = process.cwd();
@@ -185,11 +302,10 @@ describe("runPrRevisionPromise", () => {
         const pendingPreparation = new Promise<never>((_, reject) => {
           rejectPreparation = reject;
         });
-
         const running = runPrRevisionPromise(
           options(cwd, { yes: true }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace: async () => {
               preparationStarted?.();
               return pendingPreparation;
@@ -197,23 +313,25 @@ describe("runPrRevisionPromise", () => {
           },
           application,
         );
-
         await started;
         const outputWhilePending = output;
         rejectPreparation?.(new Error("stop after title assertion"));
-        expect(running).rejects.toThrow("stop after title assertion");
+        await assertRejects(
+          running,
+          (error: unknown) =>
+            error instanceof Error &&
+            error.message.includes("stop after title assertion"),
+        );
         await running.catch(() => undefined);
         expect(outputWhilePending).toContain("PR #12 · Revision preparation");
       },
     );
   });
-
-  test("legacy checkout fallback uses the control checkout as the agent workspace", async () => {
-    await noopAsync();
+  test("shared artifact locations retain canonical artifacts after a no-op revision", async () => {
+    await Promise.resolve();
     const cwd = await tempGitRepo();
-    let checkoutCalled = false;
+    let workspacePrepared = false;
     let commentCalled = false;
-
     const plan = revisionPlanResult("no-action-needed", {
       additionalSections: [
         {
@@ -225,20 +343,28 @@ describe("runPrRevisionPromise", () => {
       ],
     });
     const result = await runPrRevisionPromise(options(cwd), {
-      fetchFeedback: async () => (await noopAsync(), feedback()),
-      checkout: async () => {
-        await noopAsync();
-        checkoutCalled = true;
+      fetchFeedback: async () => (await Promise.resolve(), feedback()),
+      prepareWorkspace: () => {
+        workspacePrepared = true;
+        return Promise.resolve({
+          path: cwd,
+          metadata: {
+            path: cwd,
+            strategy: "clone",
+            cloneRemote: "origin",
+            createdNow: false,
+          },
+          releaseLock: () => Promise.resolve(),
+        });
       },
       agentRunner: async (request) => submitRevisionPlan(request, plan),
       postSummaryComment: async () => {
-        await noopAsync();
+        await Promise.resolve();
         commentCalled = true;
       },
     });
-
     expect(result.outcome).toBe("no-action-needed");
-    expect(checkoutCalled).toBe(true);
+    expect(workspacePrepared).toBe(true);
     expect(commentCalled).toBe(true);
     expect(result.context.agentCwd).toBe(result.context.controlCwd);
     expect(result.context.revisionDir).toBe(result.context.agentRevisionDir);
@@ -266,24 +392,21 @@ describe("runPrRevisionPromise", () => {
       ),
     ).toContain("## Why no revision is needed");
   });
-
   test("no-action-needed isolated revisions remove mirrored workspace artifacts", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { workspace, prepareWorkspace } = await isolatedWorkspace();
-
     let commentCalls = 0;
     const result = await runPrRevisionPromise(options(control), {
-      fetchFeedback: async () => (await noopAsync(), feedback()),
+      fetchFeedback: async () => (await Promise.resolve(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) =>
         submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
-        await noopAsync();
+        await Promise.resolve();
         commentCalls++;
       },
     });
-
     expect(result.outcome).toBe("no-action-needed");
     expect(result.context.agentCwd).toBe(workspace);
     expect(
@@ -301,43 +424,38 @@ describe("runPrRevisionPromise", () => {
       (await runOutput(["git", "status", "--porcelain"], workspace)).trim(),
     ).toBe("");
   });
-
   test("no-action-needed respects --no-comment", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
-
     const result = await runPrRevisionPromise(
       options(control, { comment: false }),
       {
-        fetchFeedback: async () => (await noopAsync(), feedback()),
+        fetchFeedback: async () => (await Promise.resolve(), feedback()),
         prepareWorkspace,
         agentRunner: async (request) =>
           submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
         postSummaryComment: async () => {
-          await noopAsync();
+          await Promise.resolve();
           commentCalled = true;
         },
       },
     );
-
     expect(result.outcome).toBe("no-action-needed");
     expect(commentCalled).toBe(false);
   });
-
   test("passes a published fresh-review finding into revision planning", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const reviewComment = freshReviewComment();
     let plannerSawFinding = false;
-
     const result = await runPrRevisionPromise(
       options(control, { comment: false }),
       {
         fetchFeedback: async () => {
-          await noopAsync();
+          await Promise.resolve();
           const value = feedback();
           const comment = { author: "roark-bot", body: reviewComment };
           return { ...value, comments: [comment], plannerComments: [comment] };
@@ -370,13 +488,11 @@ describe("runPrRevisionPromise", () => {
         },
       },
     );
-
     expect(result.outcome).toBe("no-action-needed");
     expect(plannerSawFinding).toBe(true);
   });
-
   test("allocates revisions across the control checkout and isolated workspace", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace(async (workspace) => {
       await mkdir(
@@ -384,19 +500,17 @@ describe("runPrRevisionPromise", () => {
         { recursive: true },
       );
     });
-
     let commentCalls = 0;
     const result = await runPrRevisionPromise(options(control), {
-      fetchFeedback: async () => (await noopAsync(), feedback()),
+      fetchFeedback: async () => (await Promise.resolve(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) =>
         submitRevisionPlan(request, revisionPlanResult("no-action-needed")),
       postSummaryComment: async () => {
-        await noopAsync();
+        await Promise.resolve();
         commentCalls++;
       },
     });
-
     expect(result.outcome).toBe("no-action-needed");
     expect(result.context.revision).toBe(2);
     expect(result.context.revisionDirRelative).toBe(
@@ -404,20 +518,18 @@ describe("runPrRevisionPromise", () => {
     );
     expect(commentCalls).toBe(1);
   });
-
   test("needs-human stops before enabling file-editing tools and posts one summary by default", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const fileEditingToolCalls: boolean[] = [];
     let commentCalled = false;
     let dispositionDetails: string[] | undefined;
-
     const result = await runPrRevisionPromise(options(control), {
-      fetchFeedback: async () => (await noopAsync(), feedback()),
+      fetchFeedback: async () => (await Promise.resolve(), feedback()),
       prepareWorkspace,
       agentRunner: async (request) => {
-        await noopAsync();
+        await Promise.resolve();
         fileEditingToolCalls.push(request.fileEditingToolsEnabled);
         return submitRevisionPlan(
           request,
@@ -435,33 +547,30 @@ describe("runPrRevisionPromise", () => {
         );
       },
       postSummaryComment: async (summary) => {
-        await noopAsync();
+        await Promise.resolve();
         commentCalled = true;
         dispositionDetails = summary.dispositions.map((item) => item.details);
       },
     });
-
     expect(result.outcome).toBe("needs-human");
     expect(fileEditingToolCalls).toEqual([false]);
     expect(commentCalled).toBe(true);
     expect(dispositionDetails).toEqual(["Please decide."]);
   });
-
   test("honors an explicit thinking override across revision agents", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     const thinkingLevels: string[] = [];
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control, { thinkingLevel: "medium" }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               thinkingLevels.push(request.thinkingLevel);
               if (request.fileEditingToolsEnabled)
                 return submitRevisionExecution(
@@ -476,7 +585,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
           },
           application,
@@ -495,28 +604,25 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("verification-failed");
     expect(thinkingLevels).toEqual(["medium", "medium", "medium"]);
   });
-
   test("non-repairable verification failure leaves revision unpublished without a fix pass", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
     let calls = 0;
     let writableCalls = 0;
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control, { maxFixPasses: 3 }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               calls++;
               if (request.fileEditingToolsEnabled) {
                 writableCalls++;
@@ -547,7 +653,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async () => {
-              await noopAsync();
+              await Promise.resolve();
               commentCalled = true;
             },
           },
@@ -567,7 +673,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("verification-failed");
     expect(writableCalls).toBe(1);
     expect(commentCalled).toBe(true);
@@ -577,7 +682,6 @@ describe("runPrRevisionPromise", () => {
       ),
     ).toBe(false);
   });
-
   test("verification runner exceptions propagate through PR revision", async () => {
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
@@ -591,16 +695,15 @@ describe("runPrRevisionPromise", () => {
       }),
     });
     let calls = 0;
-
     const running = Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control, { comment: false }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               calls++;
               if (request.fileEditingToolsEnabled) {
                 return submitRevisionExecution(
@@ -625,7 +728,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     let thrown: unknown;
     try {
       await running;
@@ -634,9 +736,8 @@ describe("runPrRevisionPromise", () => {
     }
     expect(thrown).toBe(failure);
   });
-
   test("repairable verification failure runs a fix pass, review, then publishes after verification passes", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const remote = await trackedTempDir("roark-pr-remote-");
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -648,19 +749,21 @@ describe("runPrRevisionPromise", () => {
     let verificationCalls = 0;
     let commentCalls = 0;
     let finalDispositions:
-      | { feedbackId: string; details: string }[]
+      | {
+          feedbackId: string;
+          details: string;
+        }[]
       | undefined;
     const writableArtifacts: string[] = [];
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control, { maxFixPasses: 3 }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               calls++;
               if (request.fileEditingToolsEnabled) {
                 writableArtifacts.push(request.prompt);
@@ -689,7 +792,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async (summary) => {
-              await noopAsync();
+              await Promise.resolve();
               commentCalls++;
               finalDispositions = summary.dispositions.map(
                 ({ feedbackId, details }) => ({ feedbackId, details }),
@@ -717,7 +820,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("published");
     expect(verificationCalls).toBe(2);
     expect(writableArtifacts).toHaveLength(2);
@@ -753,25 +855,23 @@ describe("runPrRevisionPromise", () => {
       control,
     );
   });
-
   test("review and verification repairs share the fix-pass budget", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
     let calls = 0;
     let writableCalls = 0;
     let verificationCalls = 0;
     let commentCalls = 0;
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control, { maxFixPasses: 1 }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
-              await noopAsync();
+              await Promise.resolve();
               calls++;
               if (request.fileEditingToolsEnabled) {
                 writableCalls++;
@@ -799,7 +899,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async () => {
-              await noopAsync();
+              await Promise.resolve();
               commentCalls++;
             },
           },
@@ -822,7 +922,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("verification-failed");
     expect(writableCalls).toBe(2);
     expect(verificationCalls).toBe(1);
@@ -837,19 +936,19 @@ describe("runPrRevisionPromise", () => {
         path.join(result.context.revisionDir, "metadata.json"),
         "utf8",
       ),
-    ) as { verificationFailureReason: string };
+    ) as {
+      verificationFailureReason: string;
+    };
     expect(metadata.verificationFailureReason).toContain(
       "Verification failed after 1 fix passes",
     );
   });
-
   test("successful isolated revision preserves the control checkout, uses configured remote, and excludes ignored run artifacts", async () => {
     const root = await trackedTempDir("roark-pr-isolated-");
     const seed = path.join(root, "seed");
     const remote = path.join(root, "remote.git");
     const control = path.join(root, "control");
     const workspaceRoot = path.join(root, "workspaces");
-
     await mkdir(seed, { recursive: true });
     await run(["git", "init", "-b", "main"], seed);
     await run(["git", "config", "user.email", "roark@example.invalid"], seed);
@@ -869,11 +968,9 @@ describe("runPrRevisionPromise", () => {
     await run(["git", "clone", remote, control], root);
     await run(["git", "checkout", "main"], control);
     await run(["git", "remote", "add", "upstream", remote], control);
-
     const verificationCwds: string[] = [];
     const agentCwds: string[] = [];
     let calls = 0;
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
@@ -887,13 +984,13 @@ describe("runPrRevisionPromise", () => {
               copyToWorktree: [],
             },
             hooks: {
-              timeoutMs: 10_000,
+              timeoutMs: 10000,
               afterCreate:
                 "git config user.email roark@example.invalid && git config user.name 'Roark Test'",
             },
           }),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             agentRunner: async (request) => {
               calls++;
               agentCwds.push(request.cwd);
@@ -916,7 +1013,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async () => {
-              await noopAsync();
+              await Promise.resolve();
             },
           },
           application,
@@ -938,7 +1035,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("published");
     expect(
       (await runOutput(["git", "branch", "--show-current"], control)).trim(),
@@ -956,7 +1052,6 @@ describe("runPrRevisionPromise", () => {
         path.join(result.context.agentRevisionDir, "metadata.json"),
       ).exists(),
     ).toBe(true);
-
     const pushedTree = await runOutput(
       [
         "git",
@@ -975,9 +1070,8 @@ describe("runPrRevisionPromise", () => {
     );
     expect(pushedTree).not.toContain(".roark/runs");
   });
-
   test("successful verification commits, pushes, and comments once", async () => {
-    await noopAsync();
+    await Promise.resolve();
     const control = await tempGitRepo();
     const remote = await trackedTempDir("roark-pr-remote-");
     await Bun.spawn(["git", "init", "--bare"], { cwd: remote }).exited;
@@ -987,13 +1081,12 @@ describe("runPrRevisionPromise", () => {
     });
     let calls = 0;
     let commentCalls = 0;
-
     const result = await Effect.runPromise(
       fromLegacyPromise((application) =>
         runPrRevisionPromise(
           options(control),
           {
-            fetchFeedback: async () => (await noopAsync(), feedback()),
+            fetchFeedback: async () => (await Promise.resolve(), feedback()),
             prepareWorkspace,
             agentRunner: async (request) => {
               calls++;
@@ -1012,7 +1105,7 @@ describe("runPrRevisionPromise", () => {
               return submitReview(request, reviewResult());
             },
             postSummaryComment: async () => {
-              await noopAsync();
+              await Promise.resolve();
               commentCalls++;
             },
           },
@@ -1032,7 +1125,6 @@ describe("runPrRevisionPromise", () => {
         Effect.provide(applicationLayer),
       ),
     );
-
     expect(result.outcome).toBe("published");
     expect(commentCalls).toBe(1);
     expect(result.context.agentCwd).not.toBe(control);
@@ -1052,3 +1144,8 @@ describe("runPrRevisionPromise", () => {
     );
   });
 });
+type TestProcessRunner = (
+  args: string[],
+  options?: ProcessOptions,
+  application?: ApplicationExecution,
+) => Promise<ProcessResult>;

@@ -1,3 +1,4 @@
+import { AttemptStore } from "./attempts.ts";
 import { Effect } from "effect";
 import { withCheckoutLock } from "./lock.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
@@ -6,10 +7,6 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import {
-  readAttemptIndexPromise as readAttemptIndex,
-  readAttemptMetadataPromise as readAttemptMetadata,
-} from "./attempts-promise.ts";
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`${signal} waits for attempt finalization before releasing the lock and exiting`, async () => {
     const cwd = await mkdtemp(
@@ -62,7 +59,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       expect(await child.exited).toBe(130);
       expect(await waitFile("cleanup-finished")).toBe("finished");
       const issueDir = path.join(cwd, ".roark/runs/issue/1");
-      const metadata = await readAttemptMetadata(issueDir, 1);
+      const metadata = await runApplicationPromise(
+        Effect.flatMap(AttemptStore, (store) => store.read(issueDir, 1)),
+      );
       expect(metadata.outcome).toBe("errored");
       expect(metadata.outcomeDetail).toBe("Interrupted.");
       expect(typeof metadata.endedAt).toBe("string");
@@ -71,7 +70,13 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       );
       expect(summary?.status).toBe("failed");
       expect(summary?.endedAt ?? null).toBe(metadata.endedAt);
-      expect((await readAttemptIndex(issueDir))[0]?.outcome).toBe("errored");
+      expect(
+        (
+          await runApplicationPromise(
+            Effect.flatMap(AttemptStore, (store) => store.list(issueDir)),
+          )
+        )[0]?.outcome,
+      ).toBe("errored");
       expect(
         await runApplicationPromise(
           withCheckoutLock(

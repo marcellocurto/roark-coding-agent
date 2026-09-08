@@ -1,13 +1,10 @@
-import { fromLegacyPromise } from "../runtime/application.ts";
-import { runApplicationPromise } from "../runtime/application.ts";
-import type { ApplicationExecution } from "../runtime/application.ts";
-import type { VerificationResult } from "../autorun/verification.ts";
+import { GitHub } from "../github/service.ts";
+import { Context, Effect, Layer } from "effect";
+import { type VerificationResult } from "../autorun/verification.ts";
 import { truncateGitHubIssueComment } from "../github/comments.ts";
-import { postIssueCommentPromise as postIssueComment } from "../github/promise.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
-import type { PrRevisionContext } from "./artifacts.ts";
-import type { RevisionFeedbackDisposition } from "./execution.ts";
-
+import { type PrRevisionContext } from "./artifacts.ts";
+import { type RevisionFeedbackDisposition } from "./execution.ts";
 export interface RevisionSummaryInput {
   context: PrRevisionContext;
   outcome: string;
@@ -17,14 +14,12 @@ export interface RevisionSummaryInput {
   changedFiles?: string[] | undefined;
   commitSha?: string | undefined;
 }
-
 export function buildPrRevisionSummaryMarker(input: {
   prNumber: number;
   revision: number;
 }): string {
   return `<!-- roark:pr=${input.prNumber} revision=${input.revision} phase=revision-summary -->`;
 }
-
 export function formatPrRevisionSummaryComment(
   input: RevisionSummaryInput,
 ): string {
@@ -55,31 +50,17 @@ export function formatPrRevisionSummaryComment(
   pushList(lines, input.changedFiles);
   return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
-
-export async function postPrRevisionSummaryComment(
-  input: RevisionSummaryInput,
-  application?: ApplicationExecution,
-): Promise<void> {
-  if (!application)
-    return runApplicationPromise(
-      fromLegacyPromise((application) =>
-        postPrRevisionSummaryComment(input, application),
-      ),
-      application,
-    );
-
+export const postPrRevisionSummaryComment = Effect.fn(
+  "postPrRevisionSummaryComment",
+)(function* (input: RevisionSummaryInput) {
   if (!input.context.comment) return;
-  await postIssueComment(
-    {
-      cwd: input.context.controlCwd,
-      repo: input.context.repo,
-      issueNumber: input.context.prNumber,
-      body: formatPrRevisionSummaryComment(input),
-    },
-    application,
-  );
-}
-
+  yield* (yield* GitHub).postIssueComment({
+    cwd: input.context.controlCwd,
+    repo: input.context.repo,
+    issueNumber: input.context.prNumber,
+    body: formatPrRevisionSummaryComment(input),
+  });
+});
 function pushDispositions(
   lines: string[],
   dispositions: RevisionFeedbackDisposition[],
@@ -98,7 +79,6 @@ function pushDispositions(
     );
   }
 }
-
 function pushList(lines: string[], items: string[] | undefined): void {
   if (!items || items.length === 0) {
     lines.push("- None.");
@@ -106,3 +86,26 @@ function pushList(lines: string[], items: string[] | undefined): void {
   }
   for (const item of items) lines.push(`- ${sanitizePublicMarkdown(item)}`);
 }
+export class RevisionReporting extends Context.Service<
+  RevisionReporting,
+  {
+    postSummary: (
+      input: RevisionSummaryInput,
+    ) => Effect.Effect<
+      void,
+      Effect.Error<ReturnType<typeof postPrRevisionSummaryComment>>
+    >;
+  }
+>()("roark/pr-revision/RevisionReporting") {}
+export const revisionReportingLayer = Layer.effect(
+  RevisionReporting,
+  Effect.gen(function* () {
+    const github = yield* GitHub;
+    return RevisionReporting.of({
+      postSummary: (input) =>
+        postPrRevisionSummaryComment(input).pipe(
+          Effect.provideService(GitHub, github),
+        ),
+    });
+  }),
+);

@@ -1,3 +1,6 @@
+import { runApplicationPromise } from "../runtime/application.ts";
+import { Effect } from "effect";
+import { GitHub } from "./service.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmod,
@@ -15,18 +18,14 @@ import {
   parseGitHubLabelNames,
   type RequiredGitHubLabel,
 } from "./labels.ts";
-import { ensureGitHubLabelsPromise as ensureGitHubLabels } from "./promise.ts";
-
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
-
 afterEach(async () => {
   process.env["PATH"] = originalPath;
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
 });
-
 describe("GitHub labels", () => {
   test("builds label list and create argv", () => {
     const label = requiredLabel("agent-in-progress");
@@ -51,7 +50,6 @@ describe("GitHub labels", () => {
       "test label",
     ]);
   });
-
   test("parses newline label output", () => {
     expect(parseGitHubLabelNames("bug\nready-for-agent\n")).toEqual([
       "bug",
@@ -59,19 +57,20 @@ describe("GitHub labels", () => {
     ]);
     expect(parseGitHubLabelNames("\n")).toEqual([]);
   });
-
   test("creates missing required labels and treats existing names case-insensitively", async () => {
     const cwd = await installFakeGh("READY-FOR-AGENT\n");
-
-    const result = await ensureGitHubLabels({
-      cwd,
-      repo: "owner/repo",
-      labels: [
-        requiredLabel("ready-for-agent"),
-        requiredLabel("agent-in-progress"),
-      ],
-    });
-
+    const result = await runApplicationPromise(
+      Effect.flatMap(GitHub, (github) =>
+        github.ensureGitHubLabels({
+          cwd,
+          repo: "owner/repo",
+          labels: [
+            requiredLabel("ready-for-agent"),
+            requiredLabel("agent-in-progress"),
+          ],
+        }),
+      ),
+    );
     expect(result.missing.map((label) => label.name)).toEqual([
       "agent-in-progress",
     ]);
@@ -82,17 +81,18 @@ describe("GitHub labels", () => {
       "agent-in-progress",
     );
   });
-
   test("dry-run reports missing labels without creating them", async () => {
     const cwd = await installFakeGh("");
-
-    const result = await ensureGitHubLabels({
-      cwd,
-      repo: "owner/repo",
-      dryRun: true,
-      labels: [requiredLabel("agent-in-progress")],
-    });
-
+    const result = await runApplicationPromise(
+      Effect.flatMap(GitHub, (github) =>
+        github.ensureGitHubLabels({
+          cwd,
+          repo: "owner/repo",
+          dryRun: true,
+          labels: [requiredLabel("agent-in-progress")],
+        }),
+      ),
+    );
     expect(result.missing.map((label) => label.name)).toEqual([
       "agent-in-progress",
     ]);
@@ -100,7 +100,6 @@ describe("GitHub labels", () => {
     expect(await readFile(path.join(cwd, "created.log"), "utf8")).toBe("");
   });
 });
-
 function requiredLabel(name: string): RequiredGitHubLabel {
   return {
     name,
@@ -109,7 +108,6 @@ function requiredLabel(name: string): RequiredGitHubLabel {
     description: "test label",
   };
 }
-
 async function installFakeGh(initialLabels: string): Promise<string> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-labels-"));
   tempDirs.push(cwd);

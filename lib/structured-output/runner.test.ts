@@ -1,8 +1,37 @@
+import {
+  fromLegacyPromise,
+  runApplicationPromise,
+  type ApplicationExecution,
+} from "../runtime/application.ts";
+import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
+import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+import {
+  runStructuredArtifact,
+  type StructuredArtifactDefinition,
+} from "./runner.ts";
+interface StructuredArtifactWritersPromise {
+  writeJson: (content: string) => Promise<void>;
+  writeMarkdown: (content: string) => Promise<void>;
+}
+function runTestArtifact<T>(
+  request: AgentRunRequest,
+  runner: AgentRunner,
+  definition: StructuredArtifactDefinition<T>,
+  writers: StructuredArtifactWritersPromise,
+  application?: ApplicationExecution,
+) {
+  return runApplicationPromise(
+    runStructuredArtifact(request, definition, {
+      writeJson: (content) =>
+        fromLegacyPromise(() => writers.writeJson(content)),
+      writeMarkdown: (content) =>
+        fromLegacyPromise(() => writers.writeMarkdown(content)),
+    }).pipe(provideTestAgent(runner)),
+    application,
+  );
+}
 import { describe, expect, test } from "bun:test";
 import { Type } from "typebox";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import { runStructuredArtifactPromise as runStructuredArtifact } from "./runner-promise.ts";
-
 const request: AgentRunRequest = {
   cwd: "/repo",
   model: "openai-codex/gpt-5.6-sol",
@@ -18,12 +47,14 @@ const request: AgentRunRequest = {
     operation: "inspect",
   },
 };
-
 describe("runStructuredArtifact", () => {
   test("accepts one terminating submission and persists matching JSON and Markdown", async () => {
-    const written: { json?: string; markdown?: string } = {};
+    const written: {
+      json?: string;
+      markdown?: string;
+    } = {};
     const writeOrder: string[] = [];
-    const result = await runStructuredArtifact(
+    const result = await runTestArtifact(
       request,
       async (agentRequest) => {
         const tool = agentRequest.customTools?.find(
@@ -47,7 +78,10 @@ describe("runStructuredArtifact", () => {
           { summary: Type.String({ minLength: 1 }) },
           { additionalProperties: false },
         ),
-        validate: (value) => value as { summary: string },
+        validate: (value) =>
+          value as {
+            summary: string;
+          },
         formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
         createError: (message) => new Error(message),
       },
@@ -64,7 +98,6 @@ describe("runStructuredArtifact", () => {
         },
       },
     );
-
     expect(result).toEqual({
       value: { summary: "accepted" },
       markdown: "# Example\n\naccepted\n",
@@ -75,10 +108,9 @@ describe("runStructuredArtifact", () => {
     });
     expect(writeOrder).toEqual(["markdown", "json"]);
   });
-
   test("writes nothing when the agent does not submit", async () => {
     let writes = 0;
-    const run = runStructuredArtifact(
+    const run = runTestArtifact(
       request,
       () => Promise.resolve('{"summary":"not submitted"}'),
       {
@@ -86,7 +118,10 @@ describe("runStructuredArtifact", () => {
         label: "Example",
         noun: "example",
         parameters: Type.Object({ summary: Type.String() }),
-        validate: (value) => value as { summary: string },
+        validate: (value) =>
+          value as {
+            summary: string;
+          },
         formatMarkdown: (value) => value.summary,
         createError: (message) => new Error(message),
       },
@@ -101,15 +136,13 @@ describe("runStructuredArtifact", () => {
         },
       },
     );
-
     expect(run).rejects.toThrow("without calling submit_example");
     await run.catch(() => undefined);
     expect(writes).toBe(0);
   });
-
   test("does not commit canonical JSON when Markdown persistence fails", async () => {
     let jsonWrites = 0;
-    const run = runStructuredArtifact(
+    const run = runTestArtifact(
       request,
       async (agentRequest) => {
         const tool = agentRequest.customTools?.find(
@@ -130,7 +163,10 @@ describe("runStructuredArtifact", () => {
         label: "Example",
         noun: "example",
         parameters: Type.Object({ summary: Type.String() }),
-        validate: (value) => value as { summary: string },
+        validate: (value) =>
+          value as {
+            summary: string;
+          },
         formatMarkdown: (value) => value.summary,
         createError: (message) => new Error(message),
       },
@@ -142,7 +178,6 @@ describe("runStructuredArtifact", () => {
         writeMarkdown: () => Promise.reject(new Error("disk full")),
       },
     );
-
     expect(run).rejects.toThrow("disk full");
     await run.catch(() => undefined);
     expect(jsonWrites).toBe(0);
