@@ -272,8 +272,10 @@ describe("runFullWorkflow", () => {
       await runApplicationPromise(artifactExists(context, "implementationLog")),
     ).toBe(false);
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(readArtifact(context, "readiness")),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
       ).decision.triageVerdict,
     ).toBe("blocked");
   });
@@ -438,9 +440,11 @@ describe("runFullWorkflow", () => {
       status: "completed",
     });
     expect(
-      parseImplementationPlanResultJson(
-        await runApplicationPromise(
-          readArtifact(context, "implementationPlan"),
+      Effect.runSync(
+        parseImplementationPlanResultJson(
+          await runApplicationPromise(
+            readArtifact(context, "implementationPlan"),
+          ),
         ),
       ).additionalSections,
     ).toEqual(plan.additionalSections);
@@ -450,19 +454,23 @@ describe("runFullWorkflow", () => {
       ),
     ).toContain("## Repository-specific interaction");
     expect(
-      parseReviewResultJson(
-        await runApplicationPromise(readArtifact(context, reviewARef(0))),
-        {
-          allowRestart: true,
-        },
+      Effect.runSync(
+        parseReviewResultJson(
+          await runApplicationPromise(readArtifact(context, reviewARef(0))),
+          {
+            allowRestart: true,
+          },
+        ),
       ).additionalSections,
     ).toEqual(review.additionalSections);
     expect(
       await runApplicationPromise(readArtifact(context, reviewAMarkdownRef(0))),
     ).toContain("## Positive architectural signal");
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(readArtifact(context, "readiness")),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
       ).decision.status,
     ).toBe("ready-for-pr");
   });
@@ -544,13 +552,17 @@ describe("runFullWorkflow", () => {
       }
       if (phase === "fixLog-1") {
         fixRequest = request.prompt;
-        const reviewA = parseReviewResultJson(
+        const reviewA = yield* parseReviewResultJson(
           yield* readArtifact(context, reviewARef(0)),
-          { allowRestart: true },
+          {
+            allowRestart: true,
+          },
         );
-        const reviewB = parseReviewResultJson(
+        const reviewB = yield* parseReviewResultJson(
           yield* readArtifact(context, reviewBRef(0)),
-          { allowRestart: true },
+          {
+            allowRestart: true,
+          },
         );
         fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(
           ({ title }) => title,
@@ -593,16 +605,22 @@ describe("runFullWorkflow", () => {
     ]);
     releasePassZeroReviews();
     const result = await workflow;
-    const persistedReviewA = parseReviewResultJson(
-      await runApplicationPromise(readArtifact(context, reviewARef(0))),
-      { allowRestart: true },
+    const persistedReviewA = Effect.runSync(
+      parseReviewResultJson(
+        await runApplicationPromise(readArtifact(context, reviewARef(0))),
+        { allowRestart: true },
+      ),
     );
-    const persistedReviewB = parseReviewResultJson(
-      await runApplicationPromise(readArtifact(context, reviewBRef(0))),
-      { allowRestart: true },
+    const persistedReviewB = Effect.runSync(
+      parseReviewResultJson(
+        await runApplicationPromise(readArtifact(context, reviewBRef(0))),
+        { allowRestart: true },
+      ),
     );
-    const persistedFix = parseChangeReportJson(
-      await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+    const persistedFix = Effect.runSync(
+      parseChangeReportJson(
+        await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+      ),
     );
     expect(persistedReviewA.findings.map(({ title }) => title)).toEqual(
       reviewAFindings.map(({ title }) => title),
@@ -643,8 +661,10 @@ describe("runFullWorkflow", () => {
     ).toBe(true);
     expect(result).toEqual({ status: "completed" });
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(readArtifact(context, "readiness")),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
       ).decision.status,
     ).toBe("ready-for-pr");
   });
@@ -710,8 +730,10 @@ describe("runFullWorkflow", () => {
     });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(readArtifact(context, "readiness")),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
       ).decision.status,
     ).toBe("ready-for-pr");
   });
@@ -854,8 +876,10 @@ describe("runFullWorkflow", () => {
     expect(result).toEqual({ status: "review-blocked" });
     expect(phases).toEqual(["review-a-0", "fix", "review-a-1"]);
     expect(
-      parseChangeReportJson(
-        await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+      Effect.runSync(
+        parseChangeReportJson(
+          await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+        ),
       ).addressedFindingIds,
     ).toEqual(["review-a:local-fix"]);
   });

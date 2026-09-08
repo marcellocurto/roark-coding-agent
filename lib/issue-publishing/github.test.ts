@@ -1,3 +1,4 @@
+import { GitHubResponseError } from "../github/errors.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import * as nativeGithub from "./github.ts";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -85,6 +86,25 @@ describe("publishIssueWithGitHub", () => {
     );
   });
 });
+test.each(["not json", "{}", '[{"title":42}]'])(
+  "does not publish after a malformed duplicate response: %s",
+  async (response) => {
+    const fixture = await githubFixture(response);
+    expect(
+      runApplicationPromise(
+        nativeGithub.publishIssueWithGitHub({
+          cwd: fixture.cwd,
+          title: "Track this",
+          body: "body",
+          labels: [],
+        }),
+      ),
+    ).rejects.toThrow(GitHubResponseError);
+    expect(await readFile(fixture.logPath, "utf8")).not.toContain(
+      "issue create",
+    );
+  },
+);
 async function githubFixture(listResponse: string): Promise<{
   cwd: string;
   bodyPath: string;

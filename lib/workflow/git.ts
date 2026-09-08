@@ -7,7 +7,7 @@ export interface PreImplementationBaseline {
   capturedAt: string;
   excludes: readonly [".roark"];
 }
-export const parsePreImplementationBaseline = Schema.decodeUnknownSync(
+export const parsePreImplementationBaseline = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({
       head: Schema.String,

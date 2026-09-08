@@ -1,64 +1,52 @@
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
-
+import { Effect, SchemaGetter, type SchemaIssue } from "effect";
+import {
+  artifactContract,
+  invalidArtifact,
+} from "../structured-output/contract.ts";
+import { Schema } from "effect";
 const nonEmptyString = (description: string) =>
-  Type.String({ minLength: 1, description });
+  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
 const textItems = (description: string) =>
-  Type.Array(nonEmptyString(description));
-
-export const prDraftSchema = Type.Object(
-  {
-    title: nonEmptyString("Concise pull request title."),
-    simpleSummary: nonEmptyString(
-      "Plain-language summary for a busy maintainer.",
+  Schema.mutable(Schema.Array(nonEmptyString(description)));
+const prDraftSchemaShape = Schema.Struct({
+  title: nonEmptyString("Concise pull request title."),
+  simpleSummary: nonEmptyString(
+    "Plain-language summary for a busy maintainer.",
+  ),
+  summary: textItems("What changed and why."),
+  changes: textItems("Important behavior or implementation change."),
+  reviewInstructions: textItems(
+    "Specific reviewer instruction or review path.",
+  ),
+  verification: textItems(
+    "Verification performed or explicitly not performed.",
+  ),
+  risksAndNonGoals: textItems("Known risk, limitation, or non-goal."),
+  additionalSections: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        heading: nonEmptyString("Additional reviewer-facing section heading."),
+        items: textItems("Item in the additional section."),
+      }),
     ),
-    summary: textItems("What changed and why."),
-    changes: textItems("Important behavior or implementation change."),
-    reviewInstructions: textItems(
-      "Specific reviewer instruction or review path.",
-    ),
-    verification: textItems(
-      "Verification performed or explicitly not performed.",
-    ),
-    risksAndNonGoals: textItems("Known risk, limitation, or non-goal."),
-    additionalSections: Type.Array(
-      Type.Object(
-        {
-          heading: nonEmptyString(
-            "Additional reviewer-facing section heading.",
-          ),
-          items: textItems("Item in the additional section."),
-        },
-        { additionalProperties: false },
-      ),
-    ),
-    additionalClosingIssueNumbers: Type.Array(Type.Integer({ minimum: 1 })),
-  },
-  { additionalProperties: false },
-);
-
-export type PrDraft = Static<typeof prDraftSchema>;
-
+  ),
+  additionalClosingIssueNumbers: Schema.mutable(
+    Schema.Array(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
+  ),
+});
+export type PrDraft = (typeof prDraftSchemaShape)["Type"];
 export interface PrDraftFollowUpIssue {
   title: string;
   url?: string | undefined;
   number?: number | undefined;
 }
-
 export interface PrDraftRenderingContext {
   sourceIssueNumber: number;
   followUpIssues?: readonly PrDraftFollowUpIssue[] | undefined;
 }
-
-export function validatePrDraft(value: unknown): PrDraft {
-  if (!Value.Check(prDraftSchema, value)) {
-    const first = Value.Errors(prDraftSchema, value)[0];
-    const location = first?.instancePath ?? first?.schemaPath ?? "PR draft";
-    throw new Error(
-      `PR draft does not satisfy the structured contract at ${location}.`,
-    );
-  }
-
+const normalizePrDraft = Effect.fnUntraced(function* (
+  value: PrDraft,
+): Effect.fn.Return<PrDraft, SchemaIssue.Issue> {
   const draft: PrDraft = {
     ...value,
     title: inline(value.title),
@@ -77,10 +65,14 @@ export function validatePrDraft(value: unknown): PrDraft {
     ],
   };
   if (!draft.title || !draft.simpleSummary)
-    throw new Error("PR draft title and simple summary must not be blank.");
+    return yield* invalidArtifact(
+      "PR draft title and simple summary must not be blank.",
+    );
   if (draft.additionalSections.some((section) => !section.heading))
-    throw new Error("PR draft section headings must not be blank.");
-  assertUniqueSectionHeadings(
+    return yield* invalidArtifact(
+      "PR draft section headings must not be blank.",
+    );
+  yield* assertUniqueSectionHeadings(
     draft.additionalSections.map((section) => section.heading),
     [
       "simple summary",
@@ -93,20 +85,7 @@ export function validatePrDraft(value: unknown): PrDraft {
     ],
   );
   return draft;
-}
-
-export function parsePrDraftJson(content: string): PrDraft {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch (error) {
-    throw new Error(
-      `PR draft artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  return validatePrDraft(parsed);
-}
-
+});
 export function formatPrDraftMarkdown(
   draft: PrDraft,
   context: PrDraftRenderingContext,
@@ -140,7 +119,6 @@ export function formatPrDraftMarkdown(
   ];
   return lines.join("\n");
 }
-
 function section(heading: string, items: readonly string[]): string[] {
   return [
     `## ${heading}`,
@@ -149,7 +127,6 @@ function section(heading: string, items: readonly string[]): string[] {
     "",
   ];
 }
-
 function renderFollowUps(
   issues: readonly PrDraftFollowUpIssue[] | undefined,
 ): string[] {
@@ -163,26 +140,35 @@ function renderFollowUps(
     return `- ${issue.url ? `[${label}](${issue.url})` : label}`;
   });
 }
-
 function normalizeItems(items: readonly string[]): string[] {
   return items.map(inline).filter((item) => item.length > 0);
 }
-
 function inline(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
-
-function assertUniqueSectionHeadings(
+const assertUniqueSectionHeadings = Effect.fnUntraced(function* (
   headings: readonly string[],
   reserved: readonly string[],
-): void {
+): Effect.fn.Return<void, SchemaIssue.Issue> {
   const seen = new Set(reserved);
   for (const heading of headings) {
     const key = heading.toLocaleLowerCase();
     if (seen.has(key))
-      throw new Error(
+      return yield* invalidArtifact(
         `PR draft additional section duplicates reserved or repeated heading '${heading}'.`,
       );
     seen.add(key);
   }
-}
+});
+const contract = artifactContract(
+  "PR draft",
+  prDraftSchemaShape.pipe(
+    Schema.decode({
+      decode: SchemaGetter.transformOrFail(normalizePrDraft),
+      encode: SchemaGetter.passthrough(),
+    }),
+  ),
+);
+export const validatePrDraft = contract.decode;
+export const parsePrDraftJson = contract.parse;
+export const prDraftSchema = prDraftSchemaShape;

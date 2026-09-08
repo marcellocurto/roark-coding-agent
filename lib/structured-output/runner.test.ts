@@ -1,6 +1,6 @@
 import type { ApplicationServices } from "../runtime/application.ts";
 import type { Scope } from "effect";
-import { Effect } from "effect";
+import { Cause, Exit, Effect } from "effect";
 import { Schema } from "effect";
 import { toolContext } from "../testing/tool-context.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
@@ -30,7 +30,7 @@ const runTestArtifact = Effect.fnUntraced(function* <T>(
   );
 });
 import { describe, expect, test } from "bun:test";
-import { Type } from "typebox";
+import { artifactContract } from "./contract.ts";
 const request: AgentRunRequest = {
   cwd: "/repo",
   model: "openai-codex/gpt-5.6-sol",
@@ -80,15 +80,12 @@ describe("runStructuredArtifact", () => {
           toolName: "submit_example",
           label: "Example",
           noun: "example",
-          parameters: Type.Object(
-            { summary: Type.String({ minLength: 1 }) },
-            { additionalProperties: false },
-          ),
-          validate: Schema.decodeUnknownSync(
+          parameters: Schema.Struct({ summary: Schema.NonEmptyString }),
+          validate: artifactContract(
+            "Example",
             Schema.Struct({ summary: Schema.String }),
-          ),
+          ).decode,
           formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
-          createError: (message) => new Error(message),
         },
         {
           writeJson: Effect.fnUntraced(function* (content) {
@@ -128,12 +125,12 @@ describe("runStructuredArtifact", () => {
           toolName: "submit_example",
           label: "Example",
           noun: "example",
-          parameters: Type.Object({ summary: Type.String() }),
-          validate: Schema.decodeUnknownSync(
+          parameters: Schema.Struct({ summary: Schema.String }),
+          validate: artifactContract(
+            "Example",
             Schema.Struct({ summary: Schema.String }),
-          ),
+          ).decode,
           formatMarkdown: (value) => value.summary,
-          createError: (message) => new Error(message),
         },
         {
           writeJson: Effect.fnUntraced(function* () {
@@ -180,12 +177,12 @@ describe("runStructuredArtifact", () => {
           toolName: "submit_example",
           label: "Example",
           noun: "example",
-          parameters: Type.Object({ summary: Type.String() }),
-          validate: Schema.decodeUnknownSync(
+          parameters: Schema.Struct({ summary: Schema.String }),
+          validate: artifactContract(
+            "Example",
             Schema.Struct({ summary: Schema.String }),
-          ),
+          ).decode,
           formatMarkdown: (value) => value.summary,
-          createError: (message) => new Error(message),
         },
         {
           writeJson: Effect.fnUntraced(function* () {
@@ -205,4 +202,149 @@ describe("runStructuredArtifact", () => {
     await run.catch(() => undefined);
     expect(jsonWrites).toBe(0);
   });
+});
+
+for (const phase of ["validation", "formatting"] as const) {
+  test(`${phase} defects escape even when the SDK handles tool errors`, async () => {
+    const defect = new Error(`${phase} bug`);
+    let writes = 0;
+    const schema = Schema.Struct({ summary: Schema.String });
+    const contract = artifactContract(
+      "Example",
+      schema.check(
+        Schema.makeFilter(() => {
+          if (phase === "validation") throw defect;
+          return true;
+        }),
+      ),
+    );
+    const exit = await runApplicationPromise(
+      Effect.exit(
+        runTestArtifact(
+          request,
+          Effect.fnUntraced(function* (request) {
+            const tool = request.customTools?.find(
+              (tool) => tool.name === "submit_example",
+            );
+            if (!tool) return yield* Effect.die(new Error("missing tool"));
+            // Pi reports rejected tool calls to the agent instead of failing the session.
+            yield* Effect.tryPromise({
+              try: () =>
+                tool.execute(
+                  "submit",
+                  { summary: "accepted" },
+                  undefined,
+                  undefined,
+                  toolContext,
+                ),
+              catch: (error) => error,
+            }).pipe(Effect.catch(() => Effect.void));
+            return "agent continued after the tool result";
+          }),
+          {
+            toolName: "submit_example",
+            label: "Example",
+            noun: "example",
+            parameters: schema,
+            validate: contract.decode,
+            formatMarkdown: (value) => {
+              if (phase === "formatting") throw defect;
+              return value.summary;
+            },
+          },
+          {
+            writeJson: () =>
+              Effect.sync(() => {
+                writes += 1;
+              }),
+            writeMarkdown: () =>
+              Effect.sync(() => {
+                writes += 1;
+              }),
+          },
+        ),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(true);
+      expect(Cause.hasFails(exit.cause)).toBe(false);
+      expect(Cause.squash(exit.cause)).toBe(defect);
+    }
+    expect(writes).toBe(0);
+  });
+}
+
+test("allows correcting invalid output and accepts exactly one concurrent submission", async () => {
+  let json = "";
+  let writes = 0;
+  const schema = Schema.Struct({ summary: Schema.NonEmptyString });
+  const contract = artifactContract("Example", schema);
+  const result = await runApplicationPromise(
+    runTestArtifact(
+      request,
+      Effect.fnUntraced(function* (request) {
+        const tool = request.customTools?.find(
+          (tool) => tool.name === "submit_example",
+        );
+        if (!tool) return yield* Effect.die(new Error("missing tool"));
+        const invalid = yield* Effect.tryPromise({
+          try: () =>
+            tool.execute(
+              "invalid",
+              { summary: "" },
+              undefined,
+              undefined,
+              toolContext,
+            ),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        expect(invalid._tag).toBe("Failure");
+        expect(writes).toBe(0);
+        const submitted = yield* Effect.all(
+          ["first", "second"].map((summary) =>
+            Effect.tryPromise({
+              try: () =>
+                tool.execute(
+                  summary,
+                  { summary },
+                  undefined,
+                  undefined,
+                  toolContext,
+                ),
+              catch: (error) => error,
+            }).pipe(Effect.result),
+          ),
+          { concurrency: "unbounded" },
+        );
+        expect(
+          submitted.filter((result) => result._tag === "Success"),
+        ).toHaveLength(1);
+        expect(
+          submitted.filter((result) => result._tag === "Failure"),
+        ).toHaveLength(1);
+        return "";
+      }),
+      {
+        toolName: "submit_example",
+        label: "Example",
+        noun: "example",
+        parameters: schema,
+        validate: (value) =>
+          contract.decode(value).pipe(Effect.delay("1 millis")),
+        formatMarkdown: (value) => value.summary,
+      },
+      {
+        writeJson: (content) =>
+          Effect.sync(() => {
+            json = content;
+            writes += 1;
+          }),
+        writeMarkdown: () => Effect.void,
+      },
+    ),
+  );
+  expect(writes).toBe(1);
+  expect(JSON.parse(json)).toEqual(result.value);
+  expect(["first", "second"]).toContain(result.value.summary);
 });

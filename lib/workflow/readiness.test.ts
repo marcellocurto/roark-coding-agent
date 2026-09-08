@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
   writeJsonArtifact,
@@ -188,14 +189,17 @@ describe("parseReadinessResultJson", () => {
   test("rejects readiness version 1 instead of misreading the old review model", () => {
     const priorVersion = { ...readinessResult("ready-for-pr"), version: 1 };
     expect(() =>
-      parseReadinessResultJson(JSON.stringify(priorVersion)),
+      Effect.runSync(parseReadinessResultJson(JSON.stringify(priorVersion))),
     ).toThrow("structured contract");
   });
   test("rejects a ready status that conflicts with its structured inputs", () => {
-    const corrupted = readinessResult("ready-for-pr");
-    corrupted.decision.reviewBVerdict = "missing";
-    expect(() => parseReadinessResultJson(JSON.stringify(corrupted))).toThrow(
-      "conflicts with its decision inputs",
-    );
+    const original = readinessResult("ready-for-pr");
+    const corrupted = {
+      ...original,
+      decision: { ...original.decision, reviewBVerdict: "missing" },
+    };
+    expect(() =>
+      Effect.runSync(parseReadinessResultJson(JSON.stringify(corrupted))),
+    ).toThrow("conflicts with its decision inputs");
   });
 });

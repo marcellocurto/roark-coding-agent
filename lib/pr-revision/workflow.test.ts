@@ -9,7 +9,7 @@ import {
   applicationLayer,
 } from "../runtime/application.ts";
 import { GitHub } from "../github/service.ts";
-import { GitHubResponseError } from "../github/errors.ts";
+import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "../autorun/workspace-service.ts";
 import {
   WorkspaceCommandError,
@@ -68,7 +68,13 @@ const runRevisionWithDependencies = Effect.fnUntraced(function* (
         ? {
             fetchPullRequestFeedback: (input: Parameters<typeof fetch>[0]) =>
               fetch(input).pipe(
-                Effect.mapError((cause) => new GitHubResponseError({ cause })),
+                Effect.mapError(
+                  (cause) =>
+                    new GitHubRequestError({
+                      message:
+                        cause instanceof Error ? cause.message : String(cause),
+                    }),
+                ),
                 Effect.provide(services),
                 Effect.scoped,
               ),
@@ -117,7 +123,13 @@ const runRevisionWithDependencies = Effect.fnUntraced(function* (
         ? {
             postSummary: (input) =>
               summary(input).pipe(
-                Effect.mapError((cause) => new GitHubResponseError({ cause })),
+                Effect.mapError(
+                  (cause) =>
+                    new GitHubRequestError({
+                      message:
+                        cause instanceof Error ? cause.message : String(cause),
+                    }),
+                ),
                 Effect.provide(services),
                 Effect.scoped,
               ),
@@ -923,10 +935,12 @@ describe("runRevisionWithDependencies", () => {
     expect(finalDispositions).toEqual([
       { feedbackId: "pr:12", details: "Fixed pass 2." },
     ]);
-    const canonicalExecution = parseRevisionExecutionResultJson(
-      await readFile(
-        path.join(result.context.revisionDir, "revision-log-fix-pass-1.json"),
-        "utf8",
+    const canonicalExecution = Effect.runSync(
+      parseRevisionExecutionResultJson(
+        await readFile(
+          path.join(result.context.revisionDir, "revision-log-fix-pass-1.json"),
+          "utf8",
+        ),
       ),
     );
     expect(canonicalExecution.feedbackDispositions[0]?.details).toBe(

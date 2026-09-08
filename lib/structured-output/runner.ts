@@ -1,17 +1,16 @@
-import { Effect } from "effect";
+import { Cause, Deferred, Effect, Exit, Schema, Semaphore } from "effect";
 import { AgentExecution } from "../runtime/services.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
+import { ArtifactContractError } from "./contract.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
 export interface StructuredArtifactDefinition<T> {
   toolName: string;
   label: string;
   noun: string;
-  parameters: TSchema;
-  validate: (value: unknown) => T;
+  parameters: Schema.Constraint;
+  validate: (value: unknown) => Effect.Effect<T, ArtifactContractError>;
   formatMarkdown: (value: T) => string;
-  createError: (message: string) => Error;
 }
 
 export interface StructuredArtifactWriters<E = never, R = never> {
@@ -32,6 +31,9 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
   ) {
     const agent = yield* AgentExecution;
     let submitted: T | undefined;
+    const defect = yield* Deferred.make<never, ArtifactContractError>();
+    const submission = yield* Semaphore.make(1);
+    const document = Schema.toJsonSchemaDocument(definition.parameters);
     const submit = defineTool({
       name: definition.toolName,
       label: `Submit ${definition.label}`,
@@ -41,42 +43,57 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
         `Use ${definition.toolName} as the final action for this phase.`,
         `Do not return the ${definition.noun} as Markdown or prose after calling ${definition.toolName}.`,
       ],
-      parameters: definition.parameters,
-      execute(_toolCallId, params) {
-        if (submitted !== undefined) {
-          throw definition.createError(
-            `The ${definition.noun} has already been submitted.`,
-          );
+      parameters: { ...document.schema, $defs: document.definitions },
+      async execute(_toolCallId, params, signal) {
+        const exit = await Effect.runPromiseExit(
+          submission.withPermit(
+            Effect.gen(function* () {
+              if (submitted !== undefined) {
+                return yield* Effect.fail(
+                  new ArtifactContractError({
+                    artifact: definition.noun,
+                    message: `The ${definition.noun} has already been submitted.`,
+                  }),
+                );
+              }
+              const value = yield* definition.validate(params);
+              submitted = value;
+              return value;
+            }),
+          ),
+          { signal },
+        );
+        if (Exit.isFailure(exit)) {
+          if (Cause.hasDies(exit.cause) || Cause.hasInterrupts(exit.cause)) {
+            Deferred.doneUnsafe(defect, Exit.failCause(exit.cause));
+          }
+          throw Cause.squash(exit.cause);
         }
-        try {
-          submitted = definition.validate(params);
-        } catch (error) {
-          throw definition.createError(
-            error instanceof Error ? error.message : String(error),
-          );
-        }
-        return Promise.resolve({
+        return {
           content: [
             {
               type: "text" as const,
               text: `Structured ${definition.noun} submitted.`,
             },
           ],
-          details: submitted,
+          details: exit.value,
           terminate: true,
-        });
+        };
       },
     });
 
-    yield* agent.run({
-      ...request,
-      customTools: [...(request.customTools ?? []), submit],
-    });
+    yield* agent
+      .run({
+        ...request,
+        customTools: [...(request.customTools ?? []), submit],
+      })
+      .pipe(Effect.raceFirst(Deferred.await(defect)));
     if (submitted === undefined) {
       return yield* Effect.fail(
-        definition.createError(
-          `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
-        ),
+        new ArtifactContractError({
+          artifact: definition.noun,
+          message: `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
+        }),
       );
     }
     const markdown = definition.formatMarkdown(submitted);

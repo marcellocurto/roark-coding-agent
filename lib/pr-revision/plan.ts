@@ -1,12 +1,15 @@
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Effect, SchemaGetter, type SchemaIssue } from "effect";
+import {
+  artifactContract,
+  invalidArtifact,
+} from "../structured-output/contract.ts";
+import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
 import {
   additionalSectionsSchema,
   normalizeAdditionalSections,
   renderAdditionalSectionsMarkdown,
 } from "../structured-output/additional-sections.ts";
-
 export type RevisionPlanStatus = "revise" | "needs-human" | "no-action-needed";
 export type RevisionFeedbackClassification =
   | "must-fix-current"
@@ -14,97 +17,81 @@ export type RevisionFeedbackClassification =
   | "needs-human"
   | "non-blocking"
   | "invalid-stale";
-
 const nonEmptyString = (description: string) =>
-  Type.String({ minLength: 1, description });
-const feedbackClassificationSchema = Type.Union([
-  Type.Literal("must-fix-current"),
-  Type.Literal("already-addressed"),
-  Type.Literal("needs-human"),
-  Type.Literal("non-blocking"),
-  Type.Literal("invalid-stale"),
+  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
+const feedbackClassificationSchema = Schema.Union([
+  Schema.Literal("must-fix-current"),
+  Schema.Literal("already-addressed"),
+  Schema.Literal("needs-human"),
+  Schema.Literal("non-blocking"),
+  Schema.Literal("invalid-stale"),
 ]);
-
-export const revisionPlanResultSchema = Type.Object(
-  {
-    status: Type.Union([
-      Type.Literal("revise"),
-      Type.Literal("needs-human"),
-      Type.Literal("no-action-needed"),
-    ]),
-    feedbackItems: Type.Array(
-      Type.Object(
-        {
-          id: nonEmptyString(
-            "Stable feedback identity derived from its source identity.",
-          ),
-          sourceIds: Type.Array(
+const revisionPlanResultSchemaShape = Schema.Struct({
+  status: Schema.Union([
+    Schema.Literal("revise"),
+    Schema.Literal("needs-human"),
+    Schema.Literal("no-action-needed"),
+  ]),
+  feedbackItems: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        id: nonEmptyString(
+          "Stable feedback identity derived from its source identity.",
+        ),
+        sourceIds: Schema.mutable(
+          Schema.Array(
             nonEmptyString("Source identity from pr-feedback.json."),
-            { minItems: 1 },
           ),
-          summary: nonEmptyString("Concise statement of the feedback item."),
-          classification: feedbackClassificationSchema,
-          rationale: nonEmptyString(
-            "Reason for the classification, including any required human decision.",
-          ),
-        },
-        { additionalProperties: false },
-      ),
+        ).check(Schema.isMinLength(1)),
+        summary: nonEmptyString("Concise statement of the feedback item."),
+        classification: feedbackClassificationSchema,
+        rationale: nonEmptyString(
+          "Reason for the classification, including any required human decision.",
+        ),
+      }),
     ),
-    additionalSections: Type.Optional(additionalSectionsSchema),
-  },
-  { additionalProperties: false },
-);
-
-export type RevisionPlanResult = Static<typeof revisionPlanResultSchema>;
-
-export class RevisionPlanOutputContractError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RevisionPlanOutputContractError";
-  }
-}
-
-export function validateRevisionPlanResult(
-  value: unknown,
+  ),
+  additionalSections: Schema.optional(additionalSectionsSchema),
+});
+export type RevisionPlanResult = (typeof revisionPlanResultSchemaShape)["Type"];
+const normalizeRevisionPlanResult = Effect.fnUntraced(function* (
+  value: RevisionPlanResult,
   validSourceIds?: ReadonlySet<string>,
-): RevisionPlanResult {
-  if (!Value.Check(revisionPlanResultSchema, value)) {
-    const first = Value.Errors(revisionPlanResultSchema, value)[0];
-    const location =
-      first?.instancePath ?? first?.schemaPath ?? "revision plan";
-    throw new RevisionPlanOutputContractError(
-      `Revision plan does not satisfy the structured contract at ${location}.`,
-    );
-  }
-
-  const additionalSections = normalizeAdditionalSections(
+): Effect.fn.Return<RevisionPlanResult, SchemaIssue.Issue> {
+  const additionalSections = yield* normalizeAdditionalSections(
     value.additionalSections,
     {
       artifactLabel: "Revision plan",
       reservedHeadings: ["Status", "Feedback Items"],
-      createError: (message) => new RevisionPlanOutputContractError(message),
     },
   );
   const result: RevisionPlanResult = {
     ...value,
-    feedbackItems: value.feedbackItems.map((item, index) => ({
-      id: requireTrimmed(item.id, `feedbackItems[${index}].id`),
-      sourceIds: uniqueTrimmed(
-        item.sourceIds,
-        `feedbackItems[${index}].sourceIds`,
-      ),
-      summary: requireTrimmed(item.summary, `feedbackItems[${index}].summary`),
-      classification: item.classification,
-      rationale: requireTrimmed(
-        item.rationale,
-        `feedbackItems[${index}].rationale`,
-      ),
-    })),
+    feedbackItems: yield* Effect.forEach(
+      value.feedbackItems,
+      Effect.fnUntraced(function* (item, index) {
+        return {
+          id: yield* requireTrimmed(item.id, `feedbackItems[${index}].id`),
+          sourceIds: yield* uniqueTrimmed(
+            item.sourceIds,
+            `feedbackItems[${index}].sourceIds`,
+          ),
+          summary: yield* requireTrimmed(
+            item.summary,
+            `feedbackItems[${index}].summary`,
+          ),
+          classification: item.classification,
+          rationale: yield* requireTrimmed(
+            item.rationale,
+            `feedbackItems[${index}].rationale`,
+          ),
+        };
+      }),
+    ),
     ...(additionalSections === undefined ? {} : { additionalSections }),
   };
-  assertUniqueFeedbackIds(result);
-  if (validSourceIds) assertValidFeedbackSources(result, validSourceIds);
+  yield* assertUniqueFeedbackIds(result);
+  if (validSourceIds) yield* assertValidFeedbackSources(result, validSourceIds);
   const expectedStatus: RevisionPlanStatus = result.feedbackItems.some(
     (item) => item.classification === "needs-human",
   )
@@ -115,13 +102,12 @@ export function validateRevisionPlanResult(
       ? "revise"
       : "no-action-needed";
   if (result.status !== expectedStatus) {
-    throw new RevisionPlanOutputContractError(
+    return yield* invalidArtifact(
       `Revision plan status '${result.status}' conflicts with its actionable items; expected '${expectedStatus}'.`,
     );
   }
   return result;
-}
-
+});
 export function formatRevisionPlanMarkdown(result: RevisionPlanResult): string {
   return [
     "# Revision Plan",
@@ -135,7 +121,25 @@ export function formatRevisionPlanMarkdown(result: RevisionPlanResult): string {
     ...renderAdditionalSectionsMarkdown(result.additionalSections),
   ].join("\n");
 }
-
+const contract = (validSourceIds?: ReadonlySet<string>) =>
+  artifactContract(
+    "Revision plan",
+    revisionPlanResultSchemaShape.pipe(
+      Schema.decode({
+        decode: SchemaGetter.transformOrFail((value) =>
+          normalizeRevisionPlanResult(value, validSourceIds),
+        ),
+        encode: SchemaGetter.passthrough(),
+      }),
+    ),
+  );
+export const validateRevisionPlanResult = Effect.fnUntraced(function* (
+  value: unknown,
+  validSourceIds?: ReadonlySet<string>,
+) {
+  return yield* contract(validSourceIds).decode(value);
+});
+export const revisionPlanResultSchema = revisionPlanResultSchemaShape;
 export function revisionPlanArtifactDefinition(
   validSourceIds: ReadonlySet<string>,
 ): StructuredArtifactDefinition<RevisionPlanResult> {
@@ -146,48 +150,52 @@ export function revisionPlanArtifactDefinition(
     parameters: revisionPlanResultSchema,
     validate: (value) => validateRevisionPlanResult(value, validSourceIds),
     formatMarkdown: formatRevisionPlanMarkdown,
-    createError: (message) => new RevisionPlanOutputContractError(message),
   };
 }
-
-function requireTrimmed(value: string, field: string): string {
+const requireTrimmed = Effect.fnUntraced(function* (
+  value: string,
+  field: string,
+): Effect.fn.Return<string, SchemaIssue.Issue> {
   const trimmed = value.trim();
   if (!trimmed)
-    throw new RevisionPlanOutputContractError(
-      `Revision plan ${field} must not be blank.`,
-    );
+    return yield* invalidArtifact(`Revision plan ${field} must not be blank.`);
   return trimmed;
-}
-
-function uniqueTrimmed(values: readonly string[], field: string): string[] {
-  const trimmed = values.map((value, index) =>
-    requireTrimmed(value, `${field}[${index}]`),
+});
+const uniqueTrimmed = Effect.fnUntraced(function* (
+  values: readonly string[],
+  field: string,
+): Effect.fn.Return<string[], SchemaIssue.Issue> {
+  const trimmed = yield* Effect.forEach(
+    values,
+    Effect.fnUntraced(function* (value, index) {
+      return yield* requireTrimmed(value, `${field}[${index}]`);
+    }),
   );
   if (new Set(trimmed).size !== trimmed.length)
-    throw new RevisionPlanOutputContractError(
+    return yield* invalidArtifact(
       `Revision plan ${field} must not contain duplicates.`,
     );
   return trimmed;
-}
-
-function assertUniqueFeedbackIds(result: RevisionPlanResult): void {
+});
+const assertUniqueFeedbackIds = Effect.fnUntraced(function* (
+  result: RevisionPlanResult,
+): Effect.fn.Return<void, SchemaIssue.Issue> {
   const ids = result.feedbackItems.map((item) => item.id);
   if (new Set(ids).size !== ids.length)
-    throw new RevisionPlanOutputContractError(
+    return yield* invalidArtifact(
       "Revision plan feedback item ids must be unique.",
     );
-}
-
-function assertValidFeedbackSources(
+});
+const assertValidFeedbackSources = Effect.fnUntraced(function* (
   result: RevisionPlanResult,
   validSourceIds: ReadonlySet<string>,
-): void {
+): Effect.fn.Return<void, SchemaIssue.Issue> {
   for (const item of result.feedbackItems) {
     const unknown = item.sourceIds.filter(
       (sourceId) => !validSourceIds.has(sourceId),
     );
     if (unknown.length > 0) {
-      throw new RevisionPlanOutputContractError(
+      return yield* invalidArtifact(
         `Revision plan feedback item '${item.id}' references unknown source ids: ${unknown.join(", ")}.`,
       );
     }
@@ -197,13 +205,12 @@ function assertValidFeedbackSources(
           item.id === sourceId || item.id.startsWith(`${sourceId}#`),
       )
     ) {
-      throw new RevisionPlanOutputContractError(
+      return yield* invalidArtifact(
         `Revision plan feedback item id '${item.id}' must derive from one of its source ids.`,
       );
     }
   }
-}
-
+});
 function renderFeedbackItems(result: RevisionPlanResult): string[] {
   if (result.feedbackItems.length === 0) return ["None."];
   return result.feedbackItems.map(

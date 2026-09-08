@@ -1,4 +1,5 @@
-import { Predicate, Effect } from "effect";
+import { GitHubResponseError } from "../github/errors.ts";
+import { Effect, Schema } from "effect";
 
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 export interface IssuePublishRequest {
@@ -40,8 +41,9 @@ export const publishIssueWithGitHub = Effect.fn("publishIssueWithGitHub")(
         ),
       );
     }
-    const duplicate = yield* Effect.try(() =>
-      exactTitleMatch(duplicateSearch.stdout, request.title),
+    const duplicate = yield* exactTitleMatch(
+      duplicateSearch.stdout,
+      request.title,
     );
     if (duplicate)
       return yield* Effect.fail(
@@ -74,48 +76,28 @@ export const publishIssueWithGitHub = Effect.fn("publishIssueWithGitHub")(
     return { url, ...(Number.isInteger(number) ? { number } : {}), stdout };
   },
 );
-function exactTitleMatch(
+const duplicateSearchSchema = Schema.Array(
+  Schema.Struct({
+    title: Schema.String,
+    number: Schema.optional(Schema.Int),
+    url: Schema.optional(Schema.String),
+  }),
+);
+const decodeDuplicateSearch = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(duplicateSearchSchema),
+);
+const exactTitleMatch = Effect.fnUntraced(function* (
   output: string,
   title: string,
-):
-  | {
-      number?: number;
-      title?: string;
-      url?: string;
-    }
-  | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch (error) {
-    throw new Error(
-      `Could not parse gh issue duplicate search response: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  if (!Array.isArray(parsed))
-    throw new Error("gh issue duplicate search response was not an array.");
+) {
+  const issues = yield* decodeDuplicateSearch(output).pipe(
+    Effect.mapError((cause) => new GitHubResponseError({ cause })),
+  );
   const normalizedTitle = normalizeTitle(title);
-  for (const entry of parsed) {
-    if (!Predicate.isObject(entry)) continue;
-    const candidate = entry;
-    if (
-      typeof candidate["title"] !== "string" ||
-      normalizeTitle(candidate["title"]) !== normalizedTitle
-    )
-      continue;
-    return {
-      title: candidate["title"],
-      ...(typeof candidate["url"] === "string"
-        ? { url: candidate["url"] }
-        : {}),
-      ...(typeof candidate["number"] === "number" &&
-      Number.isInteger(candidate["number"])
-        ? { number: candidate["number"] }
-        : {}),
-    };
-  }
-  return undefined;
-}
+  return issues.find(
+    (issue) => normalizeTitle(issue.title) === normalizedTitle,
+  );
+});
 function normalizeTitle(title: string): string {
   return title.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }

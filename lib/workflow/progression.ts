@@ -1,4 +1,3 @@
-import { decodeArtifact } from "./validation.ts";
 import { Effect } from "effect";
 import {
   baselineResetLogRef,
@@ -66,7 +65,6 @@ export interface WorkflowProgressionOptions {
   force?: boolean | undefined;
   completedActions?: readonly WorkflowProgressionAction[] | undefined;
 }
-
 export function issueArtifactHasRelationshipSnapshot(content: string): boolean {
   return /<github_issue_relationships\b/.test(content);
 }
@@ -98,10 +96,7 @@ export const planWorkflowProgression = Effect.fn("planWorkflowProgression")(
         ...publishGate(options, "publish gate must run after readiness"),
       ]);
     }
-    const triageResult = yield* decodeArtifact(
-      parseTriageResultJson,
-      triage.content ?? "",
-    );
+    const triageResult = yield* parseTriageResultJson(triage.content ?? "");
     if (!shouldProceedAfterTriage(triageResult)) {
       const verdict = triageResult.verdict;
       return terminal(
@@ -147,10 +142,7 @@ export const planWorkflowProgression = Effect.fn("planWorkflowProgression")(
     }
     if (
       !shouldImplementPlan(
-        yield* decodeArtifact(
-          parseImplementationPlanResultJson,
-          plan.content ?? "",
-        ),
+        yield* parseImplementationPlanResultJson(plan.content ?? ""),
       )
     ) {
       return terminal(
@@ -229,20 +221,12 @@ const reviewCycleProgression = Effect.fn("reviewCycleProgression")(function* (
         ...publishGate(options, "publish gate must run after readiness"),
       ]);
     }
-    const reviewAResult = yield* decodeArtifact(
-      parseReviewResultJson,
-      reviewA.content ?? "",
-      {
-        allowRestart: true,
-      },
-    );
-    const reviewBResult = yield* decodeArtifact(
-      parseReviewResultJson,
-      reviewB.content ?? "",
-      {
-        allowRestart: true,
-      },
-    );
+    const reviewAResult = yield* parseReviewResultJson(reviewA.content ?? "", {
+      allowRestart: true,
+    });
+    const reviewBResult = yield* parseReviewResultJson(reviewB.content ?? "", {
+      allowRestart: true,
+    });
     const nextPass = pass + 1;
     if (needsRestart(reviewAResult, reviewBResult)) {
       if (nextPass > context.maxFixPasses) return maxPassesReached(options);
@@ -355,7 +339,7 @@ const inspect = Effect.fn("inspect")(function* (
     return { exists: true, valid: false, reason: "forced rerun requested" };
   }
   const content = yield* readArtifact(context, artifact);
-  const validation = validateAgentArtifact(artifact, content);
+  const validation = yield* validateAgentArtifact(artifact, content);
   if (!validation.ok)
     return { exists: true, valid: false, reason: validation.reason, content };
   return { exists: true, valid: true, reason: "artifact is valid", content };

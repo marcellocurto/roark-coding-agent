@@ -1,109 +1,104 @@
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Effect, SchemaGetter, type SchemaIssue } from "effect";
+import {
+  artifactContract,
+  invalidArtifact,
+} from "../structured-output/contract.ts";
+import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
 import {
   additionalSectionsSchema,
   normalizeAdditionalSections,
   renderAdditionalSectionsMarkdown,
 } from "../structured-output/additional-sections.ts";
-
 const nonEmptyString = (description: string) =>
-  Type.String({ minLength: 1, description });
-
-export const implementationPlanResultSchema = Type.Object(
-  {
-    issue: nonEmptyString("Issue or requirement being planned."),
-    workClassification: Type.Union([
-      Type.Literal("frontend"),
-      Type.Literal("backend"),
-      Type.Literal("full-stack"),
-      Type.Literal("docs-config"),
-      Type.Literal("test-only"),
-      Type.Literal("unknown"),
-    ]),
-    goal: nonEmptyString("Concrete implementation goal."),
-    nonGoals: Type.Array(nonEmptyString("Explicitly excluded work.")),
-    currentCodeFindings: Type.Array(
+  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
+const implementationPlanResultSchemaShape = Schema.Struct({
+  issue: nonEmptyString("Issue or requirement being planned."),
+  workClassification: Schema.Union([
+    Schema.Literal("frontend"),
+    Schema.Literal("backend"),
+    Schema.Literal("full-stack"),
+    Schema.Literal("docs-config"),
+    Schema.Literal("test-only"),
+    Schema.Literal("unknown"),
+  ]),
+  goal: nonEmptyString("Concrete implementation goal."),
+  nonGoals: Schema.mutable(
+    Schema.Array(nonEmptyString("Explicitly excluded work.")),
+  ),
+  currentCodeFindings: Schema.mutable(
+    Schema.Array(
       nonEmptyString("Repository-grounded finding relevant to the plan."),
     ),
-    simplificationsFromDraft: Type.Array(
+  ),
+  simplificationsFromDraft: Schema.mutable(
+    Schema.Array(
       nonEmptyString("Complexity removed or narrowed during refinement."),
     ),
-    proposedChanges: Type.Array(
-      nonEmptyString("Concrete proposed behavior or code change."),
-    ),
-    filesLikelyToChange: Type.Array(
+  ),
+  proposedChanges: Schema.mutable(
+    Schema.Array(nonEmptyString("Concrete proposed behavior or code change.")),
+  ),
+  filesLikelyToChange: Schema.mutable(
+    Schema.Array(
       nonEmptyString("Repository-relative file likely to change and why."),
     ),
-    detailedSteps: Type.Array(nonEmptyString("Ordered implementation step.")),
-    testsAndValidation: Type.Array(
+  ),
+  detailedSteps: Schema.mutable(
+    Schema.Array(nonEmptyString("Ordered implementation step.")),
+  ),
+  testsAndValidation: Schema.mutable(
+    Schema.Array(
       nonEmptyString("Validation step and the regression it protects against."),
     ),
-    risks: Type.Array(nonEmptyString("Concrete implementation risk.")),
-    rollbackPlan: Type.Array(nonEmptyString("Concrete rollback action.")),
-    readyForImplementation: Type.Boolean(),
-    additionalSections: Type.Optional(additionalSectionsSchema),
-  },
-  { additionalProperties: false },
-);
-
-export type ImplementationPlanResult = Static<
-  typeof implementationPlanResultSchema
->;
+  ),
+  risks: Schema.mutable(
+    Schema.Array(nonEmptyString("Concrete implementation risk.")),
+  ),
+  rollbackPlan: Schema.mutable(
+    Schema.Array(nonEmptyString("Concrete rollback action.")),
+  ),
+  readyForImplementation: Schema.Boolean,
+  additionalSections: Schema.optional(additionalSectionsSchema),
+});
+export type ImplementationPlanResult =
+  (typeof implementationPlanResultSchemaShape)["Type"];
 export type ImplementationPlanKind = "draft" | "final";
-
-export class ImplementationPlanOutputContractError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ImplementationPlanOutputContractError";
-  }
-}
-
-export function validateImplementationPlanResult(
-  value: unknown,
-): ImplementationPlanResult {
-  if (!Value.Check(implementationPlanResultSchema, value)) {
-    const first = Value.Errors(implementationPlanResultSchema, value)[0];
-    const location =
-      first?.instancePath ?? first?.schemaPath ?? "implementation plan";
-    throw new ImplementationPlanOutputContractError(
-      `Implementation plan does not satisfy the structured contract at ${location}.`,
-    );
-  }
-  const additionalSections = normalizeAdditionalSections(
+const normalizeImplementationPlanResult = Effect.fnUntraced(function* (
+  value: ImplementationPlanResult,
+): Effect.fn.Return<ImplementationPlanResult, SchemaIssue.Issue> {
+  const additionalSections = yield* normalizeAdditionalSections(
     value.additionalSections,
     {
       artifactLabel: "Implementation plan",
       reservedHeadings: implementationPlanHeadings,
-      createError: (message) =>
-        new ImplementationPlanOutputContractError(message),
     },
   );
   const result: ImplementationPlanResult = {
     ...value,
     issue: value.issue.trim(),
     goal: value.goal.trim(),
-    nonGoals: trimItems(value.nonGoals, "nonGoals"),
-    currentCodeFindings: trimItems(
+    nonGoals: yield* trimItems(value.nonGoals, "nonGoals"),
+    currentCodeFindings: yield* trimItems(
       value.currentCodeFindings,
       "currentCodeFindings",
     ),
-    simplificationsFromDraft: trimItems(
+    simplificationsFromDraft: yield* trimItems(
       value.simplificationsFromDraft,
       "simplificationsFromDraft",
     ),
-    proposedChanges: trimItems(value.proposedChanges, "proposedChanges"),
-    filesLikelyToChange: trimItems(
+    proposedChanges: yield* trimItems(value.proposedChanges, "proposedChanges"),
+    filesLikelyToChange: yield* trimItems(
       value.filesLikelyToChange,
       "filesLikelyToChange",
     ),
-    detailedSteps: trimItems(value.detailedSteps, "detailedSteps"),
-    testsAndValidation: trimItems(
+    detailedSteps: yield* trimItems(value.detailedSteps, "detailedSteps"),
+    testsAndValidation: yield* trimItems(
       value.testsAndValidation,
       "testsAndValidation",
     ),
-    risks: trimItems(value.risks, "risks"),
-    rollbackPlan: trimItems(value.rollbackPlan, "rollbackPlan"),
+    risks: yield* trimItems(value.risks, "risks"),
+    rollbackPlan: yield* trimItems(value.rollbackPlan, "rollbackPlan"),
     ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   if (result.readyForImplementation) {
@@ -116,28 +111,13 @@ export function validateImplementationPlanResult(
       result.testsAndValidation.length === 0 ? "testsAndValidation" : undefined,
     ].filter((field): field is string => field !== undefined);
     if (missing.length > 0) {
-      throw new ImplementationPlanOutputContractError(
+      return yield* invalidArtifact(
         `An implementation-ready plan requires non-empty ${missing.join(", ")}.`,
       );
     }
   }
   return result;
-}
-
-export function parseImplementationPlanResultJson(
-  content: string,
-): ImplementationPlanResult {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch (error) {
-    throw new ImplementationPlanOutputContractError(
-      `Implementation plan artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  return validateImplementationPlanResult(parsed);
-}
-
+});
 export function formatImplementationPlanMarkdown(
   result: ImplementationPlanResult,
   kind: ImplementationPlanKind,
@@ -194,7 +174,6 @@ export function formatImplementationPlanMarkdown(
   );
   return lines.join("\n");
 }
-
 const implementationPlanHeadings = [
   "Issue",
   "Work Classification",
@@ -210,7 +189,26 @@ const implementationPlanHeadings = [
   "Rollback Plan",
   "Ready For Implementation",
 ] as const;
-
+const contract = artifactContract(
+  "Implementation plan",
+  implementationPlanResultSchemaShape.pipe(
+    Schema.decodeTo(
+      Schema.Struct({
+        ...implementationPlanResultSchemaShape.fields,
+        issue: Schema.String,
+        goal: Schema.String,
+      }),
+      {
+        decode: SchemaGetter.transformOrFail(normalizeImplementationPlanResult),
+        encode: SchemaGetter.passthrough(),
+      },
+    ),
+  ),
+);
+export const validateImplementationPlanResult = contract.decode;
+export const parseImplementationPlanResultJson = contract.parse;
+export const implementationPlanResultSchema =
+  implementationPlanResultSchemaShape;
 export function implementationPlanArtifactDefinition(
   kind: ImplementationPlanKind,
 ): StructuredArtifactDefinition<ImplementationPlanResult> {
@@ -221,26 +219,27 @@ export function implementationPlanArtifactDefinition(
     parameters: implementationPlanResultSchema,
     validate: validateImplementationPlanResult,
     formatMarkdown: (result) => formatImplementationPlanMarkdown(result, kind),
-    createError: (message) =>
-      new ImplementationPlanOutputContractError(message),
   };
 }
-
-function trimItems(values: string[], field: string): string[] {
-  return values.map((value, index) => {
-    const trimmed = value.trim();
-    if (!trimmed)
-      throw new ImplementationPlanOutputContractError(
-        `Implementation plan ${field}[${index}] must not be blank.`,
-      );
-    return trimmed;
-  });
-}
-
+const trimItems = Effect.fnUntraced(function* (
+  values: string[],
+  field: string,
+): Effect.fn.Return<string[], SchemaIssue.Issue> {
+  return yield* Effect.forEach(
+    values,
+    Effect.fnUntraced(function* (value, index) {
+      const trimmed = value.trim();
+      if (!trimmed)
+        return yield* invalidArtifact(
+          `Implementation plan ${field}[${index}] must not be blank.`,
+        );
+      return trimmed;
+    }),
+  );
+});
 function renderList(values: readonly string[]): string[] {
   return values.length === 0 ? ["None."] : values.map((value) => `- ${value}`);
 }
-
 function renderNumberedList(values: readonly string[]): string[] {
   return values.length === 0
     ? ["None."]

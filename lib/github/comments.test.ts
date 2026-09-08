@@ -1,3 +1,4 @@
+import { GitHubResponseError } from "./errors.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
 import { GitHub } from "./service.ts";
@@ -131,27 +132,31 @@ describe("GitHub comment helpers", () => {
   });
   test("parses comment refs and paginated comment lists", () => {
     expect(
-      parseGitHubCommentRef(
-        JSON.stringify({ id: 99, html_url: "https://example.test/comment" }),
-        "marker",
+      Effect.runSync(
+        parseGitHubCommentRef(
+          JSON.stringify({ id: 99, html_url: "https://example.test/comment" }),
+          "marker",
+        ),
       ),
     ).toEqual({
       id: 99,
       url: "https://example.test/comment",
       marker: "marker",
     });
-    const comments = parseIssueComments(
-      JSON.stringify([
-        [{ id: 1, body: "one" }],
-        [
-          {
-            id: 2,
-            body: "<!-- roark:issue=24 attempt=2 phase=review-a -->\ntwo",
-            html_url: "url",
-            user: { login: "roark-bot" },
-          },
-        ],
-      ]),
+    const comments = Effect.runSync(
+      parseIssueComments(
+        JSON.stringify([
+          [{ id: 1, body: "one" }],
+          [
+            {
+              id: 2,
+              body: "<!-- roark:issue=24 attempt=2 phase=review-a -->\ntwo",
+              html_url: "url",
+              user: { login: "roark-bot" },
+            },
+          ],
+        ]),
+      ),
     );
     expect(comments.map((comment) => comment.id)).toEqual([1, 2]);
     expect(findIssueCommentByMarker(comments, "phase=review-a")?.id).toBe(2);
@@ -308,3 +313,28 @@ exit 1
   process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
   return cwd;
 }
+
+test("preserves comment ownership across pages with missing and deleted authors", () => {
+  const comments = Effect.runSync(
+    parseIssueComments(
+      JSON.stringify([
+        [{ id: 1, body: "marker", user: null }],
+        [
+          { id: 2, body: "marker" },
+          { id: 3, body: "marker", user: { login: "roark-bot" } },
+        ],
+      ]),
+    ),
+  );
+  expect(comments.map((comment) => comment.id)).toEqual([1, 2, 3]);
+  expect(findIssueCommentByMarker(comments, "marker", "roark-bot")?.id).toBe(3);
+});
+
+test.each(["not json", "{}", '[[{"id":"wrong"}]]'])(
+  "rejects malformed comment pages: %s",
+  (raw) => {
+    expect(() => Effect.runSync(parseIssueComments(raw))).toThrow(
+      GitHubResponseError,
+    );
+  },
+);

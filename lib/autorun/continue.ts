@@ -1,4 +1,4 @@
-import { decodeGitHubResponse } from "../github/errors.ts";
+import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "./workspace-service.ts";
 import { GitHub } from "../github/service.ts";
 import { Presentation } from "../runtime/services.ts";
@@ -60,9 +60,13 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
   const ensureLabels =
     injected.ensureAutorunLabelContract ?? ensureAutorunLabelContract;
   const cwd = path.resolve(options.cwd);
-  const parsed = yield* decodeGitHubResponse(() =>
-    parseIssueRef(options.issue, options.repo),
-  );
+  const parsed = yield* Effect.try({
+    try: () => parseIssueRef(options.issue, options.repo),
+    catch: (cause) =>
+      new GitHubRequestError({
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
   const outDir = path.resolve(cwd, options.outDir);
   const issueDir = path.join(outDir, "issue", parsed.issueNumber);
   const attempt =

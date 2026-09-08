@@ -9,7 +9,7 @@ import {
   type IssuePublishRequest,
   type IssuePublishResult,
 } from "../issue-publishing/github.ts";
-import { GitHubResponseError } from "../github/errors.ts";
+import { GitHubRequestError } from "../github/errors.ts";
 import {
   runApplicationPromise,
   type ApplicationServices,
@@ -49,7 +49,13 @@ const runIssueCreation = Effect.fnUntraced(function* (
       publish: publish
         ? (request) =>
             publish(request).pipe(
-              Effect.mapError((cause) => new GitHubResponseError({ cause })),
+              Effect.mapError(
+                (cause) =>
+                  new GitHubRequestError({
+                    message:
+                      cause instanceof Error ? cause.message : String(cause),
+                  }),
+              ),
               Effect.provide(services),
               Effect.scoped,
             )
@@ -62,7 +68,13 @@ const runIssueCreation = Effect.fnUntraced(function* (
                 labels(request).pipe(
                   Effect.asVoid,
                   Effect.mapError(
-                    (cause) => new GitHubResponseError({ cause }),
+                    (cause) =>
+                      new GitHubRequestError({
+                        message:
+                          cause instanceof Error
+                            ? cause.message
+                            : String(cause),
+                      }),
                   ),
                   Effect.provide(services),
                   Effect.scoped,

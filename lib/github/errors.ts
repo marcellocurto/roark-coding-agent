@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 import type { ChildProcessSpawner } from "effect/unstable/process";
 import type { Presentation } from "../runtime/services.ts";
 import type {
@@ -20,24 +20,13 @@ export type GitHubRequirements =
 export class GitHubResponseError extends Schema.TaggedError<GitHubResponseError>()(
   "GitHubResponseError",
   {
-    cause: Schema.Unknown,
+    cause: Schema.instanceOf(Schema.SchemaError),
   },
 ) {
   override get message(): string {
-    return this.cause instanceof Error
-      ? this.cause.message
-      : String(this.cause);
+    return this.cause.message;
   }
 }
-
-export const decodeGitHubResponse = Effect.fnUntraced(function* <A>(
-  decode: () => A,
-) {
-  return yield* Effect.try({
-    try: decode,
-    catch: (cause) => new GitHubResponseError({ cause }),
-  });
-});
 
 export class GitHubRequestError extends Schema.TaggedError<GitHubRequestError>()(
   "GitHubRequestError",

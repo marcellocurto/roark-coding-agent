@@ -26,7 +26,6 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import { type AutorunBranchPlan } from "./branch.ts";
@@ -213,9 +212,11 @@ describe("runAutorunAttemptLifecycle", () => {
     expect(phases.slice(0, 2)).toEqual(["fixLog-1", "refinementLog-1"]);
     expect(phases.slice(2).toSorted()).toEqual(["reviewA-1", "reviewB-1"]);
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(
-          readArtifact(fixture.workflowContext, "readiness"),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(
+            readArtifact(fixture.workflowContext, "readiness"),
+          ),
         ),
       ).decision.status,
     ).toBe("ready-for-pr");
@@ -381,9 +382,11 @@ describe("runAutorunAttemptLifecycle", () => {
       ]);
     }
     expect(
-      parseReadinessResultJson(
-        await runApplicationPromise(
-          readArtifact(fixture.workflowContext, "readiness"),
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(
+            readArtifact(fixture.workflowContext, "readiness"),
+          ),
         ),
       ).decision.status,
     ).toBe("ready-for-pr");
@@ -465,70 +468,6 @@ describe("runAutorunAttemptLifecycle", () => {
     );
     expect(comment).not.toContain("--cwd");
     expect(comment).not.toContain(fixture.gateOptions.cwd);
-  });
-  test("includes direct artifact validation error artifact details in the failure comment", async () => {
-    await Promise.resolve();
-    const fixture = await createFixture();
-    await runApplicationPromise(
-      writeArtifact(
-        fixture.workflowContext,
-        "implementationLog",
-        "# Implementation Log\n\ninvalid direct validation output\n",
-      ),
-    );
-    const comments: string[] = [];
-    const error = new ArtifactValidationError(
-      "implementationLog",
-      "missing Summary section",
-    );
-    await assertRejects(
-      runApplicationPromise(
-        runAutorunAttemptLifecycle(
-          {
-            ...fixture,
-            issue: {
-              number: 44,
-              title: "Lifecycle",
-              url: "https://github.com/owner/repo/issues/44",
-            },
-          },
-          {
-            clock: { now: () => new Date("2026-05-07T02:30:00.000Z") },
-            runFullWorkflow: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              return yield* Effect.fail(error);
-            }),
-            publishReviewLedgerComments: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-            }),
-            markIssueFailed: Effect.fnUntraced(function* (options) {
-              yield* Effect.void;
-              comments.push(options.comment);
-              return undefined;
-            }),
-            finalizeAttemptObservability: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-            }),
-          },
-        ),
-      ),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message.includes(
-          "implementationLog failed output contract: missing Summary section",
-        ),
-    );
-    const terminal = await runApplicationPromise(
-      Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
-    );
-    expect(terminal.outcome).toBe("failed-output-contract");
-    expect(terminal.outcomeDetail).toBe(
-      "implementationLog failed output contract: missing Summary section",
-    );
-    const comment = comments[0] ?? "";
-    expect(comment).toContain("phase **output-contract**");
-    expect(comment).not.toContain(".roark/runs/");
-    expect(comment).toContain("invalid direct validation output");
   });
   test("runs fatal beforeRun after metadata is persisted and before workflow", async () => {
     await Promise.resolve();

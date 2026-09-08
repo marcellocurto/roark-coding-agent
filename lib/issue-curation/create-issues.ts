@@ -1,4 +1,3 @@
-import { decodeJson } from "../workflow/validation.ts";
 import { IssuePublishing } from "../issue-publishing/service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect, Schema } from "effect";
@@ -515,6 +514,9 @@ const readIssueCurationPlan = Effect.fn("readIssueCurationPlan")(function* (
     ),
   );
 });
+const decodeJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Unknown),
+);
 const readExistingCreatedEntries = Effect.fn("readExistingCreatedEntries")(
   function* (context: WorkflowContext) {
     if (!(yield* artifactExists(context, "issueCreationResults"))) return [];

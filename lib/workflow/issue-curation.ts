@@ -1,4 +1,3 @@
-import { decodeArtifact } from "./validation.ts";
 import { Effect, Schema } from "effect";
 import path from "node:path";
 import {
@@ -160,13 +159,13 @@ export const buildIssueCurationPlan = Effect.fn("buildIssueCurationPlan")(
     const reviewAResult =
       reviewA === undefined
         ? undefined
-        : yield* decodeArtifact(parseReviewResultJson, reviewA, {
+        : yield* parseReviewResultJson(reviewA, {
             allowRestart: true,
           });
     const reviewBResult =
       reviewB === undefined
         ? undefined
-        : yield* decodeArtifact(parseReviewResultJson, reviewB, {
+        : yield* parseReviewResultJson(reviewB, {
             allowRestart: true,
           });
     const findings = [
@@ -547,7 +546,6 @@ const loadSourceIssueContext = Effect.fn("loadSourceIssueContext")(function* (
       `Could not parse ${artifactRelativePath(context, "metadata")}: ${decoded.failure.message}`,
     );
   }
-
   const issueArtifact = yield* readOptionalArtifact(context, "issue", warnings);
   if (issueArtifact) return parseIssueArtifact(issueArtifact, fallback);
   warnings.push(
@@ -662,7 +660,6 @@ function decodeXmlText(value: string): string {
 function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
-
 const decodeSourceMetadata = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({

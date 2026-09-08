@@ -12,7 +12,7 @@ import {
   type WorkflowContext,
 } from "../workflow/artifacts.ts";
 import { readArtifact } from "../workflow/artifacts.ts";
-import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
+import { ArtifactContractError } from "../structured-output/contract.ts";
 
 import { type WorkflowRunResult } from "../workflow/phases.ts";
 import {
@@ -397,10 +397,7 @@ const readErrorArtifact = Effect.fn("readErrorArtifact")(function* (
   error: unknown,
 ) {
   const artifact =
-    error instanceof AgentTaskRunError ||
-    error instanceof ArtifactValidationError
-      ? error.artifact
-      : undefined;
+    error instanceof AgentTaskRunError ? error.artifact : undefined;
   if (artifact === undefined) return undefined;
   return yield* Effect.gen(function* () {
     return {
@@ -443,14 +440,14 @@ function publicRecoveryCommand(
 
 function isOutputContractError(error: unknown): boolean {
   return (
-    error instanceof ArtifactValidationError ||
+    error instanceof ArtifactContractError ||
     (error instanceof AgentTaskRunError && error.phase === "output-contract")
   );
 }
 
 function errorPhase(error: unknown): string {
   if (error instanceof AgentTaskRunError) return error.phase;
-  if (error instanceof ArtifactValidationError) return "output-contract";
+  if (error instanceof ArtifactContractError) return "output-contract";
   return "workflow-error";
 }
 

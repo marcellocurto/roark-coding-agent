@@ -13,7 +13,7 @@ import {
   applicationLayer,
 } from "../runtime/application.ts";
 import { GitHub } from "../github/service.ts";
-import { GitHubResponseError } from "../github/errors.ts";
+import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "../autorun/workspace-service.ts";
 import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
 type FixtureEffect<A> = Effect.Effect<
@@ -76,7 +76,13 @@ const reviewWithDependencies = Effect.fnUntraced(function* (
         ? {
             fetchPullRequestFeedback: (input: Parameters<typeof fetch>[0]) =>
               fetch(input).pipe(
-                Effect.mapError((cause) => new GitHubResponseError({ cause })),
+                Effect.mapError(
+                  (cause) =>
+                    new GitHubRequestError({
+                      message:
+                        cause instanceof Error ? cause.message : String(cause),
+                    }),
+                ),
                 Effect.provide(services),
                 Effect.scoped,
               ),
@@ -86,7 +92,13 @@ const reviewWithDependencies = Effect.fnUntraced(function* (
         ? {
             postIssueComment: (input: Parameters<typeof post>[0]) =>
               post(input).pipe(
-                Effect.mapError((cause) => new GitHubResponseError({ cause })),
+                Effect.mapError(
+                  (cause) =>
+                    new GitHubRequestError({
+                      message:
+                        cause instanceof Error ? cause.message : String(cause),
+                    }),
+                ),
                 Effect.provide(services),
                 Effect.scoped,
               ),

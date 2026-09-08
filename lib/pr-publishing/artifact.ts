@@ -8,10 +8,6 @@ import {
   type PrDraftRenderingContext,
 } from "./result.ts";
 
-export class PrDraftSubmissionError extends Error {
-  override readonly name = "PrDraftSubmissionError";
-}
-
 export function prDraftArtifactDefinition(input: {
   renderingContext: PrDraftRenderingContext;
   localRoots: readonly string[];
@@ -29,6 +25,5 @@ export function prDraftArtifactDefinition(input: {
           localRoots: input.localRoots,
         },
       ),
-    createError: (message) => new PrDraftSubmissionError(message),
   };
 }

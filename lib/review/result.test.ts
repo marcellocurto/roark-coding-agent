@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, test } from "bun:test";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import {
@@ -8,7 +9,6 @@ import {
   reviewDisposition,
   validateReviewResult,
 } from "./result.ts";
-
 describe("structured review result", () => {
   test("derives outcomes and stable identifiers from typed findings", () => {
     const reviewA = reviewResult([
@@ -18,7 +18,6 @@ describe("structured review result", () => {
     const reviewB = reviewResult([
       reviewFinding("suggestion", "Optional polish"),
     ]);
-
     expect(reviewDisposition(reviewA)).toBe("fixes-required");
     expect(
       normalizeReviewPair({ reviewA, reviewB }).map(
@@ -26,43 +25,47 @@ describe("structured review result", () => {
       ),
     ).toEqual(["broken-behavior", "later-work", "optional-polish"]);
   });
-
   test("rejects malformed JSON and schema-invalid review data", () => {
     expect(() =>
-      parseReviewResultJson("not json", { allowRestart: true }),
+      Effect.runSync(parseReviewResultJson("not json", { allowRestart: true })),
     ).toThrow("not valid JSON");
     expect(() =>
-      validateReviewResult({ summary: "Incomplete" }, { allowRestart: true }),
+      Effect.runSync(
+        validateReviewResult({ summary: "Incomplete" }, { allowRestart: true }),
+      ),
     ).toThrow("structured contract");
   });
-
   test("requires substantive reviewed evidence and trims accepted strings", () => {
     expect(() =>
-      validateReviewResult(reviewResult([], { evidenceReviewed: [] }), {
-        allowRestart: true,
-      }),
+      Effect.runSync(
+        validateReviewResult(reviewResult([], { evidenceReviewed: [] }), {
+          allowRestart: true,
+        }),
+      ),
     ).toThrow("structured contract");
     expect(() =>
-      validateReviewResult(reviewResult([], { evidenceReviewed: ["   "] }), {
-        allowRestart: true,
-      }),
+      Effect.runSync(
+        validateReviewResult(reviewResult([], { evidenceReviewed: ["   "] }), {
+          allowRestart: true,
+        }),
+      ),
     ).toThrow("structured contract");
-
     const finding = reviewFinding("follow-up", "  Stable title  ", {
       id: "stable-title",
     });
-    const result = validateReviewResult(
-      reviewResult([finding], {
-        summary: "  Reviewed the pinned diff.  ",
-        evidenceReviewed: ["  git diff base..head  "],
-      }),
-      { allowRestart: true },
+    const result = Effect.runSync(
+      validateReviewResult(
+        reviewResult([finding], {
+          summary: "  Reviewed the pinned diff.  ",
+          evidenceReviewed: ["  git diff base..head  "],
+        }),
+        { allowRestart: true },
+      ),
     );
     expect(result.summary).toBe("Reviewed the pinned diff.");
     expect(result.evidenceReviewed).toEqual(["git diff base..head"]);
     expect(result.findings[0]?.title).toBe("Stable title");
   });
-
   test("bounds review volume and rejects contradictory routing metadata", () => {
     const tooMany = Array.from({ length: 51 }, (_, index) =>
       reviewFinding("follow-up", `Finding ${index}`, {
@@ -70,50 +73,61 @@ describe("structured review result", () => {
       }),
     );
     expect(() =>
-      validateReviewResult(reviewResult(tooMany), { allowRestart: true }),
+      Effect.runSync(
+        validateReviewResult(reviewResult(tooMany), { allowRestart: true }),
+      ),
     ).toThrow("structured contract");
     expect(() =>
-      validateReviewResult(reviewResult([], { summary: "x".repeat(100_000) }), {
-        allowRestart: true,
-      }),
+      Effect.runSync(
+        validateReviewResult(
+          reviewResult([], { summary: "x".repeat(100000) }),
+          {
+            allowRestart: true,
+          },
+        ),
+      ),
     ).toThrow("100000-character limit");
     expect(() =>
-      validateReviewResult(
-        reviewResult([
-          reviewFinding("must-fix-current", "Uncertain blocker", {
-            confidence: "low",
-          }),
-        ]),
-        { allowRestart: true },
+      Effect.runSync(
+        validateReviewResult(
+          reviewResult([
+            reviewFinding("must-fix-current", "Uncertain blocker", {
+              confidence: "low",
+            }),
+          ]),
+          { allowRestart: true },
+        ),
       ),
     ).toThrow("requires medium or high confidence");
     expect(() =>
-      validateReviewResult(
-        reviewResult([
-          reviewFinding("suggestion", "Optional catastrophe", {
-            severity: "critical",
-          }),
-        ]),
-        { allowRestart: true },
+      Effect.runSync(
+        validateReviewResult(
+          reviewResult([
+            reviewFinding("suggestion", "Optional catastrophe", {
+              severity: "critical",
+            }),
+          ]),
+          { allowRestart: true },
+        ),
       ),
     ).toThrow("cannot be routed as an optional suggestion");
   });
-
   test("represents incomplete review coverage without inventing a finding", () => {
-    const result = validateReviewResult(
-      reviewResult([], {
-        completeness: "limited",
-        limitations: [
-          {
-            id: "migration-output-unavailable",
-            description: "Generated migration output was unavailable.",
-            blocksApproval: true,
-          },
-        ],
-      }),
-      { allowRestart: true },
+    const result = Effect.runSync(
+      validateReviewResult(
+        reviewResult([], {
+          completeness: "limited",
+          limitations: [
+            {
+              id: "migration-output-unavailable",
+              description: "Generated migration output was unavailable.",
+              blocksApproval: true,
+            },
+          ],
+        }),
+        { allowRestart: true },
+      ),
     );
-
     expect(reviewDisposition(result)).toBe("blocked");
     expect(
       normalizeReviewBlockers(result, "review-a").map(
@@ -121,7 +135,6 @@ describe("structured review result", () => {
       ),
     ).toEqual(["review-a:limitation:migration-output-unavailable"]);
   });
-
   test("renders review-provided text as plain Markdown content", () => {
     const result = reviewResult(
       [
@@ -144,7 +157,6 @@ describe("structured review result", () => {
         ],
       },
     );
-
     const markdown = formatReviewResultMarkdown(result, {
       title: "Review",
       source: "review-a",
@@ -157,7 +169,6 @@ describe("structured review result", () => {
     expect(markdown).toContain("## Architectural synthesis ## Fake finding");
     expect(reviewDisposition(result)).toBe("approve");
   });
-
   test("rejects restart recommendations where unsupported or unjustified", () => {
     const restart = reviewResult([], {
       restartRecommendation: {
@@ -165,9 +176,9 @@ describe("structured review result", () => {
         rationale: "Start over.",
       },
     });
-    expect(() => validateReviewResult(restart, { allowRestart: true })).toThrow(
-      "unknown finding",
-    );
+    expect(() =>
+      Effect.runSync(validateReviewResult(restart, { allowRestart: true })),
+    ).toThrow("unknown finding");
     const finding = reviewFinding("must-fix-current");
     const justified = reviewResult([finding], {
       restartRecommendation: {
@@ -176,7 +187,7 @@ describe("structured review result", () => {
       },
     });
     expect(() =>
-      validateReviewResult(justified, { allowRestart: false }),
+      Effect.runSync(validateReviewResult(justified, { allowRestart: false })),
     ).toThrow("does not allow restart");
   });
 });

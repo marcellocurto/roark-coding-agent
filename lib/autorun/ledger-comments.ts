@@ -217,32 +217,35 @@ export function formatReadinessLedgerComment(
   if (readiness) lines.push("", readiness);
   return `${lines.join("\n")}\n`;
 }
-export function formatReviewLedgerComment(input: {
-  issueNumber: number;
-  attempt: number;
-  phase: string;
-  markerPhase?: "review-a" | "review-b" | undefined;
-  title: string;
-  artifactContent: string;
-}): string {
-  const marker = buildRoarkMarker({
-    issueNumber: input.issueNumber,
-    attempt: input.attempt,
-    phase: input.markerPhase ?? input.phase,
-  });
-  const source: ReviewFindingSource = (
-    input.markerPhase ?? input.phase
-  ).startsWith("review-a")
-    ? "review-a"
-    : "review-b";
-  const review = parseReviewResultJson(input.artifactContent, {
-    allowRestart: true,
-  });
-  const content = sanitizePublicMarkdown(
-    formatReviewResultMarkdown(review, { title: input.title, source }),
-  );
-  return [marker, "", content.trimEnd()].join("\n") + "\n";
-}
+export const formatReviewLedgerComment = Effect.fn("formatReviewLedgerComment")(
+  function* (input: {
+    issueNumber: number;
+    attempt: number;
+    phase: string;
+    markerPhase?: "review-a" | "review-b" | undefined;
+    title: string;
+    artifactContent: string;
+  }) {
+    const marker = buildRoarkMarker({
+      issueNumber: input.issueNumber,
+      attempt: input.attempt,
+      phase: input.markerPhase ?? input.phase,
+    });
+    const source: ReviewFindingSource = (
+      input.markerPhase ?? input.phase
+    ).startsWith("review-a")
+      ? "review-a"
+      : "review-b";
+    const review = yield* parseReviewResultJson(input.artifactContent, {
+      allowRestart: true,
+    });
+    const content = sanitizePublicMarkdown(
+      formatReviewResultMarkdown(review, { title: input.title, source }),
+    );
+    return [marker, "", content.trimEnd()].join("\n") + "\n";
+  },
+);
+
 export function formatPrCreatedComment(input: {
   issueNumber: number;
   attempt: number;
@@ -280,7 +283,10 @@ const publishArtifactLedgerComment = Effect.fn("publishArtifactLedgerComment")(
       input.workflowContext,
       input.artifact,
     );
-    const validation = validateAgentArtifact(input.artifact, artifactContent);
+    const validation = yield* validateAgentArtifact(
+      input.artifact,
+      artifactContent,
+    );
     if (!validation.ok) return;
     if (!(yield* artifactExists(input.workflowContext, input.renderedArtifact)))
       return;
@@ -316,9 +322,12 @@ const publishReviewLedgerComment = Effect.fn("publishReviewLedgerComment")(
       input.workflowContext,
       input.artifact,
     );
-    const validation = validateAgentArtifact(input.artifact, artifactContent);
+    const validation = yield* validateAgentArtifact(
+      input.artifact,
+      artifactContent,
+    );
     if (!validation.ok) return;
-    const body = formatReviewLedgerComment({
+    const body = yield* formatReviewLedgerComment({
       issueNumber: input.issue.number,
       attempt: input.attemptMetadata.attempt,
       phase: input.phase,

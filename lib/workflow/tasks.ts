@@ -1,4 +1,4 @@
-import { decodeArtifact } from "./validation.ts";
+import { ArtifactContractError } from "../structured-output/contract.ts";
 import { Presentation } from "../runtime/services.ts";
 import {
   Cause,
@@ -49,23 +49,17 @@ import {
   parseReviewResultJson,
   type ReviewFindingSource,
 } from "../review/result.ts";
-import {
-  ReviewOutputContractError,
-  reviewArtifactDefinition,
-} from "../review/artifact.ts";
+import { reviewArtifactDefinition } from "../review/artifact.ts";
 import {
   parseTriageResultJson,
   triageArtifactDefinition,
-  TriageOutputContractError,
 } from "../triage/result.ts";
 import {
   implementationPlanArtifactDefinition,
-  ImplementationPlanOutputContractError,
   parseImplementationPlanResultJson,
   type ImplementationPlanKind,
 } from "../implementation-plan/result.ts";
 import {
-  ChangeReportOutputContractError,
   changeReportArtifactDefinition,
   parseChangeReportJson,
   requireAddressedFindingIds,
@@ -277,8 +271,6 @@ export const runReviewTask = Effect.fn("runReviewTask")(function* (
       source: presentation.source,
     }),
     markdownArtifact: presentation.markdownArtifact,
-    isOutputContractError: (error) =>
-      error instanceof ReviewOutputContractError,
   });
 });
 export const runTriageTask = Effect.fn("runTriageTask")(function* (
@@ -289,8 +281,6 @@ export const runTriageTask = Effect.fn("runTriageTask")(function* (
     parse: parseTriageResultJson,
     definition: triageArtifactDefinition,
     markdownArtifact: "triageMarkdown",
-    isOutputContractError: (error) =>
-      error instanceof TriageOutputContractError,
   });
 });
 export const runPlanDraftTask = Effect.fn("runPlanDraftTask")(function* (
@@ -325,25 +315,27 @@ export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
     context,
     task.artifact,
   );
-  const validateForTask = (report: ChangeReport) => {
+  const validateForTask = Effect.fnUntraced(function* (report: ChangeReport) {
     if (expectedFindingIds !== undefined)
-      return requireAddressedFindingIds(report, expectedFindingIds);
+      return yield* requireAddressedFindingIds(report, expectedFindingIds);
     if (report.addressedFindingIds.length > 0) {
-      throw new ChangeReportOutputContractError(
-        "Only fix reports may contain addressedFindingIds.",
+      return yield* Effect.fail(
+        new ArtifactContractError({
+          artifact: "Change report",
+          message: "Only fix reports may contain addressedFindingIds.",
+        }),
       );
     }
     return report;
-  };
+  });
   return yield* runStructuredArtifactTask(context, task, retryOptions, {
-    parse: (content) => validateForTask(parseChangeReportJson(content)),
+    parse: (content) =>
+      parseChangeReportJson(content).pipe(Effect.flatMap(validateForTask)),
     definition: changeReportArtifactDefinition({
       title: presentation.title,
       validate: validateForTask,
     }),
     markdownArtifact: presentation.markdownArtifact,
-    isOutputContractError: (error) =>
-      error instanceof ChangeReportOutputContractError,
     retryCompletionInstruction:
       "finish the phase, run validation, and call submit_change_report with the complete structured report",
   });
@@ -362,8 +354,6 @@ const runImplementationPlanTask = Effect.fn("runImplementationPlanTask")(
         kind === "draft"
           ? "implementationPlanDraftMarkdown"
           : "implementationPlanMarkdown",
-      isOutputContractError: (error) =>
-        error instanceof ImplementationPlanOutputContractError,
     });
   },
 );
@@ -373,10 +363,9 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
     task: AgentTask,
     retryOptions: AgentTaskRetryOptions,
     contract: {
-      parse: (content: string) => T;
+      parse: (content: string) => Effect.Effect<T, ArtifactContractError>;
       definition: StructuredArtifactDefinition<T>;
       markdownArtifact: ArtifactRef;
-      isOutputContractError: (error: unknown) => boolean;
       retryCompletionInstruction?: string | undefined;
     },
   ) {
@@ -421,7 +410,7 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
         return artifact.value;
       }),
       failurePhase: (error) =>
-        contract.isOutputContractError(error)
+        Schema.is(ArtifactContractError)(error)
           ? "output-contract"
           : "agent-error",
     });
@@ -486,10 +475,10 @@ const requiredFixFindingIds = Effect.fn("requiredFixFindingIds")(function* (
     readArtifact(context, reviewBRef(previousCycle)),
   ]);
   return normalizeReviewPair({
-    reviewA: yield* decodeArtifact(parseReviewResultJson, reviewA, {
+    reviewA: yield* parseReviewResultJson(reviewA, {
       allowRestart: true,
     }),
-    reviewB: yield* decodeArtifact(parseReviewResultJson, reviewB, {
+    reviewB: yield* parseReviewResultJson(reviewB, {
       allowRestart: true,
     }),
   })
@@ -528,16 +517,16 @@ const reuseTaskArtifact = Effect.fn("reuseTaskArtifact")(function* <T>(
   context: WorkflowContext,
   task: AgentTask,
   prepared: PreparedTaskRun,
-  parse: (content: string) => T,
+  parse: (content: string) => Effect.Effect<T, ArtifactContractError>,
 ) {
   if (context.force || !(yield* artifactExists(context, task.artifact)))
     return { reused: false } as const;
   const content = yield* readArtifact(context, task.artifact);
-  const parsed = yield* Effect.try(() => parse(content)).pipe(Effect.result);
+  const parsed = yield* parse(content).pipe(Effect.result);
   if (parsed._tag === "Failure") {
     const presentation = yield* Presentation;
     presentation.warning(
-      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${formatError(parsed.failure.cause)}); regenerating.`,
+      `${task.label}: existing ${artifactRelativePath(context, task.artifact)} is invalid (${parsed.failure.message}); regenerating.`,
     );
     return { reused: false } as const;
   }

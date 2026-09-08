@@ -1,10 +1,8 @@
 import { GitHub } from "../github/service.ts";
-import { decodeArtifact } from "../workflow/validation.ts";
 import { readArtifact } from "../workflow/artifacts.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect, Schema } from "effect";
 import type { AutoCliOptions } from "../cli/args.ts";
-
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import {
   prCreatePrompt,
@@ -385,8 +383,7 @@ export const updatePrBody = Effect.fn("updatePrBody")(function* (input: {
   yield* runPresentedPhase(
     display,
     Effect.fnUntraced(function* () {
-      const draft = yield* decodeArtifact(
-        parsePrDraftJson,
+      const draft = yield* parsePrDraftJson(
         yield* readArtifact(input.workflowContext, "prDraft"),
       );
       const body = sanitizePublicMarkdown(
@@ -440,7 +437,6 @@ function extractIssueNumber(url: string): number | undefined {
   const value = Number.parseInt(/\/pull\/(\d+)/.exec(url)?.[1] ?? "", 10);
   return Number.isInteger(value) && value > 0 ? value : undefined;
 }
-
 export class AutorunPublishError extends Schema.TaggedError<AutorunPublishError>()(
   "AutorunPublishError",
   { message: Schema.String },

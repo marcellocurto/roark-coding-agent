@@ -1,26 +1,20 @@
 import { GitHubRequestError } from "./errors.ts";
-import { decodeGitHubResponse } from "./errors.ts";
-import { Effect, Option } from "effect";
+import { GitHubResponseError } from "./errors.ts";
+import { Array as Arr, Effect, Option, Schema } from "effect";
 import type { GitHubError, GitHubRequirements } from "./errors.ts";
-
 import { runProcessOrThrow } from "../cli/process.ts";
-
-export const githubIssueCommentMaxChars = 65_536;
-
+export const githubIssueCommentMaxChars = 65536;
 export type RoarkCommentPhase = string;
-
 export interface RoarkMarkerInput {
   issueNumber: number | string;
   attempt: number;
   phase: RoarkCommentPhase;
 }
-
 export interface GitHubCommentRef {
   id: number;
   url?: string | undefined;
   marker: string;
 }
-
 interface GitHubIssueComment {
   id?: number | undefined;
   body?: string | undefined;
@@ -28,34 +22,29 @@ interface GitHubIssueComment {
   url?: string | undefined;
   authorLogin?: string | undefined;
 }
-
 export interface IssueCommentOptions {
   cwd: string;
   repo?: string | undefined;
   issueNumber: number | string;
   body: string;
 }
-
 export type IssueCommentByMarkerOptions = IssueCommentOptions & {
   marker: string;
   existingCommentId?: number | undefined;
 };
-
 export function buildRoarkMarker(input: RoarkMarkerInput): string {
   return `<!-- roark:issue=${input.issueNumber} attempt=${input.attempt} phase=${input.phase} -->`;
 }
-
 export function ensureCommentStartsWithMarker(
   body: string,
   marker: string,
 ): string {
   return body.startsWith(marker) ? body : `${marker}\n${body}`;
 }
-
 export function formatBoundedMarkdownDetails(
   summary: string,
   markdown: string,
-  maxChars = 10_000,
+  maxChars = 10000,
 ): string {
   const bounded =
     markdown.length <= maxChars
@@ -72,7 +61,6 @@ export function formatBoundedMarkdownDetails(
     "</details>",
   ].join("\n");
 }
-
 export function buildListIssueCommentsArgv(options: {
   repo: string;
   issueNumber: number | string;
@@ -85,7 +73,6 @@ export function buildListIssueCommentsArgv(options: {
     "--slurp",
   ];
 }
-
 export function buildPostIssueCommentArgv(options: {
   repo: string;
   issueNumber: number | string;
@@ -101,7 +88,6 @@ export function buildPostIssueCommentArgv(options: {
     `body=${truncateGitHubIssueComment(options.body)}`,
   ];
 }
-
 export function buildUpdateIssueCommentArgv(options: {
   repo: string;
   commentId: number;
@@ -117,7 +103,6 @@ export function buildUpdateIssueCommentArgv(options: {
     `body=${truncateGitHubIssueComment(options.body)}`,
   ];
 }
-
 export function truncateGitHubIssueComment(body: string): string {
   // Intentionally use a hard cutoff even though it may split a Markdown fence or
   // <details> block. We accept imperfect rendering at this extreme: the complete
@@ -132,7 +117,6 @@ export function truncateGitHubIssueComment(body: string): string {
   }
   return body;
 }
-
 export function buildCurrentRepoArgv(): string[] {
   return [
     "gh",
@@ -144,27 +128,74 @@ export function buildCurrentRepoArgv(): string[] {
     ".nameWithOwner",
   ];
 }
-
 export function buildCurrentCommentAuthorArgv(): string[] {
   return ["gh", "api", "user", "--jq", ".login"];
 }
-
-export function parseGitHubCommentRef(
+export const githubCommentAuthorSchema = Schema.Struct({
+  login: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const restCommentSchema = Schema.Struct({
+  id: Schema.optional(Schema.NullOr(Schema.Number)),
+  node_id: Schema.optional(Schema.NullOr(Schema.String)),
+  body: Schema.optional(Schema.NullOr(Schema.String)),
+  html_url: Schema.optional(Schema.NullOr(Schema.String)),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+  created_at: Schema.optional(Schema.NullOr(Schema.String)),
+  user: Schema.optional(Schema.NullOr(githubCommentAuthorSchema)),
+});
+const commentRefSchema = Schema.Struct({
+  ...restCommentSchema.fields,
+  id: Schema.Number,
+});
+const decodeCommentRef = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(commentRefSchema),
+);
+// gh api --paginate --slurp produces arrays of pages; one unpaginated page is also supported.
+const commentPagesSchema = Schema.Array(
+  Schema.Union([
+    Schema.Array(Schema.NullOr(restCommentSchema)),
+    Schema.NullOr(restCommentSchema),
+  ]),
+);
+const decodeCommentPages = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(commentPagesSchema),
+);
+export const parseRestCommentPages = Effect.fnUntraced(function* (raw: string) {
+  const pages = yield* decodeCommentPages(raw).pipe(
+    Effect.mapError((cause) => new GitHubResponseError({ cause })),
+  );
+  return pages
+    .flatMap((page) => Arr.ensure(page))
+    .filter((comment) => comment !== null);
+});
+export const parseGitHubCommentRef = Effect.fn("parseGitHubCommentRef")(
+  function* (
+    raw: string,
+    marker: string,
+  ): Effect.fn.Return<GitHubCommentRef, GitHubResponseError> {
+    const comment = yield* decodeCommentRef(raw).pipe(
+      Effect.mapError((cause) => new GitHubResponseError({ cause })),
+    );
+    return {
+      id: comment.id,
+      url: comment.html_url ?? comment.url ?? undefined,
+      marker,
+    };
+  },
+);
+export const parseIssueComments = Effect.fn("parseIssueComments")(function* (
   raw: string,
-  marker: string,
-): GitHubCommentRef {
-  const parsed = JSON.parse(raw) as unknown;
-  const comment = normalizeComment(parsed);
-  if (comment.id === undefined)
-    throw new Error("GitHub comment response did not include a numeric id.");
-  return { id: comment.id, url: comment.html_url ?? comment.url, marker };
-}
-
-export function parseIssueComments(raw: string): GitHubIssueComment[] {
-  const parsed = JSON.parse(raw) as unknown;
-  return flattenComments(parsed);
-}
-
+): Effect.fn.Return<GitHubIssueComment[], GitHubResponseError> {
+  return (yield* parseRestCommentPages(raw))
+    .filter((comment) => comment.id != null)
+    .map((comment) => ({
+      id: comment.id ?? undefined,
+      body: comment.body ?? undefined,
+      html_url: comment.html_url ?? undefined,
+      url: comment.url ?? undefined,
+      authorLogin: comment.user?.login ?? undefined,
+    }));
+});
 export function findIssueCommentByMarker(
   comments: GitHubIssueComment[],
   marker: string,
@@ -177,7 +208,6 @@ export function findIssueCommentByMarker(
       (authorLogin === undefined || comment.authorLogin === authorLogin),
   );
 }
-
 export const postIssueComment = Effect.fn("GitHub.postIssueComment")(function* (
   options: IssueCommentOptions,
 ): Effect.fn.Return<GitHubCommentRef, GitHubError, GitHubRequirements> {
@@ -194,11 +224,8 @@ export const postIssueComment = Effect.fn("GitHub.postIssueComment")(function* (
     }),
     { cwd: options.cwd, label: "gh api issue comment create" },
   );
-  return yield* decodeGitHubResponse(() =>
-    parseGitHubCommentRef(stdout, marker),
-  );
+  return yield* parseGitHubCommentRef(stdout, marker);
 });
-
 export const updateIssueComment = Effect.fn("GitHub.updateIssueComment")(
   function* (options: {
     cwd: string;
@@ -220,12 +247,9 @@ export const updateIssueComment = Effect.fn("GitHub.updateIssueComment")(
       }),
       { cwd: options.cwd, label: "gh api issue comment update" },
     );
-    return yield* decodeGitHubResponse(() =>
-      parseGitHubCommentRef(stdout, marker),
-    );
+    return yield* parseGitHubCommentRef(stdout, marker);
   },
 );
-
 export const postOrUpdateIssueCommentByMarker = Effect.fn(
   "GitHub.postOrUpdateIssueCommentByMarker",
 )(function* (
@@ -236,7 +260,6 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
     repo: options.repo,
   });
   const body = ensureCommentStartsWithMarker(options.body, options.marker);
-
   const existingCommentId = options.existingCommentId;
   if (existingCommentId !== undefined) {
     const updated = yield* Effect.gen(function* () {
@@ -250,7 +273,6 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
     }).pipe(Effect.option);
     if (Option.isSome(updated)) return updated.value;
   }
-
   const commentsRaw = yield* runProcessOrThrow(
     buildListIssueCommentsArgv({ repo, issueNumber: options.issueNumber }),
     { cwd: options.cwd, label: "gh api issue comments list" },
@@ -266,7 +288,7 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
       }),
     );
   const existing = findIssueCommentByMarker(
-    yield* decodeGitHubResponse(() => parseIssueComments(commentsRaw)),
+    yield* parseIssueComments(commentsRaw),
     options.marker,
     currentAuthor,
   );
@@ -279,7 +301,6 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
       marker: options.marker,
     });
   }
-
   return yield* postIssueComment({
     cwd: options.cwd,
     repo,
@@ -287,7 +308,6 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
     body,
   });
 });
-
 const resolveCommentRepo = Effect.fn("GitHub.resolveCommentRepo")(
   function* (options: {
     cwd: string;
@@ -309,40 +329,9 @@ const resolveCommentRepo = Effect.fn("GitHub.resolveCommentRepo")(
     return repo;
   },
 );
-
 function markerFromBody(body: string): string | undefined {
   return /^<!--\s*roark:[\s\S]*?-->/.exec(body)?.[0];
 }
-
-function normalizeComment(value: unknown): GitHubIssueComment {
-  if (!isRecord(value)) return {};
-  return {
-    id: typeof value["id"] === "number" ? value["id"] : undefined,
-    body: typeof value["body"] === "string" ? value["body"] : undefined,
-    html_url:
-      typeof value["html_url"] === "string" ? value["html_url"] : undefined,
-    url: typeof value["url"] === "string" ? value["url"] : undefined,
-    authorLogin:
-      isRecord(value["user"]) && typeof value["user"]["login"] === "string"
-        ? value["user"]["login"]
-        : undefined,
-  };
-}
-
-function flattenComments(value: unknown): GitHubIssueComment[] {
-  if (!Array.isArray(value)) return [];
-  const flattened: unknown[] = value.flatMap((entry: unknown) =>
-    Array.isArray(entry) ? (entry as unknown[]) : [entry],
-  );
-  return flattened
-    .map(normalizeComment)
-    .filter((comment) => comment.id !== undefined);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
 function longestBacktickRun(value: string): number {
   let longest = 0;
   let current = 0;

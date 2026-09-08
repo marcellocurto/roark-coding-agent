@@ -432,11 +432,14 @@ function structuredReview(disposition: string): string {
   if (disposition === "restart-required") {
     const finding = result.findings[0];
     if (!finding) throw new Error("restart fixture requires a finding");
-    result.restartRecommendation = {
-      findingIds: [finding.id],
-      rationale:
-        "The implementation baseline is no longer safe to repair incrementally.",
-    };
+    return JSON.stringify({
+      ...result,
+      restartRecommendation: {
+        findingIds: [finding.id],
+        rationale:
+          "The implementation baseline is no longer safe to repair incrementally.",
+      },
+    });
   }
   return JSON.stringify(result);
 }

@@ -57,7 +57,6 @@ import {
   runReviewTask,
   runTriageTask,
 } from "./tasks.ts";
-
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
   context: WorkflowContext,
@@ -214,7 +213,6 @@ export const implementationPhase = Effect.fn("implementationPhase")(function* (
   restartPass?: number,
 ) {
   restartPass ??= 0;
-
   const task = implementationTaskForPass(restartPass);
   if (
     (yield* shouldRegenerateArtifact(context, task.artifact)) ||
@@ -313,9 +311,7 @@ export const resetBaselinePhase = Effect.fn("resetBaselinePhase")(function* (
     display,
     Effect.fnUntraced(function* () {
       const raw = yield* readArtifact(context, "preImplementationBaseline");
-      const baseline = yield* Effect.try(() =>
-        parsePreImplementationBaseline(raw),
-      );
+      const baseline = yield* parsePreImplementationBaseline(raw);
       yield* resetWorktreeToPreImplementationBaseline({
         cwd: context.agentCwd,
         baseline,
@@ -542,7 +538,7 @@ const shouldRegenerateArtifact = Effect.fn("shouldRegenerateArtifact")(
     if (context.force || !(yield* artifactExists(context, artifact)))
       return true;
     const existing = yield* readArtifact(context, artifact);
-    return !validateAgentArtifact(artifact, existing).ok;
+    return !(yield* validateAgentArtifact(artifact, existing)).ok;
   },
 );
 const assertAttemptSelectedWhenAttemptsExist = Effect.fn(

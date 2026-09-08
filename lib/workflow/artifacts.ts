@@ -41,7 +41,6 @@ export {
   verificationBeforeFixRef,
   verificationBeforeFixFullRef,
 } from "./artifact-catalog.ts";
-
 export interface WorkflowContext {
   controlCwd: string;
   agentCwd: string;
@@ -63,7 +62,6 @@ export interface WorkflowContext {
   fixPass?: number | undefined;
   observer?: RunObserver | undefined;
 }
-
 export function createWorkflowContext(
   options: IssueCliOptions,
   overrides: {
@@ -81,7 +79,6 @@ export function createWorkflowContext(
       ? path.join(issueDir, "attempts", String(options.attempt))
       : issueDir;
   const runDirRelative = path.relative(controlCwd, runDir) || ".";
-
   return {
     controlCwd,
     agentCwd,
@@ -106,21 +103,18 @@ export function createWorkflowContext(
     fixPass: options.fixPass,
   };
 }
-
 export function artifactPath(
   context: WorkflowContext,
   artifact: ArtifactRef,
 ): string {
   return path.join(context.runDir, artifactFilename(artifact));
 }
-
 export function artifactRelativePath(
   context: WorkflowContext,
   artifact: ArtifactRef,
 ): string {
   return path.join(context.runDirRelative, artifactFilename(artifact));
 }
-
 export function artifactAgentPath(
   context: WorkflowContext,
   artifact: ArtifactRef,
@@ -129,14 +123,12 @@ export function artifactAgentPath(
     path.relative(context.agentCwd, artifactPath(context, artifact)) || "."
   );
 }
-
 export const ensureRunDir = Effect.fn("ensureRunDir")(function* (
   context: WorkflowContext,
 ) {
   const store = yield* ArtifactStore;
   yield* store.ensure(context);
 });
-
 export const artifactExists = Effect.fn("artifactExists")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
@@ -144,7 +136,6 @@ export const artifactExists = Effect.fn("artifactExists")(function* (
   const store = yield* ArtifactStore;
   return yield* store.exists(context, artifact);
 });
-
 export const readArtifact = Effect.fn("readArtifact")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
@@ -152,7 +143,6 @@ export const readArtifact = Effect.fn("readArtifact")(function* (
   const store = yield* ArtifactStore;
   return yield* store.read(context, artifact);
 });
-
 export const writeArtifact = Effect.fn("writeArtifact")(function* (
   context: WorkflowContext,
   artifact: ArtifactRef,
@@ -161,7 +151,6 @@ export const writeArtifact = Effect.fn("writeArtifact")(function* (
   const store = yield* ArtifactStore;
   yield* store.write(context, artifact, content);
 });
-
 export const writeJsonArtifact = Effect.fn("writeJsonArtifact")(function* (
   context: WorkflowContext,
   artifact: StaticArtifactName,
@@ -169,7 +158,6 @@ export const writeJsonArtifact = Effect.fn("writeJsonArtifact")(function* (
 ) {
   yield* writeArtifact(context, artifact, JSON.stringify(value, null, 2));
 });
-
 export const produceArtifact = Effect.fn("produceArtifact")(function* <E, R>(
   context: WorkflowContext,
   artifact: ArtifactRef,
@@ -192,7 +180,6 @@ export const produceArtifact = Effect.fn("produceArtifact")(function* <E, R>(
   );
   return content;
 });
-
 export const requireArtifacts = Effect.fn("requireArtifacts")(function* (
   context: WorkflowContext,
   ...artifacts: ArtifactRef[]
@@ -207,7 +194,6 @@ export const requireArtifacts = Effect.fn("requireArtifacts")(function* (
       ),
     );
 });
-
 export const inferNextFixPass = Effect.fn("inferNextFixPass")(function* (
   context: WorkflowContext,
 ) {
@@ -230,18 +216,14 @@ export const inferNextFixPass = Effect.fn("inferNextFixPass")(function* (
       );
   }
 });
-
 const validReviewArtifactExists = Effect.fn("validReviewArtifactExists")(
   function* (context: WorkflowContext, artifact: ArtifactRef) {
     const content = yield* readArtifact(context, artifact);
-    yield* Effect.try(() =>
-      parseReviewResultJson(content, { allowRestart: true }),
-    );
+    yield* parseReviewResultJson(content, { allowRestart: true });
     return true;
   },
   Effect.catch(() => Effect.succeed(false)),
 );
-
 export const latestCompleteReviewCycle = Effect.fn("latestCompleteReviewCycle")(
   function* (context: WorkflowContext) {
     let latest: number | undefined;
@@ -255,7 +237,6 @@ export const latestCompleteReviewCycle = Effect.fn("latestCompleteReviewCycle")(
     return latest;
   },
 );
-
 export const inferNextRefinementPass = Effect.fn("inferNextRefinementPass")(
   function* (context: WorkflowContext) {
     for (let pass = 0; ; pass++) {

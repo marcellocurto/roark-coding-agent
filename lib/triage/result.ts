@@ -1,99 +1,87 @@
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
+import { Effect, SchemaGetter, type SchemaIssue } from "effect";
+import {
+  artifactContract,
+  invalidArtifact,
+} from "../structured-output/contract.ts";
+import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
-
 const nonEmptyString = (description: string) =>
-  Type.String({ minLength: 1, description });
-
+  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
 const triageClaimVerification = {
   confirmed: "confirmed",
   notReproduced: "not-reproduced",
   insufficientDetail: "insufficient-detail",
   notApplicable: "not-applicable",
 } as const;
-
 export const triageClaimVerificationValues = Object.values(
   triageClaimVerification,
 );
-
-export const triageResultSchema = Type.Object(
-  {
-    verdict: Type.Union([
-      Type.Literal("proceed"),
-      Type.Literal("blocked"),
-      Type.Literal("reject"),
-      Type.Literal("needs-human-decision"),
-    ]),
-    reasoning: nonEmptyString("Concise reasoning for the triage verdict."),
-    claimVerification: Type.Enum(triageClaimVerification),
-    evidence: Type.Array(
+const triageResultSchemaShape = Schema.Struct({
+  verdict: Schema.Union([
+    Schema.Literal("proceed"),
+    Schema.Literal("blocked"),
+    Schema.Literal("reject"),
+    Schema.Literal("needs-human-decision"),
+  ]),
+  reasoning: nonEmptyString("Concise reasoning for the triage verdict."),
+  claimVerification: Schema.Enum(triageClaimVerification),
+  evidence: Schema.mutable(
+    Schema.Array(
       nonEmptyString(
         "Concrete repository or issue evidence supporting the verdict.",
       ),
-      { minItems: 1 },
     ),
-    establishedFacts: Type.Array(
+  ).check(Schema.isMinLength(1)),
+  establishedFacts: Schema.mutable(
+    Schema.Array(
       nonEmptyString("Fact established by the issue or repository inspection."),
     ),
-    blockingQuestions: Type.Array(
+  ),
+  blockingQuestions: Schema.mutable(
+    Schema.Array(
       nonEmptyString(
         "Specific question that must be answered before proceeding.",
       ),
     ),
-    recommendedNextStep: nonEmptyString(
-      "The smallest concrete next step after triage.",
-    ),
-  },
-  { additionalProperties: false },
-);
-
-export type TriageResult = Static<typeof triageResultSchema>;
+  ),
+  recommendedNextStep: nonEmptyString(
+    "The smallest concrete next step after triage.",
+  ),
+});
+export type TriageResult = (typeof triageResultSchemaShape)["Type"];
 export type TriageVerdict = TriageResult["verdict"];
-
-export class TriageOutputContractError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "TriageOutputContractError";
-  }
-}
-
-export function validateTriageResult(value: unknown): TriageResult {
-  if (!Value.Check(triageResultSchema, value)) {
-    const first = Value.Errors(triageResultSchema, value)[0];
-    const location =
-      first?.instancePath ?? first?.schemaPath ?? "triage result";
-    throw new TriageOutputContractError(
-      `Triage result does not satisfy the structured contract at ${location}.`,
-    );
-  }
+const normalizeTriageResult = Effect.fnUntraced(function* (
+  value: TriageResult,
+): Effect.fn.Return<TriageResult, SchemaIssue.Issue> {
   const result: TriageResult = {
     ...value,
     reasoning: value.reasoning.trim(),
-    evidence: trimItems(value.evidence, "evidence"),
-    establishedFacts: trimItems(value.establishedFacts, "establishedFacts"),
-    blockingQuestions: trimItems(value.blockingQuestions, "blockingQuestions"),
+    evidence: yield* trimItems(value.evidence, "evidence"),
+    establishedFacts: yield* trimItems(
+      value.establishedFacts,
+      "establishedFacts",
+    ),
+    blockingQuestions: yield* trimItems(
+      value.blockingQuestions,
+      "blockingQuestions",
+    ),
     recommendedNextStep: value.recommendedNextStep.trim(),
   };
   if (
     result.verdict === "needs-human-decision" &&
     result.blockingQuestions.length === 0
   ) {
-    throw new TriageOutputContractError(
+    return yield* invalidArtifact(
       "A needs-human-decision triage result requires at least one blocking question.",
     );
   }
   if (result.verdict === "proceed" && result.blockingQuestions.length > 0) {
-    throw new TriageOutputContractError(
+    return yield* invalidArtifact(
       "A proceed triage result cannot contain blocking questions.",
     );
   }
   return result;
-}
-
-export function parseTriageResultJson(content: string): TriageResult {
-  return validateTriageResult(parseJson(content, "Triage"));
-}
-
+});
 export function formatTriageMarkdown(result: TriageResult): string {
   return [
     "# Triage",
@@ -121,7 +109,25 @@ export function formatTriageMarkdown(result: TriageResult): string {
     "",
   ].join("\n");
 }
-
+const contract = artifactContract(
+  "Triage",
+  triageResultSchemaShape.pipe(
+    Schema.decodeTo(
+      Schema.Struct({
+        ...triageResultSchemaShape.fields,
+        reasoning: Schema.String,
+        recommendedNextStep: Schema.String,
+      }),
+      {
+        decode: SchemaGetter.transformOrFail(normalizeTriageResult),
+        encode: SchemaGetter.passthrough(),
+      },
+    ),
+  ),
+);
+export const validateTriageResult = contract.decode;
+export const parseTriageResultJson = contract.parse;
+export const triageResultSchema = triageResultSchemaShape;
 export const triageArtifactDefinition: StructuredArtifactDefinition<TriageResult> =
   {
     toolName: "submit_triage",
@@ -130,30 +136,23 @@ export const triageArtifactDefinition: StructuredArtifactDefinition<TriageResult
     parameters: triageResultSchema,
     validate: validateTriageResult,
     formatMarkdown: formatTriageMarkdown,
-    createError: (message) => new TriageOutputContractError(message),
   };
-
-function parseJson(content: string, label: string): unknown {
-  try {
-    return JSON.parse(content);
-  } catch (error) {
-    throw new TriageOutputContractError(
-      `${label} artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
-function trimItems(values: string[], field: string): string[] {
-  return values.map((value, index) => {
-    const trimmed = value.trim();
-    if (!trimmed)
-      throw new TriageOutputContractError(
-        `Triage ${field}[${index}] must not be blank.`,
-      );
-    return trimmed;
-  });
-}
-
+const trimItems = Effect.fnUntraced(function* (
+  values: string[],
+  field: string,
+): Effect.fn.Return<string[], SchemaIssue.Issue> {
+  return yield* Effect.forEach(
+    values,
+    Effect.fnUntraced(function* (value, index) {
+      const trimmed = value.trim();
+      if (!trimmed)
+        return yield* invalidArtifact(
+          `Triage ${field}[${index}] must not be blank.`,
+        );
+      return trimmed;
+    }),
+  );
+});
 function renderList(values: readonly string[]): string[] {
   return values.length === 0 ? ["None."] : values.map((value) => `- ${value}`);
 }

@@ -11,13 +11,6 @@ export interface RunReviewAgentOptions {
   allowRestart: boolean;
 }
 
-export class ReviewOutputContractError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ReviewOutputContractError";
-  }
-}
-
 export function reviewArtifactDefinition(
   options: RunReviewAgentOptions & {
     title: string;
@@ -31,6 +24,5 @@ export function reviewArtifactDefinition(
     parameters: reviewResultSchema,
     validate: (value) => validateReviewResult(value, options),
     formatMarkdown: (result) => formatReviewResultMarkdown(result, options),
-    createError: (message) => new ReviewOutputContractError(message),
   };
 }

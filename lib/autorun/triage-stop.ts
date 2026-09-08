@@ -1,4 +1,3 @@
-import { decodeArtifact } from "../workflow/validation.ts";
 import { GitHub } from "../github/service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect } from "effect";
@@ -23,8 +22,7 @@ export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
 };
 export const readTriageStoppedVerdict = Effect.fn("readTriageStoppedVerdict")(
   function* (context: WorkflowContext) {
-    return (yield* decodeArtifact(
-      parseTriageResultJson,
+    return (yield* parseTriageResultJson(
       yield* readArtifact(context, "triage"),
     )).verdict;
   },

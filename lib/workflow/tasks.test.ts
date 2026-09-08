@@ -249,8 +249,12 @@ describe("runAgentTask thinking profiles", () => {
         ),
     );
     expect(
-      parseChangeReportJson(
-        await runApplicationPromise(readArtifact(context, refinementLogRef(1))),
+      Effect.runSync(
+        parseChangeReportJson(
+          await runApplicationPromise(
+            readArtifact(context, refinementLogRef(1)),
+          ),
+        ),
       ).summary,
     ).toBe("Refined restart.");
     expect(prompts[0]).toContain('<artifact kind="implementation_log">');

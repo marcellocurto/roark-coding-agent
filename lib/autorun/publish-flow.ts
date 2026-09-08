@@ -1,9 +1,7 @@
 import { Workspace } from "./workspace-service.ts";
-import { decodeArtifact } from "../workflow/validation.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect } from "effect";
 import path from "node:path";
-
 import {
   artifactRelativePath,
   fixLogRef,
@@ -99,7 +97,9 @@ export interface RunPublishGateInjected {
 }
 interface AwaitedPrReview {
   outcome: "completed" | "blocked";
-  context: { reviewDirRelative: string };
+  context: {
+    reviewDirRelative: string;
+  };
 }
 export const runPublishGate = Effect.fn("runPublishGate")(function* (
   input: {
@@ -468,8 +468,7 @@ const readReadinessResult = Effect.fn("readReadinessResult")(function* (
   context: WorkflowContext,
 ) {
   return yield* Effect.gen(function* () {
-    return yield* decodeArtifact(
-      parseReadinessResultJson,
+    return yield* parseReadinessResultJson(
       yield* readArtifact(context, "readiness"),
     );
   }).pipe(

@@ -1,4 +1,3 @@
-import { decodeArtifact } from "../workflow/validation.ts";
 import { Effect } from "effect";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseReadinessResultJson } from "../workflow/readiness.ts";
@@ -17,7 +16,7 @@ export const printDoLocalModeReadyMessageIfReady = Effect.fnUntraced(function* (
   log: (message: string) => void = console.log,
 ) {
   const readiness = yield* readArtifact(context, "readiness").pipe(
-    Effect.flatMap((raw) => decodeArtifact(parseReadinessResultJson, raw)),
+    Effect.flatMap((raw) => parseReadinessResultJson(raw)),
     Effect.catch(() => Effect.succeed(undefined)),
   );
   if (readiness?.decision.status === "ready-for-pr")
