@@ -2,7 +2,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules", ".roark", "coverage", "dist", "eslint.config.js"],
+    ignores: ["node_modules", ".roark", "coverage", "dist", "repos/**", "eslint.config.js"],
   },
   ...tseslint.configs.recommendedTypeChecked,
   ...tseslint.configs.strictTypeChecked,

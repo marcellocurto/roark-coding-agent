@@ -24,6 +24,7 @@ try {
     cwd: temporaryRoot,
   })).trim();
   const installedRoot = path.join(globalRoot, packageJson.name);
+  assert(!(await readdir(installedRoot)).includes("repos"), "Vendored development references must not ship in the package");
   const executable = path.join(prefix, "bin", "roark");
   const target = path.join(temporaryRoot, "target");
   await mkdir(target);

@@ -11,6 +11,14 @@ Roark is a versioned, distributable CLI package. It is not one-off automation fo
 
 Before proposing a design, check it against global installation, CI, server, and managed-workspace execution. A design that works only in the current checkout or on the current machine is invalid.
 
+## Effect reference
+
+- Before writing Effect code, read `repos/effect/LLMS.md`, then inspect the relevant examples, source, and tests in `repos/effect/`.
+- This is a read-only upstream reference pinned to our installed Effect version. See `repos/README.md` for its provenance and update procedure.
+- Do not edit the vendored source unless explicitly updating it. Import from normal package dependencies, never from `repos/`.
+- Keep the reference aligned with the Effect dependencies when upgrading. Prefer its version-specific APIs and patterns over recalled examples from other Effect versions.
+- The reference supports development of Roark itself. It is excluded from Roark's checks and published package and must not become a runtime dependency.
+
 ## Proportional implementation scope
 
 - Match the solution's scale to the actual requirement. Keep simple work simple, and execute genuinely large work at the scale needed to complete it correctly.
