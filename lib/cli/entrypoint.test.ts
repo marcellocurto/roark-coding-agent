@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { presentAutorunOutcome, runCli, workflowOutcomeStatus } from "../../roark.ts";
@@ -180,3 +180,61 @@ describe("roark executable", () => {
     expect(result.stdout.trim()).toBe("No observability summaries found.");
   });
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  test(`runtime ${signal} interrupts verification through the Promise boundary and reaps its descendants`, async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-runtime-signal-"));
+    tempDirs.push(cwd);
+    const fixture = path.join(cwd, "runtime.ts");
+    const runtimeUrl = new URL("../../node_modules/@effect/platform-bun/dist/BunRuntime.js", import.meta.url).href;
+    const effectUrl = new URL("../../node_modules/effect/dist/Effect.js", import.meta.url).href;
+    await writeFile(fixture, `
+      import * as BunRuntime from ${JSON.stringify(runtimeUrl)};
+      import * as Effect from ${JSON.stringify(effectUrl)};
+      import { runCliEffect } from ${JSON.stringify(new URL("../../roark.ts", import.meta.url).href)};
+      import { applicationLayer } from ${JSON.stringify(new URL("../runtime/application.ts", import.meta.url).href)};
+      import { runVerification } from ${JSON.stringify(new URL("../autorun/verification.ts", import.meta.url).href)};
+      BunRuntime.runMain(runCliEffect(["do", "1"], {
+        execute: async () => {
+          await runVerification({ command: "sleep 30 & echo $! > child.pid; wait", cwd: ${JSON.stringify(cwd)} });
+        },
+        notify: () => Promise.resolve(),
+      }).pipe(Effect.provide(applicationLayer)));
+    `);
+    const child = Bun.spawn([process.execPath, fixture], { cwd, stdout: "pipe", stderr: "pipe" });
+    const stderr = new Response(child.stderr).text();
+    const stdout = new Response(child.stdout).text();
+    let descendant: number | undefined;
+    try {
+      const deadline = Date.now() + 4_000;
+      while (Date.now() < deadline) {
+        const value = await readFile(path.join(cwd, "child.pid"), "utf8").catch(() => "");
+        if (/^\d+\n$/.test(value)) { descendant = Number(value); break; }
+        if (child.exitCode !== null) throw new Error(await stderr);
+        await Bun.sleep(10);
+      }
+      expect(descendant).toBeDefined();
+      child.kill(signal);
+      expect(await child.exited).toBe(130);
+      expect(await stderr).toBe("");
+      expect(await stdout).toContain("VERIFY RUNNING");
+      if (descendant !== undefined) {
+        // Allow init to reap an orphan after the scoped group kill.
+        const deadline = Date.now() + 1_000;
+        let alive = true;
+        while (alive && Date.now() < deadline) {
+          try { process.kill(descendant, 0); } catch { alive = false; }
+          if (alive) await Bun.sleep(10);
+        }
+        expect(alive).toBe(false);
+      }
+    } finally {
+      child.kill("SIGKILL");
+      if (descendant !== undefined) {
+        try { process.kill(descendant, "SIGKILL"); } catch { /* Already reaped. */ }
+      }
+      await child.exited;
+      await Promise.all([stdout, stderr]);
+    }
+  });
+}

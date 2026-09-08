@@ -48,6 +48,37 @@ try {
     assert.equal(realpathSync(skills.bundledSkillsRoot), path.join(root, "skills"));
   `, installedRoot], { cwd: target });
 
+  console.log("Checking installed Effect verification and artifacts in a noninteractive target...");
+  await runProcessOrThrow([process.execPath, "--eval", `
+    import assert from "node:assert/strict";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    process.env.CI = "1";
+    const root = Bun.argv[1];
+    const load = (relative) => import(pathToFileURL(path.join(root, relative)).href);
+    const { runCli } = await load("roark.ts");
+    const { runVerification, writeVerificationArtifact, parseVerificationArtifact } = await load("lib/autorun/verification.ts");
+    const { createWorkflowContext, readArtifact } = await load("lib/workflow/artifacts.ts");
+    assert.equal(await runCli(["status", "--all"], {
+      execute: async () => {
+        const context = createWorkflowContext({ command: "do", issue: "1", cwd: process.cwd(), outDir: ".roark/runs", force: false, yes: false, maxFixPasses: 1 });
+        const passed = await runVerification({ command: "printf installed-output", cwd: process.cwd() });
+        assert.equal(passed.ok, true);
+        assert.equal(passed.stdout, "installed-output");
+        const failed = await runVerification({ command: "printf installed-error >&2; exit 7", cwd: process.cwd() });
+        assert.equal(failed.exitCode, 7);
+        const timedOut = await runVerification({ command: "printf before-timeout; sleep 30", cwd: process.cwd(), timeoutMs: 100 });
+        assert.equal(timedOut.timedOut, true);
+        assert.equal(timedOut.exitCode, 137);
+        assert.equal(timedOut.stdout, "before-timeout");
+        await writeVerificationArtifact(context, timedOut);
+        assert.equal(parseVerificationArtifact(await readArtifact(context, "verification")).timedOut, true);
+        assert.match(await readArtifact(context, "verificationFull"), /before-timeout/);
+      },
+      notify: () => Promise.resolve(),
+    }), 0);
+  `, installedRoot], { cwd: target });
+
   // Compare all supporting files, so npm ignore rules cannot silently truncate a skill.
   // Include new, uncommitted resources while excluding ignored local files such as .DS_Store.
   const skillFiles = await runProcessOrThrow([
@@ -61,7 +92,7 @@ try {
     ]);
     assert(source.equals(installed), `Installed resource differs: ${resource}`);
   }
-  console.log(`Package check passed on Bun ${Bun.version}: CLI, bundled skill resolution, and ${resources.length} resource files.`);
+  console.log(`Package check passed on Bun ${Bun.version}: CLI, Effect verification, bundled skill resolution, and ${resources.length} resource files.`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

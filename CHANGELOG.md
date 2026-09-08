@@ -4,9 +4,11 @@ All notable changes to Roark are tracked here.
 
 This project uses [Semantic Versioning](https://semver.org/). While Roark is pre-1.0, incompatible CLI/config changes may ship in minor releases.
 
-## Unreleased
+## [0.3.0] - 2026-09-08
 
 ### Changed
+
+- Established the Effect v4 application runtime and Bun platform services, with scoped process execution and Effect-native verification timeouts. Interrupting migrated subprocess work now waits for process-group cleanup, including descendants whose shell has already exited.
 
 - Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
 - Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.

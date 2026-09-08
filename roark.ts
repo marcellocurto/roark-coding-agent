@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import * as BunRuntime from "@effect/platform-bun/BunRuntime";
+import { Effect } from "effect";
+import { applicationLayer, fromLegacyPromise, runApplicationPromise } from "./lib/runtime/application.ts";
 import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
 import { listManagedWorkspaces, runRemoveCommand, runWorkspaceCommand } from "./lib/autorun/workspace.ts";
@@ -164,10 +167,10 @@ interface CliLifecycleDependencies {
   presentation?: Presenter | undefined;
 }
 
-export async function runCli(
+export function runCliEffect(
   argv = Bun.argv.slice(2),
   dependencies: CliLifecycleDependencies = {},
-): Promise<number> {
+) {
   const execute = dependencies.execute ?? main;
   const notify = dependencies.notify ?? sendExitNotification;
   const reportError = dependencies.reportError ?? ((error: unknown) => {
@@ -180,21 +183,29 @@ export async function runCli(
     titleEnabled: !argv.includes("--no-title"),
   });
 
-  let exitCode = 0;
-  try {
-    await runWithPresenter(presentation, () => execute(argv));
-  } catch (error) {
-    exitCode = 1;
-    if (longRunning) presentation.outcome("FAILED", presentation.currentTarget() ?? displayArgvTarget(argv), "run failed");
-    reportError(error);
-  }
-
-  try {
-    await notify({ argv, succeeded: exitCode === 0 });
-  } catch {
-    console.error("Warning: Roark could not deliver the exit notification.");
-  }
-  return exitCode;
+  return Effect.gen(function*() {
+    const exitCode = yield* fromLegacyPromise(() => runWithPresenter(presentation, () => execute(argv))).pipe(
+      Effect.as(0),
+      Effect.catch((error) => Effect.sync(() => {
+        if (longRunning) presentation.outcome("FAILED", presentation.currentTarget() ?? displayArgvTarget(argv), "run failed");
+        reportError(error);
+        return 1;
+      })),
+    );
+    yield* fromLegacyPromise(() => notify({ argv, succeeded: exitCode === 0 })).pipe(
+      Effect.catch(() => Effect.sync(() => { console.error("Warning: Roark could not deliver the exit notification."); })),
+    );
+    return exitCode;
+  });
 }
 
-if (import.meta.main) process.exitCode = await runCli();
+export function runCli(argv = Bun.argv.slice(2), dependencies: CliLifecycleDependencies = {}): Promise<number> {
+  return runApplicationPromise(runCliEffect(argv, dependencies));
+}
+
+if (import.meta.main) {
+  BunRuntime.runMain(runCliEffect().pipe(
+    Effect.tap((exitCode) => Effect.sync(() => { process.exitCode = exitCode; })),
+    Effect.provide(applicationLayer),
+  ));
+}

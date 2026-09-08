@@ -1,6 +1,6 @@
 {
   "name": "roark-coding-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A CLI for running coding agents against GitHub issues and pull requests.",
   "homepage": "https://agent.roark.at",
   "license": "MIT",
@@ -55,6 +55,8 @@
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.7",
     "@earendil-works/pi-coding-agent": "0.80.7",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "typebox": "1.1.38"
   }
 }

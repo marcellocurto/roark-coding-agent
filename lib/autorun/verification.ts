@@ -1,3 +1,6 @@
+import { Effect } from "effect";
+import { executeProcess } from "../cli/process.ts";
+import { fromLegacyPromise, runApplicationPromise } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -56,71 +59,60 @@ export interface VerificationFailureClassification {
   recoveryGuidance?: string | undefined;
 }
 
-export const defaultVerificationRunner: VerificationRunner = async ({ command, cwd, timeoutMs }) => {
-  const child = Bun.spawn(["sh", "-c", command], { cwd, stdout: "pipe", stderr: "pipe", detached: true });
-  const state = { timedOut: false };
-  const timer = setTimeout(() => {
-    state.timedOut = true;
-    try {
-      process.kill(-child.pid, "SIGKILL");
-    } catch {
-      child.kill("SIGKILL");
-    }
-  }, timeoutMs);
-  try {
-    const [stdout, rawStderr, exitCode] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    const stderr = state.timedOut ? `${rawStderr}${rawStderr.endsWith("\n") || rawStderr.length === 0 ? "" : "\n"}Timed out after ${timeoutMs}ms.\n` : rawStderr;
-    return { ok: !state.timedOut && exitCode === 0, command, exitCode, stdout, stderr, timedOut: state.timedOut };
-  } finally {
-    clearTimeout(timer);
-  }
-};
+export function executeVerification({ command, cwd, timeoutMs }: Parameters<VerificationRunner>[0]) {
+  return executeProcess(["sh", "-c", command], { cwd, timeoutMs }).pipe(Effect.map((result): VerificationResult => ({
+    ...result,
+    command,
+    ok: !result.timedOut && result.exitCode === 0,
+    stderr: result.timedOut
+      ? `${result.stderr}${result.stderr.endsWith("\n") || result.stderr.length === 0 ? "" : "\n"}Timed out after ${timeoutMs}ms.\n`
+      : result.stderr,
+  })));
+}
 
-export async function runVerification(options: {
+export const defaultVerificationRunner: VerificationRunner = (request) => runApplicationPromise(executeVerification(request));
+
+interface VerificationOptions {
   command: string;
   cwd: string;
-  runner?: VerificationRunner | undefined  ;
+  runner?: VerificationRunner | undefined;
   timeoutMs?: number | undefined;
   now?: (() => number) | undefined;
   display?: VerificationDisplayContext | undefined;
-}): Promise<VerificationResult> {
-  const runner = options.runner ?? defaultVerificationRunner;
-  const now = options.now ?? Date.now;
-  const startedAt = now();
-  presenter().verificationStarted(options.command, options.display ?? {});
-  let result: VerificationResult;
-  try {
-    result = await runner({ command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs });
-  } catch (error) {
-    presenter().verification({
-      command: options.command,
-      ok: false,
-      exitCode: -1,
-      elapsedMs: now() - startedAt,
-      reason: "verification could not be executed",
-      diagnostic: error instanceof Error ? error.message : String(error),
+}
+
+export function runVerificationEffect(options: VerificationOptions) {
+  return Effect.gen(function*() {
+    const now = options.now;
+    const startedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+    const presentation = presenter();
+    presentation.verificationStarted(options.command, options.display ?? {});
+    const request = { command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs };
+    const runner = options.runner;
+    const result = yield* (runner ? fromLegacyPromise(() => runner(request)) : executeVerification(request)).pipe(
+      Effect.tapError((error) => Effect.gen(function*() {
+        const endedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+        presentation.verification({
+          command: options.command, ok: false, exitCode: -1, elapsedMs: endedAt - startedAt,
+          reason: "verification could not be executed",
+          diagnostic: error instanceof Error ? error.message : String(error), display: options.display,
+        });
+      })),
+    );
+    const endedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+    const classification = classifyVerificationFailure(result);
+    presentation.verification({
+      command: options.command, ok: result.ok, exitCode: result.exitCode, elapsedMs: endedAt - startedAt,
+      timedOut: result.timedOut,
+      ...(!result.ok ? { reason: classification.reason, diagnostic: tailText(result.stderr || result.stdout).slice(-500) } : {}),
       display: options.display,
     });
-    throw error;
-  }
-  const classification = classifyVerificationFailure(result);
-  presenter().verification({
-    command: options.command,
-    ok: result.ok,
-    exitCode: result.exitCode,
-    elapsedMs: now() - startedAt,
-    timedOut: result.timedOut,
-    ...(!result.ok ? {
-      reason: classification.reason,
-      diagnostic: tailText(result.stderr || result.stdout).slice(-500),
-    } : {}),
-    display: options.display,
+    return result;
   });
-  return result;
+}
+
+export function runVerification(options: VerificationOptions): Promise<VerificationResult> {
+  return runApplicationPromise(runVerificationEffect(options));
 }
 
 export function formatVerificationArtifact(result: VerificationResult): string {
