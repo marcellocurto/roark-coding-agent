@@ -9,7 +9,7 @@ import { AgentTaskRunError } from "../workflow/tasks.ts";
 import { formatAttemptMetadata, readAttemptIndex, readAttemptMetadata } from "./attempts.ts";
 import { runAutorunAttemptLifecycle } from "./attempt-lifecycle.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
@@ -349,7 +349,7 @@ async function createFixture(): Promise<{
 }> {
   const cwd = await mkdtemp(path.join(tmpdir(), "roark-lifecycle-"));
   tempDirs.push(cwd);
-  await runProcessOrThrow(["git", "init"], { cwd });
+  await runProcessOrThrowPromise(["git", "init"], { cwd });
   const issueDir = path.join(cwd, ".roark/runs/issue/44");
   const runDirRelative = ".roark/runs/issue/44/attempts/1";
   const runDir = path.join(cwd, runDirRelative);

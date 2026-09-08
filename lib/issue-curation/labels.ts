@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { ensureGitHubLabels, type EnsureGitHubLabelsResult, type RequiredGitHubLabel } from "../github/labels.ts";
 
 export const reviewerIssueTriageLabels = ["needs-triage"] as const;
@@ -43,6 +44,6 @@ export const requiredReviewerIssueLabels: RequiredGitHubLabel[] = [
   },
 ];
 
-export async function ensureReviewerIssueLabels(options: { cwd: string; repo?: string | undefined }): Promise<EnsureGitHubLabelsResult> {
-  return ensureGitHubLabels({ cwd: options.cwd, repo: options.repo, labels: requiredReviewerIssueLabels });
+export async function ensureReviewerIssueLabels(options: { cwd: string; repo?: string | undefined }, application?: ApplicationExecution): Promise<EnsureGitHubLabelsResult> {
+  return ensureGitHubLabels({ cwd: options.cwd, repo: options.repo, labels: requiredReviewerIssueLabels }, application);
 }

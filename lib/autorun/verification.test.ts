@@ -1,3 +1,7 @@
+import { Cause, Deferred, Effect, Exit, PlatformError } from "effect";
+import { TestClock } from "effect/testing";
+import { ProcessExecutionError } from "../cli/process.ts";
+import { applicationLayer } from "../runtime/application.ts";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +14,7 @@ import {
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
   parseVerificationArtifact,
+  runVerificationPromise,
   runVerification,
   writeVerificationArtifact,
   writeVerificationBeforeFixArtifact,
@@ -23,20 +28,19 @@ describe("autorun verification", () => {
     let output = "";
     const stream: TerminalStream = { isTTY: true, columns: 80, write(chunk) { output += chunk; } };
     configurePresenter({ stream, env: { TERM: "xterm" } });
-    let resolveRunner: ((result: VerificationResult) => void) | undefined;
-    const runnerResult = new Promise<VerificationResult>((resolve) => { resolveRunner = resolve; });
+    const runnerResult = Deferred.makeUnsafe<VerificationResult>();
 
     try {
-      const running = runVerification({
+      const running = runVerificationPromise({
         command: "bun test",
         cwd: "/tmp/wt",
-        runner: () => runnerResult,
+        runner: () => Deferred.await(runnerResult),
         display: { target: "PR #12", repository: "owner/repo", revision: 2, pass: 1 },
       });
       expect(output).toContain("Verification");
       expect(output).toContain("PR #12 · Verification · r2 · p1 · repo");
       expect(output).not.toContain("PASSED");
-      resolveRunner?.({ ok: true, command: "bun test", exitCode: 0, stdout: "", stderr: "" });
+      await Effect.runPromise(Deferred.succeed(runnerResult, { ok: true, command: "bun test", exitCode: 0, stdout: "", stderr: "" }));
       await running;
       expect(output).toContain("VERIFY PASSED");
       expect(output).toContain("PR #12 · Verification passed · r2 · p1 · repo");
@@ -45,8 +49,8 @@ describe("autorun verification", () => {
     }
   });
 
-  test("runVerification reports ok when the runner exits 0", async () => {
-    const runner: VerificationRunner = ({ command, cwd })=> Promise.resolve(({
+  test("runVerificationPromise reports ok when the runner exits 0", async () => {
+    const runner: VerificationRunner = ({ command, cwd })=> Effect.succeed(({
       ok: true,
       command,
       exitCode: 0,
@@ -54,7 +58,7 @@ describe("autorun verification", () => {
       stderr: "",
     }));
 
-    const result = await runVerification({ command: "noop", cwd: "/tmp/wt", runner });
+    const result = await runVerificationPromise({ command: "noop", cwd: "/tmp/wt", runner });
     expect(result.ok).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.command).toBe("noop");
@@ -72,16 +76,14 @@ describe("autorun verification", () => {
     let output = "";
     const stream: TerminalStream = { isTTY: false, columns: 80, write(chunk) { output += chunk; } };
     configurePresenter({ stream });
-    const times = [100, 350];
-    const failure = new Error("spawn failed\u001b]0;owned");
+    const failure = new ProcessExecutionError({ args: ["bun", "test"], cause: PlatformError.systemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn", description: "spawn failed\u001b]0;owned" }) });
 
     try {
-      const running = runVerification({
+      const running = Effect.runPromise(runVerification({
         command: "bun test",
         cwd: "/tmp/wt",
-        runner: () => Promise.reject(failure),
-        now: () => times.shift() ?? 350,
-      });
+        runner: () => TestClock.adjust(250).pipe(Effect.andThen(Effect.fail(failure))),
+      }).pipe(Effect.provide(TestClock.layer()), Effect.provide(applicationLayer)));
 
       let thrown: unknown;
       try {
@@ -99,8 +101,56 @@ describe("autorun verification", () => {
     }
   });
 
-  test("runVerification reports failure when the runner exits non-zero", async () => {
-    const runner: VerificationRunner = ({ command })=> Promise.resolve(({
+  test("runner interruption waits for cleanup without reporting an execution failure", async () => {
+    let output = "";
+    let released = false;
+    configurePresenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
+    const started = Deferred.makeUnsafe<undefined>();
+    const controller = new AbortController();
+    const running = Effect.runPromiseExit(runVerification({
+      command: "bun test",
+      cwd: "/tmp/wt",
+      runner: () => Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Effect.never),
+        Effect.ensuring(Effect.sync(() => { released = true; })),
+      ),
+    }).pipe(Effect.provide(applicationLayer)), { signal: controller.signal });
+    try {
+      await Effect.runPromise(Deferred.await(started));
+      controller.abort();
+      const exit = await running;
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+      expect(released).toBe(true);
+      expect(output).toContain("VERIFY RUNNING");
+      expect(output).not.toContain("VERIFY FAILED");
+      expect(output).not.toContain("verification could not be executed");
+    } finally {
+      controller.abort();
+      await running;
+      configurePresenter({});
+    }
+  });
+
+  test("runner defects remain defects rather than typed execution failures", async () => {
+    let output = "";
+    configurePresenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
+    const defect = new Error("unexpected runner defect");
+    try {
+      const exit = await Effect.runPromiseExit(runVerification({
+        command: "bun test",
+        cwd: "/tmp/wt",
+        runner: () => Effect.die(defect),
+      }).pipe(Effect.provide(applicationLayer)));
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true);
+      expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false);
+      expect(output).not.toContain("verification could not be executed");
+    } finally {
+      configurePresenter({});
+    }
+  });
+
+  test("runVerificationPromise reports failure when the runner exits non-zero", async () => {
+    const runner: VerificationRunner = ({ command })=> Effect.succeed(({
       ok: false,
       command,
       exitCode: 2,
@@ -108,7 +158,7 @@ describe("autorun verification", () => {
       stderr: "boom",
     }));
 
-    const result = await runVerification({ command: "fail", cwd: "/tmp/wt", runner });
+    const result = await runVerificationPromise({ command: "fail", cwd: "/tmp/wt", runner });
     expect(result.ok).toBe(false);
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toBe("boom");
@@ -116,7 +166,7 @@ describe("autorun verification", () => {
 
   test("default verification terminates the process tree when a command exceeds its timeout", async () => {
     const startedAt = Date.now();
-    const result = await runVerification({ command: "sh -c 'sleep 2 & wait'", cwd: "/tmp", timeoutMs: 10 });
+    const result = await runVerificationPromise({ command: "sh -c 'sleep 2 & wait'", cwd: "/tmp", timeoutMs: 10 });
     expect(result.ok).toBe(false);
     expect(result.timedOut).toBe(true);
     expect(Date.now() - startedAt).toBeLessThan(1_000);

@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
@@ -6,7 +7,7 @@ import type { AutorunBranchPlan } from "./branch.ts";
 import { runPublishGate, type AutorunGateOptions, type PublishGateOutcome } from "./publish-flow.ts";
 import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { mapTriageVerdictToLabel, markIssueTriageStopped, type MarkIssueTriageStoppedOptions } from "./triage-stop.ts";
+import { mapTriageVerdictToLabel, markIssueTriageStopped } from "./triage-stop.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
 export type AutorunCompletionOutcome =
@@ -26,13 +27,14 @@ export interface CompleteAutorunWorkflowInput {
 
 export interface CompleteAutorunWorkflowInjected {
   publishGate?: typeof runPublishGate | undefined;
-  markTriageStopped?: ((options: MarkIssueTriageStoppedOptions) => Promise<unknown>) | undefined;
+  markTriageStopped?: ((...args: Parameters<typeof markIssueTriageStopped>) => Promise<unknown>) | undefined;
   publishPlanningLedgerComments?: typeof publishPlanningLedgerComments | undefined;
 }
 
 export async function completeAutorunWorkflow(
   input: CompleteAutorunWorkflowInput,
   injected: CompleteAutorunWorkflowInjected = {},
+  application?: ApplicationExecution,
 ): Promise<AutorunCompletionOutcome> {
   const publishGate = injected.publishGate ?? runPublishGate;
   const markTriageStopped = injected.markTriageStopped ?? markIssueTriageStopped;
@@ -56,7 +58,7 @@ export async function completeAutorunWorkflow(
       }),
       marker,
       existingCommentId: input.attemptMetadata.githubComments?.issue?.[phase]?.id,
-    });
+    }, application);
     if (isCommentRef(ref)) recordAttemptIssueComment(input.attemptMetadata, phase, ref);
     return {
       outcome: "triage-stopped",
@@ -70,7 +72,7 @@ export async function completeAutorunWorkflow(
     issue: input.issue,
     workflowContext: input.workflowContext,
     attemptMetadata: input.attemptMetadata,
-  });
+  }, undefined, application);
 
   await publishReviewLedgerComments({
     cwd: input.options.cwd,
@@ -78,7 +80,7 @@ export async function completeAutorunWorkflow(
     issue: input.issue,
     workflowContext: input.workflowContext,
     attemptMetadata: input.attemptMetadata,
-  });
+  }, undefined, application);
 
   return publishGate({
     options: input.options,
@@ -88,7 +90,7 @@ export async function completeAutorunWorkflow(
     attemptMetadata: input.attemptMetadata,
     attemptMetadataPath: input.attemptMetadataPath,
     recoveryCommand: input.recoveryCommand,
-  });
+  }, undefined, application);
 }
 
 async function readArtifactIfExists(context: WorkflowContext, artifact: "triageMarkdown"): Promise<string | undefined> {

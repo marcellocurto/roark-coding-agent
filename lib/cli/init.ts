@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,9 +13,9 @@ import {
 import { defaultMaxFixPasses, type InitCliOptions } from "./args.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig, type WorkspaceConfig } from "../autorun/workspace.ts";
 import { inferRepoFromOrigin, inferVerifyCommand, type RoarkConfig } from "./hydrate.ts";
-import { runProcess, type ProcessResult } from "./process.ts";
+import { runProcessPromise, type ProcessResult } from "./process.ts";
 
-type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
+type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}, application?: ApplicationExecution) => Promise<ProcessResult>;
 
 export interface InitResult {
   root: string;
@@ -39,14 +40,14 @@ logs/
 `;
 
 
-export async function runInit(options: InitCliOptions, deps: InitDependencies = {}): Promise<InitResult> {
-  const runner = deps.runner ?? runProcess;
-  const rawRepo = options.repo ?? (await inferRepoFromOrigin(options.cwd, runner));
+export async function runInit(options: InitCliOptions, deps: InitDependencies = {}, application?: ApplicationExecution): Promise<InitResult> {
+  const runner = deps.runner ?? runProcessPromise;
+  const rawRepo = options.repo ?? (await inferRepoFromOrigin(options.cwd, runner, application));
   if (!rawRepo) {
     throw new Error("Could not determine GitHub repository. Pass --repo owner/repo or set origin to a GitHub repository URL.");
   }
   assertOwnerRepo(rawRepo);
-  const repo = options.repo ? rawRepo : await canonicalizeGitHubRepo(rawRepo, runner);
+  const repo = options.repo ? rawRepo : await canonicalizeGitHubRepo(rawRepo, runner, application);
   assertOwnerRepo(repo);
 
   const verify = await inferVerifyCommand(options.cwd, runner);
@@ -82,8 +83,8 @@ export async function runInit(options: InitCliOptions, deps: InitDependencies = 
   };
 }
 
-async function canonicalizeGitHubRepo(repo: string, runner: ProcessRunner): Promise<string> {
-  const result = await runner(["gh", "repo", "view", repo, "--json", "nameWithOwner", "--jq", ".nameWithOwner"]);
+async function canonicalizeGitHubRepo(repo: string, runner: ProcessRunner, application?: ApplicationExecution): Promise<string> {
+  const result = await runner(["gh", "repo", "view", repo, "--json", "nameWithOwner", "--jq", ".nameWithOwner"], undefined, application);
   if (result.exitCode !== 0) return repo;
 
   const canonical = result.stdout.trim();

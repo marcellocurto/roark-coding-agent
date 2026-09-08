@@ -1,10 +1,11 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import path from "node:path";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
-  runVerification,
+  runVerificationPromise,
   type VerificationResult,
   type VerificationRunner,
 } from "../autorun/verification.ts";
@@ -55,9 +56,9 @@ export interface RunPrReviewDependencies {
   assertWorkspace?: typeof assertPinnedPrReviewWorkspace | undefined;
 }
 
-export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReviewDependencies = {}): Promise<PrReviewResult> {
+export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReviewDependencies = {}, application?: ApplicationExecution): Promise<PrReviewResult> {
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
-  const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber });
+  const initial = await fetchFeedback({ cwd: options.cwd, repo: options.repo, prNumber: options.prNumber }, application);
   validateReviewablePr(initial);
   presenter().transition("Review preparation", `PR #${initial.pr.number}`, { operation: "inspect" });
   const hooks = options.hooks ?? defaultLifecycleHooks;
@@ -73,18 +74,18 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     headRefOid: initial.pr.headRefOid,
     workspace,
     hooks,
-  });
+  }, application);
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
   const assertWorkspace = deps.assertWorkspace ?? assertPinnedPrReviewWorkspace;
   let context: PrReviewContext | undefined;
 
   try {
-    context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path });
+    context = await createPrReviewContext({ ...options, repo: initial.repo, agentCwd: prepared.path }, application);
     presenter().transition("Review preparation", `PR #${context.prNumber}`, { pass: context.generation, operation: "inspect" });
     presenter().line(`Run directory: ${context.reviewDirRelative}`);
     presenter().line(`Review workspace: ${path.basename(context.agentCwd)}`);
-    await hookRunner("beforeRun", hooks, context.agentCwd);
-    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
+    await hookRunner("beforeRun", hooks, context.agentCwd, undefined, application);
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid }, application);
 
     const closingIssues = sameRepositoryClosingIssues(initial);
     await writePrReviewInputJson(context, "pr-context.json", { ...initial, closingIssues });
@@ -92,14 +93,14 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     await writePrReviewInputJson(context, "comparison.json", prepared.comparison);
 
     let verification: VerificationResult | undefined;
-    await hookRunner("beforeVerify", hooks, context.agentCwd);
+    await hookRunner("beforeVerify", hooks, context.agentCwd, undefined, application);
     try {
-      verification = await runVerification({
+      verification = await runVerificationPromise({
         command: options.verifyCommand,
         cwd: context.agentCwd,
         runner: deps.verificationRunner,
         display: { target: `PR #${context.prNumber}`, repository: context.repo, pass: context.generation },
-      });
+      }, application);
       await writePrReviewInputArtifact(context, "verification.md", formatVerificationArtifact(verification));
       await writePrReviewArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
       presenter().artifact(path.join(context.reviewDirRelative, "verification.md"));
@@ -111,7 +112,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
       const reason = `Verification could not run: ${errorMessage(error)}`;
       await writePrReviewInputArtifact(context, "verification.md", `# Verification\n\n## Status\nUnavailable\n\n## Reason\n${reason}\n`);
     }
-    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid }, application);
 
     await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
       outcome: "reviewing",
@@ -131,9 +132,9 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
     }
     const reviewA = reviewAResult.value;
     const reviewB = reviewBResult.value;
-    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid });
+    await assertWorkspace({ cwd: context.agentCwd, headOid: prepared.comparison.headOid }, application);
 
-    const latest = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber });
+    const latest = await fetchFeedback({ cwd: options.cwd, repo: initial.repo, prNumber: options.prNumber }, application);
     const staleReasons = prIdentityChanges(initial, latest);
     if (staleReasons.length > 0) {
       await writePrReviewJson(context, "metadata.json", metadata(context, initial, prepared, {
@@ -166,13 +167,13 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
           repo: context.repo,
           issueNumber: context.prNumber,
           body: publicReviewComment(context, "a", reviewA),
-        });
+        }, application);
         await postComment({
           cwd: context.controlCwd,
           repo: context.repo,
           issueNumber: context.prNumber,
           body: publicReviewComment(context, "b", reviewB),
-        });
+        }, application);
         published = true;
         presenter().phaseCompleted(publishDisplay, { outcome: "published 2 reviewer comments" });
       } catch (error) {
@@ -191,7 +192,7 @@ export async function runPrReview(options: ReviewPrCliOptions, deps: RunPrReview
   } finally {
     try {
       if (context) await removeAgentPrReviewArtifacts(context);
-      await hookRunner("afterRun", hooks, prepared.path);
+      await hookRunner("afterRun", hooks, prepared.path, undefined, application);
     } finally {
       await prepared.releaseLock();
     }

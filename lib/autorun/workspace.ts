@@ -1,8 +1,9 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { runProcess, runProcessOrThrow, type ProcessResult } from "../cli/process.ts";
+import { runProcessPromise, runProcessOrThrowPromise, type ProcessResult } from "../cli/process.ts";
 import { presenter } from "../presentation/presenter.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 
@@ -97,7 +98,7 @@ export const defaultWorkspaceConfig: WorkspaceConfig = {
 };
 export const defaultLifecycleHooks: LifecycleHooksConfig = { timeoutMs: 600_000 };
 
-export type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
+export type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}, application?: ApplicationExecution) => Promise<ProcessResult>;
 
 interface WorkspaceLockOwner {
   token: string;
@@ -159,13 +160,13 @@ export async function assertWorkspacePathSafe(input: { root: string; workspacePa
   }
 }
 
-export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: string; runner?: ProcessRunner  | undefined}): Promise<{ remote: string; url: string }> {
-  const runner = input.runner ?? runProcess;
+export async function resolveCloneRemote(input: { cwd: string; cloneRemote?: string; runner?: ProcessRunner  | undefined}, application?: ApplicationExecution): Promise<{ remote: string; url: string }> {
+  const runner = input.runner ?? runProcessPromise;
   const remote = input.cloneRemote?.trim() ?? "origin";
-  const remoteResult = await runner(["git", "remote", "get-url", remote], { cwd: input.cwd });
+  const remoteResult = await runner(["git", "remote", "get-url", remote], { cwd: input.cwd }, application);
   const url = remoteResult.exitCode === 0 && remoteResult.stdout.trim() ? remoteResult.stdout.trim() : remote;
 
-  const preflight = await runner(["git", "ls-remote", url, "HEAD"], { cwd: input.cwd });
+  const preflight = await runner(["git", "ls-remote", url, "HEAD"], { cwd: input.cwd }, application);
   if (preflight.exitCode !== 0) {
     throw new Error(
       [
@@ -186,11 +187,11 @@ export async function resolvePrReviewCloneRemote(input: {
   repo?: string | undefined;
   repositoryUrl?: string | undefined;
   runner?: ProcessRunner | undefined;
-}): Promise<{ remote: "origin"; url: string }> {
-  const runner = input.runner ?? runProcess;
+}, application?: ApplicationExecution): Promise<{ remote: "origin"; url: string }> {
+  const runner = input.runner ?? runProcessPromise;
   const repositoryUrl = input.repositoryUrl?.trim();
   const url = repositoryUrl && repositoryUrl.length > 0 ? repositoryUrl : githubRepositoryUrl(input.repo);
-  const preflight = await runner(["git", "ls-remote", url, "HEAD"], { cwd: input.cwd });
+  const preflight = await runner(["git", "ls-remote", url, "HEAD"], { cwd: input.cwd }, application);
   if (preflight.exitCode !== 0) {
     throw new Error(
       [
@@ -215,35 +216,35 @@ export async function prepareCloneWorkspace(input: {
   mode: "auto" | "continue";
   workspacePath?: string | undefined  ;
   runner?: ProcessRunner | undefined  ;
-}): Promise<PreparedWorkspace> {
-  const runner = input.runner ?? runProcess;
+}, application?: ApplicationExecution): Promise<PreparedWorkspace> {
+  const runner = input.runner ?? runProcessPromise;
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForIssue({ root, repo: input.repo, issueNumber: input.issueNumber, controlCwd: input.controlCwd }));
   await assertWorkspacePathSafe({ root, workspacePath });
-  const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+  const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner }, application);
     const createdNow = !existsSync(workspacePath);
 
     if (createdNow) {
       await mkdir(path.dirname(workspacePath), { recursive: true });
       const cloneArgs = buildCloneArgs({ url: remote.url, target: workspacePath, clone: input.workspace.clone });
-      await runProcessOrThrowWithRunner(runner, cloneArgs, { cwd: input.controlCwd, label: "git clone" });
+      await runProcessOrThrowWithRunner(runner, cloneArgs, { cwd: input.controlCwd, label: "git clone" }, application);
       try {
-        await checkoutWorkspaceBranch({ cwd: workspacePath, plan: input.plan, runner });
-        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
-        await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
+        await checkoutWorkspaceBranch({ cwd: workspacePath, plan: input.plan, runner }, application);
+        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner }, application);
+        await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner, application);
       } catch (error) {
         await writePoisonState(workspacePath, error);
         throw error;
       }
     } else {
       await assertNotPoisoned(workspacePath);
-      await assertGitWorkspaceOnBranch({ cwd: workspacePath, branchName: input.plan.branchName, runner });
-      if (input.mode === "auto" && await hasGitChanges(workspacePath, runner)) {
+      await assertGitWorkspaceOnBranch({ cwd: workspacePath, branchName: input.plan.branchName, runner }, application);
+      if (input.mode === "auto" && await hasGitChanges(workspacePath, runner, application)) {
         throw new Error(
           `Workspace '${workspacePath}' has uncommitted changes. Use 'roark continue ${input.issueNumber} --cwd ${input.controlCwd}' to recover a failed attempt, or clean/remove the workspace before starting fresh auto work.`,
         );
       }
-      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner }, application);
     }
 
     return {
@@ -267,8 +268,8 @@ export async function preparePrRevisionWorkspace(input: {
   hooks: LifecycleHooksConfig;
   workspacePath?: string | undefined;
   runner?: ProcessRunner | undefined;
-}): Promise<PreparedPrRevisionWorkspace> {
-  const runner = input.runner ?? runProcess;
+}, application?: ApplicationExecution): Promise<PreparedPrRevisionWorkspace> {
+  const runner = input.runner ?? runProcessPromise;
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForPrRevision({
     root,
@@ -280,7 +281,7 @@ export async function preparePrRevisionWorkspace(input: {
   const releaseLock = await acquireWorkspaceLock(workspacePath);
 
   try {
-    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner });
+    const remote = await resolveCloneRemote({ cwd: input.controlCwd, cloneRemote: input.workspace.cloneRemote, runner }, application);
     const createdNow = !existsSync(workspacePath);
 
     if (createdNow) {
@@ -288,22 +289,22 @@ export async function preparePrRevisionWorkspace(input: {
       await runProcessOrThrowWithRunner(runner, buildCloneArgs({ url: remote.url, target: workspacePath, clone: input.workspace.clone }), {
         cwd: input.controlCwd,
         label: "git clone",
-      });
+      }, application);
       try {
-        await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner });
-        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
-        await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
+        await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner }, application);
+        await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner }, application);
+        await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner, application);
       } catch (error) {
         await writePoisonState(workspacePath, error);
         throw error;
       }
     } else {
       await assertNotPoisoned(workspacePath);
-      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath });
+      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath }, application);
       if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") throw new Error(`Workspace '${workspacePath}' is not a git work tree.`);
-      if (await hasGitChanges(workspacePath, runner)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before revising PR #${input.prNumber}.`);
-      await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner });
-      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
+      if (await hasGitChanges(workspacePath, runner, application)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before revising PR #${input.prNumber}.`);
+      await checkoutPrWorkspaceBranch({ cwd: workspacePath, headRefName: input.headRefName, runner }, application);
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner }, application);
     }
 
     return {
@@ -335,11 +336,11 @@ export async function preparePrReviewWorkspace(input: {
   hooks: LifecycleHooksConfig;
   workspacePath?: string | undefined;
   runner?: ProcessRunner | undefined;
-}): Promise<PreparedPrReviewWorkspace> {
+}, application?: ApplicationExecution): Promise<PreparedPrReviewWorkspace> {
   if (!input.baseRefOid || !input.headRefOid) {
     throw new Error(`PR #${input.prNumber} metadata did not include immutable base and head commit identifiers.`);
   }
-  const runner = input.runner ?? runProcess;
+  const runner = input.runner ?? runProcessPromise;
   const root = normalizeWorkspaceRoot(input.workspace.root);
   const workspacePath = path.resolve(input.workspacePath ?? workspacePathForPrRevision({
     root,
@@ -356,23 +357,23 @@ export async function preparePrReviewWorkspace(input: {
       repo: input.repo,
       repositoryUrl: input.repositoryUrl,
       runner,
-    });
+    }, application);
     const createdNow = !existsSync(workspacePath);
     if (createdNow) {
       await mkdir(path.dirname(workspacePath), { recursive: true });
       await runProcessOrThrowWithRunner(runner, buildCloneArgs({ url: remote.url, target: workspacePath, clone: input.workspace.clone }), {
         cwd: input.controlCwd,
         label: "git clone",
-      });
+      }, application);
     } else {
       await assertNotPoisoned(workspacePath);
-      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath });
+      const insideWorkTree = await runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: workspacePath }, application);
       if (insideWorkTree.exitCode !== 0 || insideWorkTree.stdout.trim() !== "true") throw new Error(`Workspace '${workspacePath}' is not a git work tree.`);
-      if (await hasGitChanges(workspacePath, runner)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before reviewing PR #${input.prNumber}.`);
+      if (await hasGitChanges(workspacePath, runner, application)) throw new Error(`Workspace '${workspacePath}' has uncommitted changes. Clean or remove it before reviewing PR #${input.prNumber}.`);
       await runProcessOrThrowWithRunner(runner, ["git", "remote", "set-url", "origin", remote.url], {
         cwd: workspacePath,
         label: "git set PR review origin",
-      });
+      }, application);
     }
 
     try {
@@ -383,10 +384,10 @@ export async function preparePrReviewWorkspace(input: {
         baseRefOid: input.baseRefOid,
         headRefOid: input.headRefOid,
         runner,
-      });
-      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner });
-      if (createdNow) await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner);
-      await assertPinnedPrReviewWorkspace({ cwd: workspacePath, headOid: input.headRefOid, runner });
+      }, application);
+      await refreshCopyToWorktree({ controlCwd: input.controlCwd, worktreePath: workspacePath, copyToWorktree: input.workspace.copyToWorktree, runner }, application);
+      if (createdNow) await runLifecycleHook("afterCreate", input.hooks, workspacePath, runner, application);
+      await assertPinnedPrReviewWorkspace({ cwd: workspacePath, headOid: input.headRefOid, runner }, application);
       return {
         path: workspacePath,
         comparison,
@@ -421,16 +422,16 @@ export async function assertPinnedPrReviewWorkspace(input: {
   cwd: string;
   headOid: string;
   runner?: ProcessRunner | undefined;
-}): Promise<void> {
-  const runner = input.runner ?? runProcess;
+}, application?: ApplicationExecution): Promise<void> {
+  const runner = input.runner ?? runProcessPromise;
   const currentHead = (await runProcessOrThrowWithRunner(runner, ["git", "rev-parse", "HEAD"], {
     cwd: input.cwd,
     label: "git rev-parse review HEAD",
-  })).trim();
+  }, application)).trim();
   if (currentHead !== input.headOid) {
     throw new Error(`PR review workspace HEAD changed from pinned commit ${input.headOid} to ${currentHead || "(unknown)"}. Refusing to publish this review.`);
   }
-  const status = await runner(["git", "status", "--porcelain", "--untracked-files=all"], { cwd: input.cwd });
+  const status = await runner(["git", "status", "--porcelain", "--untracked-files=all"], { cwd: input.cwd }, application);
   if (status.exitCode !== 0) throw new Error(`Unable to verify PR review workspace cleanliness: ${tail(status.stderr || status.stdout)}`);
   if (status.stdout.trim()) {
     throw new Error(`PR review workspace changed during inspection. Refusing to publish this review.\n${status.stdout.trim()}`);
@@ -444,38 +445,38 @@ async function checkoutPinnedPrReview(input: {
   baseRefOid: string;
   headRefOid: string;
   runner: ProcessRunner;
-}): Promise<PrReviewComparison> {
+}, application?: ApplicationExecution): Promise<PrReviewComparison> {
   const baseReviewRef = `refs/remotes/roark/pr-${input.prNumber}-base`;
   const headReviewRef = `refs/remotes/roark/pr-${input.prNumber}-head`;
   await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/heads/${input.baseRefName}:${baseReviewRef}`], {
     cwd: input.cwd,
     label: "git fetch PR base",
-  });
+  }, application);
   await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/pull/${input.prNumber}/head:${headReviewRef}`], {
     cwd: input.cwd,
     label: "git fetch GitHub PR head",
-  });
-  const fetchedHead = (await runProcessOrThrowWithRunner(input.runner, ["git", "rev-parse", headReviewRef], { cwd: input.cwd, label: "git rev-parse PR head" })).trim();
+  }, application);
+  const fetchedHead = (await runProcessOrThrowWithRunner(input.runner, ["git", "rev-parse", headReviewRef], { cwd: input.cwd, label: "git rev-parse PR head" }, application)).trim();
   if (fetchedHead !== input.headRefOid) {
     throw new PrReviewHeadChangedError(`PR #${input.prNumber} changed while its review workspace was prepared (expected ${input.headRefOid}, fetched ${fetchedHead}).`);
   }
-  await assertFetchedOid(input.runner, input.cwd, input.baseRefOid, "base");
-  await assertFetchedOid(input.runner, input.cwd, input.headRefOid, "head");
-  await ensureCompleteHistory(input.runner, input.cwd, input.prNumber);
-  const mergeBaseResult = await input.runner(["git", "merge-base", input.baseRefOid, input.headRefOid], { cwd: input.cwd });
+  await assertFetchedOid(input.runner, input.cwd, input.baseRefOid, "base", application);
+  await assertFetchedOid(input.runner, input.cwd, input.headRefOid, "head", application);
+  await ensureCompleteHistory(input.runner, input.cwd, input.prNumber, application);
+  const mergeBaseResult = await input.runner(["git", "merge-base", input.baseRefOid, input.headRefOid], { cwd: input.cwd }, application);
   const mergeBaseOid = mergeBaseResult.stdout.trim();
   if (mergeBaseResult.exitCode !== 0 || !mergeBaseOid) {
     throw new Error(`Could not determine merge base for PR #${input.prNumber} after ensuring complete clone history: ${tail(mergeBaseResult.stderr || mergeBaseResult.stdout) || "no common ancestor was available"}`);
   }
-  await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "--detach", input.headRefOid], { cwd: input.cwd, label: "git checkout pinned PR head" });
+  await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "--detach", input.headRefOid], { cwd: input.cwd, label: "git checkout pinned PR head" }, application);
   const changedFiles = (await runProcessOrThrowWithRunner(input.runner, ["git", "diff", "--name-only", `${mergeBaseOid}..${input.headRefOid}`, "--"], {
     cwd: input.cwd,
     label: "git diff PR changed files",
-  })).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+  }, application)).split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
   const diffStat = (await runProcessOrThrowWithRunner(input.runner, ["git", "diff", "--stat", `${mergeBaseOid}..${input.headRefOid}`, "--"], {
     cwd: input.cwd,
     label: "git diff PR stat",
-  })).trim();
+  }, application)).trim();
   return {
     baseOid: input.baseRefOid,
     headOid: input.headRefOid,
@@ -486,29 +487,29 @@ async function checkoutPinnedPrReview(input: {
   };
 }
 
-async function ensureCompleteHistory(runner: ProcessRunner, cwd: string, prNumber: number): Promise<void> {
-  let shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd });
+async function ensureCompleteHistory(runner: ProcessRunner, cwd: string, prNumber: number, application?: ApplicationExecution): Promise<void> {
+  let shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd }, application);
   if (shallow.exitCode !== 0) {
     throw new Error(`Unable to inspect clone history before calculating the merge base for PR #${prNumber}: ${tail(shallow.stderr || shallow.stdout)}`);
   }
   if (shallow.stdout.trim() !== "true") return;
 
-  const unshallow = await runner(["git", "fetch", "--unshallow", "origin"], { cwd });
+  const unshallow = await runner(["git", "fetch", "--unshallow", "origin"], { cwd }, application);
   if (unshallow.exitCode !== 0) {
     throw new Error(`Unable to fetch complete history for shallow PR review workspace #${prNumber}: ${tail(unshallow.stderr || unshallow.stdout)}`);
   }
-  shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd });
+  shallow = await runner(["git", "rev-parse", "--is-shallow-repository"], { cwd }, application);
   if (shallow.exitCode !== 0 || shallow.stdout.trim() === "true") {
     throw new Error(`PR review workspace #${prNumber} remains shallow after fetching complete history; its merge base cannot be calculated reliably.`);
   }
 }
 
-async function assertFetchedOid(runner: ProcessRunner, cwd: string, oid: string, label: string): Promise<void> {
-  let result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd });
+async function assertFetchedOid(runner: ProcessRunner, cwd: string, oid: string, label: string, application?: ApplicationExecution): Promise<void> {
+  let result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd }, application);
   if (result.exitCode !== 0) {
-    result = await runner(["git", "fetch", "origin", oid], { cwd });
+    result = await runner(["git", "fetch", "origin", oid], { cwd }, application);
     if (result.exitCode !== 0) throw new Error(`Unable to fetch pinned PR ${label} commit ${oid}: ${tail(result.stderr || result.stdout)}`);
-    result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd });
+    result = await runner(["git", "cat-file", "-e", `${oid}^{commit}`], { cwd }, application);
   }
   if (result.exitCode !== 0) throw new Error(`Pinned PR ${label} commit ${oid} is unavailable after fetch.`);
 }
@@ -518,10 +519,10 @@ export async function refreshCopyToWorktree(input: {
   worktreePath: string;
   copyToWorktree?: readonly string[] | undefined  ;
   runner?: ProcessRunner | undefined  ;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   const entries = input.copyToWorktree ?? [];
   if (entries.length === 0) return;
-  const runner = input.runner ?? runProcess;
+  const runner = input.runner ?? runProcessPromise;
   const preflight: { entry: string; source: string; destination: string }[] = [];
 
   for (const rawEntry of entries) {
@@ -538,7 +539,7 @@ export async function refreshCopyToWorktree(input: {
       throw new Error(`Configured workspace.copyToWorktree source '${entry}' is missing at '${source}'.`);
     }
 
-    const ignored = await runner(["git", "check-ignore", "--quiet", "--", entry], { cwd: input.worktreePath });
+    const ignored = await runner(["git", "check-ignore", "--quiet", "--", entry], { cwd: input.worktreePath }, application);
     if (ignored.exitCode !== 0) {
       const detail = ignored.exitCode === 1 ? "path is not ignored" : `git check-ignore failed: ${tail(ignored.stderr || ignored.stdout) || "(empty)"}`;
       throw new Error(`Refusing to copy workspace.copyToWorktree path '${entry}': destination must be ignored by Git in '${input.worktreePath}' (${detail}).`);
@@ -551,7 +552,7 @@ export async function refreshCopyToWorktree(input: {
     await rm(item.destination, { recursive: true, force: true });
     await copyDereferenced(item.source, item.destination);
 
-    const status = await runner(["git", "status", "--porcelain", "--", item.entry], { cwd: input.worktreePath });
+    const status = await runner(["git", "status", "--porcelain", "--", item.entry], { cwd: input.worktreePath }, application);
     if (status.exitCode !== 0) {
       throw new Error(`git status check failed after copying workspace.copyToWorktree path '${item.entry}': ${tail(status.stderr || status.stdout)}`);
     }
@@ -625,12 +626,13 @@ export async function runLifecycleHook(
   name: keyof LifecycleHooksConfig,
   hooks: LifecycleHooksConfig | undefined,
   cwd: string,
-  runner: ProcessRunner = runProcess,
+  runner: ProcessRunner = runProcessPromise,
+  application?: ApplicationExecution,
 ): Promise<void> {
   const command = typeof hooks?.[name] === "string" ? hooks[name].trim() : "";
   if (!command) return;
   const timeoutMs = hooks?.timeoutMs ?? defaultLifecycleHooks.timeoutMs;
-  const result = await runHookCommand(command, cwd, timeoutMs, runner);
+  const result = await runHookCommand(command, cwd, timeoutMs, runner, application);
   if (result.exitCode === 0) return;
   const message = `${name} hook failed with exit code ${result.exitCode}: ${command}\n${tail(result.stderr || result.stdout)}`;
   if (name === "afterRun" || name === "beforeRemove") {
@@ -676,7 +678,7 @@ export async function listWorkspaces(options: { workspace: WorkspaceConfig; repo
   return (await listManagedWorkspaces(options)).map((managedWorkspace) => managedWorkspace.path);
 }
 
-export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Promise<void> {
+export async function runWorkspaceCommand(options: WorkspaceCommandOptions, application?: ApplicationExecution): Promise<void> {
   if (options.action === "list") {
     const paths = await listWorkspaces({ workspace: options.workspace, repo: options.repo, cwd: options.cwd });
     if (paths.length === 0) console.log("No managed workspaces found.");
@@ -691,12 +693,12 @@ export async function runWorkspaceCommand(options: WorkspaceCommandOptions): Pro
   for (const workspacePath of paths) {
     const stats = await stat(workspacePath);
     if (stats.mtimeMs > cutoff) continue;
-    if (await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks })) removed++;
+    if (await removeWorkspace({ workspacePath, force: options.force, hooks: options.hooks }, application)) removed++;
   }
   console.log(`Pruned ${removed} workspace(s).`);
 }
 
-export async function runRemoveCommand(options: RemoveCommandOptions): Promise<void> {
+export async function runRemoveCommand(options: RemoveCommandOptions, application?: ApplicationExecution): Promise<void> {
   if (options.targets.length === 0) throw new Error("No managed workspaces selected for removal.");
   const paths = [...new Set(options.targets.map((target) => target.kind === "issue"
     ? workspacePathForIssue({ root: options.workspace.root, repo: options.repo, issueNumber: target.number, controlCwd: options.cwd })
@@ -710,7 +712,7 @@ export async function runRemoveCommand(options: RemoveCommandOptions): Promise<v
   if (!options.force) {
     const dirtyPaths: string[] = [];
     for (const workspacePath of paths) {
-      if (await hasGitChanges(workspacePath, runProcess)) dirtyPaths.push(workspacePath);
+      if (await hasGitChanges(workspacePath, runProcessPromise, application)) dirtyPaths.push(workspacePath);
     }
     if (dirtyPaths.length > 0) {
       throw new Error(`Refusing to remove dirty workspace${dirtyPaths.length === 1 ? "" : "s"}:\n${dirtyPaths.join("\n")}\nPass --force to remove ${dirtyPaths.length === 1 ? "it" : "them"} anyway.`);
@@ -718,29 +720,29 @@ export async function runRemoveCommand(options: RemoveCommandOptions): Promise<v
   }
 
   for (const workspacePath of paths) {
-    if (!await removeWorkspaceFiles({ workspacePath, hooks: options.hooks })) {
+    if (!await removeWorkspaceFiles({ workspacePath, hooks: options.hooks }, application)) {
       throw new Error(`Managed workspace disappeared before it could be removed: ${workspacePath}`);
     }
     console.log(`Removed workspace: ${workspacePath}`);
   }
 }
 
-export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }): Promise<boolean> {
+export async function removeWorkspace(input: { workspacePath: string; force: boolean; hooks: LifecycleHooksConfig }, application?: ApplicationExecution): Promise<boolean> {
   const legacyLockPath = `${input.workspacePath}.lock`;
   if (!existsSync(input.workspacePath)) {
     await rm(legacyLockPath, { recursive: true, force: true });
     return false;
   }
-  if (!input.force && await hasGitChanges(input.workspacePath, runProcess)) {
+  if (!input.force && await hasGitChanges(input.workspacePath, runProcessPromise, application)) {
     throw new Error(`Refusing to remove dirty workspace '${input.workspacePath}'. Pass --force to remove it anyway.`);
   }
-  return removeWorkspaceFiles({ workspacePath: input.workspacePath, hooks: input.hooks });
+  return removeWorkspaceFiles({ workspacePath: input.workspacePath, hooks: input.hooks }, application);
 }
 
-async function removeWorkspaceFiles(input: { workspacePath: string; hooks: LifecycleHooksConfig }): Promise<boolean> {
+async function removeWorkspaceFiles(input: { workspacePath: string; hooks: LifecycleHooksConfig }, application?: ApplicationExecution): Promise<boolean> {
   if (!existsSync(input.workspacePath)) return false;
   const legacyLockPath = `${input.workspacePath}.lock`;
-  await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath);
+  await runLifecycleHook("beforeRemove", input.hooks, input.workspacePath, undefined, application);
   await rm(input.workspacePath, { recursive: true, force: true });
   await rm(legacyLockPath, { recursive: true, force: true });
   return true;
@@ -802,32 +804,32 @@ function isErrorWithCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code;
 }
 
-async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranchPlan; runner: ProcessRunner }): Promise<void> {
-  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin"], { cwd: input.cwd, label: "git fetch origin" });
-  const remoteBranch = await gitRemoteBranchExists({ cwd: input.cwd, branchName: input.plan.branchName, runner: input.runner });
+async function checkoutWorkspaceBranch(input: { cwd: string; plan: AutorunBranchPlan; runner: ProcessRunner }, application?: ApplicationExecution): Promise<void> {
+  await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin"], { cwd: input.cwd, label: "git fetch origin" }, application);
+  const remoteBranch = await gitRemoteBranchExists({ cwd: input.cwd, branchName: input.plan.branchName, runner: input.runner }, application);
   if (remoteBranch) {
-    await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.plan.branchName, `origin/${input.plan.branchName}`], { cwd: input.cwd, label: "git checkout issue branch" });
+    await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.plan.branchName, `origin/${input.plan.branchName}`], { cwd: input.cwd, label: "git checkout issue branch" }, application);
   } else {
-    await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.plan.branchName, `origin/${input.plan.baseBranch}`], { cwd: input.cwd, label: "git checkout issue branch from base" });
+    await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.plan.branchName, `origin/${input.plan.baseBranch}`], { cwd: input.cwd, label: "git checkout issue branch from base" }, application);
   }
 }
 
-async function checkoutPrWorkspaceBranch(input: { cwd: string; headRefName: string; runner: ProcessRunner }): Promise<void> {
+async function checkoutPrWorkspaceBranch(input: { cwd: string; headRefName: string; runner: ProcessRunner }, application?: ApplicationExecution): Promise<void> {
   await runProcessOrThrowWithRunner(input.runner, ["git", "fetch", "origin", `+refs/heads/${input.headRefName}:refs/remotes/origin/${input.headRefName}`], {
     cwd: input.cwd,
     label: "git fetch PR head",
-  });
-  await assertNoUnpushedBranchCommits({ cwd: input.cwd, branchName: input.headRefName, upstreamRef: `origin/${input.headRefName}`, runner: input.runner });
+  }, application);
+  await assertNoUnpushedBranchCommits({ cwd: input.cwd, branchName: input.headRefName, upstreamRef: `origin/${input.headRefName}`, runner: input.runner }, application);
   await runProcessOrThrowWithRunner(input.runner, ["git", "checkout", "-B", input.headRefName, `origin/${input.headRefName}`], {
     cwd: input.cwd,
     label: "git checkout PR head",
-  });
+  }, application);
 }
 
-async function assertNoUnpushedBranchCommits(input: { cwd: string; branchName: string; upstreamRef: string; runner: ProcessRunner }): Promise<void> {
-  const localBranch = await input.runner(["git", "show-ref", "--verify", "--quiet", `refs/heads/${input.branchName}`], { cwd: input.cwd });
+async function assertNoUnpushedBranchCommits(input: { cwd: string; branchName: string; upstreamRef: string; runner: ProcessRunner }, application?: ApplicationExecution): Promise<void> {
+  const localBranch = await input.runner(["git", "show-ref", "--verify", "--quiet", `refs/heads/${input.branchName}`], { cwd: input.cwd }, application);
   if (localBranch.exitCode !== 0) return;
-  const ahead = await input.runner(["git", "rev-list", "--count", input.branchName, "--not", input.upstreamRef], { cwd: input.cwd });
+  const ahead = await input.runner(["git", "rev-list", "--count", input.branchName, "--not", input.upstreamRef], { cwd: input.cwd }, application);
   if (ahead.exitCode !== 0) throw new Error(`Unable to inspect local commits on '${input.branchName}': ${tail(ahead.stderr || ahead.stdout)}`);
   const aheadCount = Number(ahead.stdout.trim());
   if (!Number.isFinite(aheadCount)) throw new Error(`Unable to inspect local commits on '${input.branchName}': unexpected rev-list output '${ahead.stdout.trim()}'.`);
@@ -836,10 +838,10 @@ async function assertNoUnpushedBranchCommits(input: { cwd: string; branchName: s
   }
 }
 
-async function assertGitWorkspaceOnBranch(input: { cwd: string; branchName: string; runner: ProcessRunner }): Promise<void> {
-  const result = await input.runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: input.cwd });
+async function assertGitWorkspaceOnBranch(input: { cwd: string; branchName: string; runner: ProcessRunner }, application?: ApplicationExecution): Promise<void> {
+  const result = await input.runner(["git", "rev-parse", "--is-inside-work-tree"], { cwd: input.cwd }, application);
   if (result.exitCode !== 0 || result.stdout.trim() !== "true") throw new Error(`Workspace '${input.cwd}' is not a git work tree.`);
-  const currentBranch = (await runProcessOrThrowWithRunner(input.runner, ["git", "branch", "--show-current"], { cwd: input.cwd, label: "git branch --show-current" })).trim();
+  const currentBranch = (await runProcessOrThrowWithRunner(input.runner, ["git", "branch", "--show-current"], { cwd: input.cwd, label: "git branch --show-current" }, application)).trim();
   if (currentBranch !== input.branchName) throw new Error(`Workspace '${input.cwd}' is on branch '${currentBranch || "(detached)"}', expected '${input.branchName}'.`);
 }
 
@@ -864,26 +866,26 @@ async function writePoisonState(workspacePath: string, error: unknown): Promise<
   await writeFile(path.join(workspacePath, workspaceStateFile), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
-async function hasGitChanges(cwd: string, runner: ProcessRunner): Promise<boolean> {
-  const result = await runner(["git", "status", "--porcelain"], { cwd });
+async function hasGitChanges(cwd: string, runner: ProcessRunner, application?: ApplicationExecution): Promise<boolean> {
+  const result = await runner(["git", "status", "--porcelain"], { cwd }, application);
   if (result.exitCode !== 0) throw new Error(`git status --porcelain failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
   return result.stdout.trim() !== "";
 }
 
-async function gitRemoteBranchExists(input: { cwd: string; branchName: string; runner: ProcessRunner }): Promise<boolean> {
-  const result = await input.runner(["git", "show-ref", "--verify", "--quiet", `refs/remotes/origin/${input.branchName}`], { cwd: input.cwd });
+async function gitRemoteBranchExists(input: { cwd: string; branchName: string; runner: ProcessRunner }, application?: ApplicationExecution): Promise<boolean> {
+  const result = await input.runner(["git", "show-ref", "--verify", "--quiet", `refs/remotes/origin/${input.branchName}`], { cwd: input.cwd }, application);
   return result.exitCode === 0;
 }
 
-async function runProcessOrThrowWithRunner(runner: ProcessRunner, args: string[], options: { cwd?: string | undefined; label?: string }): Promise<string> {
-  if (runner === runProcess) return runProcessOrThrow(args, options);
-  const result = await runner(args, { cwd: options.cwd });
+async function runProcessOrThrowWithRunner(runner: ProcessRunner, args: string[], options: { cwd?: string | undefined; label?: string }, application?: ApplicationExecution): Promise<string> {
+  if (runner === runProcessPromise) return runProcessOrThrowPromise(args, options, application);
+  const result = await runner(args, { cwd: options.cwd }, application);
   if (result.exitCode !== 0) throw new Error(`${options.label ?? args.join(" ")} failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
   return result.stdout;
 }
 
-async function runHookCommand(command: string, cwd: string, timeoutMs: number, runner: ProcessRunner): Promise<ProcessResult> {
-  if (runner !== runProcess) return runner(["sh", "-lc", command], { cwd });
+async function runHookCommand(command: string, cwd: string, timeoutMs: number, runner: ProcessRunner, application?: ApplicationExecution): Promise<ProcessResult> {
+  if (runner !== runProcessPromise) return runner(["sh", "-lc", command], { cwd }, application);
   const child = Bun.spawn(["sh", "-lc", command], { cwd, stdout: "pipe", stderr: "pipe" });
   const timeoutState = { timedOut: false };
   const timer = setTimeout(() => {

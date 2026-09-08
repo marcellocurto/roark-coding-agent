@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fetchGitHubIssue, type GitHubIssueSnapshot } from "../github/issue.ts";
@@ -55,6 +56,7 @@ export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 export async function fetchIssuePhase(
   context: WorkflowContext,
   suppliedSnapshot?: GitHubIssueSnapshot,
+  application?: ApplicationExecution,
 ): Promise<string> {
   const display = deterministicDisplay(context, "fetch", "Fetch issue", "issue.md", "inspect");
   let outcome = "fetched";
@@ -73,7 +75,7 @@ export async function fetchIssuePhase(
       ? `Using fresh pre-claim snapshot for issue #${context.issueNumber}`
       : `Fetching issue #${context.issueNumber}`);
     await context.observer?.phaseStarted({ phase: "fetch", label: "Fetch issue", artifact: "issue" });
-    const result = suppliedSnapshot ?? await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo });
+    const result = suppliedSnapshot ?? await fetchGitHubIssue(context.issueInput, { cwd: context.controlCwd, repo: context.repo }, application);
     assertSnapshotMatchesContext(context, result);
     const issueArtifact = formatGitHubIssueArtifact(result.issue, result.relationships);
 
@@ -104,7 +106,7 @@ export async function planPhase(context: WorkflowContext, runner: AgentRunner = 
   return runPlanTask(context, runner);
 }
 
-export async function captureBaselinePhase(context: WorkflowContext): Promise<string> {
+export async function captureBaselinePhase(context: WorkflowContext, application?: ApplicationExecution): Promise<string> {
   const display = deterministicDisplay(context, "capture-baseline", "Capture baseline", "pre-implementation-baseline.json", "inspect");
   let outcome = "captured";
   return runPresentedPhase(display, async () => {
@@ -115,7 +117,7 @@ export async function captureBaselinePhase(context: WorkflowContext): Promise<st
         return existing;
       }
     }
-    const baseline = await capturePreImplementationBaseline({ cwd: context.agentCwd, yes: context.yes });
+    const baseline = await capturePreImplementationBaseline({ cwd: context.agentCwd, yes: context.yes }, application);
     const content = JSON.stringify({
       ...baseline,
       note: "Restart resets non-.roark worktree state to this baseline; .roark control-plane artifacts are preserved.",
@@ -125,10 +127,10 @@ export async function captureBaselinePhase(context: WorkflowContext): Promise<st
   }, () => ({ outcome, artifact: display.expectedArtifact }));
 }
 
-export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0): Promise<ChangeReport> {
+export async function implementationPhase(context: WorkflowContext, runner: AgentRunner = runPiAgent, restartPass = 0, application?: ApplicationExecution): Promise<ChangeReport> {
   const task = implementationTaskForPass(restartPass);
   if (await shouldRegenerateArtifact(context, task.artifact) || restartPass > 0) {
-    await assertCleanGit({ cwd: context.agentCwd, yes: context.yes || restartPass > 0 });
+    await assertCleanGit({ cwd: context.agentCwd, yes: context.yes || restartPass > 0 }, application);
   }
   const content = await runChangeReportTaskWithForceOverride(context, runner, task, restartPass > 0);
   if (restartPass > 0) {
@@ -174,20 +176,21 @@ export async function fixPhase(
   context: WorkflowContext,
   pass = inferNextFixPass(context),
   runner: AgentRunner = runPiAgent,
+  application?: ApplicationExecution,
 ): Promise<ChangeReport> {
   const task = fixTask(pass);
   if (await shouldRegenerateArtifact(context, task.artifact)) {
-    await assertCleanGit({ cwd: context.agentCwd, yes: true });
+    await assertCleanGit({ cwd: context.agentCwd, yes: true }, application);
   }
   return runChangeReportTask(context, runner, task);
 }
 
-export async function resetBaselinePhase(context: WorkflowContext, pass: number): Promise<string> {
+export async function resetBaselinePhase(context: WorkflowContext, pass: number, application?: ApplicationExecution): Promise<string> {
   const artifact = `baseline-reset-${pass}.md`;
   const display = { ...deterministicDisplay(context, `baseline-reset-${pass}`, "Reset baseline", artifact, "edit"), pass };
   return runPresentedPhase(display, async () => {
     const baseline = JSON.parse(await readArtifact(context, "preImplementationBaseline")) as PreImplementationBaseline;
-    await resetWorktreeToPreImplementationBaseline({ cwd: context.agentCwd, baseline });
+    await resetWorktreeToPreImplementationBaseline({ cwd: context.agentCwd, baseline }, application);
     const content = `# Baseline Reset Pass ${pass}\n\n## Summary\nReset non-.roark worktree state to pre-implementation baseline ${baseline.head}.\n\n## Preserved Control Plane\n.roark artifacts were preserved.\n`;
     await writeArtifact(context, baselineResetLogRef(pass), content);
     return content;
@@ -222,11 +225,12 @@ export async function runFullWorkflow(
   context: WorkflowContext,
   runner: AgentRunner = runPiAgent,
   options: RunFullWorkflowOptions = {},
+  application?: ApplicationExecution,
 ): Promise<WorkflowRunResult> {
   context.observer ??= createFileRunObserver(context);
   await context.observer.runStarted({ command: "do" });
   try {
-    const result = await runFullWorkflowBody(context, runner, options);
+    const result = await runFullWorkflowBody(context, runner, options, application);
     await context.observer.runCompleted({ status: result.status });
     return result;
   } catch (error) {
@@ -239,6 +243,7 @@ async function runFullWorkflowBody(
   context: WorkflowContext,
   runner: AgentRunner,
   options: RunFullWorkflowOptions,
+  application?: ApplicationExecution,
 ): Promise<WorkflowRunResult> {
   const completedActions: WorkflowProgressionAction[] = [];
 
@@ -266,7 +271,7 @@ async function runFullWorkflowBody(
         completedActions.push(next, following);
         continue;
       }
-      await runWorkflowPhase(context, runner, next.phase, next.pass, options);
+      await runWorkflowPhase(context, runner, next.phase, next.pass, options, application);
       completedActions.push(next);
       continue;
     }
@@ -293,19 +298,20 @@ async function runWorkflowPhase(
   phase: WorkflowRunPhase,
   pass?: number,
   options: RunFullWorkflowOptions = {},
+  application?: ApplicationExecution,
 ): Promise<void> {
   switch (phase) {
-    case "fetch": await fetchIssuePhase(context, options.issueSnapshot); return;
+    case "fetch": await fetchIssuePhase(context, options.issueSnapshot, application); return;
     case "triage": await triagePhase(context, runner); return;
     case "plan-draft": await planDraftPhase(context, runner); return;
     case "plan": await planPhase(context, runner); return;
-    case "capture-baseline": await captureBaselinePhase(context); return;
-    case "implement": await implementationPhase(context, runner, pass ?? 0); return;
+    case "capture-baseline": await captureBaselinePhase(context, application); return;
+    case "implement": await implementationPhase(context, runner, pass ?? 0, application); return;
     case "refine-code": await codeRefinementPhase(context, pass, runner); return;
     case "review-a": await runReviewTask(context, runner, reviewATaskForPass(pass ?? 0)); return;
     case "review-b": await runReviewTask(context, runner, reviewBTaskForPass(pass ?? 0)); return;
-    case "fix": await fixPhase(context, pass, runner); return;
-    case "reset-baseline": await resetBaselinePhase(context, pass ?? 1); return;
+    case "fix": await fixPhase(context, pass, runner, application); return;
+    case "reset-baseline": await resetBaselinePhase(context, pass ?? 1, application); return;
     default: return assertNever(phase);
   }
 }
@@ -366,6 +372,7 @@ export async function runSinglePhase(
   context: WorkflowContext,
   phase: SinglePhaseCommand,
   runner: AgentRunner = runPiAgent,
+  application?: ApplicationExecution,
 ): Promise<void> {
   context.observer ??= createFileRunObserver(context);
   await context.observer.runStarted({ command: phase });
@@ -378,9 +385,9 @@ export async function runSinglePhase(
     }
     else if (phase === "create-issues") {
       assertAttemptSelectedWhenAttemptsExist(context, "create-issues");
-      await createIssuesPhase(context, runner);
+      await createIssuesPhase(context, runner, application);
     }
-    else await runWorkflowPhase(context, runner, phase, standalonePhasePass(context, phase));
+    else await runWorkflowPhase(context, runner, phase, standalonePhasePass(context, phase), undefined, application);
     await context.observer.runCompleted({ status: "completed" });
   } catch (error) {
     await context.observer.runFailed(error);

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import type { ApplicationExecution } from "./lib/runtime/application.ts";
 import * as BunRuntime from "@effect/platform-bun/BunRuntime";
 import { Effect } from "effect";
 import { applicationLayer, fromLegacyPromise, runApplicationPromise } from "./lib/runtime/application.ts";
@@ -21,7 +22,7 @@ import { sanitizeTerminalText } from "./lib/presentation/terminal.ts";
 import type { AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
 import { displayArgvTarget, displayCommandTarget } from "./lib/cli/target.ts";
 
-export async function main(argv = Bun.argv.slice(2)): Promise<void> {
+export async function main(argv = Bun.argv.slice(2), application?: ApplicationExecution): Promise<void> {
   const cliArgv = argv.length === 0 ? await resolveInteractiveArgv() : argv;
   if (!cliArgv) return;
 
@@ -36,7 +37,7 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
     return;
   }
 
-  const parsed = await hydrateCliOptions(rawParsed);
+  const parsed = await hydrateCliOptions(rawParsed, undefined, application);
 
   if (isLongRunningCommand(parsed.command)) {
     presenter().setRoots([parsed.cwd]);
@@ -44,7 +45,7 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   }
 
   if (parsed.command === "init") {
-    const result = await runInit(parsed);
+    const result = await runInit(parsed, undefined, application);
     console.log(`Initialized Roark in ${result.root}`);
     for (const file of result.files) console.log(`- ${file}`);
     for (const line of result.guidance) console.log(line);
@@ -52,7 +53,7 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   }
 
   if (parsed.command === "auto") {
-    const result = await runAutoDiscovery(parsed);
+    const result = await runAutoDiscovery(parsed, undefined, application);
     if (result.kind === "dry-run") presenter().outcome("SUCCESS", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "dry run complete");
     else if (result.kind === "no-eligible") presenter().outcome("STOPPED", "auto", "no eligible issues");
     else if (result.attempts.length === 0) presenter().outcome("STOPPED", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "no attempt started");
@@ -61,19 +62,19 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   }
 
   if (parsed.command === "continue") {
-    presentAutorunOutcome(await runAutoContinue(parsed));
+    presentAutorunOutcome(await runAutoContinue(parsed, undefined, application));
     return;
   }
 
   if (parsed.command === "revise-pr") {
-    const result = await runPrRevision(parsed);
+    const result = await runPrRevision(parsed, undefined, application);
     presenter().outcome(outcomeStatus(result.outcome), `PR #${parsed.prNumber}`, result.outcome);
     presenter().artifact(result.context.revisionDirRelative);
     return;
   }
 
   if (parsed.command === "review-pr") {
-    const result = await runPrReview(parsed);
+    const result = await runPrReview(parsed, undefined, application);
     presenter().outcome(result.outcome === "blocked" ? "BLOCKED" : "SUCCESS", `PR #${parsed.prNumber}`, result.outcome);
     presenter().artifact(result.context.reviewDirRelative);
     return;
@@ -85,13 +86,13 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
   }
 
   if (parsed.command === "workspace") {
-    await runWorkspaceCommand(parsed);
+    await runWorkspaceCommand(parsed, application);
     return;
   }
 
   if (parsed.command === "remove") {
     if (parsed.targets.length > 0) {
-      await runRemoveCommand(parsed);
+      await runRemoveCommand(parsed, application);
       return;
     }
 
@@ -107,7 +108,7 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
       if (!managedWorkspace) throw new Error("Interactive workspace selection returned an invalid index.");
       return managedWorkspace.target;
     });
-    await runRemoveCommand({ ...parsed, targets });
+    await runRemoveCommand({ ...parsed, targets }, application);
     return;
   }
 
@@ -116,13 +117,13 @@ export async function main(argv = Bun.argv.slice(2)): Promise<void> {
 
   if (parsed.command === "do") {
     for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n")) presenter().line(line);
-    const result = await runFullWorkflow(context);
+    const result = await runFullWorkflow(context, undefined, undefined, application);
     await printDoLocalModeReadyMessageIfReady(context, (message) => {
       presenter().line(message);
     });
     presenter().outcome(workflowOutcomeStatus(result.status), `#${context.issueNumber}`, result.status);
   } else {
-    await runSinglePhase(context, parsed.command);
+    await runSinglePhase(context, parsed.command, undefined, application);
     presenter().outcome("SUCCESS", `#${context.issueNumber}`, `${parsed.command} complete`);
   }
 
@@ -161,18 +162,17 @@ async function readPackageVersion(): Promise<string> {
 }
 
 interface CliLifecycleDependencies {
-  execute?: (argv: string[]) => Promise<void>;
-  notify?: (request: ExitNotificationRequest) => Promise<void>;
+  execute?: (argv: string[], application?: ApplicationExecution) => Promise<void>;
+  notify?: (request: ExitNotificationRequest) => Effect.Effect<void, Error, Effect.Services<ReturnType<typeof sendExitNotification>>>;
   reportError?: (error: unknown) => void;
   presentation?: Presenter | undefined;
 }
 
-export function runCliEffect(
+export function runCli(
   argv = Bun.argv.slice(2),
   dependencies: CliLifecycleDependencies = {},
 ) {
   const execute = dependencies.execute ?? main;
-  const notify = dependencies.notify ?? sendExitNotification;
   const reportError = dependencies.reportError ?? ((error: unknown) => {
     console.error(sanitizeTerminalText(error instanceof Error ? error.message : String(error)));
   });
@@ -184,7 +184,7 @@ export function runCliEffect(
   });
 
   return Effect.gen(function*() {
-    const exitCode = yield* fromLegacyPromise(() => runWithPresenter(presentation, () => execute(argv))).pipe(
+    const exitCode = yield* fromLegacyPromise((application) => runWithPresenter(presentation, () => execute(argv, application))).pipe(
       Effect.as(0),
       Effect.catch((error) => Effect.sync(() => {
         if (longRunning) presentation.outcome("FAILED", presentation.currentTarget() ?? displayArgvTarget(argv), "run failed");
@@ -192,19 +192,19 @@ export function runCliEffect(
         return 1;
       })),
     );
-    yield* fromLegacyPromise(() => notify({ argv, succeeded: exitCode === 0 })).pipe(
+    yield* (dependencies.notify ?? sendExitNotification)({ argv, succeeded: exitCode === 0 }).pipe(
       Effect.catch(() => Effect.sync(() => { console.error("Warning: Roark could not deliver the exit notification."); })),
     );
     return exitCode;
   });
 }
 
-export function runCli(argv = Bun.argv.slice(2), dependencies: CliLifecycleDependencies = {}): Promise<number> {
-  return runApplicationPromise(runCliEffect(argv, dependencies));
+export function runCliPromise(argv = Bun.argv.slice(2), dependencies: CliLifecycleDependencies = {}, application?: ApplicationExecution): Promise<number> {
+  return runApplicationPromise(runCli(argv, dependencies), application);
 }
 
 if (import.meta.main) {
-  BunRuntime.runMain(runCliEffect().pipe(
+  BunRuntime.runMain(runCli().pipe(
     Effect.tap((exitCode) => Effect.sync(() => { process.exitCode = exitCode; })),
     Effect.provide(applicationLayer),
   ));

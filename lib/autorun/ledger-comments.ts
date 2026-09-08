@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { artifactExists, latestCompleteReviewCycle, readArtifact, reviewARef, reviewBRef, type ArtifactRef, type WorkflowContext } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
 import { buildRoarkMarker, postOrUpdateIssueCommentByMarker } from "../github/comments.ts";
@@ -44,7 +45,7 @@ export async function publishPlanningLedgerComments(input: {
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
-}, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}): Promise<void> {
+}, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}, application?: ApplicationExecution): Promise<void> {
   const publishLedgerComment = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   await publishArtifactLedgerComment({
     ...input,
@@ -57,7 +58,7 @@ export async function publishPlanningLedgerComments(input: {
       artifactContent,
     }),
     publishLedgerComment,
-  });
+  }, application);
   await publishArtifactLedgerComment({
     ...input,
     artifact: "implementationPlan",
@@ -69,7 +70,7 @@ export async function publishPlanningLedgerComments(input: {
       artifactContent,
     }),
     publishLedgerComment,
-  });
+  }, application);
 }
 
 export async function publishReviewLedgerComments(input: {
@@ -78,7 +79,7 @@ export async function publishReviewLedgerComments(input: {
   issue: AutorunIssueCandidate;
   workflowContext: WorkflowContext;
   attemptMetadata: AttemptMetadata;
-}, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}): Promise<void> {
+}, injected: { publishIssueLedgerComment?: PublishIssueLedgerCommentFn } = {}, application?: ApplicationExecution): Promise<void> {
   const publishLedgerComment = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   const latestCycle = latestCompleteReviewCycle(input.workflowContext);
   if (latestCycle === undefined) return;
@@ -89,7 +90,7 @@ export async function publishReviewLedgerComments(input: {
     title: `Review A pass ${latestCycle}`,
     markerPhase: "review-a",
     publishLedgerComment,
-  });
+  }, application);
   await publishReviewLedgerComment({
     ...input,
     artifact: reviewBRef(latestCycle),
@@ -97,7 +98,7 @@ export async function publishReviewLedgerComments(input: {
     title: `Review B pass ${latestCycle}`,
     markerPhase: "review-b",
     publishLedgerComment,
-  });
+  }, application);
 }
 
 export async function publishIssueLedgerComment(input: {
@@ -107,7 +108,7 @@ export async function publishIssueLedgerComment(input: {
   attemptMetadata: AttemptMetadata;
   phase: LedgerCommentPhase;
   body: string;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   const marker = buildRoarkMarker({
     issueNumber: input.issueNumber,
     attempt: input.attemptMetadata.attempt,
@@ -121,7 +122,7 @@ export async function publishIssueLedgerComment(input: {
       marker,
       body: input.body,
       existingCommentId: input.attemptMetadata.githubComments?.issue?.[input.phase]?.id,
-    });
+    }, application);
     recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
   } catch (error) {
     presenter().warning(`failed to publish ${input.phase} issue ledger comment: ${formatError(error)}`);
@@ -194,7 +195,7 @@ async function publishArtifactLedgerComment(input: {
   attemptMetadataPath?: string | undefined;
   formatBody: (artifactContent: string) => string;
   publishLedgerComment: PublishIssueLedgerCommentFn;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   if (!artifactExists(input.workflowContext, input.artifact)) return;
   const artifactContent = await readArtifact(input.workflowContext, input.artifact);
   const validation = validateAgentArtifact(input.artifact, artifactContent);
@@ -208,7 +209,7 @@ async function publishArtifactLedgerComment(input: {
     attemptMetadata: input.attemptMetadata,
     phase: input.phase,
     body: input.formatBody(renderedContent),
-  });
+  }, application);
 }
 
 async function publishReviewLedgerComment(input: {
@@ -222,7 +223,7 @@ async function publishReviewLedgerComment(input: {
   markerPhase?: "review-a" | "review-b" | undefined;
   title: string;
   publishLedgerComment: PublishIssueLedgerCommentFn;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   if (!artifactExists(input.workflowContext, input.artifact)) return;
   const artifactContent = await readArtifact(input.workflowContext, input.artifact);
   const validation = validateAgentArtifact(input.artifact, artifactContent);
@@ -242,7 +243,7 @@ async function publishReviewLedgerComment(input: {
     attemptMetadata: input.attemptMetadata,
     phase: input.phase,
     body,
-  });
+  }, application);
 }
 
 function formatFencedBlock(value: string, language: string): string {

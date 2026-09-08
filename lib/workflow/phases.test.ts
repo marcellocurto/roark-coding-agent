@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import type { AgentRunner } from "./agent-runner.ts";
 import { artifactExists, createWorkflowContext, fixLogMarkdownRef, fixLogRef, readArtifact, refinementLogRef, reviewAMarkdownRef, reviewARef, reviewBMarkdownRef, reviewBRef, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
 import { issueArtifactHasRelationshipSnapshot, reviewPhase, runFullWorkflow, runSinglePhase } from "./phases.ts";
@@ -260,7 +260,7 @@ describe("runFullWorkflow", () => {
 
   test("persists both reviewers' required findings, fixes them, and becomes ready after approval", async () => {
     const context = await tempContext();
-    await runProcessOrThrow(["git", "init", "-b", "main"], { cwd: context.agentCwd });
+    await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd: context.agentCwd });
     await seedBaselineAndImplementation(context);
     const reviewAFindings = [
       reviewFinding("must-fix-current", "Reject malformed identifiers"),
@@ -417,7 +417,7 @@ describe("runFullWorkflow", () => {
 
   test("fixes local findings before stopping on an independent external blocker", async () => {
     const context = await tempContext();
-    await runProcessOrThrow(["git", "init", "-b", "main"], { cwd: context.agentCwd });
+    await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd: context.agentCwd });
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
 

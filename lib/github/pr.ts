@@ -1,4 +1,5 @@
-import { runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 
 export interface PullRequestComment {
   id?: string | undefined;
@@ -101,32 +102,32 @@ export function buildPullRequestFeedbackGraphqlArgv(input: { repo: string; prNum
   ];
 }
 
-export async function fetchPullRequestFeedback(options: { cwd: string; repo?: string | undefined; prNumber: number }): Promise<PullRequestFeedback> {
-  const repo = await resolvePullRequestRepo({ cwd: options.cwd, repo: options.repo });
-  const stdout = await runProcessOrThrow(buildPullRequestFeedbackGraphqlArgv({ repo, prNumber: options.prNumber }), {
+export async function fetchPullRequestFeedback(options: { cwd: string; repo?: string | undefined; prNumber: number }, application?: ApplicationExecution): Promise<PullRequestFeedback> {
+  const repo = await resolvePullRequestRepo({ cwd: options.cwd, repo: options.repo }, application);
+  const stdout = await runProcessOrThrowPromise(buildPullRequestFeedbackGraphqlArgv({ repo, prNumber: options.prNumber }), {
     cwd: options.cwd,
     label: "gh api graphql pull request feedback",
-  });
+  }, application);
   const feedback = parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
   const closingIssues = await Promise.all((feedback.closingIssues ?? []).map(async (issue) => {
     if (issue.repository?.toLowerCase() !== repo.toLowerCase()) return issue;
-    const raw = await runProcessOrThrow([
+    const raw = await runProcessOrThrowPromise([
       "gh", "api", `repos/${repo}/issues/${issue.number}/comments`, "--paginate", "--slurp",
-    ], { cwd: options.cwd, label: `gh api closing issue #${issue.number} comments` });
+    ], { cwd: options.cwd, label: `gh api closing issue #${issue.number} comments` }, application);
     return { ...issue, comments: parseRestPullRequestComments(raw) };
   }));
-  const commentsRaw = await runProcessOrThrow([
+  const commentsRaw = await runProcessOrThrowPromise([
     "gh", "api", `repos/${repo}/issues/${options.prNumber}/comments`, "--paginate", "--slurp",
-  ], { cwd: options.cwd, label: "gh api pull request comments" });
+  ], { cwd: options.cwd, label: "gh api pull request comments" }, application);
   return withPlannerComments({ ...feedback, closingIssues }, parseRestPullRequestComments(commentsRaw));
 }
 
-export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
+export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}, application?: ApplicationExecution): Promise<string> {
   if (options.repo) return options.repo;
-  const stdout = await runProcessOrThrow(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
+  const stdout = await runProcessOrThrowPromise(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
     cwd: options.cwd,
     label: "gh repo view",
-  });
+  }, application);
   const repo = stdout.trim();
   if (!repo) throw new Error("Could not resolve GitHub repository. Pass --repo owner/repo.");
   return repo;

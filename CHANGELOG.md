@@ -4,24 +4,12 @@ All notable changes to Roark are tracked here.
 
 This project uses [Semantic Versioning](https://semver.org/). While Roark is pre-1.0, incompatible CLI/config changes may ship in minor releases.
 
-## [0.3.0] - 2026-09-08
+## [0.3.0] - Unreleased
 
 ### Changed
 
 - Migrated all default agent phases to GPT-6 Astra through Pi 0.85.1. Default thinking now varies by phase, fast uses low except for medium Reviews A and B, and deep uses high execution with xhigh planning/reviews. Publishing uses low in every profile; explicit model and thinking overrides remain available.
 - Established the Effect v4 application runtime and Bun platform services, with scoped process execution and Effect-native verification timeouts. Interrupting migrated subprocess work now waits for process-group cleanup, including descendants whose shell has already exited.
-
-- Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
-- Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
-- `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
-- PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.
-- `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.
-- `revise-pr` now assigns every planned feedback item a stable source-derived identity and requires execution and fix passes to provide exactly one final disposition for every identity. Summary comments render that single linked list with objective outcome, review, verification, changed-file, and commit metadata; internal plans, logs, reviews, feedback snapshots, and local artifact paths stay local.
-- Public GitHub comments, pull request bodies, and generated issues no longer expose machine-local `.roark` run or artifact paths. PR bodies also omit the redundant Roark automation details block. Internal paths and run metadata remain available in local artifacts, status output, observability, prompts, and terminal recovery guidance.
-
-### Removed
-
-- Removed the derived `pr-narrative.md` artifact and its generation lifecycle.
 
 ## [0.2.0] - 2026-07-14
 
@@ -34,6 +22,13 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
+- Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
+- `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
+- PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.
+- `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.
+- `revise-pr` now assigns every planned feedback item a stable source-derived identity and requires execution and fix passes to provide exactly one final disposition for every identity. Summary comments render that single linked list with objective outcome, review, verification, changed-file, and commit metadata; internal plans, logs, reviews, feedback snapshots, and local artifact paths stay local.
+- Public GitHub comments, pull request bodies, and generated issues no longer expose machine-local `.roark` run or artifact paths. PR bodies also omit the redundant Roark automation details block. Internal paths and run metadata remain available in local artifacts, status output, observability, prompts, and terminal recovery guidance.
 - Review outcomes and finding identifiers are now derived from typed findings instead of parsed from agent-authored Markdown, so arbitrary reviewer formatting cannot hide required fixes.
 - Issue-workflow readiness, curation, publishing, and ledger comments now use only validated numbered review cycles; unnumbered review files are ignored.
 - Triage, draft/final implementation plans, implementation/refinement/fix reports, and readiness now persist canonical JSON. Workflow routing, PR narrative construction, local-mode reporting, and the publish gate consume validated JSON; Markdown companions are deterministic presentation only.
@@ -46,6 +41,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Removed
 
+- Removed the derived `pr-narrative.md` artifact and its generation lifecycle.
 - Removed the pre-1.0 `roark workspace remove` command in favor of the simpler `roark remove` interface.
 
 ## [0.0.2] - 2026-07-11

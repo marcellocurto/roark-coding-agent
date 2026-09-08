@@ -1,3 +1,4 @@
+import { Effect } from "effect";
 import { describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import type { PullRequestFeedback } from "../github/pr.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import { noopAsync } from "../utils/async.ts";
 import { runPrReview } from "./workflow.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
 
@@ -83,10 +84,7 @@ describe("runPrReview", () => {
       }); },
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      verificationRunner: async ({ command }) => {
-        await noopAsync();
-        return { ok: true, command, exitCode: 0, stdout: "passed", stderr: "" };
-      },
+      verificationRunner: ({ command }) => Effect.succeed({ ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
       agentRunner: async (request) => {
         await noopAsync();
         return request.display.phaseId.endsWith("a")
@@ -162,7 +160,7 @@ describe("runPrReview", () => {
         lifecycleCalls.push(`${name}:${String(hooks?.timeoutMs)}`);
       },
       assertWorkspace: async () => { await noopAsync(); },
-      verificationRunner: async ({ command }) => (await noopAsync(), { ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
+      verificationRunner: ({ command }) => Effect.succeed({ ok: true, command, exitCode: 0, stdout: "passed", stderr: "" }),
       agentRunner: async (request) => {
         await noopAsync();
         agentCalls.push(request);
@@ -282,7 +280,7 @@ describe("runPrReview", () => {
       }),
       runLifecycleHook: async () => { await noopAsync(); },
       assertWorkspace: async () => { await noopAsync(); },
-      verificationRunner: async ({ command }) => (await noopAsync(), {
+      verificationRunner: ({ command }) => Effect.succeed({
         ok: true,
         command,
         exitCode: 0,
@@ -461,5 +459,5 @@ function approvedReview(id: string): string {
 }
 
 async function initAgentRepo(cwd: string): Promise<void> {
-  await runProcessOrThrow(["git", "init", "-b", "main"], { cwd });
+  await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
 }

@@ -1,4 +1,5 @@
-import { runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import { formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 import { presenter } from "../presentation/presenter.ts";
@@ -63,23 +64,23 @@ export function buildRemoveLabelArgv(options: FailureLabelArgvOptions): string[]
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
-export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<GitHubCommentRef | undefined> {
+export async function markIssueFailed(options: MarkIssueFailedOptions, application?: ApplicationExecution): Promise<GitHubCommentRef | undefined> {
   const labelArgv = buildFailureLabelArgv({
     repo: options.repo,
     issueNumber: options.issueNumber,
     label: options.label,
   });
   try {
-    await runProcessOrThrow(labelArgv, { cwd: options.cwd, label: "gh issue edit --add-label (failure)" });
+    await runProcessOrThrowPromise(labelArgv, { cwd: options.cwd, label: "gh issue edit --add-label (failure)" }, application);
   } catch (error) {
     presenter().warning(`failed to apply failure label '${options.label}': ${formatError(error)}`);
   }
 
   for (const label of uniqueLabels(options.removeLabels ?? []).filter((label) => label !== options.label)) {
     try {
-      await runProcessOrThrow(
+      await runProcessOrThrowPromise(
         buildRemoveLabelArgv({ repo: options.repo, issueNumber: options.issueNumber, label }),
-        { cwd: options.cwd, label: "gh issue edit --remove-label (failure cleanup)" },
+        { cwd: options.cwd, label: "gh issue edit --remove-label (failure cleanup)" }, application
       );
     } catch (error) {
       presenter().warning(`failed to remove label '${label}': ${formatError(error)}`);
@@ -95,9 +96,9 @@ export async function markIssueFailed(options: MarkIssueFailedOptions): Promise<
         marker: options.marker,
         body: options.comment,
         existingCommentId: options.existingCommentId,
-      });
+      }, application);
     }
-    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: options.comment });
+    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: options.comment }, application);
   } catch (error) {
     presenter().warning(`failed to post failure comment: ${formatError(error)}`);
   }

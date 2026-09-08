@@ -11,7 +11,7 @@ import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 import { defaultLifecycleHooks, defaultWorkspaceConfig } from "../autorun/workspace.ts";
 import { hydrateCliOptions } from "./hydrate.ts";
 import { roarkGitignoreContent, runInit } from "./init.ts";
-import { runProcess, runProcessOrThrow } from "./process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "./process.ts";
 
 const tempDirs: string[] = [];
 
@@ -22,7 +22,7 @@ afterEach(async () => {
 describe("runInit", () => {
   test("resolves subdirectory cwd to git root and writes managed files", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
     await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc --noEmit", test: "bun test" } }), "utf8");
     const subdir = path.join(repo, "src", "components");
     await mkdir(subdir, { recursive: true });
@@ -44,7 +44,7 @@ describe("runInit", () => {
 
   test("generates config with inferred HTTPS origin and Bun-first verify", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/inferred.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/inferred.git"], { cwd: repo });
     await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc", test: "bun test" } }), "utf8");
 
     await initFromArgv(["init", "--cwd", repo]);
@@ -72,14 +72,14 @@ describe("runInit", () => {
 
   test("canonicalizes inferred origin repos through GitHub before writing config", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/old-name.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/old-name.git"], { cwd: repo });
 
     await runInit({ command: "init", cwd: repo, force: false }, {
       runner: async (args, options) => {
         if (args.join(" ") === "gh repo view owner/old-name --json nameWithOwner --jq .nameWithOwner") {
           return { exitCode: 0, stdout: "owner/new-name\n", stderr: "" };
         }
-        return runProcess(args, options);
+        return runProcessPromise(args, options);
       },
     });
 
@@ -89,7 +89,7 @@ describe("runInit", () => {
 
   test("generates config with inferred SSH origin and test fallback", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "git@github.com:owner/ssh-repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "git@github.com:owner/ssh-repo.git"], { cwd: repo });
     await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }), "utf8");
 
     await initFromArgv(["init", "--cwd", repo]);
@@ -115,7 +115,7 @@ describe("runInit", () => {
 
   test("--repo overrides origin and Makefile test target is inferred", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: repo });
     await writeFile(path.join(repo, "Makefile"), "test:\n\techo ok\n", "utf8");
 
     await initFromArgv(["init", "--cwd", repo, "--repo", "override/repo"]);
@@ -127,7 +127,7 @@ describe("runInit", () => {
 
   test("omits verify and returns guidance when no verify command is obvious", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
 
     const result = await initFromArgv(["init", "--cwd", repo]);
 
@@ -208,6 +208,6 @@ async function tempDir(): Promise<string> {
 
 async function tempGitRepo(): Promise<string> {
   const dir = await tempDir();
-  await runProcessOrThrow(["git", "init"], { cwd: dir });
+  await runProcessOrThrowPromise(["git", "init"], { cwd: dir });
   return dir;
 }

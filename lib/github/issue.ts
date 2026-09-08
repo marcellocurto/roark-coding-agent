@@ -1,5 +1,6 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import { postIssueComment } from "./comments.ts";
 
 export interface ParsedIssueRef {
@@ -102,7 +103,7 @@ export function parseIssueRef(input: string, explicitRepo?: string): ParsedIssue
   throw new Error(`Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`);
 }
 
-export async function listOpenGitHubIssues(options: { cwd: string; repo?: string | undefined; limit: number }): Promise<GitHubIssueListItem[]> {
+export async function listOpenGitHubIssues(options: { cwd: string; repo?: string | undefined; limit: number }, application?: ApplicationExecution): Promise<GitHubIssueListItem[]> {
   const args = [
     "gh",
     "issue",
@@ -116,15 +117,15 @@ export async function listOpenGitHubIssues(options: { cwd: string; repo?: string
   ];
   if (options.repo) args.push("--repo", options.repo);
 
-  const stdout = await runProcessOrThrow(args, { cwd: options.cwd, label: "gh issue list" });
+  const stdout = await runProcessOrThrowPromise(args, { cwd: options.cwd, label: "gh issue list" }, application);
   return JSON.parse(stdout) as GitHubIssueListItem[];
 }
 
-export async function getCurrentGitHubLogin(options: { cwd: string }): Promise<string> {
-  return (await runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" })).trim();
+export async function getCurrentGitHubLogin(options: { cwd: string }, application?: ApplicationExecution): Promise<string> {
+  return (await runProcessOrThrowPromise(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" }, application)).trim();
 }
 
-export async function claimGitHubIssue(options: { cwd: string; repo?: string | undefined; plan: AutorunClaimPlan; postComment?: boolean }): Promise<void> {
+export async function claimGitHubIssue(options: { cwd: string; repo?: string | undefined; plan: AutorunClaimPlan; postComment?: boolean }, application?: ApplicationExecution): Promise<void> {
   const issueNumber = String(options.plan.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
 
@@ -134,18 +135,18 @@ export async function claimGitHubIssue(options: { cwd: string; repo?: string | u
     issueNumber: options.plan.issueNumber,
     nextLabel: options.plan.inProgressLabel,
     removeLabels: options.plan.removeLabels,
-  });
+  }, application);
 
   if (options.plan.assignee) {
-    await runProcessOrThrow(
+    await runProcessOrThrowPromise(
       ["gh", "issue", "edit", issueNumber, "--add-assignee", options.plan.assignee, ...repoArgs],
-      { cwd: options.cwd, label: "gh issue edit --add-assignee" },
+      { cwd: options.cwd, label: "gh issue edit --add-assignee" }, application
     );
   }
 
   if (options.postComment === false) return;
 
-  await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber, body: options.plan.commentBody });
+  await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber, body: options.plan.commentBody }, application);
 }
 
 export async function transitionGitHubIssueLabels(options: {
@@ -154,15 +155,15 @@ export async function transitionGitHubIssueLabels(options: {
   issueNumber: string | number;
   nextLabel: string;
   removeLabels: readonly string[];
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   const issueNumber = String(options.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   const labelArgs = options.removeLabels
     .filter((candidate) => candidate !== options.nextLabel)
     .flatMap((label) => ["--remove-label", label]);
-  await runProcessOrThrow(
+  await runProcessOrThrowPromise(
     ["gh", "issue", "edit", issueNumber, "--add-label", options.nextLabel, ...labelArgs, ...repoArgs],
-    { cwd: options.cwd, label: "gh issue edit --transition-label" },
+    { cwd: options.cwd, label: "gh issue edit --transition-label" }, application
   );
 }
 
@@ -194,6 +195,7 @@ export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "num
 export async function fetchGitHubIssue(
   input: string,
   options: { cwd: string; repo?: string | undefined },
+  application?: ApplicationExecution,
 ): Promise<GitHubIssueSnapshot> {
   const parsed = parseIssueRef(input, options.repo);
   const args = [
@@ -206,15 +208,15 @@ export async function fetchGitHubIssue(
   ];
   if (parsed.repo) args.push("--repo", parsed.repo);
 
-  const stdout = await runProcessOrThrow(args, { cwd: options.cwd, label: "gh issue view" });
+  const stdout = await runProcessOrThrowPromise(args, { cwd: options.cwd, label: "gh issue view" }, application);
   const issue = JSON.parse(stdout) as GitHubIssue;
-  const repo = await resolveGitHubIssueRepo({ cwd: options.cwd, explicitRepo: parsed.repo, issueUrl: issue.url });
+  const repo = await resolveGitHubIssueRepo({ cwd: options.cwd, explicitRepo: parsed.repo, issueUrl: issue.url }, application);
   const relationships = await fetchGitHubIssueRelationships({
     cwd: options.cwd,
     repo,
     issueNumber: parsed.issueNumber,
     body: issue.body ?? "",
-  });
+  }, application);
 
   return {
     issue,
@@ -225,15 +227,15 @@ export async function fetchGitHubIssue(
   };
 }
 
-export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string | undefined; issueUrl?: string  | undefined}): Promise<string | undefined> {
+export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string | undefined; issueUrl?: string  | undefined}, application?: ApplicationExecution): Promise<string | undefined> {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;
 
   try {
-    return (await runProcessOrThrow(
+    return (await runProcessOrThrowPromise(
       ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-      { cwd: options.cwd, label: "gh repo view" },
+      { cwd: options.cwd, label: "gh repo view" }, application
     )).trim() || undefined;
   } catch {
     return undefined;
@@ -245,10 +247,10 @@ export async function fetchGitHubIssueRelationships(options: {
   repo?: string | undefined  ;
   issueNumber: string | number;
   body: string;
-}): Promise<GitHubIssueRelationships> {
+}, application?: ApplicationExecution): Promise<GitHubIssueRelationships> {
   const fetchedAt = new Date().toISOString();
   const native = options.repo
-    ? await fetchNativeRelationshipsBestEffort({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber })
+    ? await fetchNativeRelationshipsBestEffort({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber }, application)
     : {
       nativeDependenciesAvailable: false,
       blockedBy: [] as GitHubIssueDependency[],
@@ -257,7 +259,7 @@ export async function fetchGitHubIssueRelationships(options: {
     };
 
   const bodyDeclaredBlockers = options.repo
-    ? await verifyBodyDeclaredBlockers({ cwd: options.cwd, refs: parseBodyDeclaredBlockerRefs(options.body, options.repo) })
+    ? await verifyBodyDeclaredBlockers({ cwd: options.cwd, refs: parseBodyDeclaredBlockerRefs(options.body, options.repo) }, application)
     : [];
 
   return {
@@ -316,7 +318,7 @@ export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDepen
   };
 }
 
-async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: string; issueNumber: string | number }): Promise<{
+async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: string; issueNumber: string | number }, application?: ApplicationExecution): Promise<{
   nativeDependenciesAvailable: boolean;
   issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
   blockedBy: GitHubIssueDependency[];
@@ -325,9 +327,9 @@ async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: 
 }> {
   try {
     const [issueRaw, blockedByRaw, blockingRaw] = await Promise.all([
-      runProcessOrThrow(buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependency summary" }),
-      runProcessOrThrow(buildIssueBlockedByDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocked_by" }),
-      runProcessOrThrow(buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocking" }),
+      runProcessOrThrowPromise(buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependency summary" }, application),
+      runProcessOrThrowPromise(buildIssueBlockedByDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocked_by" }, application),
+      runProcessOrThrowPromise(buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocking" }, application),
     ]);
 
     const issuePayload = JSON.parse(issueRaw) as unknown;
@@ -346,11 +348,11 @@ async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: 
   }
 }
 
-async function verifyBodyDeclaredBlockers(options: { cwd: string; refs: BodyBlockerRef[] }): Promise<BodyDeclaredBlocker[]> {
+async function verifyBodyDeclaredBlockers(options: { cwd: string; refs: BodyBlockerRef[] }, application?: ApplicationExecution): Promise<BodyDeclaredBlocker[]> {
   const results: BodyDeclaredBlocker[] = [];
   for (const ref of options.refs) {
     try {
-      const raw = await runProcessOrThrow(buildBodyBlockerViewArgv(ref), { cwd: options.cwd, label: "gh issue view body-declared blocker" });
+      const raw = await runProcessOrThrowPromise(buildBodyBlockerViewArgv(ref), { cwd: options.cwd, label: "gh issue view body-declared blocker" }, application);
       const parsed = JSON.parse(raw) as unknown;
       const dependency = normalizeGitHubIssueDependency(parsed);
       const closed = isRecord(parsed) ? booleanField(parsed, "closed") : undefined;

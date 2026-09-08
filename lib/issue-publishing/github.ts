@@ -1,4 +1,5 @@
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 
 export interface IssuePublishRequest {
   cwd: string;
@@ -14,31 +15,31 @@ export interface IssuePublishResult {
   stdout?: string | undefined;
 }
 
-export type IssuePublisher = (request: IssuePublishRequest) => Promise<IssuePublishResult>;
+export type IssuePublisher = (request: IssuePublishRequest, application?: ApplicationExecution) => Promise<IssuePublishResult>;
 
-export async function publishIssueWithGitHub(request: IssuePublishRequest): Promise<IssuePublishResult> {
+export async function publishIssueWithGitHub(request: IssuePublishRequest, application?: ApplicationExecution): Promise<IssuePublishResult> {
   const repoArgs = request.repo ? ["--repo", request.repo] : [];
-  const duplicateSearch = await runProcess([
+  const duplicateSearch = await runProcessPromise([
     "gh", "issue", "list",
     "--state", "all",
     "--search", `\"${request.title}\" in:title`,
     "--json", "number,title,url",
     "--limit", "20",
     ...repoArgs,
-  ], { cwd: request.cwd });
+  ], { cwd: request.cwd }, application);
   if (duplicateSearch.exitCode !== 0) {
     throw new Error(`gh issue duplicate search failed with exit code ${duplicateSearch.exitCode}:\n${duplicateSearch.stderr || duplicateSearch.stdout}`);
   }
   const duplicate = exactTitleMatch(duplicateSearch.stdout, request.title);
   if (duplicate) throw new Error(`An issue with the same title already exists: ${duplicate.url ?? `#${duplicate.number ?? "unknown"}`}`);
 
-  const stdout = await runProcessOrThrow([
+  const stdout = await runProcessOrThrowPromise([
     "gh", "issue", "create",
     "--title", request.title,
     "--body-file", "-",
     ...request.labels.flatMap((label) => ["--label", label]),
     ...repoArgs,
-  ], { cwd: request.cwd, label: "gh issue create", input: request.body });
+  ], { cwd: request.cwd, label: "gh issue create", input: request.body }, application);
   const url = /https?:\/\/\S+\/issues\/\d+/.exec(stdout)?.[0]?.replace(/[),.;]+$/, "");
   if (!url) throw new Error("gh issue create succeeded but did not return an issue URL.");
   const number = Number.parseInt(/\/issues\/(\d+)/.exec(url)?.[1] ?? "", 10);

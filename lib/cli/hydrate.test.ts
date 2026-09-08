@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { defaultMaxFixPasses, parseArgs } from "./args.ts";
 import { hydrateCliOptions, inferVerifyCommand, loadRoarkConfig, parseGithubRepoFromOrigin } from "./hydrate.ts";
-import { runProcessOrThrow } from "./process.ts";
+import { runProcessOrThrowPromise } from "./process.ts";
 
 const tempDirs: string[] = [];
 
@@ -287,7 +287,7 @@ describe("hydrateCliOptions", () => {
     expect(shorthandHydrated.repo).toBe("owner/shorthand");
 
     const originRepo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: originRepo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: originRepo });
     const originRaw = parseArgs(["fetch", "https://github.com/url/repo/issues/123", "--cwd", originRepo]);
     if ("help" in originRaw) throw new Error("expected options");
     const originHydrated = await hydrateCliOptions(originRaw);
@@ -305,7 +305,7 @@ describe("hydrateCliOptions", () => {
 
   test("infers repo from GitHub origin and verify from package.json when config is missing", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "git@github.com:owner/inferred.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "git@github.com:owner/inferred.git"], { cwd: repo });
     await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc --noEmit", test: "bun test" } }), "utf8");
 
     const raw = parseArgs(["auto", "--cwd", repo, "--dry-run"]);
@@ -326,7 +326,7 @@ describe("hydrateCliOptions", () => {
 
   test("ignores root-level roark.config.json and loads only .roark/config.json", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/origin.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/origin.git"], { cwd: repo });
     await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }), "utf8");
     await writeFile(path.join(repo, "roark.config.json"), JSON.stringify({ repo: "wrong/repo", model: "bad" }), "utf8");
 
@@ -363,7 +363,7 @@ describe("hydrateCliOptions", () => {
 
   test("auto and continue fail before running when verify cannot be configured or inferred", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrow(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
 
     for (const argv of [["auto", "--cwd", repo], ["continue", "1", "--cwd", repo]]) {
       const raw = parseArgs(argv);
@@ -429,7 +429,7 @@ async function tempDir(): Promise<string> {
 
 async function tempGitRepo(): Promise<string> {
   const dir = await tempDir();
-  await runProcessOrThrow(["git", "init"], { cwd: dir });
+  await runProcessOrThrowPromise(["git", "init"], { cwd: dir });
   return dir;
 }
 

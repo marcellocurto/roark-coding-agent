@@ -1,4 +1,5 @@
-import { runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import type { PullRequestMetadata } from "../github/pr.ts";
 
 const unsafeHeadBranchNames = new Set(["main", "master", "develop", "development", "trunk", "release"]);
@@ -27,15 +28,15 @@ export function buildPrCheckoutArgv(input: { prNumber: number; repo?: string  | 
   return ["gh", "pr", "checkout", String(input.prNumber), ...(input.repo ? ["--repo", input.repo] : [])];
 }
 
-export async function checkoutPrHeadBranch(options: { cwd: string; repo?: string | undefined; pr: PullRequestMetadata }): Promise<void> {
-  await runProcessOrThrow(buildPrCheckoutArgv({ prNumber: options.pr.number, repo: options.repo }), {
+export async function checkoutPrHeadBranch(options: { cwd: string; repo?: string | undefined; pr: PullRequestMetadata }, application?: ApplicationExecution): Promise<void> {
+  await runProcessOrThrowPromise(buildPrCheckoutArgv({ prNumber: options.pr.number, repo: options.repo }), {
     cwd: options.cwd,
     label: "gh pr checkout",
-  });
-  const currentBranch = (await runProcessOrThrow(["git", "branch", "--show-current"], {
+  }, application);
+  const currentBranch = (await runProcessOrThrowPromise(["git", "branch", "--show-current"], {
     cwd: options.cwd,
     label: "git branch --show-current",
-  })).trim();
+  }, application)).trim();
   if (currentBranch !== options.pr.headRefName) {
     throw new Error(
       `After gh pr checkout, current branch is '${currentBranch || "(detached)"}' but PR head is '${options.pr.headRefName}'.`,

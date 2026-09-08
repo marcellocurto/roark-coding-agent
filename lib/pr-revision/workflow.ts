@@ -1,6 +1,7 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 import type { RevisePrCliOptions } from "../cli/args.ts";
 import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
@@ -10,7 +11,7 @@ import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
-  runVerification,
+  runVerificationPromise,
   verificationFailureReason,
   type VerificationResult,
   type VerificationRunner,
@@ -89,12 +90,13 @@ export interface RunPrRevisionDependencies {
 export async function runPrRevision(
   options: RevisePrCliOptions,
   deps: RunPrRevisionDependencies = {},
+  application?: ApplicationExecution,
 ): Promise<PrRevisionResult> {
   const controlCwd = options.cwd;
-  await assertCleanGitTree({ cwd: controlCwd, yes: options.yes });
+  await assertCleanGitTree({ cwd: controlCwd, yes: options.yes }, application);
 
   const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
-  const feedback = await fetchFeedback({ cwd: controlCwd, repo: options.repo, prNumber: options.prNumber });
+  const feedback = await fetchFeedback({ cwd: controlCwd, repo: options.repo, prNumber: options.prNumber }, application);
   if (feedback.reviewThreadsTruncated === true) {
     throw new Error(`PR #${options.prNumber} has more review threads than Roark can fetch safely in one request. Refusing a partial revision plan.`);
   }
@@ -102,7 +104,7 @@ export async function runPrRevision(
   validatePrBranchSafety(feedback.pr, repo);
 
   presenter().transition("Revision preparation", `PR #${feedback.pr.number}`, { operation: "edit" });
-  const preparedWorkspace = await prepareRevisionWorkspace({ options, repo, feedback, deps });
+  const preparedWorkspace = await prepareRevisionWorkspace({ options, repo, feedback, deps }, application);
   const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
   const hooks = options.hooks ?? defaultLifecycleHooks;
 
@@ -112,7 +114,7 @@ export async function runPrRevision(
     presenter().line(`Run directory: ${context.revisionDirRelative}`);
     if (context.agentCwd !== context.controlCwd) presenter().line(`Revision workspace: ${path.basename(context.agentCwd)}`);
 
-    await hookRunner("beforeRun", hooks, context.agentCwd);
+    await hookRunner("beforeRun", hooks, context.agentCwd, undefined, application);
     await writeInitialArtifacts(context, feedback);
 
     const runner = deps.agentRunner ?? runPiAgent;
@@ -132,7 +134,7 @@ export async function runPrRevision(
           context,
           outcome: "no-action-needed",
           dispositions: revisionFeedbackDispositions(plan),
-        });
+        }, application);
       }
       await removeAgentPrRevisionArtifacts(context);
       return { outcome: "no-action-needed", context, planStatus };
@@ -145,7 +147,7 @@ export async function runPrRevision(
         context,
         outcome: "needs-human",
         dispositions: revisionFeedbackDispositions(plan),
-      });
+      }, application);
       return { outcome: "needs-human", context, planStatus };
     }
 
@@ -179,7 +181,7 @@ export async function runPrRevision(
             outcome: "review-blocked",
             reviewVerdict,
             dispositions: revisionFeedbackDispositions(plan, execution),
-          });
+          }, application);
           return { outcome: "review-blocked", context, planStatus, reviewVerdict };
         }
 
@@ -216,12 +218,12 @@ export async function runPrRevision(
           outcome: "review-blocked",
           reviewVerdict,
           dispositions: revisionFeedbackDispositions(plan, execution),
-        });
+        }, application);
         return { outcome: "review-blocked", context, planStatus, reviewVerdict };
       }
 
-      await hookRunner("beforeVerify", hooks, context.agentCwd);
-      verification = await runVerification({
+      await hookRunner("beforeVerify", hooks, context.agentCwd, undefined, application);
+      verification = await runVerificationPromise({
         command: context.verifyCommand,
         cwd: context.agentCwd,
         runner: deps.verificationRunner,
@@ -231,7 +233,7 @@ export async function runPrRevision(
           revision: context.revision,
           ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
         },
-      });
+      }, application);
       await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
       await writePrRevisionArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
       presenter().artifact(prRevisionArtifactRelativePath(context, "verification.md"));
@@ -261,7 +263,7 @@ export async function runPrRevision(
           reviewVerdict,
           verification,
           dispositions: revisionFeedbackDispositions(plan, execution),
-        });
+        }, application);
         return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
       }
 
@@ -295,7 +297,7 @@ export async function runPrRevision(
       reviewVerdict = revisionReviewVerdict(review);
     }
 
-    if ((await dirtyLinesOutsideRoark(context.agentCwd)).length === 0) {
+    if ((await dirtyLinesOutsideRoark(context.agentCwd, application)).length === 0) {
       await updateMetadata(context, feedback, { outcome: "no-code-changes", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
       await removeAgentPrRevisionArtifacts(context);
       await postSummary({
@@ -304,11 +306,11 @@ export async function runPrRevision(
         reviewVerdict,
         verification,
         dispositions: revisionFeedbackDispositions(plan, execution),
-      });
+      }, application);
       return { outcome: "no-code-changes", context, planStatus, reviewVerdict, verification };
     }
 
-    const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
+    const changedFiles = await changedFilesOutsideRoark(context.agentCwd, application);
     await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
     const publishDisplay: AgentDisplayContext = {
       command: "revise-pr",
@@ -321,7 +323,7 @@ export async function runPrRevision(
     };
     const commitSha = await runPresentedPhase(
       publishDisplay,
-      () => commitAndPushRevision(context, feedback.pr.headRefName),
+      () => commitAndPushRevision(context, feedback.pr.headRefName, application),
       (sha) => ({ outcome: sha ? `pushed ${sha.slice(0, 12)}` : "pushed" }),
     );
     await postSummary({
@@ -332,12 +334,12 @@ export async function runPrRevision(
       dispositions: revisionFeedbackDispositions(plan, execution),
       changedFiles,
       commitSha,
-    });
+    }, application);
 
     return { outcome: "published", context, planStatus, reviewVerdict, verification };
   } finally {
     try {
-      await hookRunner("afterRun", hooks, preparedWorkspace.path);
+      await hookRunner("afterRun", hooks, preparedWorkspace.path, undefined, application);
     } finally {
       await preparedWorkspace.releaseLock();
     }
@@ -349,7 +351,7 @@ async function prepareRevisionWorkspace(input: {
   repo: string;
   feedback: PullRequestFeedback;
   deps: RunPrRevisionDependencies;
-}): Promise<PreparedPrRevisionWorkspace> {
+}, application?: ApplicationExecution): Promise<PreparedPrRevisionWorkspace> {
   const { options, repo, feedback, deps } = input;
   if (deps.prepareWorkspace) {
     return deps.prepareWorkspace({
@@ -359,11 +361,11 @@ async function prepareRevisionWorkspace(input: {
       headRefName: feedback.pr.headRefName,
       workspace: options.workspace ?? defaultWorkspaceConfig,
       hooks: options.hooks ?? defaultLifecycleHooks,
-    });
+    }, application);
   }
 
   if (deps.checkout) {
-    await deps.checkout({ cwd: options.cwd, repo, pr: feedback.pr });
+    await deps.checkout({ cwd: options.cwd, repo, pr: feedback.pr }, application);
     return {
       path: options.cwd,
       metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
@@ -378,7 +380,7 @@ async function prepareRevisionWorkspace(input: {
     headRefName: feedback.pr.headRefName,
     workspace: options.workspace ?? defaultWorkspaceConfig,
     hooks: options.hooks ?? defaultLifecycleHooks,
-  });
+  }, application);
 }
 
 async function runRevisionExecutionPhase(
@@ -582,8 +584,8 @@ function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
   return disposition;
 }
 
-async function dirtyLinesOutsideRoark(cwd: string): Promise<string[]> {
-  return (await gitDirtyLines(cwd)).filter((line) => !statusLinePaths(line).every(isRoarkPath));
+async function dirtyLinesOutsideRoark(cwd: string, application?: ApplicationExecution): Promise<string[]> {
+  return (await gitDirtyLines(cwd, application)).filter((line) => !statusLinePaths(line).every(isRoarkPath));
 }
 
 function statusLinePaths(line: string): string[] {
@@ -596,50 +598,50 @@ function isRoarkPath(filePath: string): boolean {
   return filePath === ".roark" || filePath.startsWith(".roark/");
 }
 
-async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<string | undefined> {
-  await ensurePushRemote(context);
-  await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
-  await runProcessOrThrow(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
+async function commitAndPushRevision(context: PrRevisionContext, branchName: string, application?: ApplicationExecution): Promise<string | undefined> {
+  await ensurePushRemote(context, application);
+  await runProcessOrThrowPromise(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" }, application);
+  await runProcessOrThrowPromise(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
     cwd: context.agentCwd,
     label: "git commit",
-  });
-  await runProcessOrThrow(["git", "push", context.remote, `HEAD:${branchName}`], { cwd: context.agentCwd, label: `git push ${context.remote}` });
+  }, application);
+  await runProcessOrThrowPromise(["git", "push", context.remote, `HEAD:${branchName}`], { cwd: context.agentCwd, label: `git push ${context.remote}` }, application);
   try {
-    return (await runProcessOrThrow(["git", "rev-parse", "--short", "HEAD"], { cwd: context.agentCwd, label: "git rev-parse HEAD" })).trim();
+    return (await runProcessOrThrowPromise(["git", "rev-parse", "--short", "HEAD"], { cwd: context.agentCwd, label: "git rev-parse HEAD" }, application)).trim();
   } catch {
     return undefined;
   }
 }
 
-async function changedFilesOutsideRoark(cwd: string): Promise<string[]> {
-  const paths = (await gitDirtyLines(cwd))
+async function changedFilesOutsideRoark(cwd: string, application?: ApplicationExecution): Promise<string[]> {
+  const paths = (await gitDirtyLines(cwd, application))
     .flatMap(statusLinePaths)
     .filter((filePath) => !isRoarkPath(filePath));
   return [...new Set(paths)];
 }
 
-async function ensurePushRemote(context: PrRevisionContext): Promise<void> {
-  const agentRemote = await runProcess(["git", "remote", "get-url", context.remote], { cwd: context.agentCwd });
+async function ensurePushRemote(context: PrRevisionContext, application?: ApplicationExecution): Promise<void> {
+  const agentRemote = await runProcessPromise(["git", "remote", "get-url", context.remote], { cwd: context.agentCwd }, application);
   if (path.resolve(context.agentCwd) === path.resolve(context.controlCwd)) {
     if (agentRemote.exitCode === 0 && agentRemote.stdout.trim()) return;
     throw new Error(`Git remote '${context.remote}' is not configured in '${context.agentCwd}'.`);
   }
 
-  const fetchUrl = (await runProcessOrThrow(["git", "remote", "get-url", context.remote], {
+  const fetchUrl = (await runProcessOrThrowPromise(["git", "remote", "get-url", context.remote], {
     cwd: context.controlCwd,
     label: `git remote get-url ${context.remote}`,
-  })).trim();
-  const pushUrl = (await runProcessOrThrow(["git", "remote", "get-url", "--push", context.remote], {
+  }, application)).trim();
+  const pushUrl = (await runProcessOrThrowPromise(["git", "remote", "get-url", "--push", context.remote], {
     cwd: context.controlCwd,
     label: `git remote get-url --push ${context.remote}`,
-  })).trim();
+  }, application)).trim();
 
   if (agentRemote.exitCode !== 0 || !agentRemote.stdout.trim()) {
-    await runProcessOrThrow(["git", "remote", "add", context.remote, fetchUrl], { cwd: context.agentCwd, label: `git remote add ${context.remote}` });
+    await runProcessOrThrowPromise(["git", "remote", "add", context.remote, fetchUrl], { cwd: context.agentCwd, label: `git remote add ${context.remote}` }, application);
   }
 
-  const agentPushUrl = await runProcess(["git", "remote", "get-url", "--push", context.remote], { cwd: context.agentCwd });
+  const agentPushUrl = await runProcessPromise(["git", "remote", "get-url", "--push", context.remote], { cwd: context.agentCwd }, application);
   if (pushUrl && (agentPushUrl.exitCode !== 0 || agentPushUrl.stdout.trim() !== pushUrl)) {
-    await runProcessOrThrow(["git", "remote", "set-url", "--push", context.remote, pushUrl], { cwd: context.agentCwd, label: `git remote set-url --push ${context.remote}` });
+    await runProcessOrThrowPromise(["git", "remote", "set-url", "--push", context.remote, pushUrl], { cwd: context.agentCwd, label: `git remote set-url --push ${context.remote}` }, application);
   }
 }

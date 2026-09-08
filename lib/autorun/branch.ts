@@ -1,7 +1,8 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 
 export const defaultAutorunBaseBranch = "main";
 
@@ -53,14 +54,14 @@ export async function ensureRoarkWorktreesIgnored(controlCwd: string): Promise<v
   await writeFile(ignorePath, `${prefix}${desiredLine}\n`, "utf8");
 }
 
-export async function ensureIssueWorktree(options: { controlCwd: string; plan: AutorunBranchPlan }): Promise<string> {
+export async function ensureIssueWorktree(options: { controlCwd: string; plan: AutorunBranchPlan }, application?: ApplicationExecution): Promise<string> {
   const agentCwd = autorunWorktreePath(options.controlCwd, options.plan.issueNumber);
   await ensureRoarkWorktreesIgnored(options.controlCwd);
   await mkdir(path.dirname(agentCwd), { recursive: true });
   if (existsSync(agentCwd)) {
     await assertDirectory(agentCwd);
-    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
-    if (await hasGitChanges(agentCwd)) {
+    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName }, application);
+    if (await hasGitChanges(agentCwd, application)) {
       throw new Error(
         `Issue worktree '${agentCwd}' has uncommitted changes. Use 'roark continue ${options.plan.issueNumber} --cwd ${options.controlCwd}' to recover a failed attempt, or clean the worktree before starting fresh auto work.`,
       );
@@ -68,58 +69,58 @@ export async function ensureIssueWorktree(options: { controlCwd: string; plan: A
     return agentCwd;
   }
 
-  if (await gitBranchExists({ cwd: options.controlCwd, branchName: options.plan.branchName })) {
-    await runProcessOrThrow(["git", "worktree", "add", agentCwd, options.plan.branchName], {
+  if (await gitBranchExists({ cwd: options.controlCwd, branchName: options.plan.branchName }, application)) {
+    await runProcessOrThrowPromise(["git", "worktree", "add", agentCwd, options.plan.branchName], {
       cwd: options.controlCwd,
       label: "git worktree add",
-    });
+    }, application);
   } else {
-    await runProcessOrThrow(["git", "fetch", "origin"], { cwd: options.controlCwd, label: "git fetch origin" });
-    await runProcessOrThrow(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.baseBranch}`], {
+    await runProcessOrThrowPromise(["git", "fetch", "origin"], { cwd: options.controlCwd, label: "git fetch origin" }, application);
+    await runProcessOrThrowPromise(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.baseBranch}`], {
       cwd: options.controlCwd,
       label: "git worktree add -b",
-    });
+    }, application);
   }
 
-  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName }, application);
   return agentCwd;
 }
 
-export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }): Promise<void> {
-  await ensureIssueWorktree({ controlCwd: options.cwd, plan: options.plan });
+export async function checkoutIssueBranch(options: { cwd: string; plan: AutorunBranchPlan }, application?: ApplicationExecution): Promise<void> {
+  await ensureIssueWorktree({ controlCwd: options.cwd, plan: options.plan }, application);
 }
 
-export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan; worktreePath?: string }): Promise<string> {
+export async function checkoutExistingIssueBranch(options: { cwd: string; plan: AutorunBranchPlan; worktreePath?: string }, application?: ApplicationExecution): Promise<string> {
   const agentCwd = path.resolve(options.worktreePath ?? autorunWorktreePath(options.cwd, options.plan.issueNumber));
   if (existsSync(agentCwd)) {
     await assertDirectory(agentCwd);
-    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+    await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName }, application);
     return agentCwd;
   }
 
   await ensureRoarkWorktreesIgnored(options.cwd);
   await mkdir(path.dirname(agentCwd), { recursive: true });
-  await runProcessOrThrow(["git", "worktree", "prune"], { cwd: options.cwd, label: "git worktree prune" });
+  await runProcessOrThrowPromise(["git", "worktree", "prune"], { cwd: options.cwd, label: "git worktree prune" }, application);
 
-  if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName })) {
-    await runProcessOrThrow(["git", "worktree", "add", agentCwd, options.plan.branchName], {
+  if (await gitBranchExists({ cwd: options.cwd, branchName: options.plan.branchName }, application)) {
+    await runProcessOrThrowPromise(["git", "worktree", "add", agentCwd, options.plan.branchName], {
       cwd: options.cwd,
       label: "git worktree add",
-    });
+    }, application);
   } else {
-    await fetchOriginIfAvailable(options.cwd);
-    if (!(await gitRemoteBranchExists({ cwd: options.cwd, branchName: options.plan.branchName }))) {
+    await fetchOriginIfAvailable(options.cwd, application);
+    if (!(await gitRemoteBranchExists({ cwd: options.cwd, branchName: options.plan.branchName }, application))) {
       throw new Error(
         `Cannot continue autorun attempt for #${options.plan.issueNumber}: worktree '${agentCwd}' is missing and neither local branch '${options.plan.branchName}' nor remote branch 'origin/${options.plan.branchName}' exists.`,
       );
     }
-    await runProcessOrThrow(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.branchName}`], {
+    await runProcessOrThrowPromise(["git", "worktree", "add", "-b", options.plan.branchName, agentCwd, `origin/${options.plan.branchName}`], {
       cwd: options.cwd,
       label: "git worktree add -b",
-    });
+    }, application);
   }
 
-  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName });
+  await assertWorktreeOnBranch({ agentCwd, branchName: options.plan.branchName }, application);
   return agentCwd;
 }
 
@@ -128,11 +129,11 @@ async function assertDirectory(directoryPath: string): Promise<void> {
   if (!current.isDirectory()) throw new Error(`${directoryPath} exists but is not a directory.`);
 }
 
-async function assertWorktreeOnBranch(options: { agentCwd: string; branchName: string }): Promise<void> {
-  const currentBranch = (await runProcessOrThrow(["git", "branch", "--show-current"], {
+async function assertWorktreeOnBranch(options: { agentCwd: string; branchName: string }, application?: ApplicationExecution): Promise<void> {
+  const currentBranch = (await runProcessOrThrowPromise(["git", "branch", "--show-current"], {
     cwd: options.agentCwd,
     label: "git branch --show-current",
-  })).trim();
+  }, application)).trim();
   if (currentBranch !== options.branchName) {
     throw new Error(
       `Autorun worktree '${options.agentCwd}' is on branch '${currentBranch || "(detached)"}', expected '${options.branchName}'.`,
@@ -140,28 +141,28 @@ async function assertWorktreeOnBranch(options: { agentCwd: string; branchName: s
   }
 }
 
-async function hasGitChanges(cwd: string): Promise<boolean> {
-  const result = await runProcess(["git", "status", "--porcelain"], { cwd });
+async function hasGitChanges(cwd: string, application?: ApplicationExecution): Promise<boolean> {
+  const result = await runProcessPromise(["git", "status", "--porcelain"], { cwd }, application);
   if (result.exitCode !== 0) {
     throw new Error(`git status --porcelain failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`);
   }
   return result.stdout.trim() !== "";
 }
 
-async function gitBranchExists(options: { cwd: string; branchName: string }): Promise<boolean> {
-  const result = await runProcess(["git", "show-ref", "--verify", "--quiet", `refs/heads/${options.branchName}`], {
+async function gitBranchExists(options: { cwd: string; branchName: string }, application?: ApplicationExecution): Promise<boolean> {
+  const result = await runProcessPromise(["git", "show-ref", "--verify", "--quiet", `refs/heads/${options.branchName}`], {
     cwd: options.cwd,
-  });
+  }, application);
   return result.exitCode === 0;
 }
 
-async function gitRemoteBranchExists(options: { cwd: string; branchName: string }): Promise<boolean> {
-  const result = await runProcess(["git", "show-ref", "--verify", "--quiet", `refs/remotes/origin/${options.branchName}`], {
+async function gitRemoteBranchExists(options: { cwd: string; branchName: string }, application?: ApplicationExecution): Promise<boolean> {
+  const result = await runProcessPromise(["git", "show-ref", "--verify", "--quiet", `refs/remotes/origin/${options.branchName}`], {
     cwd: options.cwd,
-  });
+  }, application);
   return result.exitCode === 0;
 }
 
-async function fetchOriginIfAvailable(cwd: string): Promise<void> {
-  await runProcess(["git", "fetch", "origin"], { cwd });
+async function fetchOriginIfAvailable(cwd: string, application?: ApplicationExecution): Promise<void> {
+  await runProcessPromise(["git", "fetch", "origin"], { cwd }, application);
 }

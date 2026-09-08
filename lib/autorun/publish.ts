@@ -1,6 +1,7 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { readFileSync } from "node:fs";
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { prCreatePrompt, prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import { prDraftArtifactDefinition } from "../pr-publishing/artifact.ts";
@@ -121,16 +122,16 @@ export function collectPrBodyArtifactPaths(context: WorkflowContext): string[] {
   return paths;
 }
 
-export async function collectPrChangedFiles(options: { cwd: string; baseBranch: string }): Promise<string[]> {
-  const output = await runProcessOrThrow(
+export async function collectPrChangedFiles(options: { cwd: string; baseBranch: string }, application?: ApplicationExecution): Promise<string[]> {
+  const output = await runProcessOrThrowPromise(
     ["git", "diff", "--name-only", "-z", `${options.baseBranch}...HEAD`, "--"],
-    { cwd: options.cwd, label: "git diff PR changed files" },
+    { cwd: options.cwd, label: "git diff PR changed files" }, application
   );
   return output.split("\0").filter((file) => file.length > 0);
 }
 
-export async function hasUncommittedChanges(options: { cwd: string }): Promise<boolean> {
-  const result = await runProcess(["git", "status", "--porcelain", "--", ".", ":(exclude).roark"], { cwd: options.cwd });
+export async function hasUncommittedChanges(options: { cwd: string }, application?: ApplicationExecution): Promise<boolean> {
+  const result = await runProcessPromise(["git", "status", "--porcelain", "--", ".", ":(exclude).roark"], { cwd: options.cwd }, application);
   if (result.exitCode !== 0) {
     throw new Error(
       `git status --porcelain failed with exit code ${result.exitCode}:\n${result.stderr || result.stdout}`,
@@ -139,7 +140,7 @@ export async function hasUncommittedChanges(options: { cwd: string }): Promise<b
   return result.stdout.trim() !== "";
 }
 
-export async function publishAutorunResult(input: PublishAutorunResultInput): Promise<PublishedPullRequest> {
+export async function publishAutorunResult(input: PublishAutorunResultInput, application?: ApplicationExecution): Promise<PublishedPullRequest> {
   const display: AgentDisplayContext = {
     command: input.workflowContext.displayCommand ?? "auto",
     repository: input.options.repo,
@@ -151,34 +152,34 @@ export async function publishAutorunResult(input: PublishAutorunResultInput): Pr
   };
   return runPresentedPhase(
     display,
-    () => performAutorunPublication(input, display),
+    () => performAutorunPublication(input, display, application),
     (pr) => ({ outcome: `published ${pr.url}` }),
   );
 }
 
-async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext): Promise<PublishedPullRequest> {
+async function performAutorunPublication(input: PublishAutorunResultInput, display: AgentDisplayContext, application?: ApplicationExecution): Promise<PublishedPullRequest> {
   const { options, issue, branchPlan, workflowContext, verification, attemptMetadata, attemptMetadataPath, agentRunner = runPiAgent } = input;
   const agentCwd = workflowContext.agentCwd;
   const controlCwd = workflowContext.controlCwd;
 
   presenter().line(`Publishing issue #${issue.number}`);
 
-  if (await hasUncommittedChanges({ cwd: agentCwd })) {
+  if (await hasUncommittedChanges({ cwd: agentCwd }, application)) {
     presenter().line("Committing worktree changes");
-    await runProcessOrThrow(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" });
-    await runProcess(["git", "reset", "-q", "--", ".roark"], { cwd: agentCwd });
-    await runProcessOrThrow(
+    await runProcessOrThrowPromise(buildStageAllArgv(), { cwd: agentCwd, label: "git add -A" }, application);
+    await runProcessPromise(["git", "reset", "-q", "--", ".roark"], { cwd: agentCwd }, application);
+    await runProcessOrThrowPromise(
       buildCommitArgv({ message: formatCommitMessage({ issueNumber: issue.number }) }),
-      { cwd: agentCwd, label: "git commit" },
+      { cwd: agentCwd, label: "git commit" }, application
     );
   } else {
     presenter().line("No uncommitted changes; skipping commit");
   }
 
   presenter().line(`Pushing ${branchPlan.branchName} to ${options.remote}`);
-  await runProcessOrThrow(
+  await runProcessOrThrowPromise(
     buildPushArgv({ remote: options.remote, branchName: branchPlan.branchName }),
-    { cwd: agentCwd, label: `git push ${options.remote}` },
+    { cwd: agentCwd, label: `git push ${options.remote}` }, application
   );
 
   presenter().line("Authoring and creating pull request");
@@ -191,7 +192,7 @@ async function performAutorunPublication(input: PublishAutorunResultInput, displ
     attemptMetadata,
     attemptMetadataPath,
     agentRunner,
-  }, display);
+  }, display, application);
   const prUrl = publishedPr.url;
   if (prUrl) presenter().line(`PR: ${prUrl}`);
 
@@ -202,14 +203,14 @@ async function performAutorunPublication(input: PublishAutorunResultInput, displ
     knownPresent: [options.inProgressLabel, options.failureLabel],
   });
   try {
-    await runProcessOrThrow(
+    await runProcessOrThrowPromise(
       buildSuccessLabelArgv({
         repo: options.repo,
         issueNumber: issue.number,
         label: options.successLabel,
         removeLabels,
       }),
-      { cwd: controlCwd, label: "gh issue edit --transition-label (success)" },
+      { cwd: controlCwd, label: "gh issue edit --transition-label (success)" }, application
     );
   } catch (error) {
     presenter().warning(
@@ -233,6 +234,7 @@ interface AuthoredPullRequest extends PublishedPullRequest {
 async function authorAndPublishPullRequest(
   input: PublishAutorunResultInput & { agentRunner: AgentRunner },
   display: AgentDisplayContext,
+  application?: ApplicationExecution,
 ): Promise<AuthoredPullRequest> {
   const renderingContext = prDraftRenderingContext({
     issueNumber: input.issue.number,
@@ -240,7 +242,7 @@ async function authorAndPublishPullRequest(
   const changedFiles = await collectPrChangedFiles({
     cwd: input.workflowContext.agentCwd,
     baseBranch: input.branchPlan.baseBranch,
-  });
+  }, application);
   const artifact = await runStructuredArtifact({
     cwd: input.workflowContext.controlCwd,
     model: effectiveModelForStage(input.workflowContext.model, "issuePublishing"),
@@ -272,7 +274,7 @@ async function authorAndPublishPullRequest(
   const body = artifact.markdown;
   const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
 
-  const stdout = await runProcessOrThrow(buildPrCreateArgv({
+  const stdout = await runProcessOrThrowPromise(buildPrCreateArgv({
     repo: input.options.repo,
     baseBranch: input.options.baseBranch,
     branchName: input.branchPlan.branchName,
@@ -281,7 +283,7 @@ async function authorAndPublishPullRequest(
     cwd: input.workflowContext.controlCwd,
     label: "gh pr create",
     input: body,
-  });
+  }, application);
   const url = extractPrUrl(stdout);
   if (!url) throw new Error("gh pr create succeeded but did not return a pull request URL.");
   const number = extractIssueNumber(url);
@@ -298,7 +300,7 @@ export async function updatePrBody(input: {
   verification?: VerificationResult | undefined;
   attemptMetadata?: AttemptMetadata | undefined;
   followUpIssues?: FormatPrBodyFollowUpIssue[] | undefined;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   const display: AgentDisplayContext = {
     command: input.workflowContext.displayCommand ?? "auto",
     repository: input.repo,
@@ -315,12 +317,12 @@ export async function updatePrBody(input: {
     })), { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
     const title = sanitizePublicMarkdown(draft.title, { localRoots: [input.workflowContext.controlCwd, input.workflowContext.agentCwd] });
     await writeArtifact(input.workflowContext, "prDraftMarkdown", body);
-    await runProcessOrThrow([
+    await runProcessOrThrowPromise([
       "gh", "pr", "edit", input.pr,
       "--title", title,
       "--body-file", "-",
       ...(input.repo ? ["--repo", input.repo] : []),
-    ], { cwd: input.cwd, label: "gh pr edit", input: body });
+    ], { cwd: input.cwd, label: "gh pr edit", input: body }, application);
   }, () => ({ outcome: "updated" }));
 }
 

@@ -1,3 +1,5 @@
+import { ProcessExecutionError } from "../cli/process.ts";
+import { Effect, PlatformError } from "effect";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -351,7 +353,7 @@ describe("runPrRevision", () => {
         if (thinkingLevels.length === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
+      verificationRunner: ({ command }) => Effect.succeed(({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
         await noopAsync();
       },
@@ -388,7 +390,7 @@ describe("runPrRevision", () => {
         }
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
+      verificationRunner: ({ command }) => Effect.succeed(({ ok: false, command, exitCode: 127, stdout: "", stderr: "sh: missing-command: command not found" })),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalled = true;
@@ -404,7 +406,7 @@ describe("runPrRevision", () => {
   test("verification runner exceptions propagate through PR revision", async () => {
     const control = await tempGitRepo();
     const { prepareWorkspace } = await isolatedWorkspace();
-    const failure = new Error("verification runner failed");
+    const failure = new ProcessExecutionError({ args: ["bun", "test"], cause: PlatformError.systemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn", description: "verification runner failed" }) });
     let calls = 0;
 
     const running = runPrRevision(options(control, { comment: false }), {
@@ -419,7 +421,7 @@ describe("runPrRevision", () => {
         if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
-      verificationRunner: () => Promise.reject(failure),
+      verificationRunner: () => Effect.fail(failure),
     });
 
     let thrown: unknown;
@@ -466,13 +468,12 @@ describe("runPrRevision", () => {
         if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command }) => {
-        await noopAsync();
+      verificationRunner: ({ command }) => Effect.sync(() => {
         verificationCalls++;
         return verificationCalls === 1
           ? { ok: false, command, exitCode: 1, stdout: "", stderr: "type error" }
           : { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
-      },
+      }),
       postSummaryComment: async (summary) => {
         await noopAsync();
         commentCalls++;
@@ -526,11 +527,10 @@ describe("runPrRevision", () => {
         }
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command }) => {
-        await noopAsync();
+      verificationRunner: ({ command }) => Effect.sync(() => {
         verificationCalls++;
         return { ok: false, command, exitCode: 1, stdout: "", stderr: "test failed" };
-      },
+      }),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalls++;
@@ -593,11 +593,10 @@ describe("runPrRevision", () => {
         if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command, cwd }) => {
-        await noopAsync();
+      verificationRunner: ({ command, cwd }) => Effect.sync(() => {
         verificationCwds.push(cwd);
         return { ok: true, command, exitCode: 0, stdout: "ok", stderr: "" };
-      },
+      }),
       postSummaryComment: async () => { await noopAsync(); },
     });
 
@@ -639,7 +638,7 @@ describe("runPrRevision", () => {
         if (calls === 1) return submitRevisionPlan(request, revisionPlanResult("revise"));
         return submitReview(request, reviewResult());
       },
-      verificationRunner: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+      verificationRunner: ({ command }) => Effect.succeed(({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       postSummaryComment: async () => {
         await noopAsync();
         commentCalls++;

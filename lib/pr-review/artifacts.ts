@@ -1,8 +1,9 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import { getWorkflowThinkingConfig, type WorkflowThinkingConfig } from "../workflow/thinking.ts";
 
 export interface PrReviewContext {
@@ -21,17 +22,17 @@ export interface PrReviewContext {
   comment: boolean;
 }
 
-export async function createPrReviewContext(options: ReviewPrCliOptions & { repo: string; agentCwd: string }): Promise<PrReviewContext> {
+export async function createPrReviewContext(options: ReviewPrCliOptions & { repo: string; agentCwd: string }, application?: ApplicationExecution): Promise<PrReviewContext> {
   const controlCwd = path.resolve(options.cwd);
   const outDir = path.resolve(controlCwd, options.outDir);
   const prDir = path.join(outDir, "pr", String(options.prNumber));
   const generation = await nextReviewGeneration(prDir);
   const reviewDir = path.join(prDir, `review-${generation}`);
   const agentCwd = path.resolve(options.agentCwd);
-  const gitDir = (await runProcessOrThrow(["git", "rev-parse", "--absolute-git-dir"], {
+  const gitDir = (await runProcessOrThrowPromise(["git", "rev-parse", "--absolute-git-dir"], {
     cwd: agentCwd,
     label: "git rev-parse --absolute-git-dir",
-  })).trim();
+  }, application)).trim();
   const agentReviewDir = path.join(gitDir, "roark", "pr-review", String(options.prNumber), `review-${generation}`);
   return {
     controlCwd,

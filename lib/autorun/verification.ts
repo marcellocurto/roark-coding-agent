@@ -1,6 +1,8 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { Effect } from "effect";
-import { executeProcess } from "../cli/process.ts";
-import { fromLegacyPromise, runApplicationPromise } from "../runtime/application.ts";
+import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
+import { executeProcess, type InvalidProcessCommandError, type ProcessExecutionError } from "../cli/process.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -51,7 +53,17 @@ export interface VerificationResult {
   timedOut?: boolean | undefined;
 }
 
-export type VerificationRunner = (request: { command: string; cwd: string; timeoutMs: number }) => Promise<VerificationResult>;
+export interface VerificationRequest {
+  command: string;
+  cwd: string;
+  timeoutMs: number;
+}
+
+export type VerificationRunner = (request: VerificationRequest) => Effect.Effect<
+  VerificationResult,
+  InvalidProcessCommandError | ProcessExecutionError,
+  ChildProcessSpawner
+>;
 
 export interface VerificationFailureClassification {
   repairable: boolean;
@@ -59,7 +71,7 @@ export interface VerificationFailureClassification {
   recoveryGuidance?: string | undefined;
 }
 
-export function executeVerification({ command, cwd, timeoutMs }: Parameters<VerificationRunner>[0]) {
+export function executeVerification({ command, cwd, timeoutMs }: VerificationRequest): ReturnType<VerificationRunner> {
   return executeProcess(["sh", "-c", command], { cwd, timeoutMs }).pipe(Effect.map((result): VerificationResult => ({
     ...result,
     command,
@@ -70,36 +82,33 @@ export function executeVerification({ command, cwd, timeoutMs }: Parameters<Veri
   })));
 }
 
-export const defaultVerificationRunner: VerificationRunner = (request) => runApplicationPromise(executeVerification(request));
-
 interface VerificationOptions {
   command: string;
   cwd: string;
   runner?: VerificationRunner | undefined;
   timeoutMs?: number | undefined;
-  now?: (() => number) | undefined;
   display?: VerificationDisplayContext | undefined;
 }
 
-export function runVerificationEffect(options: VerificationOptions) {
+export function runVerification(options: VerificationOptions): ReturnType<VerificationRunner> {
   return Effect.gen(function*() {
-    const now = options.now;
-    const startedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+    const startedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
     const presentation = presenter();
     presentation.verificationStarted(options.command, options.display ?? {});
     const request = { command: options.command, cwd: options.cwd, timeoutMs: options.timeoutMs ?? defaultVerificationTimeoutMs };
-    const runner = options.runner;
-    const result = yield* (runner ? fromLegacyPromise(() => runner(request)) : executeVerification(request)).pipe(
+    const runner = options.runner ?? executeVerification;
+    const result = yield* runner(request).pipe(
       Effect.tapError((error) => Effect.gen(function*() {
-        const endedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+        const endedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
         presentation.verification({
           command: options.command, ok: false, exitCode: -1, elapsedMs: endedAt - startedAt,
           reason: "verification could not be executed",
-          diagnostic: error instanceof Error ? error.message : String(error), display: options.display,
+          diagnostic: error.message,
+          display: options.display,
         });
       })),
     );
-    const endedAt = now ? now() : yield* Effect.clockWith((clock) => clock.currentTimeMillis);
+    const endedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis);
     const classification = classifyVerificationFailure(result);
     presentation.verification({
       command: options.command, ok: result.ok, exitCode: result.exitCode, elapsedMs: endedAt - startedAt,
@@ -111,8 +120,9 @@ export function runVerificationEffect(options: VerificationOptions) {
   });
 }
 
-export function runVerification(options: VerificationOptions): Promise<VerificationResult> {
-  return runApplicationPromise(runVerificationEffect(options));
+// Promise compatibility ends here; migrated callers compose runVerification.
+export function runVerificationPromise(options: VerificationOptions, application?: ApplicationExecution): Promise<VerificationResult> {
+  return runApplicationPromise(runVerification(options), application);
 }
 
 export function formatVerificationArtifact(result: VerificationResult): string {

@@ -24,7 +24,7 @@ import {
   workspaceStateFile,
   type ProcessRunner,
 } from "./workspace.ts";
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 import { noopAsync } from "../utils/async.ts";
 import { configurePresenter } from "../presentation/presenter.ts";
 import type { TerminalStream } from "../presentation/terminal.ts";
@@ -215,8 +215,8 @@ describe("managed clone workspaces", () => {
     const dirtyPath = workspacePathForIssue({ root: workspaceRoot, repo: "owner/repo", issueNumber: 34 });
     await mkdir(cleanPath, { recursive: true });
     await mkdir(dirtyPath, { recursive: true });
-    await runProcessOrThrow(["git", "init"], { cwd: cleanPath });
-    await runProcessOrThrow(["git", "init"], { cwd: dirtyPath });
+    await runProcessOrThrowPromise(["git", "init"], { cwd: cleanPath });
+    await runProcessOrThrowPromise(["git", "init"], { cwd: dirtyPath });
     await writeFile(path.join(dirtyPath, "recoverable.txt"), "keep me\n");
 
     expect(runRemoveCommand({
@@ -598,20 +598,20 @@ describe("managed clone workspaces", () => {
     const source = path.join(root, "source");
     const remote = path.join(root, "remote.git");
     await initGitRepo(source, ".roark\n");
-    const initial = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
-    await runProcessOrThrow(["git", "checkout", "-b", "contributor/change"], { cwd: source });
+    const initial = (await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrowPromise(["git", "checkout", "-b", "contributor/change"], { cwd: source });
     await writeFile(path.join(source, "feature.txt"), "feature\n", "utf8");
-    await runProcessOrThrow(["git", "add", "feature.txt"], { cwd: source });
-    await runProcessOrThrow(["git", "commit", "-m", "feature"], { cwd: source });
-    const headOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
-    await runProcessOrThrow(["git", "checkout", "main"], { cwd: source });
+    await runProcessOrThrowPromise(["git", "add", "feature.txt"], { cwd: source });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "feature"], { cwd: source });
+    const headOid = (await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrowPromise(["git", "checkout", "main"], { cwd: source });
     await writeFile(path.join(source, "base-only.txt"), "base advance\n", "utf8");
-    await runProcessOrThrow(["git", "add", "base-only.txt"], { cwd: source });
-    await runProcessOrThrow(["git", "commit", "-m", "advance base"], { cwd: source });
-    const baseOid = (await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
-    await runProcessOrThrow(["git", "clone", "--bare", source, remote], { cwd: root });
-    await runProcessOrThrow(["git", "update-ref", "refs/pull/12/head", headOid], { cwd: remote });
-    await runProcessOrThrow(["git", "remote", "add", "origin", `file://${remote}`], { cwd: source });
+    await runProcessOrThrowPromise(["git", "add", "base-only.txt"], { cwd: source });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "advance base"], { cwd: source });
+    const baseOid = (await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], { cwd: source })).trim();
+    await runProcessOrThrowPromise(["git", "clone", "--bare", source, remote], { cwd: root });
+    await runProcessOrThrowPromise(["git", "update-ref", "refs/pull/12/head", headOid], { cwd: remote });
+    await runProcessOrThrowPromise(["git", "remote", "add", "origin", `file://${remote}`], { cwd: source });
 
     const calls: string[][] = [];
     const prepared = await preparePrReviewWorkspace({
@@ -626,19 +626,19 @@ describe("managed clone workspaces", () => {
       hooks: defaultLifecycleHooks,
       runner: async (args, options) => {
         calls.push(args);
-        return runProcess(args, options);
+        return runProcessPromise(args, options);
       },
     });
 
     expect(prepared.comparison.mergeBaseOid).toBe(initial);
     expect(prepared.comparison.changedFiles).toEqual(["feature.txt"]);
     expect(prepared.comparison.inspectionCommand).toBe(`git diff ${initial}..${headOid} --`);
-    expect((await runProcessOrThrow(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
+    expect((await runProcessOrThrowPromise(["git", "rev-parse", "HEAD"], { cwd: prepared.path })).trim()).toBe(headOid);
     expect(calls.some((args) => args[0] === "git" && args[1] === "fetch" && args[2] === "--unshallow")).toBe(true);
     expect(calls.some((args) => args[0] === "git" && ["commit", "push"].includes(args[1] ?? ""))).toBe(false);
     await prepared.releaseLock();
 
-    await runProcessOrThrow(["git", "remote", "set-url", "origin", `file://${source}`], { cwd: prepared.path });
+    await runProcessOrThrowPromise(["git", "remote", "set-url", "origin", `file://${source}`], { cwd: prepared.path });
     const reused = await preparePrReviewWorkspace({
       controlCwd: source,
       repo: "owner/repo",
@@ -650,7 +650,7 @@ describe("managed clone workspaces", () => {
       workspace: { ...defaultWorkspaceConfig, root: path.join(root, "managed") },
       hooks: defaultLifecycleHooks,
     });
-    expect((await runProcessOrThrow(["git", "remote", "get-url", "origin"], { cwd: reused.path })).trim()).toBe(`file://${remote}`);
+    expect((await runProcessOrThrowPromise(["git", "remote", "get-url", "origin"], { cwd: reused.path })).trim()).toBe(`file://${remote}`);
     await writeFile(path.join(reused.path, "unexpected.txt"), "mutation\n", "utf8");
     expect(assertPinnedPrReviewWorkspace({ cwd: reused.path, headOid })).rejects.toThrow("changed during inspection");
     await reused.releaseLock();
@@ -712,11 +712,11 @@ function findDeadPid(): number {
 
 async function initGitRepo(cwd: string, gitignore: string): Promise<void> {
   await mkdir(cwd, { recursive: true });
-  await runProcessOrThrow(["git", "init", "-b", "main"], { cwd });
-  await runProcessOrThrow(["git", "config", "user.email", "roark@example.com"], { cwd });
-  await runProcessOrThrow(["git", "config", "user.name", "Roark Test"], { cwd });
+  await runProcessOrThrowPromise(["git", "init", "-b", "main"], { cwd });
+  await runProcessOrThrowPromise(["git", "config", "user.email", "roark@example.com"], { cwd });
+  await runProcessOrThrowPromise(["git", "config", "user.name", "Roark Test"], { cwd });
   await writeFile(path.join(cwd, ".gitignore"), gitignore, "utf8");
   await writeFile(path.join(cwd, "README.md"), "test\n", "utf8");
-  await runProcessOrThrow(["git", "add", ".gitignore", "README.md"], { cwd });
-  await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd });
+  await runProcessOrThrowPromise(["git", "add", ".gitignore", "README.md"], { cwd });
+  await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], { cwd });
 }

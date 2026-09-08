@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -106,18 +108,18 @@ describe("createIssuesFromCurationPlan", () => {
     await writeJsonArtifact(context, "issueCurationPlan", basePlan());
     const ensured: { cwd: string; repo?: string | undefined }[] = [];
 
-    const result = await createIssuesFromCurationPlan({
+    const result = await Effect.runPromise(fromLegacyPromise((application) => createIssuesFromCurationPlan({
       context,
       approved: true,
       approvalReason: "autorun PR was opened",
       clock,
-      labelEnsurer: async (options) => { await noopAsync(); ensured.push(options); },
+      labelEnsurer: async (options, supplied) => { expect(supplied).toBe(application); await noopAsync(); ensured.push(options); },
       issuePublisher: successfulIssuePublisher,
       agentRunner: (request) => {
         expect(request.prompt).toContain("autorun PR was opened");
         return submitIssueDrafts(request, { issues: [issueDraft("external-blocker-1"), issueDraft("follow-up-1")] });
       },
-    });
+    }, application)).pipe(Effect.provide(applicationLayer)));
 
     expect(ensured).toEqual([{ cwd: context.agentCwd, repo: "owner/repo" }]);
     expect(result.approved).toBe(true);

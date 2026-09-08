@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
@@ -64,6 +65,7 @@ export interface RunAutorunAttemptLifecycleInjected {
 export async function runAutorunAttemptLifecycle(
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected = {},
+  application?: ApplicationExecution,
 ): Promise<AutorunAttemptResult> {
   const clock = injected.clock ?? defaultClock;
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
@@ -91,8 +93,8 @@ export async function runAutorunAttemptLifecycle(
     await persistAttempt(input.issueDir, attemptMetadata);
 
     const workflowResult = input.initialVerificationRepairPass === undefined
-      ? await runWorkflow(input.workflowContext, input.runner, { issueSnapshot: input.issueSnapshot })
-      : await runVerificationRepairWorkflow(input.workflowContext, input.initialVerificationRepairPass, input.runner);
+      ? await runWorkflow(input.workflowContext, input.runner, { issueSnapshot: input.issueSnapshot }, application)
+      : await runVerificationRepairWorkflow(input.workflowContext, input.initialVerificationRepairPass, input.runner, application);
     const issue = await resolveIssue(input);
     const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
     let completionOutcome = await completeWorkflow({
@@ -104,10 +106,10 @@ export async function runAutorunAttemptLifecycle(
       attemptMetadata,
       attemptMetadataPath,
       recoveryCommand: publicRecoveryCommand(input, false),
-    });
+    }, undefined, application);
 
     while (completionOutcome.outcome === "verification-needs-fix") {
-      const repairResult = await runVerificationRepairWorkflow(input.workflowContext, completionOutcome.pass, input.runner);
+      const repairResult = await runVerificationRepairWorkflow(input.workflowContext, completionOutcome.pass, input.runner, application);
       completionOutcome = await completeWorkflow({
         workflowResult: repairResult,
         options: input.gateOptions,
@@ -117,7 +119,7 @@ export async function runAutorunAttemptLifecycle(
         attemptMetadata,
         attemptMetadataPath,
         recoveryCommand: publicRecoveryCommand(input, false),
-      });
+      }, undefined, application);
     }
 
     const terminalOutcome = completionOutcome;
@@ -126,7 +128,7 @@ export async function runAutorunAttemptLifecycle(
   } catch (error) {
     outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
     outcomeDetail = formatError(error);
-    await markWorkflowError(input, injected, attemptMetadata, error);
+    await markWorkflowError(input, injected, attemptMetadata, error, application);
     throw error;
   } finally {
     try {
@@ -157,10 +159,11 @@ async function runVerificationRepairWorkflow(
   context: WorkflowContext,
   initialPass: number,
   runner?: AgentRunner  ,
+  application?: ApplicationExecution,
 ): Promise<WorkflowRunResult> {
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
     presenter().line(`Verification repair pass ${pass}`);
-    await fixPhase(context, pass, runner);
+    await fixPhase(context, pass, runner, application);
     await codeRefinementPhase(context, pass, runner);
     const reviews = await reviewPhase(context, pass, runner);
     if (hasBlockedReview(reviews.reviewA, reviews.reviewB) || needsRestart(reviews.reviewA, reviews.reviewB)) break;
@@ -181,6 +184,7 @@ async function markWorkflowError(
   injected: RunAutorunAttemptLifecycleInjected,
   attemptMetadata: AttemptMetadata,
   error: unknown,
+  application?: ApplicationExecution,
 ): Promise<void> {
   const issue = await resolveIssue(input);
   const phase = errorPhase(error);
@@ -201,7 +205,7 @@ async function markWorkflowError(
     issue,
     workflowContext: input.workflowContext,
     attemptMetadata,
-  });
+  }, undefined, application);
 
   await publishLedger({
     cwd: input.gateOptions.cwd,
@@ -209,7 +213,7 @@ async function markWorkflowError(
     issue,
     workflowContext: input.workflowContext,
     attemptMetadata,
-  });
+  }, undefined, application);
 
   const errorArtifact = await readErrorArtifact(input.workflowContext, error);
   if (errorArtifact) presenter().artifact(errorArtifact.path);
@@ -238,7 +242,7 @@ async function markWorkflowError(
       nextLabel: input.gateOptions.failureLabel,
       knownPresent: [input.gateOptions.inProgressLabel],
     }),
-  });
+  }, application);
 }
 
 async function resolveIssue(input: RunAutorunAttemptLifecycleInput): Promise<AutorunIssueCandidate> {

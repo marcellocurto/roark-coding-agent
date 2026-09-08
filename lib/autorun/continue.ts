@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { ContinueCliOptions, IssueCliOptions } from "../cli/args.ts";
@@ -34,6 +35,7 @@ export async function runAutoContinue(
     fetchGitHubIssue?: typeof fetchGitHubIssue | undefined;
     transitionGitHubIssueLabels?: typeof transitionGitHubIssueLabels | undefined;
   } = {},
+  application?: ApplicationExecution,
 ): Promise<AutorunAttemptResult> {
   const clock = injected.clock ?? defaultClock;
   const runner = injected.runner ?? runPiAgent;
@@ -72,7 +74,7 @@ export async function runAutoContinue(
       inProgressLabel: options.inProgressLabel,
       failureLabel: options.failureLabel,
       successLabel: options.successLabel,
-    });
+    }, application);
 
     const branchPlan: AutorunBranchPlan = {
       issueNumber: attemptMetadata.issueNumber,
@@ -101,7 +103,7 @@ export async function runAutoContinue(
         hooks: options.hooks ?? defaultLifecycleHooks,
         mode: "continue",
         workspacePath: attemptMetadata.workspace.path,
-      });
+      }, application);
       workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: preparedWorkspace.path, displayCommand: "continue" });
       await ensureRunDir(workflowContext);
     } else {
@@ -110,7 +112,7 @@ export async function runAutoContinue(
         cwd: workflowContext.controlCwd,
         plan: branchPlan,
         worktreePath: workflowContext.agentCwd,
-      });
+      }, application);
       if (recoveredAgentCwd !== workflowContext.agentCwd) {
         workflowContext = createWorkflowContext(createContinueWorkflowOptions(options, attempt), { agentCwd: recoveredAgentCwd, displayCommand: "continue" });
         await ensureRunDir(workflowContext);
@@ -133,7 +135,7 @@ export async function runAutoContinue(
     }
 
     const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
-    const fetched = await fetchIssue(options.issue, { cwd, repo: parsed.repo ?? options.repo });
+    const fetched = await fetchIssue(options.issue, { cwd, repo: parsed.repo ?? options.repo }, application);
     const currentIssue = toIssueCandidate(fetched.issue);
     const transitionLabels = injected.transitionGitHubIssueLabels ?? transitionGitHubIssueLabels;
     await transitionLabels({
@@ -146,7 +148,7 @@ export async function runAutoContinue(
         workflow: options,
         nextLabel: options.inProgressLabel,
       }),
-    });
+    }, application);
 
     const result = await runAutorunAttemptLifecycle({
       issueDir,
@@ -154,7 +156,7 @@ export async function runAutoContinue(
       branchPlan,
       gateOptions: createGateOptions(options, workflowContext.controlCwd, branchPlan.baseBranch, parsed.repo),
       attemptMetadata,
-      loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }),
+      loadIssue: () => loadIssueCandidate({ context: workflowContext, options, issueNumber: attemptMetadata.issueNumber }, application),
       runner,
       logPrefix: "Continue",
       inProgressOutcomeDetail: `continued at ${clock.now().toISOString()}`,
@@ -164,11 +166,11 @@ export async function runAutoContinue(
         for (const line of formatContinuationPlan(continuationPlan)) presenter().line(line);
       },
       beforeRun: async () => {
-        await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
-        await runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd);
+        await refreshCopyToWorktree({ controlCwd: workflowContext.controlCwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree }, application);
+        await runLifecycleHook("beforeRun", options.hooks, workflowContext.agentCwd, undefined, application);
       },
-      afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd),
-    }, { clock });
+      afterRun: async () => runLifecycleHook("afterRun", options.hooks, workflowContext.agentCwd, undefined, application),
+    }, { clock }, application);
 
     return result;
   });
@@ -224,12 +226,12 @@ async function loadIssueCandidate(input: {
   context: ReturnType<typeof createWorkflowContext>;
   options: ContinueCliOptions;
   issueNumber: number;
-}): Promise<AutorunIssueCandidate> {
+}, application?: ApplicationExecution): Promise<AutorunIssueCandidate> {
   const fromMetadata = await loadIssueCandidateFromMetadata(input.context);
   if (fromMetadata) return fromMetadata;
 
   try {
-    const fetched = await fetchGitHubIssue(input.options.issue, { cwd: input.context.controlCwd, repo: input.options.repo });
+    const fetched = await fetchGitHubIssue(input.options.issue, { cwd: input.context.controlCwd, repo: input.options.repo }, application);
     return toIssueCandidate(fetched.issue);
   } catch {
     return { number: input.issueNumber, title: `Fix issue #${input.issueNumber}` };

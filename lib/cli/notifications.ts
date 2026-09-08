@@ -1,7 +1,9 @@
+import { Effect, FileSystem, Option } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { runProcess } from "./process.ts";
 import path from "node:path";
 import { isWorkflowCommand } from "./args.ts";
-import type { RoarkConfig } from "./hydrate.ts";
-import { loadRoarkConfig, resolveWorkspace } from "./hydrate.ts";
+import { decodeRoarkConfig, workspaceFromGitResult } from "./hydrate.ts";
 
 export const notificationTimeoutMs = 2_000;
 
@@ -21,43 +23,47 @@ export interface NotificationContent {
   body: string;
 }
 
-interface NotifierProcess {
-  exited: Promise<number>;
-  kill(signal?: NodeJS.Signals | number): void;
-}
-
 export interface NotificationDependencies {
   platform?: NodeJS.Platform;
   cwd?: string;
-  resolveWorkspace?: (cwd: string) => Promise<string>;
-  loadConfig?: (workspace: string) => Promise<RoarkConfig>;
-  spawn?: (args: string[]) => NotifierProcess;
+  resolveWorkspace?: typeof resolveNotificationWorkspace;
+  loadConfig?: typeof loadNotificationConfig;
   warn?: (message: string) => void;
   timeoutMs?: number;
 }
 
-export async function sendExitNotification(
+export function sendExitNotification(
   request: ExitNotificationRequest,
   dependencies: NotificationDependencies = {},
-): Promise<void> {
-  const platform = dependencies.platform ?? process.platform;
-  if (platform !== "darwin") return;
-
-  let workspace: string;
-  let config: RoarkConfig;
-  try {
-    const cwd = notificationCwd(request.argv, dependencies.cwd ?? process.cwd());
-    workspace = await (dependencies.resolveWorkspace ?? resolveWorkspace)(cwd);
-    config = await (dependencies.loadConfig ?? loadRoarkConfig)(workspace);
-  } catch {
+) {
+  return Effect.gen(function*() {
+    if ((dependencies.platform ?? process.platform) !== "darwin") return;
+    const lookup = yield* Effect.gen(function*() {
+      const cwd = notificationCwd(request.argv, dependencies.cwd ?? process.cwd());
+      const workspace = yield* (dependencies.resolveWorkspace ?? resolveNotificationWorkspace)(cwd);
+      const config = yield* (dependencies.loadConfig ?? loadNotificationConfig)(workspace);
+      return { workspace, config };
+    }).pipe(Effect.option);
     // Notification opt-in is available only through a valid repository config.
-    return;
-  }
+    if (Option.isNone(lookup) || lookup.value.config.notifications?.onExit !== true) return;
+    yield* deliverMacNotification(formatNotificationContent(request, lookup.value.workspace), dependencies);
+  });
+}
 
-  if (config.notifications?.onExit !== true) return;
+function resolveNotificationWorkspace(cwd: string) {
+  const absoluteStart = path.resolve(cwd);
+  return runProcess(["git", "rev-parse", "--show-toplevel"], { cwd: absoluteStart }).pipe(
+    Effect.flatMap((result) => Effect.try(() => workspaceFromGitResult(absoluteStart, result))),
+  );
+}
 
-  const content = formatNotificationContent(request, workspace);
-  await deliverMacNotification(content, dependencies);
+function loadNotificationConfig(workspace: string) {
+  return Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem;
+    const configPath = path.join(workspace, ".roark", "config.json");
+    const content = yield* fs.readFileString(configPath);
+    return yield* Effect.try(() => decodeRoarkConfig(JSON.parse(content), configPath));
+  });
 }
 
 export function formatNotificationContent(
@@ -71,60 +77,28 @@ export function formatNotificationContent(
   return { title, body: `${command}${target} · ${repository}` };
 }
 
-export async function deliverMacNotification(
+export function deliverMacNotification(
   content: NotificationContent,
   dependencies: NotificationDependencies = {},
-): Promise<void> {
-  if ((dependencies.platform ?? process.platform) !== "darwin") return;
-
-  const spawn = dependencies.spawn ?? spawnNotifier;
-  const warn = dependencies.warn ?? ((message: string) => {
-    console.error(message);
-  });
-  const timeoutMs = dependencies.timeoutMs ?? notificationTimeoutMs;
-  let child: NotifierProcess;
-
-  try {
-    child = spawn(["/usr/bin/osascript", "-e", notificationScript, content.title, content.body]);
-  } catch {
-    warn("Warning: Roark could not deliver the exit notification.");
-    return;
-  }
-
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      child.exited.then((exitCode) => ({ kind: "exit" as const, exitCode })),
-      new Promise<{ kind: "timeout" }>((resolve) => {
-        timeout = setTimeout(() => {
-          resolve({ kind: "timeout" });
-        }, timeoutMs);
-      }),
-    ]);
-
-    if (result.kind === "timeout") {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // The child may have exited while the timeout was being handled.
-      }
-      // Bun reaps the forcibly terminated child through this promise. Do not
-      // await it: notifier cleanup must not extend the delivery timeout.
-      void child.exited.catch(() => undefined);
+) {
+  return Effect.gen(function*() {
+    if ((dependencies.platform ?? process.platform) !== "darwin") return;
+    const delivered = yield* Effect.scoped(Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const child = yield* spawner.spawn(ChildProcess.make("/usr/bin/osascript", [
+        "-e", notificationScript, content.title, content.body,
+      ], { stdin: "ignore", stdout: "ignore", stderr: "ignore", killSignal: "SIGKILL" }));
+      return (yield* child.exitCode) === 0;
+    })).pipe(
+      Effect.timeoutOption(dependencies.timeoutMs ?? notificationTimeoutMs),
+      Effect.map((result) => Option.isSome(result) && result.value),
+      Effect.catch(() => Effect.succeed(false)),
+    );
+    if (!delivered) {
+      const warn = dependencies.warn ?? ((message: string) => { console.error(message); });
       warn("Warning: Roark could not deliver the exit notification.");
-      return;
     }
-
-    if (result.exitCode !== 0) warn("Warning: Roark could not deliver the exit notification.");
-  } catch {
-    warn("Warning: Roark could not deliver the exit notification.");
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-}
-
-function spawnNotifier(args: string[]): NotifierProcess {
-  return Bun.spawn(args, { stdout: "ignore", stderr: "ignore" });
+  });
 }
 
 function notificationCwd(argv: string[], fallback: string): string {

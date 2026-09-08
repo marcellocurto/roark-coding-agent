@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -31,7 +32,7 @@ import {
   type RemoveCommandOptions,
   type WorkspaceConfig,
 } from "../autorun/workspace.ts";
-import { runProcess, type ProcessResult } from "./process.ts";
+import { runProcessPromise, type ProcessResult } from "./process.ts";
 
 export interface RoarkConfig {
   repo?: string | undefined  ;
@@ -49,7 +50,7 @@ export interface RoarkConfig {
   notifications?: { onExit: boolean } | undefined;
 }
 
-type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}) => Promise<ProcessResult>;
+type ProcessRunner = (args: string[], options?: { cwd?: string  | undefined}, application?: ApplicationExecution) => Promise<ProcessResult>;
 
 interface HydrateDependencies {
   cwd?: string | undefined  ;
@@ -75,9 +76,9 @@ const configKeys = new Set([
 
 const unsupportedConfigKeys = new Set(["model", "thinking", "updateStrategy"]);
 
-export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDependencies = {}): Promise<CliOptions> {
-  const runner = deps.runner ?? runProcess;
-  const workspace = await resolveWorkspace(raw.cwd ?? deps.cwd ?? process.cwd(), runner);
+export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDependencies = {}, application?: ApplicationExecution): Promise<CliOptions> {
+  const runner = deps.runner ?? runProcessPromise;
+  const workspace = await resolveWorkspace(raw.cwd ?? deps.cwd ?? process.cwd(), runner, application);
 
   if (raw.command === "init") {
     return {
@@ -89,7 +90,7 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
   }
 
   const config = await loadRoarkConfig(workspace);
-  const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo);
+  const repo = await hydrateRepo(raw, config, workspace, runner, deps.promptRepo, application);
   const workspaceConfig = config.workspace ?? defaultWorkspaceConfig;
   const hooks = config.hooks ?? defaultLifecycleHooks;
 
@@ -237,9 +238,13 @@ export async function hydrateCliOptions(raw: RawCliOptions, deps: HydrateDepende
   };
 }
 
-export async function resolveWorkspace(startCwd: string, runner: ProcessRunner = runProcess): Promise<string> {
+export async function resolveWorkspace(startCwd: string, runner: ProcessRunner = runProcessPromise, application?: ApplicationExecution): Promise<string> {
   const absoluteStart = path.resolve(startCwd);
-  const result = await runner(["git", "rev-parse", "--show-toplevel"], { cwd: absoluteStart });
+  const result = await runner(["git", "rev-parse", "--show-toplevel"], { cwd: absoluteStart }, application);
+  return workspaceFromGitResult(absoluteStart, result);
+}
+
+export function workspaceFromGitResult(absoluteStart: string, result: ProcessResult): string {
   if (result.exitCode !== 0) {
     throw new Error(`Roark commands must be run inside a git repository. '${absoluteStart}' is not inside a git work tree.`);
   }
@@ -260,6 +265,10 @@ export async function loadRoarkConfig(workspace: string): Promise<RoarkConfig> {
     throw new Error(`Invalid Roark config at ${configPath}: ${detail}`);
   }
 
+  return decodeRoarkConfig(parsed, configPath);
+}
+
+export function decodeRoarkConfig(parsed: unknown, configPath: string): RoarkConfig {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Invalid Roark config at ${configPath}: expected a JSON object.`);
   }
@@ -420,6 +429,7 @@ async function hydrateRepo(
   workspace: string,
   runner: ProcessRunner,
   promptRepo?: (cwd: string) => Promise<string | undefined>,
+  application?: ApplicationExecution,
 ): Promise<string | undefined> {
   if (raw.repo) return raw.repo;
 
@@ -428,7 +438,7 @@ async function hydrateRepo(
 
   if (config.repo) return config.repo;
 
-  const inferred = await inferRepoFromOrigin(workspace, runner);
+  const inferred = await inferRepoFromOrigin(workspace, runner, application);
   if (inferred) return inferred;
 
   if (raw.command === "status" || raw.command === "workspace") return undefined;
@@ -451,8 +461,8 @@ function repoFromQualifiedIssueRef(issue: string | undefined): string | undefine
   return undefined;
 }
 
-export async function inferRepoFromOrigin(workspace: string, runner: ProcessRunner = runProcess): Promise<string | undefined> {
-  const result = await runner(["git", "remote", "get-url", "origin"], { cwd: workspace });
+export async function inferRepoFromOrigin(workspace: string, runner: ProcessRunner = runProcessPromise, application?: ApplicationExecution): Promise<string | undefined> {
+  const result = await runner(["git", "remote", "get-url", "origin"], { cwd: workspace }, application);
   if (result.exitCode !== 0) return undefined;
   return parseGithubRepoFromOrigin(result.stdout);
 }
@@ -471,7 +481,7 @@ async function hydrateRequiredVerifyCommand(
   );
 }
 
-export async function inferVerifyCommand(workspace: string, runner: ProcessRunner = runProcess): Promise<string | undefined> {
+export async function inferVerifyCommand(workspace: string, runner: ProcessRunner = runProcessPromise): Promise<string | undefined> {
   void runner;
   return inferVerificationCommand(workspace);
 }

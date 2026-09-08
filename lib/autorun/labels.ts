@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { ensureGitHubLabels, type EnsureGitHubLabelsResult, type RequiredGitHubLabel } from "../github/labels.ts";
 
 export interface AutorunLabelContractInput {
@@ -102,13 +103,13 @@ export function labelsToRemoveForAutorunTransition(input: {
   ]).filter((label) => normalizeLabel(label) !== normalizeLabel(input.nextLabel));
 }
 
-export async function ensureAutorunLabelContract(options: EnsureAutorunLabelContractOptions): Promise<EnsureGitHubLabelsResult> {
+export async function ensureAutorunLabelContract(options: EnsureAutorunLabelContractOptions, application?: ApplicationExecution): Promise<EnsureGitHubLabelsResult> {
   return ensureGitHubLabels({
     cwd: options.cwd,
     repo: options.repo,
     dryRun: options.dryRun,
     labels: buildRequiredAutorunLabels(options),
-  });
+  }, application);
 }
 
 export function mergeLifecycleSkipLabels(input: {

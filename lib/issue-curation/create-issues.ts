@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { runPiAgent } from "../pi/agent.ts";
 import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
 import { publishIssueWithGitHub, type IssuePublisher } from "../issue-publishing/github.ts";
@@ -105,7 +106,7 @@ export interface CreateIssuesOptions {
   clock?: { now(): Date } | undefined;
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
-  labelEnsurer?: ((options: { cwd: string; repo?: string | undefined }) => Promise<unknown>) | false | undefined;
+  labelEnsurer?: ((...args: Parameters<typeof ensureReviewerIssueLabels>) => Promise<unknown>) | false | undefined;
   issuePublisher?: IssuePublisher | undefined;
 }
 
@@ -122,15 +123,15 @@ interface ValidPlanItem {
 
 const issueCreationDefaultClock = { now: () => new Date() };
 
-export async function createIssuesPhase(context: WorkflowContext, agentRunner: AgentRunner = runPiAgent): Promise<IssueCreationResults> {
-  const result = await createIssuesFromCurationPlan({ context, agentRunner });
+export async function createIssuesPhase(context: WorkflowContext, agentRunner: AgentRunner = runPiAgent, application?: ApplicationExecution): Promise<IssueCreationResults> {
+  const result = await createIssuesFromCurationPlan({ context, agentRunner }, application);
   if (context.yes && result.failed.length > 0) {
     throw new Error(`Issue creation failed for ${result.failed.length} plan item(s). See ${artifactRelativePath(context, "issueCreationResults")}.`);
   }
   return result;
 }
 
-export async function createIssuesFromCurationPlan(options: CreateIssuesOptions): Promise<IssueCreationResults> {
+export async function createIssuesFromCurationPlan(options: CreateIssuesOptions, application?: ApplicationExecution): Promise<IssueCreationResults> {
   const { context, agentRunner = runPiAgent, clock = issueCreationDefaultClock } = options;
   const approved = options.approved ?? context.yes;
   const approvalReason = options.approvalReason ?? (context.yes ? "The user passed --yes" : "An internal caller explicitly approved publishing");
@@ -187,7 +188,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
     const labelEnsurer = options.labelEnsurer ?? ensureReviewerIssueLabels;
     if (labelEnsurer !== false) {
       try {
-        await labelEnsurer({ cwd: context.agentCwd, repo: context.repo });
+        await labelEnsurer({ cwd: context.agentCwd, repo: context.repo }, application);
       } catch (error) {
         const message = `Required reviewer-generated issue labels could not be ensured: ${error instanceof Error ? error.message : String(error)}`;
         const result = buildResult({
@@ -233,7 +234,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions)
         approvalReason,
         display,
         issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
-      });
+      }, application);
 
     const result = buildResult({
       context,
@@ -279,7 +280,7 @@ async function authorAndPublishIssues(input: {
   approvalReason: string;
   issuePublisher: IssuePublisher;
   display: AgentDisplayContext;
-}): Promise<PublishResult> {
+}, application?: ApplicationExecution): Promise<PublishResult> {
   const { context, promptSourcePlanPath, creatable, agentRunner, approvalReason, issuePublisher, display } = input;
 
   try {
@@ -330,7 +331,7 @@ async function authorAndPublishIssues(input: {
           title: rendered.title,
           body: rendered.body,
           labels: labelsForPlanItem(item),
-        });
+        }, application);
         createdCurrentRun.push({
           planItemId: item.planItemId,
           kind: item.kind,

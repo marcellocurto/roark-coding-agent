@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import path from "node:path";
 import { presenter } from "../presentation/presenter.ts";
 import { artifactExists, artifactRelativePath, fixLogRef, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
@@ -10,7 +11,7 @@ import { decidePublish, type PublishGateDecision } from "./publish-gate.ts";
 import { parseReadinessResultJson } from "../workflow/readiness.ts";
 import {
   classifyVerificationFailure,
-  runVerification,
+  runVerificationPromise,
   verificationFailureReason,
   writeVerificationArtifact,
   writeVerificationBeforeFixArtifact,
@@ -23,7 +24,6 @@ import type { AutorunIssueCandidate } from "./selection.ts";
 import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 import { runPrReview } from "../pr-review/workflow.ts";
-import type { ReviewPrCliOptions } from "../cli/args.ts";
 
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
@@ -35,7 +35,7 @@ export type PublishGateOutcome =
   | { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null }
   | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
 
-type AutomaticPrReviewRunner = (options: ReviewPrCliOptions) => Promise<{
+type AutomaticPrReviewRunner = (...args: Parameters<typeof runPrReview>) => Promise<{
   outcome: "completed" | "blocked";
   context: { reviewDirRelative: string };
 }>;
@@ -43,11 +43,11 @@ type AutomaticPrReviewRunner = (options: ReviewPrCliOptions) => Promise<{
 export interface RunPublishGateInjected {
   refreshCopyToWorktree?: typeof refreshCopyToWorktree | undefined;
   runLifecycleHook?: typeof runLifecycleHook | undefined;
-  runVerification?: typeof runVerification | undefined;
+  runVerificationPromise?: typeof runVerificationPromise | undefined;
   writeVerificationArtifact?: typeof writeVerificationArtifact | undefined;
   handleNonPublish?: typeof handleNonPublish | undefined;
   publishAutorunResult?: typeof publishAutorunResult | undefined;
-  postPrIssueCreation?: ((input: { workflowContext: WorkflowContext; prUrl: string }) => Promise<IssueCreationResults | undefined>) | undefined;
+  postPrIssueCreation?: ((...args: Parameters<typeof createReviewerIssuesAfterPr>) => Promise<IssueCreationResults | undefined>) | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
   updatePrBody?: typeof updatePublishedPrBody | undefined;
   runPrReview?: AutomaticPrReviewRunner | undefined;
@@ -61,11 +61,11 @@ export async function runPublishGate(input: {
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
   recoveryCommand?: string | undefined  ;
-}, injected: RunPublishGateInjected = {}): Promise<PublishGateOutcome> {
+}, injected: RunPublishGateInjected = {}, application?: ApplicationExecution): Promise<PublishGateOutcome> {
   const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
   const refreshWorkspace = injected.refreshCopyToWorktree ?? refreshCopyToWorktree;
   const runHook = injected.runLifecycleHook ?? runLifecycleHook;
-  const verify = injected.runVerification ?? runVerification;
+  const verify = injected.runVerificationPromise ?? runVerificationPromise;
   const writeVerification = injected.writeVerificationArtifact ?? writeVerificationArtifact;
   const nonPublish = injected.handleNonPublish ?? handleNonPublish;
   const publishResult = injected.publishAutorunResult ?? publishAutorunResult;
@@ -80,13 +80,13 @@ export async function runPublishGate(input: {
 
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
-    await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
-    await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
+    await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree }, application);
+    await runHook("beforeVerify", options.hooks, workflowContext.agentCwd, undefined, application);
     verification = await verify({
       command: options.verifyCommand,
       cwd: workflowContext.agentCwd,
       display: { target: `#${workflowContext.issueNumber}`, repository: workflowContext.repo },
-    });
+    }, application);
     await writeVerification(workflowContext, verification);
     presenter().artifact(artifactRelativePath(workflowContext, "verification"));
   }
@@ -102,7 +102,7 @@ export async function runPublishGate(input: {
       verification,
       attemptMetadata,
       attemptMetadataPath,
-    });
+    }, application);
     await publishLedger({
       cwd: options.cwd,
       repo: options.repo,
@@ -114,7 +114,7 @@ export async function runPublishGate(input: {
         attempt: attemptMetadata.attempt,
         artifactContent: readinessMarkdown ?? "",
       }),
-    });
+    }, application);
     await publishLedger({
       cwd: options.cwd,
       repo: options.repo,
@@ -126,10 +126,10 @@ export async function runPublishGate(input: {
         attempt: attemptMetadata.attempt,
         prUrl: publishedPr.url,
       }),
-    });
+    }, application);
     let issueCreationResults: IssueCreationResults | undefined;
     try {
-      issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl: publishedPr.url }) ?? undefined;
+      issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl: publishedPr.url }, application) ?? undefined;
     } catch (error) {
       presenter().warning(`reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -143,7 +143,7 @@ export async function runPublishGate(input: {
         verification,
         attemptMetadata,
         followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
-      });
+      }, application);
     } catch (error) {
       presenter().warning(`failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -161,7 +161,7 @@ export async function runPublishGate(input: {
         comment: true,
         workspace: options.workspace,
         hooks: options.hooks,
-      });
+      }, undefined, application);
       presenter().artifact(review.context.reviewDirRelative);
       if (review.outcome === "blocked") {
         presenter().warning(`automatic PR review for #${publishedPr.number} was blocked because the PR changed during review; review artifacts were preserved`);
@@ -206,10 +206,10 @@ export async function runPublishGate(input: {
         artifactContent: readinessMarkdown ?? "",
         recoveryCommand,
       }),
-    });
+    }, application);
   }
 
-  await nonPublish({ options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand });
+  await nonPublish({ options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand }, application);
   return {
     outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
     outcomeDetail: decision.reason,
@@ -219,13 +219,13 @@ export async function runPublishGate(input: {
 export async function createReviewerIssuesAfterPr(input: {
   workflowContext: WorkflowContext;
   prUrl: string;
-}): Promise<IssueCreationResults> {
+}, application?: ApplicationExecution): Promise<IssueCreationResults> {
   await issueCurationPhase(input.workflowContext, undefined, { prUrl: input.prUrl });
   const result = await createIssuesFromCurationPlan({
     context: input.workflowContext,
     approved: true,
     approvalReason: "Roark opened the autorun pull request successfully",
-  });
+  }, application);
   if (result.failed.length > 0) {
     presenter().warning(`reviewer-generated issue creation reported ${result.failed.length} failure(s)`);
     presenter().artifact(artifactRelativePath(input.workflowContext, "issueCreationResults"));
@@ -271,7 +271,7 @@ export async function handleNonPublish(input: {
   attemptMetadata: AttemptMetadata;
   attemptMetadataPath: string;
   recoveryCommand?: string | undefined  ;
-}): Promise<void> {
+}, application?: ApplicationExecution): Promise<void> {
   const { options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
   const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
   const artifactContent = await readDecisionArtifact(workflowContext, decision.phase);
@@ -315,7 +315,7 @@ export async function handleNonPublish(input: {
     }),
     marker,
     existingCommentId: attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
-  });
+  }, application);
   if (ref) recordAttemptIssueComment(attemptMetadata, decision.phase, ref);
 }
 

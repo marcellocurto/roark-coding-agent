@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runProcessOrThrow } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import {
   assertSafeWorkBranch,
   autorunWorktreePath,
@@ -75,12 +75,12 @@ describe("autorun issue worktrees", () => {
 
   test("creates new work branches from origin/<baseBranch>", async () => {
     const { repo } = await createRepoWithRemote();
-    await runProcessOrThrow(["git", "switch", "-c", "develop"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "switch", "-c", "develop"], { cwd: repo });
     await writeFile(path.join(repo, "develop.txt"), "from develop\n", "utf8");
-    await runProcessOrThrow(["git", "add", "develop.txt"], { cwd: repo });
-    await runProcessOrThrow(["git", "commit", "-m", "develop"], { cwd: repo });
-    await runProcessOrThrow(["git", "push", "-u", "origin", "develop"], { cwd: repo });
-    await runProcessOrThrow(["git", "switch", "main"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "add", "develop.txt"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "develop"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "push", "-u", "origin", "develop"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "switch", "main"], { cwd: repo });
 
     const plan = createBranchPlan({ issueNumber: 124, branchName: "roark/issue-124", baseBranch: "develop" });
     const agentCwd = await ensureIssueWorktree({ controlCwd: repo, plan });
@@ -96,9 +96,9 @@ describe("autorun issue worktrees", () => {
     const originalHead = await gitOutput(agentCwd, ["rev-parse", "HEAD"]);
 
     await writeFile(path.join(repo, "base.txt"), "base update\n", "utf8");
-    await runProcessOrThrow(["git", "add", "base.txt"], { cwd: repo });
-    await runProcessOrThrow(["git", "commit", "-m", "base update"], { cwd: repo });
-    await runProcessOrThrow(["git", "push", "origin", "main"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "add", "base.txt"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "base update"], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "push", "origin", "main"], { cwd: repo });
 
     const reused = await ensureIssueWorktree({ controlCwd: repo, plan });
 
@@ -134,8 +134,8 @@ describe("autorun issue worktrees", () => {
     const plan = createBranchPlan({ issueNumber: 128, branchName: "roark/issue-128", baseBranch: "main" });
     const agentCwd = await ensureIssueWorktree({ controlCwd: repo, plan });
     await writeFile(path.join(agentCwd, "work.txt"), "committed work\n", "utf8");
-    await runProcessOrThrow(["git", "add", "work.txt"], { cwd: agentCwd });
-    await runProcessOrThrow(["git", "commit", "-m", "work"], { cwd: agentCwd });
+    await runProcessOrThrowPromise(["git", "add", "work.txt"], { cwd: agentCwd });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "work"], { cwd: agentCwd });
     await rm(agentCwd, { recursive: true, force: true });
 
     const recovered = await checkoutExistingIssueBranch({ cwd: repo, plan });
@@ -150,12 +150,12 @@ describe("autorun issue worktrees", () => {
     const plan = createBranchPlan({ issueNumber: 129, branchName: "roark/issue-129", baseBranch: "main" });
     const agentCwd = await ensureIssueWorktree({ controlCwd: repo, plan });
     await writeFile(path.join(agentCwd, "remote-work.txt"), "remote work\n", "utf8");
-    await runProcessOrThrow(["git", "add", "remote-work.txt"], { cwd: agentCwd });
-    await runProcessOrThrow(["git", "commit", "-m", "remote work"], { cwd: agentCwd });
-    await runProcessOrThrow(["git", "push", "-u", "origin", plan.branchName], { cwd: agentCwd });
-    await runProcessOrThrow(["git", "worktree", "remove", "--force", agentCwd], { cwd: repo });
-    await runProcessOrThrow(["git", "branch", "-D", plan.branchName], { cwd: repo });
-    await runProcessOrThrow(["git", "update-ref", "-d", `refs/remotes/origin/${plan.branchName}`], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "add", "remote-work.txt"], { cwd: agentCwd });
+    await runProcessOrThrowPromise(["git", "commit", "-m", "remote work"], { cwd: agentCwd });
+    await runProcessOrThrowPromise(["git", "push", "-u", "origin", plan.branchName], { cwd: agentCwd });
+    await runProcessOrThrowPromise(["git", "worktree", "remove", "--force", agentCwd], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "branch", "-D", plan.branchName], { cwd: repo });
+    await runProcessOrThrowPromise(["git", "update-ref", "-d", `refs/remotes/origin/${plan.branchName}`], { cwd: repo });
 
     const recovered = await checkoutExistingIssueBranch({ cwd: repo, plan });
 
@@ -177,19 +177,19 @@ async function createRepoWithRemote(): Promise<{ repo: string; remote: string }>
   tempDirs.push(root);
   const repo = path.join(root, "repo");
   const remote = path.join(root, "remote.git");
-  await runProcessOrThrow(["git", "init", "-b", "main", repo]);
-  await runProcessOrThrow(["git", "config", "user.email", "test@example.com"], { cwd: repo });
-  await runProcessOrThrow(["git", "config", "user.name", "Test User"], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "init", "-b", "main", repo]);
+  await runProcessOrThrowPromise(["git", "config", "user.email", "test@example.com"], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "config", "user.name", "Test User"], { cwd: repo });
   await writeFile(path.join(repo, "README.md"), "hello\n", "utf8");
-  await runProcessOrThrow(["git", "add", "README.md"], { cwd: repo });
-  await runProcessOrThrow(["git", "commit", "-m", "initial"], { cwd: repo });
-  await runProcessOrThrow(["git", "init", "--bare", remote]);
-  await runProcessOrThrow(["git", "remote", "add", "origin", remote], { cwd: repo });
-  await runProcessOrThrow(["git", "push", "-u", "origin", "main"], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "add", "README.md"], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "commit", "-m", "initial"], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "init", "--bare", remote]);
+  await runProcessOrThrowPromise(["git", "remote", "add", "origin", remote], { cwd: repo });
+  await runProcessOrThrowPromise(["git", "push", "-u", "origin", "main"], { cwd: repo });
   return { repo, remote };
 }
 
 async function gitOutput(cwd: string, args: string[]): Promise<string> {
-  return (await runProcessOrThrow(["git", ...args], { cwd })).trim();
+  return (await runProcessOrThrowPromise(["git", ...args], { cwd })).trim();
 }
 

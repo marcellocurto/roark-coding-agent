@@ -1,4 +1,5 @@
-import { runProcess, runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
 import { presenter } from "../presentation/presenter.ts";
 
 export interface RequiredGitHubLabel {
@@ -40,7 +41,7 @@ export function buildCreateGitHubLabelArgv(options: { repo: string; label: Requi
   ];
 }
 
-export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Promise<EnsureGitHubLabelsResult> {
+export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions, application?: ApplicationExecution): Promise<EnsureGitHubLabelsResult> {
   if (!options.repo) {
     throw new Error("Could not ensure GitHub labels because the repository was not resolved.");
   }
@@ -48,7 +49,7 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
   const required = uniqueRequiredLabels(options.labels);
   if (required.length === 0) return { existing: [], missing: [], created: [] };
 
-  const existing = await listGitHubLabelNames({ cwd: options.cwd, repo: options.repo });
+  const existing = await listGitHubLabelNames({ cwd: options.cwd, repo: options.repo }, application);
   const existingSet = normalizedSet(existing);
   const missing = required.filter((label) => !existingSet.has(normalizeLabelName(label.name)));
 
@@ -65,13 +66,13 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
   const failures: string[] = [];
 
   for (const label of missing) {
-    const create = await runProcess(buildCreateGitHubLabelArgv({ repo: options.repo, label }), { cwd: options.cwd });
+    const create = await runProcessPromise(buildCreateGitHubLabelArgv({ repo: options.repo, label }), { cwd: options.cwd }, application);
     if (create.exitCode === 0) {
       created.push(label);
       continue;
     }
 
-    const refreshed = await listGitHubLabelNames({ cwd: options.cwd, repo: options.repo });
+    const refreshed = await listGitHubLabelNames({ cwd: options.cwd, repo: options.repo }, application);
     if (normalizedSet(refreshed).has(normalizeLabelName(label.name))) continue;
 
     failures.push(`- ${label.name} (${label.role}): ${create.stderr || create.stdout || `exit code ${create.exitCode}`}`.trim());
@@ -96,11 +97,11 @@ export async function ensureGitHubLabels(options: EnsureGitHubLabelsOptions): Pr
   return { existing, missing, created };
 }
 
-export async function listGitHubLabelNames(options: { cwd: string; repo: string }): Promise<string[]> {
-  const stdout = await runProcessOrThrow(buildListGitHubLabelsArgv({ repo: options.repo }), {
+export async function listGitHubLabelNames(options: { cwd: string; repo: string }, application?: ApplicationExecution): Promise<string[]> {
+  const stdout = await runProcessOrThrowPromise(buildListGitHubLabelsArgv({ repo: options.repo }), {
     cwd: options.cwd,
     label: "gh api labels list",
-  });
+  }, application);
   return parseGitHubLabelNames(stdout);
 }
 

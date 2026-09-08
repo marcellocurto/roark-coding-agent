@@ -1,3 +1,5 @@
+import { Effect } from "effect";
+import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
 import { describe, expect, test } from "bun:test";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
@@ -51,7 +53,7 @@ describe("completeAutorunWorkflow", () => {
     let publishCalls = 0;
     const marked: unknown[] = [];
 
-    const outcome = await completeAutorunWorkflow({
+    const outcome = await Effect.runPromise(fromLegacyPromise((application) => completeAutorunWorkflow({
       workflowResult: { status: "triage-stopped", triageVerdict: "blocked" },
       options,
       issue,
@@ -65,11 +67,12 @@ describe("completeAutorunWorkflow", () => {
         publishCalls += 1;
         return { outcome: "published", outcomeDetail: null };
       },
-      markTriageStopped: async (input) => {
+      markTriageStopped: async (input, supplied) => {
+        expect(supplied).toBe(application);
         await noopAsync();
         marked.push(input);
       },
-    });
+    }, application)).pipe(Effect.provide(applicationLayer)));
 
     expect(outcome).toEqual({ outcome: "triage-stopped", outcomeDetail: 'triage verdict is "blocked"' });
     expect(publishCalls).toBe(0);

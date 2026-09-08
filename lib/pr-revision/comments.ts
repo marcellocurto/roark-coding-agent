@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import type { VerificationResult } from "../autorun/verification.ts";
 import { postIssueComment, truncateGitHubIssueComment } from "../github/comments.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
@@ -39,14 +40,14 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
 
-export async function postPrRevisionSummaryComment(input: RevisionSummaryInput): Promise<void> {
+export async function postPrRevisionSummaryComment(input: RevisionSummaryInput, application?: ApplicationExecution): Promise<void> {
   if (!input.context.comment) return;
   await postIssueComment({
     cwd: input.context.controlCwd,
     repo: input.context.repo,
     issueNumber: input.context.prNumber,
     body: formatPrRevisionSummaryComment(input),
-  });
+  }, application);
 }
 
 function pushDispositions(lines: string[], dispositions: RevisionFeedbackDisposition[]): void {

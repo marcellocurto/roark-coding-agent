@@ -1,10 +1,11 @@
+import { Effect } from "effect";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { presentAutorunOutcome, runCli, workflowOutcomeStatus } from "../../roark.ts";
+import { presentAutorunOutcome, runCliPromise, workflowOutcomeStatus } from "../../roark.ts";
 import { configurePresenter, Presenter, presenter } from "../presentation/presenter.ts";
-import { runProcess, runProcessOrThrow } from "./process.ts";
+import { runProcessPromise, runProcessOrThrowPromise } from "./process.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "../..");
 const entrypoint = path.join(projectRoot, "roark.ts");
@@ -14,7 +15,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("runCli lifecycle", () => {
+describe("runCliPromise lifecycle", () => {
   test("presents published, stopped, blocked, readiness-failed, and verification-failed outcomes distinctly", () => {
     let output = "";
     configurePresenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
@@ -38,14 +39,14 @@ describe("runCli lifecycle", () => {
   test("preserves a discovered autorun target in the final failure", async () => {
     let output = "";
     const presentation = new Presenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
-    const exitCode = await runCli(["auto"], {
+    const exitCode = await runCliPromise(["auto"], {
       presentation,
       execute: () => {
         presenter().run({ command: "auto", repository: "owner/repo" });
         presenter().updateTarget("#140");
         return Promise.reject(new Error("failed"));
       },
-      notify: () => Promise.resolve(),
+      notify: () => Effect.void,
       reportError: () => {
         // The expected failure is asserted through the operational output.
       },
@@ -58,12 +59,9 @@ describe("runCli lifecycle", () => {
 
   test("dispatches exactly once after a successful quick command", async () => {
     const notifications: { argv: string[]; succeeded: boolean }[] = [];
-    const exitCode = await runCli(["status", "--all"], {
+    const exitCode = await runCliPromise(["status", "--all"], {
       execute: () => Promise.resolve(),
-      notify: (request) => {
-        notifications.push(request);
-        return Promise.resolve();
-      },
+      notify: (request) => Effect.sync(() => { notifications.push(request); }),
     });
 
     expect(exitCode).toBe(0);
@@ -77,12 +75,11 @@ describe("runCli lifecycle", () => {
       // Suppress the expected notification warning in test output.
     });
     try {
-      const exitCode = await runCli(["do", "95"], {
+      const exitCode = await runCliPromise(["do", "95"], {
         execute: () => Promise.reject(new Error("raw SECRET failure")),
-        notify: (request) => {
-          notifications.push(request);
-          return Promise.reject(new Error("notifier failed"));
-        },
+        notify: (request) => Effect.sync(() => { notifications.push(request); }).pipe(
+          Effect.andThen(Effect.fail(new Error("notifier failed"))),
+        ),
         reportError: (error) => reported.push(error),
       });
 
@@ -101,14 +98,14 @@ describe("runCli lifecycle", () => {
       reported.push(String(value));
     });
     try {
-      expect(await runCli(["do", "95"], {
+      expect(await runCliPromise(["do", "95"], {
         execute: () => Promise.reject(new Error("Invalid input\n\nUsage:\n  roark do <issue>")),
-        notify: () => Promise.resolve(),
+        notify: () => Effect.void,
       })).toBe(1);
-      expect(await runCli(["do", "95"], {
+      expect(await runCliPromise(["do", "95"], {
         // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the CLI boundary must report arbitrary JavaScript throw values
         execute: () => Promise.reject({ code: "E_OBJECT" }),
-        notify: () => Promise.resolve(),
+        notify: () => Effect.void,
       })).toBe(1);
 
       expect(reported[0]).toBe("Invalid input\n\nUsage:\n  roark do <issue>");
@@ -123,9 +120,9 @@ describe("runCli lifecycle", () => {
       // Suppress the expected warning in test output.
     });
     try {
-      const exitCode = await runCli(["status", "--all"], {
+      const exitCode = await runCliPromise(["status", "--all"], {
         execute: () => Promise.resolve(),
-        notify: () => Promise.reject(new Error("notifier failed")),
+        notify: () => Effect.fail(new Error("notifier failed")),
       });
       expect(exitCode).toBe(0);
       expect(consoleError).toHaveBeenCalledTimes(1);
@@ -138,7 +135,7 @@ describe("runCli lifecycle", () => {
 describe("roark executable", () => {
   test("prints the package version", async () => {
     const packageJson = await Bun.file(path.join(projectRoot, "package.json")).json() as { version: string };
-    const result = await runProcess([entrypoint, "--version"], { cwd: projectRoot });
+    const result = await runProcessPromise([entrypoint, "--version"], { cwd: projectRoot });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -146,7 +143,7 @@ describe("roark executable", () => {
   });
 
   test("prints help successfully", async () => {
-    const result = await runProcess([entrypoint, "--help"], { cwd: projectRoot });
+    const result = await runProcessPromise([entrypoint, "--help"], { cwd: projectRoot });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -154,7 +151,7 @@ describe("roark executable", () => {
   });
 
   test("reports invalid commands on stderr with a nonzero exit", async () => {
-    const result = await runProcess([entrypoint, "not-a-command"], { cwd: projectRoot });
+    const result = await runProcessPromise([entrypoint, "not-a-command"], { cwd: projectRoot });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Unknown command 'not-a-command'.\n\nroark <command> [issue] [options]\n\nCommands:");
@@ -163,9 +160,9 @@ describe("roark executable", () => {
   test("dispatches a hydrated status command", async () => {
     const repo = await mkdtemp(path.join(tmpdir(), "roark-entrypoint-"));
     tempDirs.push(repo);
-    await runProcessOrThrow(["git", "init", repo]);
+    await runProcessOrThrowPromise(["git", "init", repo]);
 
-    const result = await runProcess([
+    const result = await runProcessPromise([
       entrypoint,
       "status",
       "--all",
@@ -185,22 +182,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`runtime ${signal} interrupts verification through the Promise boundary and reaps its descendants`, async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-runtime-signal-"));
     tempDirs.push(cwd);
-    const fixture = path.join(cwd, "runtime.ts");
-    const runtimeUrl = new URL("../../node_modules/@effect/platform-bun/dist/BunRuntime.js", import.meta.url).href;
-    const effectUrl = new URL("../../node_modules/effect/dist/Effect.js", import.meta.url).href;
-    await writeFile(fixture, `
-      import * as BunRuntime from ${JSON.stringify(runtimeUrl)};
-      import * as Effect from ${JSON.stringify(effectUrl)};
-      import { runCliEffect } from ${JSON.stringify(new URL("../../roark.ts", import.meta.url).href)};
-      import { applicationLayer } from ${JSON.stringify(new URL("../runtime/application.ts", import.meta.url).href)};
-      import { runVerification } from ${JSON.stringify(new URL("../autorun/verification.ts", import.meta.url).href)};
-      BunRuntime.runMain(runCliEffect(["do", "1"], {
-        execute: async () => {
-          await runVerification({ command: "sleep 30 & echo $! > child.pid; wait", cwd: ${JSON.stringify(cwd)} });
-        },
-        notify: () => Promise.resolve(),
-      }).pipe(Effect.provide(applicationLayer)));
-    `);
+    const fixture = path.join(projectRoot, "lib/testing/fixtures/runtime-signal.ts");
     const child = Bun.spawn([process.execPath, fixture], { cwd, stdout: "pipe", stderr: "pipe" });
     const stderr = new Response(child.stderr).text();
     const stdout = new Response(child.stdout).text();

@@ -1,4 +1,5 @@
-import { runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 
 export const githubIssueCommentMaxChars = 65_536;
 
@@ -130,28 +131,28 @@ export function findIssueCommentByMarker(comments: GitHubIssueComment[], marker:
     (authorLogin === undefined || comment.authorLogin === authorLogin));
 }
 
-export async function postIssueComment(options: IssueCommentOptions): Promise<GitHubCommentRef> {
-  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo });
+export async function postIssueComment(options: IssueCommentOptions, application?: ApplicationExecution): Promise<GitHubCommentRef> {
+  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo }, application);
   const marker = markerFromBody(options.body) ?? "";
-  const stdout = await runProcessOrThrow(
+  const stdout = await runProcessOrThrowPromise(
     buildPostIssueCommentArgv({ repo, issueNumber: options.issueNumber, body: options.body }),
-    { cwd: options.cwd, label: "gh api issue comment create" },
+    { cwd: options.cwd, label: "gh api issue comment create" }, application
   );
   return parseGitHubCommentRef(stdout, marker);
 }
 
-export async function updateIssueComment(options: { cwd: string; repo?: string | undefined; commentId: number; body: string; marker?: string }): Promise<GitHubCommentRef> {
-  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo });
+export async function updateIssueComment(options: { cwd: string; repo?: string | undefined; commentId: number; body: string; marker?: string }, application?: ApplicationExecution): Promise<GitHubCommentRef> {
+  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo }, application);
   const marker = options.marker ?? markerFromBody(options.body) ?? "";
-  const stdout = await runProcessOrThrow(
+  const stdout = await runProcessOrThrowPromise(
     buildUpdateIssueCommentArgv({ repo, commentId: options.commentId, body: options.body }),
-    { cwd: options.cwd, label: "gh api issue comment update" },
+    { cwd: options.cwd, label: "gh api issue comment update" }, application
   );
   return parseGitHubCommentRef(stdout, marker);
 }
 
-export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMarkerOptions): Promise<GitHubCommentRef> {
-  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo });
+export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMarkerOptions, application?: ApplicationExecution): Promise<GitHubCommentRef> {
+  const repo = await resolveCommentRepo({ cwd: options.cwd, repo: options.repo }, application);
   const body = ensureCommentStartsWithMarker(options.body, options.marker);
 
   if (options.existingCommentId !== undefined) {
@@ -162,29 +163,29 @@ export async function postOrUpdateIssueCommentByMarker(options: IssueCommentByMa
         commentId: options.existingCommentId,
         body,
         marker: options.marker,
-      });
+      }, application);
     } catch {
       // Fall through to marker lookup. The stored comment may have been deleted.
     }
   }
 
-  const commentsRaw = await runProcessOrThrow(
+  const commentsRaw = await runProcessOrThrowPromise(
     buildListIssueCommentsArgv({ repo, issueNumber: options.issueNumber }),
-    { cwd: options.cwd, label: "gh api issue comments list" },
+    { cwd: options.cwd, label: "gh api issue comments list" }, application
   );
-  const currentAuthor = (await runProcessOrThrow(buildCurrentCommentAuthorArgv(), { cwd: options.cwd, label: "gh api current comment author" })).trim();
+  const currentAuthor = (await runProcessOrThrowPromise(buildCurrentCommentAuthorArgv(), { cwd: options.cwd, label: "gh api current comment author" }, application)).trim();
   if (!currentAuthor) throw new Error("Could not resolve the authenticated GitHub comment author.");
   const existing = findIssueCommentByMarker(parseIssueComments(commentsRaw), options.marker, currentAuthor);
   if (existing?.id !== undefined) {
-    return await updateIssueComment({ cwd: options.cwd, repo, commentId: existing.id, body, marker: options.marker });
+    return await updateIssueComment({ cwd: options.cwd, repo, commentId: existing.id, body, marker: options.marker }, application);
   }
 
-  return await postIssueComment({ cwd: options.cwd, repo, issueNumber: options.issueNumber, body });
+  return await postIssueComment({ cwd: options.cwd, repo, issueNumber: options.issueNumber, body }, application);
 }
 
-async function resolveCommentRepo(options: { cwd: string; repo?: string  | undefined}): Promise<string> {
+async function resolveCommentRepo(options: { cwd: string; repo?: string  | undefined}, application?: ApplicationExecution): Promise<string> {
   if (options.repo) return options.repo;
-  const stdout = await runProcessOrThrow(buildCurrentRepoArgv(), { cwd: options.cwd, label: "gh repo view" });
+  const stdout = await runProcessOrThrowPromise(buildCurrentRepoArgv(), { cwd: options.cwd, label: "gh repo view" }, application);
   const repo = stdout.trim();
   if (!repo) throw new Error("Could not resolve GitHub repository for issue comment publishing.");
   return repo;

@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import path from "node:path";
 import type { AutoCliOptions } from "../cli/args.ts";
 import { presenter } from "../presentation/presenter.ts";
@@ -61,14 +62,15 @@ export interface AutoDiscoveryResult {
 export async function runAutoDiscovery(
   options: AutoCliOptions,
   injected: AutoRunInjected = {},
+  application?: ApplicationExecution,
 ): Promise<AutoDiscoveryResult> {
   presenter().transition(options.issue ? "Target lookup" : "Discovery", displayIssueTarget(options.issue, "auto"));
-  await ensureRequiredLabelsBeforeIssueWork(options, injected);
-  if (options.issue) return runTargetedAuto(options, injected);
-  return runDiscoveryAuto(options, injected);
+  await ensureRequiredLabelsBeforeIssueWork(options, injected, application);
+  if (options.issue) return runTargetedAuto(options, injected, application);
+  return runDiscoveryAuto(options, injected, application);
 }
 
-async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, injected: AutoRunInjected): Promise<void> {
+async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, injected: AutoRunInjected, application?: ApplicationExecution): Promise<void> {
   const ensureLabels = injected.ensureAutorunLabelContract ?? ensureAutorunLabelContract;
   await ensureLabels({
     cwd: options.cwd,
@@ -78,10 +80,10 @@ async function ensureRequiredLabelsBeforeIssueWork(options: AutoCliOptions, inje
     failureLabel: options.failureLabel,
     successLabel: options.successLabel,
     dryRun: options.dryRun,
-  });
+  }, application);
 }
 
-async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<AutoDiscoveryResult> {
+async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInjected, application?: ApplicationExecution): Promise<AutoDiscoveryResult> {
   presenter().line("Auto issue discovery");
   presenter().line(`Ready label: ${options.readyLabel}`);
   presenter().line(`Skip labels: ${options.skipLabels.join(", ") || "none"}`);
@@ -93,13 +95,13 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
     cwd: options.cwd,
     repo: options.repo,
     limit: discoveryFetchLimit,
-  });
+  }, application);
   const rankedCandidates = rankEligibleIssues(issues, {
     readyLabel: options.readyLabel,
     skipLabels: options.skipLabels,
     limit: options.limit,
   });
-  const { selected, skippedBlocked } = await selectDependencyClearIssues(rankedCandidates, options, injected);
+  const { selected, skippedBlocked } = await selectDependencyClearIssues(rankedCandidates, options, injected, application);
 
   printSkippedBlockedIssues(skippedBlocked);
 
@@ -117,7 +119,7 @@ async function runDiscoveryAuto(options: AutoCliOptions, injected: AutoRunInject
     return { kind: "dry-run", attempts: [] };
   }
 
-  return { kind: "attempts", attempts: await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true }) };
+  return { kind: "attempts", attempts: await runManagedIssueAttempts(selected, options, injected, { requireReadyLabel: true }, application) };
 }
 
 interface SkippedBlockedIssue {
@@ -129,6 +131,7 @@ async function selectDependencyClearIssues(
   candidates: readonly AutorunIssueCandidate[],
   options: AutoCliOptions,
   injected: AutoRunInjected,
+  application?: ApplicationExecution,
 ): Promise<{ selected: AutorunIssueCandidate[]; skippedBlocked: SkippedBlockedIssue[] }> {
   const selected: AutorunIssueCandidate[] = [];
   const skippedBlocked: SkippedBlockedIssue[] = [];
@@ -140,13 +143,13 @@ async function selectDependencyClearIssues(
   for (const issue of candidates) {
     if (selected.length >= options.limit) break;
 
-    const repo = await resolveRepo({ cwd: options.cwd, explicitRepo: options.repo, issueUrl: issue.url });
+    const repo = await resolveRepo({ cwd: options.cwd, explicitRepo: options.repo, issueUrl: issue.url }, application);
     const relationships = await fetchRelationships({
       cwd: options.cwd,
       repo,
       issueNumber: issue.number,
       body: issue.body ?? "",
-    });
+    }, application);
 
     if (!relationships.nativeDependenciesAvailable) {
       const reason = relationships.unavailableReason ? `: ${relationships.unavailableReason}` : "";
@@ -212,7 +215,7 @@ function dedupeDependencies(dependencies: GitHubIssueDependency[]): GitHubIssueD
   return result;
 }
 
-async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected): Promise<AutoDiscoveryResult> {
+async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjected, application?: ApplicationExecution): Promise<AutoDiscoveryResult> {
   if (!options.issue) throw new Error("Targeted auto requires an issue.");
 
   presenter().line("Targeted auto issue");
@@ -221,7 +224,7 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
   presenter().line(`Mode: ${options.dryRun ? "dry run" : "claim + branch + workflow"}`);
 
   const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
-  const fetched = await fetchIssue(options.issue, { cwd: options.cwd, repo: options.repo });
+  const fetched = await fetchIssue(options.issue, { cwd: options.cwd, repo: options.repo }, application);
   const runOptions: AutoCliOptions = { ...options, repo: fetched.repo ?? options.repo };
   const issue = toAutorunIssueCandidate(fetched.issue);
   presenter().updateTarget(`#${issue.number}`);
@@ -243,7 +246,7 @@ async function runTargetedAuto(options: AutoCliOptions, injected: AutoRunInjecte
     return { kind: "dry-run", attempts: [] };
   }
 
-  return { kind: "attempts", attempts: await runManagedIssueAttempts([issue], runOptions, injected, { requireReadyLabel: false }) };
+  return { kind: "attempts", attempts: await runManagedIssueAttempts([issue], runOptions, injected, { requireReadyLabel: false }, application) };
 }
 
 async function runManagedIssueAttempts(
@@ -251,8 +254,9 @@ async function runManagedIssueAttempts(
   options: AutoCliOptions,
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
+  application?: ApplicationExecution,
 ): Promise<AutorunAttemptResult[]> {
-  const assignee = await resolveAssignee(options, injected);
+  const assignee = await resolveAssignee(options, injected, application);
   const results: AutorunAttemptResult[] = [];
   presenter().line(`Claiming issue(s) with label: ${options.inProgressLabel}`);
   if (assignee) presenter().line(`Assignee: ${assignee}`);
@@ -261,7 +265,7 @@ async function runManagedIssueAttempts(
   const clock = injected.clock ?? defaultClock;
   for (const issue of issues) {
     const result = await withAutorunIssueLock({ cwd: options.cwd, issueNumber: issue.number, description: `roark auto issue #${issue.number}` }, async () => {
-      return runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions);
+      return runManagedIssueAttempt(issue, options, assignee, clock, injected, claimOptions, application);
     });
     if (result) results.push(result);
   }
@@ -276,11 +280,12 @@ async function runManagedIssueAttempt(
   clock: Clock,
   injected: AutoRunInjected,
   claimOptions: { requireReadyLabel: boolean },
+  application?: ApplicationExecution,
 ): Promise<AutorunAttemptResult | undefined> {
   presenter().updateTarget(`#${issue.number}`);
   presenter().transition("Preparation", `#${issue.number}`, { operation: "edit" });
   const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
-  await preflight({ cwd: options.cwd });
+  await preflight({ cwd: options.cwd }, application);
 
   let claimPlan = createClaimPlan(issue, { inProgressLabel: options.inProgressLabel, assignee });
   const branchPlan = createBranchPlan({
@@ -298,9 +303,9 @@ async function runManagedIssueAttempt(
     workspace: options.workspace ?? defaultWorkspaceConfig,
     hooks: options.hooks ?? defaultLifecycleHooks,
     mode: "auto",
-  });
+  }, application);
 
-  const recheckedSnapshot = await fetchLatestIssueForClaimRecheck(issue, options, injected);
+  const recheckedSnapshot = await fetchLatestIssueForClaimRecheck(issue, options, injected, application);
   const recheckedIssue = toAutorunIssueCandidate(recheckedSnapshot.issue);
   const skipReason = claimRecheckSkipReason(recheckedIssue, options, claimOptions);
   if (skipReason) {
@@ -324,7 +329,7 @@ async function runManagedIssueAttempt(
 
   presenter().line(`Claiming #${claimPlan.issueNumber} for branch ${claimPlan.branchName}`);
   const claimIssue = injected.claimGitHubIssue ?? claimGitHubIssue;
-  await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false });
+  await claimIssue({ cwd: options.cwd, repo: options.repo, plan: claimPlan, postComment: false }, application);
 
   const workflowIssue = recheckedIssue;
   presenter().line(`Running full workflow in workspace for branch ${branchPlan.branchName} (attempt ${attempt})`);
@@ -365,33 +370,34 @@ async function runManagedIssueAttempt(
           branchName: branchPlan.branchName,
           assignee,
         }),
-      });
+      }, application);
     },
     beforeRun: async () => {
-      await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: preparedWorkspace.path, copyToWorktree: options.workspace?.copyToWorktree });
-      await runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path);
+      await refreshCopyToWorktree({ controlCwd: options.cwd, worktreePath: preparedWorkspace.path, copyToWorktree: options.workspace?.copyToWorktree }, application);
+      await runLifecycleHook("beforeRun", options.hooks, preparedWorkspace.path, undefined, application);
     },
-    afterRun: async () => runLifecycleHook("afterRun", options.hooks, preparedWorkspace.path),
+    afterRun: async () => runLifecycleHook("afterRun", options.hooks, preparedWorkspace.path, undefined, application),
   }, {
     clock,
     runFullWorkflow: injected.runFullWorkflow,
     completeAutorunWorkflow: injected.completeAutorunWorkflow,
-  });
+  }, application);
 }
 
-async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjected): Promise<string | undefined> {
+async function resolveAssignee(options: AutoCliOptions, injected: AutoRunInjected, application?: ApplicationExecution): Promise<string | undefined> {
   if (options.noAssign) return undefined;
   const getLogin = injected.getCurrentGitHubLogin ?? getCurrentGitHubLogin;
-  return options.assignee ?? await getLogin({ cwd: options.cwd });
+  return options.assignee ?? await getLogin({ cwd: options.cwd }, application);
 }
 
 async function fetchLatestIssueForClaimRecheck(
   issue: AutorunIssueCandidate,
   options: AutoCliOptions,
   injected: AutoRunInjected,
+  application?: ApplicationExecution,
 ): Promise<GitHubIssueSnapshot> {
   const fetchIssue = injected.fetchGitHubIssue ?? fetchGitHubIssue;
-  return fetchIssue(issue.url ?? String(issue.number), { cwd: options.cwd, repo: options.repo });
+  return fetchIssue(issue.url ?? String(issue.number), { cwd: options.cwd, repo: options.repo }, application);
 }
 
 function claimRecheckSkipReason(

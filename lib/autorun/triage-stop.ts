@@ -1,4 +1,5 @@
-import { runProcessOrThrow } from "../cli/process.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { runProcessOrThrowPromise } from "../cli/process.ts";
 import { postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
 import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
@@ -47,14 +48,14 @@ export function buildTriageStopRemoveLabelArgv(options: { repo?: string | undefi
   return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
 }
 
-export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions): Promise<GitHubCommentRef | undefined> {
+export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOptions, application?: ApplicationExecution): Promise<GitHubCommentRef | undefined> {
   const label = mapTriageVerdictToLabel(options.triageVerdict);
   const comment = formatTriageStoppedComment(options);
 
   try {
-    await runProcessOrThrow(
+    await runProcessOrThrowPromise(
       buildTriageStopAddLabelArgv({ repo: options.repo, issueNumber: options.issueNumber, label }),
-      { cwd: options.cwd, label: "gh issue edit --add-label (triage stop)" },
+      { cwd: options.cwd, label: "gh issue edit --add-label (triage stop)" }, application
     );
   } catch (error) {
     presenter().warning(`failed to apply triage-stop label '${label}': ${formatError(error)}`);
@@ -62,9 +63,9 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
 
   for (const removeLabel of uniqueLabels(options.removeLabels ?? []).filter((candidate) => candidate !== label)) {
     try {
-      await runProcessOrThrow(
+      await runProcessOrThrowPromise(
         buildTriageStopRemoveLabelArgv({ repo: options.repo, issueNumber: options.issueNumber, label: removeLabel }),
-        { cwd: options.cwd, label: "gh issue edit --remove-label (triage stop cleanup)" },
+        { cwd: options.cwd, label: "gh issue edit --remove-label (triage stop cleanup)" }, application
       );
     } catch (error) {
       presenter().warning(`failed to remove label '${removeLabel}': ${formatError(error)}`);
@@ -80,9 +81,9 @@ export async function markIssueTriageStopped(options: MarkIssueTriageStoppedOpti
         marker: options.marker,
         body: comment,
         existingCommentId: options.existingCommentId,
-      });
+      }, application);
     }
-    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment });
+    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: comment }, application);
   } catch (error) {
     presenter().warning(`failed to post triage-stop comment: ${formatError(error)}`);
   }

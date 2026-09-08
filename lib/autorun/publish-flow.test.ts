@@ -1,3 +1,6 @@
+import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
+import { Effect, PlatformError } from "effect";
+import { ProcessExecutionError } from "../cli/process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,7 +8,7 @@ import path from "node:path";
 import { fixLogRef, readArtifact, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { createReviewerIssuesAfterPr, planVerificationRepair, runPublishGate } from "./publish-flow.ts";
-import { runVerification, type VerificationResult } from "./verification.ts";
+import { runVerificationPromise, type VerificationResult } from "./verification.ts";
 import { noopAsync } from "../utils/async.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
 import type { ReviewFinding } from "../review/result.ts";
@@ -65,7 +68,7 @@ describe("verification repair planning", () => {
     const workspace = { root: "/tmp/roark-workspaces", strategy: "clone" as const, cloneRemote: "origin", clone: {}, copyToWorktree: ["local.env"] };
     const hooks = { beforeRun: "bun install", timeoutMs: 1234 };
 
-    const outcome = await runPublishGate({
+    const outcome = await Effect.runPromise(fromLegacyPromise((application) => runPublishGate({
       options: {
         cwd: context.controlCwd,
         repo: "owner/repo",
@@ -86,23 +89,24 @@ describe("verification repair planning", () => {
     }, {
       refreshCopyToWorktree: async () => { await noopAsync(); },
       runLifecycleHook: async () => { await noopAsync(); },
-      runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+      runVerificationPromise: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
       writeVerificationArtifact: async () => { await noopAsync(); },
       publishAutorunResult: async () => (await noopAsync(), { url: "https://github.com/owner/repo/pull/10", number: 10 }),
       publishIssueLedgerComment: async () => { await noopAsync(); return undefined; },
-      postPrIssueCreation: async ({ prUrl }) => { await noopAsync(); postPrCalls.push(prUrl); return undefined; },
+      postPrIssueCreation: async ({ prUrl }, supplied) => { expect(supplied).toBe(application); await noopAsync(); postPrCalls.push(prUrl); return undefined; },
       updatePrBody: async ({ pr, followUpIssues }) => {
         await noopAsync();
         postPublicationOrder.push("body-update");
         prBodyUpdates.push({ pr, followUpCount: followUpIssues?.length ?? 0 });
       },
-      runPrReview: async (options) => {
+      runPrReview: async (options, _dependencies, supplied) => {
+        expect(supplied).toBe(application);
         await noopAsync();
         postPublicationOrder.push("pr-review");
         reviewCalls.push(options);
         return { outcome: "completed", context: { reviewDirRelative: ".roark/runs/pr/10/review-1" } };
       },
-    });
+    }, application)).pipe(Effect.provide(applicationLayer)));
 
     expect(outcome).toEqual({ outcome: "published", outcomeDetail: null });
     expect(postPrCalls).toEqual(["https://github.com/owner/repo/pull/10"]);
@@ -238,7 +242,7 @@ describe("verification repair planning", () => {
     }, {
       refreshCopyToWorktree: async () => { await noopAsync(); },
       runLifecycleHook: async () => { await noopAsync(); },
-      runVerification: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
+      runVerificationPromise: async ({ command }) => (await noopAsync(), ({ ok: false, command, exitCode: 1, stdout: "", stderr: "lint failed" })),
       writeVerificationArtifact: async () => { await noopAsync(); },
       handleNonPublish: async () => { await noopAsync(); },
       postPrIssueCreation: async () => { await noopAsync(); postPrCalled = true; return undefined; },
@@ -258,7 +262,7 @@ describe("verification repair planning", () => {
     const context = await tempContext(1);
     await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
     await writeArtifact(context, "readinessMarkdown", "# PR Readiness\n\n## Status\nready-for-pr\n");
-    const failure = new Error("verification runner failed");
+    const failure = new ProcessExecutionError({ args: ["bun", "test"], cause: PlatformError.systemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn", description: "verification runner failed" }) });
 
     const running = runPublishGate({
       options: {
@@ -279,7 +283,7 @@ describe("verification repair planning", () => {
     }, {
       refreshCopyToWorktree: async () => { await noopAsync(); },
       runLifecycleHook: async () => { await noopAsync(); },
-      runVerification: (input) => runVerification({ ...input, runner: () => Promise.reject(failure) }),
+      runVerificationPromise: (input) => runVerificationPromise({ ...input, runner: () => Effect.fail(failure) }),
     });
 
     let thrown: unknown;
@@ -359,7 +363,7 @@ describe("verification repair planning", () => {
         await noopAsync();},
       runLifecycleHook: async () => {
         await noopAsync();},
-      runVerification: async ({ command }) => (await noopAsync(), ({
+      runVerificationPromise: async ({ command }) => (await noopAsync(), ({
         ok: false,
         command,
         exitCode: 127,
@@ -414,7 +418,7 @@ function successfulPublicationDependencies(overrides: Parameters<typeof runPubli
   return {
     refreshCopyToWorktree: async () => { await noopAsync(); },
     runLifecycleHook: async () => { await noopAsync(); },
-    runVerification: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
+    runVerificationPromise: async ({ command }) => (await noopAsync(), ({ ok: true, command, exitCode: 0, stdout: "ok", stderr: "" })),
     writeVerificationArtifact: async () => { await noopAsync(); },
     publishAutorunResult: async () => (await noopAsync(), ({ url: "https://github.com/owner/repo/pull/10", number: 10 })),
     publishIssueLedgerComment: async () => { await noopAsync(); return undefined; },

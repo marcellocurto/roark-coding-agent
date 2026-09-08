@@ -1,3 +1,4 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { constants } from "node:os";
 import { Data, Effect, Ref, Stream, type PlatformError } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -14,12 +15,20 @@ export interface ProcessOptions {
   input?: string | undefined;
 }
 
-export class ProcessExecutionError extends Data.TaggedError("ProcessExecutionError")<{
+export class InvalidProcessCommandError extends Data.TaggedError("InvalidProcessCommandError")<{
   args: readonly string[];
-  cause: unknown;
 }> {
   override get message(): string {
-    return `Could not execute ${this.args.join(" ")}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`;
+    return "A command is required.";
+  }
+}
+
+export class ProcessExecutionError extends Data.TaggedError("ProcessExecutionError")<{
+  args: readonly string[];
+  cause: PlatformError.PlatformError;
+}> {
+  override get message(): string {
+    return `Could not execute ${this.args.join(" ")}: ${this.cause.message}`;
   }
 }
 
@@ -38,7 +47,7 @@ export function executeProcess(
 ) {
   return Effect.scoped(Effect.gen(function*() {
     const [command, ...arguments_] = args;
-    if (!command) return yield* Effect.fail(new ProcessExecutionError({ args, cause: new Error("A command is required.") }));
+    if (!command) return yield* Effect.fail(new InvalidProcessCommandError({ args }));
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const child = yield* spawner.spawn(ChildProcess.make(command, arguments_, {
       cwd: options.cwd,
@@ -77,7 +86,7 @@ export function executeProcess(
         return yield* Effect.never;
       }));
     return { ...result, timedOut: yield* Ref.get(timedOut) };
-  })).pipe(Effect.mapError((cause) => cause instanceof ProcessExecutionError ? cause : new ProcessExecutionError({ args, cause })));
+  })).pipe(Effect.mapError((cause) => cause._tag === "PlatformError" ? new ProcessExecutionError({ args, cause }) : cause));
 }
 
 // The pinned platform reports signal exits as PlatformError rather than a code.
@@ -91,21 +100,21 @@ function signalExitCode(error: PlatformError.PlatformError): number | undefined 
   return entry === undefined ? undefined : 128 + entry[1];
 }
 
-export function runProcessEffect(args: readonly string[], options: ProcessOptions = {}) {
+export function runProcess(args: readonly string[], options: ProcessOptions = {}) {
   return executeProcess(args, options).pipe(Effect.map(({ stdout, stderr, exitCode }): ProcessResult => ({ stdout, stderr, exitCode })));
 }
 
-export function runProcessOrThrowEffect(args: readonly string[], options: ProcessOptions & { label?: string } = {}) {
-  return runProcessEffect(args, options).pipe(Effect.flatMap((result) => result.exitCode === 0
+export function runProcessOrThrow(args: readonly string[], options: ProcessOptions & { label?: string } = {}) {
+  return runProcess(args, options).pipe(Effect.flatMap((result) => result.exitCode === 0
     ? Effect.succeed(result.stdout)
     : Effect.fail(new ProcessExitError({ label: options.label ?? args.join(" "), result }))));
 }
 
 // Remove these adapters as the remaining git/gh/workspace callers migrate.
-export function runProcess(args: string[], options: ProcessOptions = {}): Promise<ProcessResult> {
-  return runApplicationPromise(runProcessEffect(args, options));
+export function runProcessPromise(args: string[], options: ProcessOptions = {}, application?: ApplicationExecution): Promise<ProcessResult> {
+  return runApplicationPromise(runProcess(args, options), application);
 }
 
-export function runProcessOrThrow(args: string[], options: ProcessOptions & { label?: string } = {}): Promise<string> {
-  return runApplicationPromise(runProcessOrThrowEffect(args, options));
+export function runProcessOrThrowPromise(args: string[], options: ProcessOptions & { label?: string } = {}, application?: ApplicationExecution): Promise<string> {
+  return runApplicationPromise(runProcessOrThrow(args, options), application);
 }
