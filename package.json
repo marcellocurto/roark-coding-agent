@@ -36,6 +36,8 @@
     "do": "bun run roark.ts do",
     "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --cache --cache-strategy content --cache-location .eslintcache",
     "lint:full": "eslint .",
@@ -49,8 +51,9 @@
   "devDependencies": {
     "@types/bun": "latest",
     "eslint": "^10.3.0",
-    "typescript-eslint": "^8.59.2",
-    "typescript": "^6.0.3"
+    "oxfmt": "0.67.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.2"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.85.1",
