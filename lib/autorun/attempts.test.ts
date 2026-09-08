@@ -3,7 +3,6 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  allocateNextAttempt,
   attemptArtifactRelativePath,
   attemptDir,
   attemptIndexPath,
@@ -11,15 +10,18 @@ import {
   attemptMetadataRelativePath,
   attemptsRootDir,
   formatAttemptMetadata,
-  latestAttemptNumber,
-  readAttemptIndex,
-  readAttemptMetadata,
   recordAttemptIssueComment,
   summarizeAttempt,
-  updateAttemptIndex,
-  writeAttemptMetadata,
   type AttemptMetadata,
 } from "./attempts.ts";
+import {
+  allocateNextAttemptPromise as allocateNextAttempt,
+  latestAttemptNumberPromise as latestAttemptNumber,
+  readAttemptIndexPromise as readAttemptIndex,
+  readAttemptMetadataPromise as readAttemptMetadata,
+  updateAttemptIndexPromise as updateAttemptIndex,
+  writeAttemptMetadataPromise as writeAttemptMetadata,
+} from "./attempts-promise.ts";
 
 const tempDirs: string[] = [];
 
@@ -55,8 +57,12 @@ describe("path helpers", () => {
     expect(attemptDir("/repo/.roark/runs/issue/10", 2)).toBe(
       "/repo/.roark/runs/issue/10/attempts/2",
     );
-    expect(attemptMetadataPath("/repo/issue/10", 3)).toBe("/repo/issue/10/attempts/3/attempt.json");
-    expect(attemptIndexPath("/repo/issue/10")).toBe("/repo/issue/10/attempts.json");
+    expect(attemptMetadataPath("/repo/issue/10", 3)).toBe(
+      "/repo/issue/10/attempts/3/attempt.json",
+    );
+    expect(attemptIndexPath("/repo/issue/10")).toBe(
+      "/repo/issue/10/attempts.json",
+    );
   });
 });
 
@@ -88,17 +94,21 @@ describe("formatAttemptMetadata", () => {
     expect(metadata.endedAt).toBe("2026-05-05T07:42:11.000Z");
     expect(metadata.outcome).toBe("published");
   });
-
 });
 
 describe("recordAttemptIssueComment", () => {
   test("stores issue comment refs by phase", () => {
     const metadata = formatAttemptMetadata(baseInput);
-    recordAttemptIssueComment(metadata, "review-a", {
-      id: 123,
-      url: "https://github.com/owner/repo/issues/10#issuecomment-123",
-      marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
-    }, "2026-05-05T07:20:00.000Z");
+    recordAttemptIssueComment(
+      metadata,
+      "review-a",
+      {
+        id: 123,
+        url: "https://github.com/owner/repo/issues/10#issuecomment-123",
+        marker: "<!-- roark:issue=10 attempt=2 phase=review-a -->",
+      },
+      "2026-05-05T07:20:00.000Z",
+    );
 
     expect(metadata.githubComments?.issue?.["review-a"]).toEqual({
       id: 123,
@@ -130,7 +140,9 @@ describe("summarizeAttempt", () => {
 describe("attemptArtifactRelativePath", () => {
   test("returns the run artifact path when filename is omitted", () => {
     const metadata = formatAttemptMetadata(baseInput);
-    expect(attemptArtifactRelativePath(metadata)).toBe(".roark/runs/issue/10/attempts/2");
+    expect(attemptArtifactRelativePath(metadata)).toBe(
+      ".roark/runs/issue/10/attempts/2",
+    );
   });
 
   test("joins filenames with forward slashes", () => {
@@ -163,7 +175,9 @@ describe("allocateNextAttempt", () => {
   test("ignores non-numeric subdirectories", async () => {
     const issueDir = await makeIssueDir();
     await mkdir(path.join(issueDir, "attempts", "1"), { recursive: true });
-    await mkdir(path.join(issueDir, "attempts", "scratch"), { recursive: true });
+    await mkdir(path.join(issueDir, "attempts", "scratch"), {
+      recursive: true,
+    });
     expect(await allocateNextAttempt(issueDir)).toBe(2);
   });
 });
@@ -178,9 +192,12 @@ describe("writeAttemptMetadata + readAttemptMetadata", () => {
     });
 
     await writeAttemptMetadata(issueDir, metadata);
-    const raw = await readFile(attemptMetadataPath(issueDir, metadata.attempt), "utf8");
+    const raw = await readFile(
+      attemptMetadataPath(issueDir, metadata.attempt),
+      "utf8",
+    );
     expect(raw.endsWith("\n")).toBe(true);
-    expect(raw).toContain("\"attempt\": 2");
+    expect(raw).toContain('"attempt": 2');
 
     const parsed = await readAttemptMetadata(issueDir, metadata.attempt);
     expect(parsed).toEqual(metadata);
@@ -207,7 +224,9 @@ describe("readAttemptIndex + latestAttemptNumber", () => {
       runArtifactPath: ".roark/runs/issue/10/attempts/3",
     });
 
-    expect((await readAttemptIndex(issueDir)).map((entry) => entry.attempt)).toEqual([1, 3]);
+    expect(
+      (await readAttemptIndex(issueDir)).map((entry) => entry.attempt),
+    ).toEqual([1, 3]);
     expect(await latestAttemptNumber(issueDir)).toBe(3);
   });
 
@@ -242,7 +261,9 @@ describe("updateAttemptIndex", () => {
     });
     expect(second.map((entry) => entry.attempt)).toEqual([1, 2]);
 
-    const persisted = JSON.parse(await readFile(attemptIndexPath(issueDir), "utf8")) as { attempt: number }[];
+    const persisted = JSON.parse(
+      await readFile(attemptIndexPath(issueDir), "utf8"),
+    ) as { attempt: number }[];
     expect(Array.isArray(persisted)).toBe(true);
     expect(persisted).toHaveLength(2);
     expect(persisted[1]?.attempt).toBe(2);

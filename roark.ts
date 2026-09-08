@@ -1,29 +1,59 @@
 #!/usr/bin/env bun
+import {
+  CommandExecution,
+  ExitNotifications,
+  Presentation,
+} from "./lib/runtime/services.ts";
 import type { ApplicationExecution } from "./lib/runtime/application.ts";
 import * as BunRuntime from "@effect/platform-bun/BunRuntime";
-import { Effect } from "effect";
-import { applicationLayer, fromLegacyPromise, runApplicationPromise } from "./lib/runtime/application.ts";
+import * as BunServices from "@effect/platform-bun/BunServices";
+import { Effect, Layer } from "effect";
+import {
+  applicationServicesLayer,
+  fromLegacyPromise,
+  runApplicationPromise,
+} from "./lib/runtime/application.ts";
 import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
-import { listManagedWorkspaces, runRemoveCommand, runWorkspaceCommand } from "./lib/autorun/workspace.ts";
+import {
+  listManagedWorkspaces,
+  runRemoveCommand,
+  runWorkspaceCommand,
+} from "./lib/autorun/workspace.ts";
 import { isLongRunningCommand, parseArgs, usage } from "./lib/cli/args.ts";
 import { hydrateCliOptions } from "./lib/cli/hydrate.ts";
 import { runInit } from "./lib/cli/init.ts";
-import { resolveInteractiveArgv, resolveInteractiveWorkspaceRemoval } from "./lib/cli/interactive.ts";
-import { sendExitNotification, type ExitNotificationRequest } from "./lib/cli/notifications.ts";
-import { runPrRevision } from "./lib/pr-revision/workflow.ts";
-import { runPrReview } from "./lib/pr-review/workflow.ts";
-import { formatDoLocalModeStartMessage, printDoLocalModeReadyMessageIfReady } from "./lib/cli/local-mode.ts";
+import {
+  resolveInteractiveArgv,
+  resolveInteractiveWorkspaceRemoval,
+} from "./lib/cli/interactive.ts";
+import { runPrRevisionPromise } from "./lib/pr-revision/workflow.ts";
+import { runPrReviewPromise } from "./lib/pr-review/workflow.ts";
+import {
+  formatDoLocalModeStartMessage,
+  printDoLocalModeReadyMessageIfReady,
+} from "./lib/cli/local-mode.ts";
 import { renderStatus } from "./lib/observability/status.ts";
 import { createWorkflowContext } from "./lib/workflow/artifacts.ts";
 import { runFullWorkflow, runSinglePhase } from "./lib/workflow/phases.ts";
-import { Presenter, presenter, runWithPresenter } from "./lib/presentation/presenter.ts";
-import { sanitizeTerminalText } from "./lib/presentation/terminal.ts";
+import { presenter, presentationLayer } from "./lib/presentation/presenter.ts";
 import type { AutorunAttemptResult } from "./lib/autorun/attempt-lifecycle.ts";
 import { displayArgvTarget, displayCommandTarget } from "./lib/cli/target.ts";
 
-export async function main(argv = Bun.argv.slice(2), application?: ApplicationExecution): Promise<void> {
-  const cliArgv = argv.length === 0 ? await resolveInteractiveArgv() : argv;
+export async function main(
+  argv = Bun.argv.slice(2),
+  application?: ApplicationExecution,
+): Promise<void> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) => main(argv, application)),
+      application,
+    );
+
+  const cliArgv =
+    argv.length === 0
+      ? await resolveInteractiveArgv({ signal: application.signal })
+      : argv;
   if (!cliArgv) return;
 
   if (isVersionArgv(cliArgv)) {
@@ -40,8 +70,12 @@ export async function main(argv = Bun.argv.slice(2), application?: ApplicationEx
   const parsed = await hydrateCliOptions(rawParsed, undefined, application);
 
   if (isLongRunningCommand(parsed.command)) {
-    presenter().setRoots([parsed.cwd]);
-    presenter().run({ command: parsed.command, repository: parsed.repo, target: displayCommandTarget(parsed) });
+    presenter(application).setRoots([parsed.cwd]);
+    presenter(application).run({
+      command: parsed.command,
+      repository: parsed.repo,
+      target: displayCommandTarget(parsed),
+    });
   }
 
   if (parsed.command === "init") {
@@ -54,29 +88,57 @@ export async function main(argv = Bun.argv.slice(2), application?: ApplicationEx
 
   if (parsed.command === "auto") {
     const result = await runAutoDiscovery(parsed, undefined, application);
-    if (result.kind === "dry-run") presenter().outcome("SUCCESS", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "dry run complete");
-    else if (result.kind === "no-eligible") presenter().outcome("STOPPED", "auto", "no eligible issues");
-    else if (result.attempts.length === 0) presenter().outcome("STOPPED", presenter().currentTarget() ?? displayCommandTarget(parsed) ?? "auto", "no attempt started");
-    else for (const attempt of result.attempts) presentAutorunOutcome(attempt);
+    if (result.kind === "dry-run")
+      presenter(application).outcome(
+        "SUCCESS",
+        presenter(application).currentTarget() ??
+          displayCommandTarget(parsed) ??
+          "auto",
+        "dry run complete",
+      );
+    else if (result.kind === "no-eligible")
+      presenter(application).outcome("STOPPED", "auto", "no eligible issues");
+    else if (result.attempts.length === 0)
+      presenter(application).outcome(
+        "STOPPED",
+        presenter(application).currentTarget() ??
+          displayCommandTarget(parsed) ??
+          "auto",
+        "no attempt started",
+      );
+    else
+      for (const attempt of result.attempts)
+        presentAutorunOutcome(attempt, application);
     return;
   }
 
   if (parsed.command === "continue") {
-    presentAutorunOutcome(await runAutoContinue(parsed, undefined, application));
+    presentAutorunOutcome(
+      await runAutoContinue(parsed, undefined, application),
+      application,
+    );
     return;
   }
 
   if (parsed.command === "revise-pr") {
-    const result = await runPrRevision(parsed, undefined, application);
-    presenter().outcome(outcomeStatus(result.outcome), `PR #${parsed.prNumber}`, result.outcome);
-    presenter().artifact(result.context.revisionDirRelative);
+    const result = await runPrRevisionPromise(parsed, undefined, application);
+    presenter(application).outcome(
+      outcomeStatus(result.outcome),
+      `PR #${parsed.prNumber}`,
+      result.outcome,
+    );
+    presenter(application).artifact(result.context.revisionDirRelative);
     return;
   }
 
   if (parsed.command === "review-pr") {
-    const result = await runPrReview(parsed, undefined, application);
-    presenter().outcome(result.outcome === "blocked" ? "BLOCKED" : "SUCCESS", `PR #${parsed.prNumber}`, result.outcome);
-    presenter().artifact(result.context.reviewDirRelative);
+    const result = await runPrReviewPromise(parsed, undefined, application);
+    presenter(application).outcome(
+      result.outcome === "blocked" ? "BLOCKED" : "SUCCESS",
+      `PR #${parsed.prNumber}`,
+      result.outcome,
+    );
+    presenter(application).artifact(result.context.reviewDirRelative);
     return;
   }
 
@@ -96,16 +158,28 @@ export async function main(argv = Bun.argv.slice(2), application?: ApplicationEx
       return;
     }
 
-    const managedWorkspaces = await listManagedWorkspaces({ workspace: parsed.workspace, repo: parsed.repo, cwd: parsed.cwd });
+    const managedWorkspaces = await listManagedWorkspaces({
+      workspace: parsed.workspace,
+      repo: parsed.repo,
+      cwd: parsed.cwd,
+    });
     if (managedWorkspaces.length === 0) {
       console.log("No managed workspaces found.");
       return;
     }
-    const selection = await resolveInteractiveWorkspaceRemoval({ workspacePaths: managedWorkspaces.map((managedWorkspace) => managedWorkspace.path) });
+    const selection = await resolveInteractiveWorkspaceRemoval({
+      signal: application.signal,
+      workspacePaths: managedWorkspaces.map(
+        (managedWorkspace) => managedWorkspace.path,
+      ),
+    });
     if (!selection) return;
     const targets = selection.selectedIndexes.map((index) => {
       const managedWorkspace = managedWorkspaces[index];
-      if (!managedWorkspace) throw new Error("Interactive workspace selection returned an invalid index.");
+      if (!managedWorkspace)
+        throw new Error(
+          "Interactive workspace selection returned an invalid index.",
+        );
       return managedWorkspace.target;
     });
     await runRemoveCommand({ ...parsed, targets }, application);
@@ -113,41 +187,81 @@ export async function main(argv = Bun.argv.slice(2), application?: ApplicationEx
   }
 
   const context = createWorkflowContext(parsed);
-  presenter().line(`Run directory: ${context.runDirRelative}`);
+  presenter(application).line(`Run directory: ${context.runDirRelative}`);
 
   if (parsed.command === "do") {
-    for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n")) presenter().line(line);
-    const result = await runFullWorkflow(context, undefined, undefined, application);
-    await printDoLocalModeReadyMessageIfReady(context, (message) => {
-      presenter().line(message);
-    });
-    presenter().outcome(workflowOutcomeStatus(result.status), `#${context.issueNumber}`, result.status);
+    for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n"))
+      presenter(application).line(line);
+    const result = await runFullWorkflow(
+      context,
+      undefined,
+      undefined,
+      application,
+    );
+    await printDoLocalModeReadyMessageIfReady(
+      context,
+      (message) => {
+        presenter(application).line(message);
+      },
+      application,
+    );
+    presenter(application).outcome(
+      workflowOutcomeStatus(result.status),
+      `#${context.issueNumber}`,
+      result.status,
+    );
   } else {
     await runSinglePhase(context, parsed.command, undefined, application);
-    presenter().outcome("SUCCESS", `#${context.issueNumber}`, `${parsed.command} complete`);
+    presenter(application).outcome(
+      "SUCCESS",
+      `#${context.issueNumber}`,
+      `${parsed.command} complete`,
+    );
   }
 
-  presenter().artifact(context.runDirRelative);
+  presenter(application).artifact(context.runDirRelative);
 }
 
-export function presentAutorunOutcome(result: AutorunAttemptResult): void {
-  const status = result.outcome === "published"
-    ? "SUCCESS"
-    : result.outcome === "triage-stopped"
-      ? "STOPPED"
-      : "FAILED";
-  presenter().outcome(status, `#${result.issueNumber}`, result.outcomeDetail ?? result.outcome);
+export function presentAutorunOutcome(
+  result: AutorunAttemptResult,
+  application: ApplicationExecution,
+): void {
+  const status =
+    result.outcome === "published"
+      ? "SUCCESS"
+      : result.outcome === "triage-stopped"
+        ? "STOPPED"
+        : "FAILED";
+  presenter(application).outcome(
+    status,
+    `#${result.issueNumber}`,
+    result.outcomeDetail ?? result.outcome,
+  );
 }
 
-export function workflowOutcomeStatus(status: "completed" | "triage-stopped" | "planning-stopped" | "review-blocked"): "SUCCESS" | "BLOCKED" | "STOPPED" {
+export function workflowOutcomeStatus(
+  status:
+    | "completed"
+    | "triage-stopped"
+    | "planning-stopped"
+    | "review-blocked",
+): "SUCCESS" | "BLOCKED" | "STOPPED" {
   if (status === "completed") return "SUCCESS";
   if (status === "review-blocked") return "BLOCKED";
   return "STOPPED";
 }
 
-function outcomeStatus(outcome: string): "SUCCESS" | "FAILED" | "BLOCKED" | "STOPPED" {
-  if (outcome === "published" || outcome === "no-action-needed" || outcome === "no-code-changes") return "SUCCESS";
-  if (outcome === "needs-human" || outcome === "review-blocked") return "BLOCKED";
+function outcomeStatus(
+  outcome: string,
+): "SUCCESS" | "FAILED" | "BLOCKED" | "STOPPED" {
+  if (
+    outcome === "published" ||
+    outcome === "no-action-needed" ||
+    outcome === "no-code-changes"
+  )
+    return "SUCCESS";
+  if (outcome === "needs-human" || outcome === "review-blocked")
+    return "BLOCKED";
   return "FAILED";
 }
 
@@ -156,56 +270,93 @@ function isVersionArgv(argv: string[]): boolean {
 }
 
 async function readPackageVersion(): Promise<string> {
-  const packageJson = (await Bun.file(new URL("./package.json", import.meta.url)).json()) as { version?: unknown };
-  if (typeof packageJson.version !== "string") throw new Error("package.json is missing a string version.");
+  const packageJson = (await Bun.file(
+    new URL("./package.json", import.meta.url),
+  ).json()) as { version?: unknown };
+  if (typeof packageJson.version !== "string")
+    throw new Error("package.json is missing a string version.");
   return packageJson.version;
 }
 
-interface CliLifecycleDependencies {
-  execute?: (argv: string[], application?: ApplicationExecution) => Promise<void>;
-  notify?: (request: ExitNotificationRequest) => Effect.Effect<void, Error, Effect.Services<ReturnType<typeof sendExitNotification>>>;
-  reportError?: (error: unknown) => void;
-  presentation?: Presenter | undefined;
-}
+const commandExecutionLayer = Layer.succeed(
+  CommandExecution,
+  CommandExecution.of({
+    execute: (argv) =>
+      fromLegacyPromise((application) => main(argv, application)),
+  }),
+);
 
-export function runCli(
-  argv = Bun.argv.slice(2),
-  dependencies: CliLifecycleDependencies = {},
+export const cliLayer = (argv: string[]) =>
+  Layer.mergeAll(applicationServicesLayer, commandExecutionLayer).pipe(
+    Layer.provideMerge(
+      Layer.mergeAll(
+        BunServices.layer,
+        presentationLayer({
+          verbose: argv.includes("--verbose"),
+          titleEnabled: !argv.includes("--no-title"),
+        }),
+      ),
+    ),
+  );
+
+export const runCli = Effect.fn("runCli")(function* (
+  argv: string[] = Bun.argv.slice(2),
 ) {
-  const execute = dependencies.execute ?? main;
-  const reportError = dependencies.reportError ?? ((error: unknown) => {
-    console.error(sanitizeTerminalText(error instanceof Error ? error.message : String(error)));
-  });
-
+  const commands = yield* CommandExecution;
+  const presentation = yield* Presentation;
+  const notifications = yield* ExitNotifications;
   const longRunning = isLongRunningCommand(argv[0]);
-  const presentation = dependencies.presentation ?? new Presenter({
-    verbose: argv.includes("--verbose"),
-    titleEnabled: !argv.includes("--no-title"),
-  });
-
-  return Effect.gen(function*() {
-    const exitCode = yield* fromLegacyPromise((application) => runWithPresenter(presentation, () => execute(argv, application))).pipe(
-      Effect.as(0),
-      Effect.catch((error) => Effect.sync(() => {
-        if (longRunning) presentation.outcome("FAILED", presentation.currentTarget() ?? displayArgvTarget(argv), "run failed");
-        reportError(error);
+  const exitCode = yield* commands.execute(argv).pipe(
+    Effect.as(0),
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        if (longRunning)
+          presentation.outcome(
+            "FAILED",
+            presentation.currentTarget() ?? displayArgvTarget(argv),
+            "run failed",
+          );
+        presentation.error(
+          error instanceof Error ? error.message : String(error),
+        );
         return 1;
-      })),
-    );
-    yield* (dependencies.notify ?? sendExitNotification)({ argv, succeeded: exitCode === 0 }).pipe(
-      Effect.catch(() => Effect.sync(() => { console.error("Warning: Roark could not deliver the exit notification."); })),
-    );
-    return exitCode;
-  });
-}
+      }),
+    ),
+  );
+  yield* notifications.send({ argv, succeeded: exitCode === 0 }).pipe(
+    Effect.catch(() =>
+      Effect.sync(() => {
+        presentation.error(
+          "Warning: Roark could not deliver the exit notification.",
+        );
+      }),
+    ),
+  );
+  return exitCode;
+});
 
-export function runCliPromise(argv = Bun.argv.slice(2), dependencies: CliLifecycleDependencies = {}, application?: ApplicationExecution): Promise<number> {
-  return runApplicationPromise(runCli(argv, dependencies), application);
+export function runCliPromise(
+  argv = Bun.argv.slice(2),
+  application?: ApplicationExecution,
+): Promise<number> {
+  if (application)
+    return runApplicationPromise(
+      runCli(argv).pipe(Effect.provide(commandExecutionLayer)),
+      application,
+    );
+  return Effect.runPromise(runCli(argv).pipe(Effect.provide(cliLayer(argv))));
 }
 
 if (import.meta.main) {
-  BunRuntime.runMain(runCli().pipe(
-    Effect.tap((exitCode) => Effect.sync(() => { process.exitCode = exitCode; })),
-    Effect.provide(applicationLayer),
-  ));
+  const argv = Bun.argv.slice(2);
+  BunRuntime.runMain(
+    runCli(argv).pipe(
+      Effect.tap((exitCode) =>
+        Effect.sync(() => {
+          process.exitCode = exitCode;
+        }),
+      ),
+      Effect.provide(cliLayer(argv)),
+    ),
+  );
 }

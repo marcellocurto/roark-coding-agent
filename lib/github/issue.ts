@@ -1,11 +1,14 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
+import { decodeGitHubResponse } from "./errors.ts";
+import { Effect } from "effect";
+import type { GitHubError, GitHubRequirements } from "./errors.ts";
+
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
-import { runProcessOrThrowPromise } from "../cli/process.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
 import { postIssueComment } from "./comments.ts";
 
 export interface ParsedIssueRef {
   issueNumber: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
 }
 
 export interface GitHubIssue {
@@ -16,7 +19,7 @@ export interface GitHubIssue {
   labels?: { name: string }[] | undefined;
   assignees?: { login: string }[] | undefined;
   milestone?: { title: string } | null | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   comments?: {
     author?: { login: string } | undefined;
     body?: string | undefined;
@@ -28,7 +31,7 @@ export interface GitHubIssueListItem {
   number: number;
   title: string;
   body?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   createdAt?: string | undefined;
   labels?: { name: string }[] | undefined;
 }
@@ -36,7 +39,7 @@ export interface GitHubIssueListItem {
 export interface GitHubIssueDependency {
   number: number;
   title: string;
-  url?: string | undefined  ;
+  url?: string | undefined;
   state: string;
   stateReason?: string | null | undefined;
   closedAt?: string | null | undefined;
@@ -55,7 +58,7 @@ export interface BodyDeclaredBlocker {
   number: number;
   verified: boolean;
   title?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   state?: string | undefined;
   stateReason?: string | null | undefined;
   closed?: boolean | undefined;
@@ -65,7 +68,7 @@ export interface BodyDeclaredBlocker {
 
 export interface GitHubIssueRelationships {
   fetchedAt: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   nativeDependenciesAvailable: boolean;
   issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
   blockedBy: GitHubIssueDependency[];
@@ -88,98 +91,177 @@ interface BodyBlockerRef {
   number: number;
 }
 
-export function parseIssueRef(input: string, explicitRepo?: string): ParsedIssueRef {
-  const urlMatch = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(input);
-  if (urlMatch?.[1] && urlMatch[2]) return { repo: explicitRepo ?? urlMatch[1], issueNumber: urlMatch[2] };
+export function parseIssueRef(
+  input: string,
+  explicitRepo?: string,
+): ParsedIssueRef {
+  const urlMatch =
+    /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(input);
+  if (urlMatch?.[1] && urlMatch[2])
+    return { repo: explicitRepo ?? urlMatch[1], issueNumber: urlMatch[2] };
 
   const shorthandMatch = /^([^/\s]+\/[^#\s]+)#(\d+)$/.exec(input);
   if (shorthandMatch?.[1] && shorthandMatch[2]) {
-    return { repo: explicitRepo ?? shorthandMatch[1], issueNumber: shorthandMatch[2] };
+    return {
+      repo: explicitRepo ?? shorthandMatch[1],
+      issueNumber: shorthandMatch[2],
+    };
   }
 
   const numberMatch = /^#?(\d+)$/.exec(input);
-  if (numberMatch?.[1]) return { repo: explicitRepo, issueNumber: numberMatch[1] };
+  if (numberMatch?.[1])
+    return { repo: explicitRepo, issueNumber: numberMatch[1] };
 
-  throw new Error(`Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`);
+  throw new Error(
+    `Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`,
+  );
 }
 
-export async function listOpenGitHubIssues(options: { cwd: string; repo?: string | undefined; limit: number }, application?: ApplicationExecution): Promise<GitHubIssueListItem[]> {
-  const args = [
-    "gh",
-    "issue",
-    "list",
-    "--state",
-    "open",
-    "--limit",
-    String(options.limit),
-    "--json",
-    "number,title,body,url,createdAt,labels",
-  ];
-  if (options.repo) args.push("--repo", options.repo);
+export const listOpenGitHubIssues = Effect.fn("GitHub.listOpenGitHubIssues")(
+  function* (options: {
+    cwd: string;
+    repo?: string | undefined;
+    limit: number;
+  }): Effect.fn.Return<GitHubIssueListItem[], GitHubError, GitHubRequirements> {
+    const args = [
+      "gh",
+      "issue",
+      "list",
+      "--state",
+      "open",
+      "--limit",
+      String(options.limit),
+      "--json",
+      "number,title,body,url,createdAt,labels",
+    ];
+    if (options.repo) args.push("--repo", options.repo);
 
-  const stdout = await runProcessOrThrowPromise(args, { cwd: options.cwd, label: "gh issue list" }, application);
-  return JSON.parse(stdout) as GitHubIssueListItem[];
-}
+    const stdout = yield* runProcessOrThrow(args, {
+      cwd: options.cwd,
+      label: "gh issue list",
+    });
+    return (yield* decodeGitHubResponse(
+      () => JSON.parse(stdout) as unknown,
+    )) as GitHubIssueListItem[];
+  },
+);
 
-export async function getCurrentGitHubLogin(options: { cwd: string }, application?: ApplicationExecution): Promise<string> {
-  return (await runProcessOrThrowPromise(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" }, application)).trim();
-}
+export const getCurrentGitHubLogin = Effect.fn("GitHub.getCurrentGitHubLogin")(
+  function* (options: {
+    cwd: string;
+  }): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
+    return (yield* runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], {
+      cwd: options.cwd,
+      label: "gh api user",
+    })).trim();
+  },
+);
 
-export async function claimGitHubIssue(options: { cwd: string; repo?: string | undefined; plan: AutorunClaimPlan; postComment?: boolean }, application?: ApplicationExecution): Promise<void> {
-  const issueNumber = String(options.plan.issueNumber);
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
+export const claimGitHubIssue = Effect.fn("GitHub.claimGitHubIssue")(
+  function* (options: {
+    cwd: string;
+    repo?: string | undefined;
+    plan: AutorunClaimPlan;
+    postComment?: boolean;
+  }): Effect.fn.Return<void, GitHubError, GitHubRequirements> {
+    const issueNumber = String(options.plan.issueNumber);
+    const repoArgs = options.repo ? ["--repo", options.repo] : [];
 
-  await transitionGitHubIssueLabels({
-    cwd: options.cwd,
-    repo: options.repo,
-    issueNumber: options.plan.issueNumber,
-    nextLabel: options.plan.inProgressLabel,
-    removeLabels: options.plan.removeLabels,
-  }, application);
+    yield* transitionGitHubIssueLabels({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: options.plan.issueNumber,
+      nextLabel: options.plan.inProgressLabel,
+      removeLabels: options.plan.removeLabels,
+    });
 
-  if (options.plan.assignee) {
-    await runProcessOrThrowPromise(
-      ["gh", "issue", "edit", issueNumber, "--add-assignee", options.plan.assignee, ...repoArgs],
-      { cwd: options.cwd, label: "gh issue edit --add-assignee" }, application
-    );
-  }
+    if (options.plan.assignee) {
+      yield* runProcessOrThrow(
+        [
+          "gh",
+          "issue",
+          "edit",
+          issueNumber,
+          "--add-assignee",
+          options.plan.assignee,
+          ...repoArgs,
+        ],
+        { cwd: options.cwd, label: "gh issue edit --add-assignee" },
+      );
+    }
 
-  if (options.postComment === false) return;
+    if (options.postComment === false) return;
 
-  await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber, body: options.plan.commentBody }, application);
-}
+    yield* postIssueComment({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber,
+      body: options.plan.commentBody,
+    });
+  },
+);
 
-export async function transitionGitHubIssueLabels(options: {
+export const transitionGitHubIssueLabels = Effect.fn(
+  "GitHub.transitionGitHubIssueLabels",
+)(function* (options: {
   cwd: string;
   repo?: string | undefined;
   issueNumber: string | number;
   nextLabel: string;
   removeLabels: readonly string[];
-}, application?: ApplicationExecution): Promise<void> {
+}): Effect.fn.Return<void, GitHubError, GitHubRequirements> {
   const issueNumber = String(options.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   const labelArgs = options.removeLabels
     .filter((candidate) => candidate !== options.nextLabel)
     .flatMap((label) => ["--remove-label", label]);
-  await runProcessOrThrowPromise(
-    ["gh", "issue", "edit", issueNumber, "--add-label", options.nextLabel, ...labelArgs, ...repoArgs],
-    { cwd: options.cwd, label: "gh issue edit --transition-label" }, application
+  yield* runProcessOrThrow(
+    [
+      "gh",
+      "issue",
+      "edit",
+      issueNumber,
+      "--add-label",
+      options.nextLabel,
+      ...labelArgs,
+      ...repoArgs,
+    ],
+    { cwd: options.cwd, label: "gh issue edit --transition-label" },
   );
-}
+});
 
-export function buildIssueDependenciesSummaryArgv(repo: string, issueNumber: string | number): string[] {
+export function buildIssueDependenciesSummaryArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
   return ["gh", "api", `repos/${repo}/issues/${issueNumber}`];
 }
 
-export function buildIssueBlockedByDependenciesArgv(repo: string, issueNumber: string | number): string[] {
-  return ["gh", "api", `repos/${repo}/issues/${issueNumber}/dependencies/blocked_by`];
+export function buildIssueBlockedByDependenciesArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
+  return [
+    "gh",
+    "api",
+    `repos/${repo}/issues/${issueNumber}/dependencies/blocked_by`,
+  ];
 }
 
-export function buildIssueBlockingDependenciesArgv(repo: string, issueNumber: string | number): string[] {
-  return ["gh", "api", `repos/${repo}/issues/${issueNumber}/dependencies/blocking`];
+export function buildIssueBlockingDependenciesArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
+  return [
+    "gh",
+    "api",
+    `repos/${repo}/issues/${issueNumber}/dependencies/blocking`,
+  ];
 }
 
-export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "number">): string[] {
+export function buildBodyBlockerViewArgv(
+  ref: Pick<BodyBlockerRef, "repo" | "number">,
+): string[] {
   return [
     "gh",
     "issue",
@@ -192,12 +274,13 @@ export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "num
   ];
 }
 
-export async function fetchGitHubIssue(
+export const fetchGitHubIssue = Effect.fn("GitHub.fetchGitHubIssue")(function* (
   input: string,
   options: { cwd: string; repo?: string | undefined },
-  application?: ApplicationExecution,
-): Promise<GitHubIssueSnapshot> {
-  const parsed = parseIssueRef(input, options.repo);
+): Effect.fn.Return<GitHubIssueSnapshot, GitHubError, GitHubRequirements> {
+  const parsed = yield* decodeGitHubResponse(() =>
+    parseIssueRef(input, options.repo),
+  );
   const args = [
     "gh",
     "issue",
@@ -208,15 +291,24 @@ export async function fetchGitHubIssue(
   ];
   if (parsed.repo) args.push("--repo", parsed.repo);
 
-  const stdout = await runProcessOrThrowPromise(args, { cwd: options.cwd, label: "gh issue view" }, application);
-  const issue = JSON.parse(stdout) as GitHubIssue;
-  const repo = await resolveGitHubIssueRepo({ cwd: options.cwd, explicitRepo: parsed.repo, issueUrl: issue.url }, application);
-  const relationships = await fetchGitHubIssueRelationships({
+  const stdout = yield* runProcessOrThrow(args, {
+    cwd: options.cwd,
+    label: "gh issue view",
+  });
+  const issue = (yield* decodeGitHubResponse(
+    () => JSON.parse(stdout) as unknown,
+  )) as GitHubIssue;
+  const repo = yield* resolveGitHubIssueRepo({
+    cwd: options.cwd,
+    explicitRepo: parsed.repo,
+    issueUrl: issue.url,
+  });
+  const relationships = yield* fetchGitHubIssueRelationships({
     cwd: options.cwd,
     repo,
     issueNumber: parsed.issueNumber,
     body: issue.body ?? "",
-  }, application);
+  });
 
   return {
     issue,
@@ -225,41 +317,75 @@ export async function fetchGitHubIssue(
     fetchedAt: new Date().toISOString(),
     relationships,
   };
-}
+});
 
-export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string | undefined; issueUrl?: string  | undefined}, application?: ApplicationExecution): Promise<string | undefined> {
+export const resolveGitHubIssueRepo = Effect.fn(
+  "GitHub.resolveGitHubIssueRepo",
+)(function* (options: {
+  cwd: string;
+  explicitRepo?: string | undefined;
+  issueUrl?: string | undefined;
+}): Effect.fn.Return<string | undefined, GitHubError, GitHubRequirements> {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;
 
-  try {
-    return (await runProcessOrThrowPromise(
-      ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-      { cwd: options.cwd, label: "gh repo view" }, application
-    )).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
+  return yield* Effect.gen(function* () {
+    return (
+      (yield* runProcessOrThrow(
+        [
+          "gh",
+          "repo",
+          "view",
+          "--json",
+          "nameWithOwner",
+          "--jq",
+          ".nameWithOwner",
+        ],
+        { cwd: options.cwd, label: "gh repo view" },
+      )).trim() || undefined
+    );
+  }).pipe(
+    Effect.catch(() =>
+      Effect.sync(() => {
+        return undefined;
+      }),
+    ),
+  );
+});
 
-export async function fetchGitHubIssueRelationships(options: {
+export const fetchGitHubIssueRelationships = Effect.fn(
+  "GitHub.fetchGitHubIssueRelationships",
+)(function* (options: {
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   issueNumber: string | number;
   body: string;
-}, application?: ApplicationExecution): Promise<GitHubIssueRelationships> {
+}): Effect.fn.Return<
+  GitHubIssueRelationships,
+  GitHubError,
+  GitHubRequirements
+> {
   const fetchedAt = new Date().toISOString();
   const native = options.repo
-    ? await fetchNativeRelationshipsBestEffort({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber }, application)
+    ? yield* fetchNativeRelationshipsBestEffort({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: options.issueNumber,
+      })
     : {
-      nativeDependenciesAvailable: false,
-      blockedBy: [] as GitHubIssueDependency[],
-      blocking: [] as GitHubIssueDependency[],
-      unavailableReason: "repository could not be resolved for dependency API requests",
-    };
+        nativeDependenciesAvailable: false,
+        blockedBy: [] as GitHubIssueDependency[],
+        blocking: [] as GitHubIssueDependency[],
+        unavailableReason:
+          "repository could not be resolved for dependency API requests",
+      };
 
   const bodyDeclaredBlockers = options.repo
-    ? await verifyBodyDeclaredBlockers({ cwd: options.cwd, refs: parseBodyDeclaredBlockerRefs(options.body, options.repo) }, application)
+    ? yield* verifyBodyDeclaredBlockers({
+        cwd: options.cwd,
+        refs: parseBodyDeclaredBlockerRefs(options.body, options.repo),
+      })
     : [];
 
   return {
@@ -272,9 +398,12 @@ export async function fetchGitHubIssueRelationships(options: {
     bodyDeclaredBlockers,
     unavailableReason: native.unavailableReason,
   };
-}
+});
 
-export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string): BodyBlockerRef[] {
+export function parseBodyDeclaredBlockerRefs(
+  body: string,
+  currentRepo: string,
+): BodyBlockerRef[] {
   const lines = body.split(/\r?\n/);
   const refs: BodyBlockerRef[] = [];
   let inFence = false;
@@ -296,15 +425,27 @@ export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string):
       inDependencySection = false;
     }
 
-    const inlineMatch = /^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i.exec(line);
-    if (inlineMatch?.[1]) refs.push(...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo));
-    else if (inDependencySection) refs.push(...extractExplicitIssueRefsFromStart(line.replace(/^\s*[-*]\s*/, ""), currentRepo));
+    const inlineMatch =
+      /^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i.exec(line);
+    if (inlineMatch?.[1])
+      refs.push(
+        ...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo),
+      );
+    else if (inDependencySection)
+      refs.push(
+        ...extractExplicitIssueRefsFromStart(
+          line.replace(/^\s*[-*]\s*/, ""),
+          currentRepo,
+        ),
+      );
   }
 
   return dedupeBodyBlockerRefs(refs);
 }
 
-export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDependency | undefined {
+export function normalizeGitHubIssueDependency(
+  value: unknown,
+): GitHubIssueDependency | undefined {
   if (!isRecord(value)) return undefined;
   const number = numericField(value, "number");
   if (number === undefined) return undefined;
@@ -313,49 +454,109 @@ export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDepen
     title: stringField(value, "title") ?? "",
     url: stringField(value, "url") ?? stringField(value, "html_url"),
     state: normalizeIssueState(stringField(value, "state")),
-    stateReason: nullableStringField(value, "stateReason") ?? nullableStringField(value, "state_reason"),
-    closedAt: nullableStringField(value, "closedAt") ?? nullableStringField(value, "closed_at"),
+    stateReason:
+      nullableStringField(value, "stateReason") ??
+      nullableStringField(value, "state_reason"),
+    closedAt:
+      nullableStringField(value, "closedAt") ??
+      nullableStringField(value, "closed_at"),
   };
 }
 
-async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: string; issueNumber: string | number }, application?: ApplicationExecution): Promise<{
-  nativeDependenciesAvailable: boolean;
-  issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
-  blockedBy: GitHubIssueDependency[];
-  blocking: GitHubIssueDependency[];
-  unavailableReason?: string | undefined;
-}> {
-  try {
-    const [issueRaw, blockedByRaw, blockingRaw] = await Promise.all([
-      runProcessOrThrowPromise(buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependency summary" }, application),
-      runProcessOrThrowPromise(buildIssueBlockedByDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocked_by" }, application),
-      runProcessOrThrowPromise(buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocking" }, application),
-    ]);
+const fetchNativeRelationshipsBestEffort = Effect.fn(
+  "GitHub.fetchNativeRelationshipsBestEffort",
+)(function* (options: {
+  cwd: string;
+  repo: string;
+  issueNumber: string | number;
+}): Effect.fn.Return<
+  {
+    nativeDependenciesAvailable: boolean;
+    issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
+    blockedBy: GitHubIssueDependency[];
+    blocking: GitHubIssueDependency[];
+    unavailableReason?: string | undefined;
+  },
+  GitHubError,
+  GitHubRequirements
+> {
+  return yield* Effect.gen(function* () {
+    const [issueRaw, blockedByRaw, blockingRaw] = yield* Effect.all(
+      [
+        runProcessOrThrow(
+          buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber),
+          { cwd: options.cwd, label: "gh api issue dependency summary" },
+        ),
+        runProcessOrThrow(
+          buildIssueBlockedByDependenciesArgv(
+            options.repo,
+            options.issueNumber,
+          ),
+          { cwd: options.cwd, label: "gh api issue dependencies blocked_by" },
+        ),
+        runProcessOrThrow(
+          buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber),
+          { cwd: options.cwd, label: "gh api issue dependencies blocking" },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
 
-    const issuePayload = JSON.parse(issueRaw) as unknown;
-    const blockedBy = normalizeDependencyList(JSON.parse(blockedByRaw) as unknown);
-    const blocking = normalizeDependencyList(JSON.parse(blockingRaw) as unknown);
-    const issueDependenciesSummary = normalizeIssueDependenciesSummary(issuePayload, blockedBy, blocking);
+    const issuePayload = yield* decodeGitHubResponse(
+      () => JSON.parse(issueRaw) as unknown,
+    );
+    const blockedBy = normalizeDependencyList(
+      yield* decodeGitHubResponse(() => JSON.parse(blockedByRaw) as unknown),
+    );
+    const blocking = normalizeDependencyList(
+      yield* decodeGitHubResponse(() => JSON.parse(blockingRaw) as unknown),
+    );
+    const issueDependenciesSummary = normalizeIssueDependenciesSummary(
+      issuePayload,
+      blockedBy,
+      blocking,
+    );
 
-    return { nativeDependenciesAvailable: true, issueDependenciesSummary, blockedBy, blocking };
-  } catch (error) {
     return {
-      nativeDependenciesAvailable: false,
-      blockedBy: [],
-      blocking: [],
-      unavailableReason: formatError(error),
+      nativeDependenciesAvailable: true,
+      issueDependenciesSummary,
+      blockedBy,
+      blocking,
     };
-  }
-}
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        return {
+          nativeDependenciesAvailable: false,
+          blockedBy: [],
+          blocking: [],
+          unavailableReason: formatError(error),
+        };
+      }),
+    ),
+  );
+});
 
-async function verifyBodyDeclaredBlockers(options: { cwd: string; refs: BodyBlockerRef[] }, application?: ApplicationExecution): Promise<BodyDeclaredBlocker[]> {
+const verifyBodyDeclaredBlockers = Effect.fn(
+  "GitHub.verifyBodyDeclaredBlockers",
+)(function* (options: {
+  cwd: string;
+  refs: BodyBlockerRef[];
+}): Effect.fn.Return<BodyDeclaredBlocker[], GitHubError, GitHubRequirements> {
   const results: BodyDeclaredBlocker[] = [];
   for (const ref of options.refs) {
-    try {
-      const raw = await runProcessOrThrowPromise(buildBodyBlockerViewArgv(ref), { cwd: options.cwd, label: "gh issue view body-declared blocker" }, application);
-      const parsed = JSON.parse(raw) as unknown;
+    yield* Effect.gen(function* () {
+      const raw = yield* runProcessOrThrow(buildBodyBlockerViewArgv(ref), {
+        cwd: options.cwd,
+        label: "gh issue view body-declared blocker",
+      });
+      const parsed = yield* decodeGitHubResponse(
+        () => JSON.parse(raw) as unknown,
+      );
       const dependency = normalizeGitHubIssueDependency(parsed);
-      const closed = isRecord(parsed) ? booleanField(parsed, "closed") : undefined;
+      const closed = isRecord(parsed)
+        ? booleanField(parsed, "closed")
+        : undefined;
       results.push({
         raw: ref.raw,
         repo: ref.repo,
@@ -368,22 +569,28 @@ async function verifyBodyDeclaredBlockers(options: { cwd: string; refs: BodyBloc
         closed: closed ?? dependency?.state === "CLOSED",
         closedAt: dependency?.closedAt,
       });
-    } catch (error) {
-      results.push({
-        raw: ref.raw,
-        repo: ref.repo,
-        number: ref.number,
-        verified: false,
-        unavailableReason: formatError(error),
-      });
-    }
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          results.push({
+            raw: ref.raw,
+            repo: ref.repo,
+            number: ref.number,
+            verified: false,
+            unavailableReason: formatError(error),
+          });
+        }),
+      ),
+    );
   }
   return results;
-}
+});
 
 function normalizeDependencyList(value: unknown): GitHubIssueDependency[] {
   const array = dependencyArray(value);
-  return array.map(normalizeGitHubIssueDependency).filter((item): item is GitHubIssueDependency => item !== undefined);
+  return array
+    .map(normalizeGitHubIssueDependency)
+    .filter((item): item is GitHubIssueDependency => item !== undefined);
 }
 
 function dependencyArray(value: unknown): unknown[] {
@@ -402,14 +609,24 @@ function normalizeIssueDependenciesSummary(
   blocking: GitHubIssueDependency[],
 ): GitHubIssueDependenciesSummary {
   const summary = isRecord(issuePayload)
-    ? recordField(issuePayload, "issue_dependencies_summary") ?? recordField(issuePayload, "issueDependenciesSummary")
+    ? (recordField(issuePayload, "issue_dependencies_summary") ??
+      recordField(issuePayload, "issueDependenciesSummary"))
     : undefined;
 
   return {
-    blockedBy: numericField(summary, "blockedBy") ?? numericField(summary, "blocked_by") ?? activeIssueCount(blockedBy),
+    blockedBy:
+      numericField(summary, "blockedBy") ??
+      numericField(summary, "blocked_by") ??
+      activeIssueCount(blockedBy),
     blocking: numericField(summary, "blocking") ?? activeIssueCount(blocking),
-    totalBlockedBy: numericField(summary, "totalBlockedBy") ?? numericField(summary, "total_blocked_by") ?? blockedBy.length,
-    totalBlocking: numericField(summary, "totalBlocking") ?? numericField(summary, "total_blocking") ?? blocking.length,
+    totalBlockedBy:
+      numericField(summary, "totalBlockedBy") ??
+      numericField(summary, "total_blocked_by") ??
+      blockedBy.length,
+    totalBlocking:
+      numericField(summary, "totalBlocking") ??
+      numericField(summary, "total_blocking") ??
+      blocking.length,
   };
 }
 
@@ -417,17 +634,24 @@ function activeIssueCount(issues: GitHubIssueDependency[]): number {
   return issues.filter((issue) => issue.state !== "CLOSED").length;
 }
 
-function extractExplicitIssueRefsFromStart(text: string, currentRepo: string): BodyBlockerRef[] {
+function extractExplicitIssueRefsFromStart(
+  text: string,
+  currentRepo: string,
+): BodyBlockerRef[] {
   const refs: BodyBlockerRef[] = [];
   let remainder = text.trim();
 
   while (remainder.length > 0) {
-    const match = /^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i.exec(remainder);
+    const match =
+      /^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i.exec(
+        remainder,
+      );
     if (!match?.[1]) break;
 
     const repo = match[2] ?? match[4] ?? currentRepo;
     const number = Number(match[3] ?? match[5] ?? match[6]);
-    if (Number.isInteger(number) && number > 0) refs.push({ raw: match[1], repo, number });
+    if (Number.isInteger(number) && number > 0)
+      refs.push({ raw: match[1], repo, number });
 
     remainder = remainder.slice(match[1].length).trimStart();
     const separator = /^(?:[,;]|\band\b|&)\s*/i.exec(remainder);
@@ -451,7 +675,9 @@ function dedupeBodyBlockerRefs(refs: BodyBlockerRef[]): BodyBlockerRef[] {
 }
 
 function repoFromIssueUrl(url?: string): string | undefined {
-  return url?.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i)?.[1];
+  return url?.match(
+    /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i,
+  )?.[1];
 }
 
 function normalizeIssueState(value: string | undefined): string {
@@ -462,7 +688,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function recordField(value: unknown, key: string): Record<string, unknown> | undefined {
+function recordField(
+  value: unknown,
+  key: string,
+): Record<string, unknown> | undefined {
   if (!isRecord(value)) return undefined;
   const candidate = value[key];
   return isRecord(candidate) ? candidate : undefined;
@@ -474,7 +703,10 @@ function stringField(value: unknown, key: string): string | undefined {
   return typeof candidate === "string" ? candidate : undefined;
 }
 
-function nullableStringField(value: unknown, key: string): string | null | undefined {
+function nullableStringField(
+  value: unknown,
+  key: string,
+): string | null | undefined {
   if (!isRecord(value) || !(key in value)) return undefined;
   const candidate = value[key];
   if (candidate === null) return null;
@@ -484,7 +716,9 @@ function nullableStringField(value: unknown, key: string): string | null | undef
 function numericField(value: unknown, key: string): number | undefined {
   if (!isRecord(value)) return undefined;
   const candidate = value[key];
-  return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
+  return typeof candidate === "number" && Number.isFinite(candidate)
+    ? candidate
+    : undefined;
 }
 
 function booleanField(value: unknown, key: string): boolean | undefined {

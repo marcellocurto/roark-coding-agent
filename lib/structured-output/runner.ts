@@ -1,3 +1,6 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import type { AgentRunRequest, AgentRunner } from "../workflow/agent-runner.ts";
@@ -27,7 +30,22 @@ export async function runStructuredArtifact<T>(
   runner: AgentRunner,
   definition: StructuredArtifactDefinition<T>,
   writers: StructuredArtifactWriters,
+  application?: ApplicationExecution,
 ): Promise<StructuredArtifactResult<T>> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        runStructuredArtifact(
+          request,
+          runner,
+          definition,
+          writers,
+          application,
+        ),
+      ),
+      application,
+    );
+
   let submitted: T | undefined;
   const submit = defineTool({
     name: definition.toolName,
@@ -41,25 +59,37 @@ export async function runStructuredArtifact<T>(
     parameters: definition.parameters,
     execute(_toolCallId, params) {
       if (submitted !== undefined) {
-        throw definition.createError(`The ${definition.noun} has already been submitted.`);
+        throw definition.createError(
+          `The ${definition.noun} has already been submitted.`,
+        );
       }
       try {
         submitted = definition.validate(params);
       } catch (error) {
-        throw definition.createError(error instanceof Error ? error.message : String(error));
+        throw definition.createError(
+          error instanceof Error ? error.message : String(error),
+        );
       }
       return Promise.resolve({
-        content: [{ type: "text" as const, text: `Structured ${definition.noun} submitted.` }],
+        content: [
+          {
+            type: "text" as const,
+            text: `Structured ${definition.noun} submitted.`,
+          },
+        ],
         details: submitted,
         terminate: true,
       });
     },
   });
 
-  await runner({
-    ...request,
-    customTools: [...(request.customTools ?? []), submit],
-  });
+  await runner(
+    {
+      ...request,
+      customTools: [...(request.customTools ?? []), submit],
+    },
+    application,
+  );
   if (submitted === undefined) {
     throw definition.createError(
       `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,

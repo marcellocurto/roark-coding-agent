@@ -1,18 +1,39 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
-import { runProcessOrThrowPromise } from "../cli/process.ts";
+import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
 import type { PullRequestMetadata } from "../github/pr.ts";
 
-const unsafeHeadBranchNames = new Set(["main", "master", "develop", "development", "trunk", "release"]);
+const unsafeHeadBranchNames = new Set([
+  "main",
+  "master",
+  "develop",
+  "development",
+  "trunk",
+  "release",
+]);
 
-export function validatePrBranchSafety(pr: PullRequestMetadata, repo: string): void {
-  if (pr.state !== "OPEN") throw new Error(`PR #${pr.number} must be open. Current state: ${pr.state}.`);
-  if (!pr.headRefName.trim()) throw new Error(`PR #${pr.number} has an empty head branch name.`);
-  if (!pr.baseRefName.trim()) throw new Error(`PR #${pr.number} has an empty base branch name.`);
+export function validatePrBranchSafety(
+  pr: PullRequestMetadata,
+  repo: string,
+): void {
+  if (pr.state !== "OPEN")
+    throw new Error(
+      `PR #${pr.number} must be open. Current state: ${pr.state}.`,
+    );
+  if (!pr.headRefName.trim())
+    throw new Error(`PR #${pr.number} has an empty head branch name.`);
+  if (!pr.baseRefName.trim())
+    throw new Error(`PR #${pr.number} has an empty base branch name.`);
   if (pr.headRefName === pr.baseRefName) {
-    throw new Error(`Refusing to revise PR #${pr.number}: head branch '${pr.headRefName}' matches base branch.`);
+    throw new Error(
+      `Refusing to revise PR #${pr.number}: head branch '${pr.headRefName}' matches base branch.`,
+    );
   }
   if (unsafeHeadBranchNames.has(pr.headRefName)) {
-    throw new Error(`Refusing to revise PR #${pr.number}: '${pr.headRefName}' is an unsafe shared/base branch name.`);
+    throw new Error(
+      `Refusing to revise PR #${pr.number}: '${pr.headRefName}' is an unsafe shared/base branch name.`,
+    );
   }
   if (pr.headRepository && pr.headRepository !== repo) {
     throw new Error(
@@ -20,23 +41,55 @@ export function validatePrBranchSafety(pr: PullRequestMetadata, repo: string): v
     );
   }
   if (pr.baseRepository && pr.baseRepository !== repo) {
-    throw new Error(`PR #${pr.number} base repository '${pr.baseRepository}' does not match target repo '${repo}'.`);
+    throw new Error(
+      `PR #${pr.number} base repository '${pr.baseRepository}' does not match target repo '${repo}'.`,
+    );
   }
 }
 
-export function buildPrCheckoutArgv(input: { prNumber: number; repo?: string  | undefined}): string[] {
-  return ["gh", "pr", "checkout", String(input.prNumber), ...(input.repo ? ["--repo", input.repo] : [])];
+export function buildPrCheckoutArgv(input: {
+  prNumber: number;
+  repo?: string | undefined;
+}): string[] {
+  return [
+    "gh",
+    "pr",
+    "checkout",
+    String(input.prNumber),
+    ...(input.repo ? ["--repo", input.repo] : []),
+  ];
 }
 
-export async function checkoutPrHeadBranch(options: { cwd: string; repo?: string | undefined; pr: PullRequestMetadata }, application?: ApplicationExecution): Promise<void> {
-  await runProcessOrThrowPromise(buildPrCheckoutArgv({ prNumber: options.pr.number, repo: options.repo }), {
-    cwd: options.cwd,
-    label: "gh pr checkout",
-  }, application);
-  const currentBranch = (await runProcessOrThrowPromise(["git", "branch", "--show-current"], {
-    cwd: options.cwd,
-    label: "git branch --show-current",
-  }, application)).trim();
+export async function checkoutPrHeadBranch(
+  options: { cwd: string; repo?: string | undefined; pr: PullRequestMetadata },
+  application?: ApplicationExecution,
+): Promise<void> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        checkoutPrHeadBranch(options, application),
+      ),
+      application,
+    );
+
+  await runProcessOrThrowPromise(
+    buildPrCheckoutArgv({ prNumber: options.pr.number, repo: options.repo }),
+    {
+      cwd: options.cwd,
+      label: "gh pr checkout",
+    },
+    application,
+  );
+  const currentBranch = (
+    await runProcessOrThrowPromise(
+      ["git", "branch", "--show-current"],
+      {
+        cwd: options.cwd,
+        label: "git branch --show-current",
+      },
+      application,
+    )
+  ).trim();
   if (currentBranch !== options.pr.headRefName) {
     throw new Error(
       `After gh pr checkout, current branch is '${currentBranch || "(detached)"}' but PR head is '${options.pr.headRefName}'.`,

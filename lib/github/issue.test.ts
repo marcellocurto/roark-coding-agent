@@ -10,7 +10,11 @@ import {
 
 describe("GitHub issue dependency argv builders", () => {
   test("builds gh api dependency paths", () => {
-    expect(buildIssueDependenciesSummaryArgv("owner/repo", 12)).toEqual(["gh", "api", "repos/owner/repo/issues/12"]);
+    expect(buildIssueDependenciesSummaryArgv("owner/repo", 12)).toEqual([
+      "gh",
+      "api",
+      "repos/owner/repo/issues/12",
+    ]);
     expect(buildIssueBlockedByDependenciesArgv("owner/repo", 12)).toEqual([
       "gh",
       "api",
@@ -24,16 +28,18 @@ describe("GitHub issue dependency argv builders", () => {
   });
 
   test("builds body blocker verification command", () => {
-    expect(buildBodyBlockerViewArgv({ repo: "owner/repo", number: 7 })).toEqual([
-      "gh",
-      "issue",
-      "view",
-      "7",
-      "--repo",
-      "owner/repo",
-      "--json",
-      "number,title,state,stateReason,closed,closedAt,url",
-    ]);
+    expect(buildBodyBlockerViewArgv({ repo: "owner/repo", number: 7 })).toEqual(
+      [
+        "gh",
+        "issue",
+        "view",
+        "7",
+        "--repo",
+        "owner/repo",
+        "--json",
+        "number,title,state,stateReason,closed,closedAt,url",
+      ],
+    );
   });
 });
 
@@ -55,7 +61,11 @@ describe("parseBodyDeclaredBlockerRefs", () => {
     expect(refs).toEqual([
       { raw: "#7", repo: "owner/repo", number: 7 },
       { raw: "owner/other#8", repo: "owner/other", number: 8 },
-      { raw: "https://github.com/up/down/issues/9", repo: "up/down", number: 9 },
+      {
+        raw: "https://github.com/up/down/issues/9",
+        repo: "up/down",
+        number: 9,
+      },
       { raw: "#10", repo: "owner/repo", number: 10 },
       { raw: "owner/repo#11", repo: "owner/repo", number: 11 },
     ]);
@@ -76,7 +86,11 @@ describe("parseBodyDeclaredBlockerRefs", () => {
     expect(refs).toEqual([
       { raw: "#12", repo: "owner/repo", number: 12 },
       { raw: "owner/other#13", repo: "owner/other", number: 13 },
-      { raw: "https://github.com/up/down/issues/14", repo: "up/down", number: 14 },
+      {
+        raw: "https://github.com/up/down/issues/14",
+        repo: "up/down",
+        number: 14,
+      },
     ]);
   });
 
@@ -99,14 +113,16 @@ describe("parseBodyDeclaredBlockerRefs", () => {
 
 describe("normalizeGitHubIssueDependency", () => {
   test("normalizes snake_case and closed dependency fields", () => {
-    expect(normalizeGitHubIssueDependency({
-      number: 7,
-      title: "Old blocker",
-      html_url: "https://github.com/owner/repo/issues/7",
-      state: "closed",
-      state_reason: "completed",
-      closed_at: "2026-01-01T00:00:00Z",
-    })).toEqual({
+    expect(
+      normalizeGitHubIssueDependency({
+        number: 7,
+        title: "Old blocker",
+        html_url: "https://github.com/owner/repo/issues/7",
+        state: "closed",
+        state_reason: "completed",
+        closed_at: "2026-01-01T00:00:00Z",
+      }),
+    ).toEqual({
       number: 7,
       title: "Old blocker",
       url: "https://github.com/owner/repo/issues/7",

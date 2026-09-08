@@ -1,9 +1,14 @@
-import { Effect, FileSystem, Option } from "effect";
+import {
+  ExitNotifications,
+  Presentation,
+  RepositoryConfiguration,
+} from "../runtime/services.ts";
+import { Context, Effect, Layer, Option } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { runProcess } from "./process.ts";
 import path from "node:path";
 import { isWorkflowCommand } from "./args.ts";
-import { decodeRoarkConfig, workspaceFromGitResult } from "./hydrate.ts";
+import { workspaceFromGitResult } from "./hydrate.ts";
 
 export const notificationTimeoutMs = 2_000;
 
@@ -23,48 +28,105 @@ export interface NotificationContent {
   body: string;
 }
 
-export interface NotificationDependencies {
-  platform?: NodeJS.Platform;
-  cwd?: string;
-  resolveWorkspace?: typeof resolveNotificationWorkspace;
-  loadConfig?: typeof loadNotificationConfig;
-  warn?: (message: string) => void;
-  timeoutMs?: number;
-}
+export const NotificationSettings = Context.Reference<{
+  platform: NodeJS.Platform;
+  cwd: string;
+  timeoutMs: number;
+}>("roark/cli/NotificationSettings", {
+  defaultValue: () => ({
+    platform: process.platform,
+    cwd: process.cwd(),
+    timeoutMs: notificationTimeoutMs,
+  }),
+});
 
-export function sendExitNotification(
+export const exitNotificationsLayer = Layer.effect(
+  ExitNotifications,
+  Effect.gen(function* () {
+    const configuration = yield* RepositoryConfiguration;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const presentation = yield* Presentation;
+
+    const deliver = Effect.fn("deliverMacNotification")(function* (
+      content: NotificationContent,
+    ) {
+      const settings = yield* NotificationSettings;
+      if (settings.platform !== "darwin") return;
+      const delivered = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const child = yield* spawner.spawn(
+            ChildProcess.make(
+              "/usr/bin/osascript",
+              ["-e", notificationScript, content.title, content.body],
+              {
+                stdin: "ignore",
+                stdout: "ignore",
+                stderr: "ignore",
+                killSignal: "SIGKILL",
+              },
+            ),
+          );
+          return (yield* child.exitCode) === 0;
+        }),
+      ).pipe(
+        Effect.timeoutOption(settings.timeoutMs),
+        Effect.map((result) => Option.isSome(result) && result.value),
+        Effect.catch(() => Effect.succeed(false)),
+      );
+      if (!delivered)
+        presentation.error(
+          "Warning: Roark could not deliver the exit notification.",
+        );
+    });
+
+    const send = Effect.fn("sendExitNotification")(function* (
+      request: ExitNotificationRequest,
+    ) {
+      const settings = yield* NotificationSettings;
+      if (settings.platform !== "darwin") return;
+      const lookup = yield* Effect.gen(function* () {
+        const cwd = path.resolve(notificationCwd(request.argv, settings.cwd));
+        const result = yield* runProcess(
+          ["git", "rev-parse", "--show-toplevel"],
+          { cwd },
+        ).pipe(
+          Effect.provideService(
+            ChildProcessSpawner.ChildProcessSpawner,
+            spawner,
+          ),
+        );
+        const workspace = yield* Effect.try(() =>
+          workspaceFromGitResult(cwd, result),
+        );
+        const config = yield* configuration.load(workspace);
+        return { workspace, config };
+      }).pipe(Effect.option);
+      if (
+        Option.isSome(lookup) &&
+        lookup.value.config.notifications?.onExit === true
+      ) {
+        yield* deliver(
+          formatNotificationContent(request, lookup.value.workspace),
+        );
+      }
+    });
+    return ExitNotifications.of({ send, deliver });
+  }),
+);
+
+export const sendExitNotification = Effect.fnUntraced(function* (
   request: ExitNotificationRequest,
-  dependencies: NotificationDependencies = {},
 ) {
-  return Effect.gen(function*() {
-    if ((dependencies.platform ?? process.platform) !== "darwin") return;
-    const lookup = yield* Effect.gen(function*() {
-      const cwd = notificationCwd(request.argv, dependencies.cwd ?? process.cwd());
-      const workspace = yield* (dependencies.resolveWorkspace ?? resolveNotificationWorkspace)(cwd);
-      const config = yield* (dependencies.loadConfig ?? loadNotificationConfig)(workspace);
-      return { workspace, config };
-    }).pipe(Effect.option);
-    // Notification opt-in is available only through a valid repository config.
-    if (Option.isNone(lookup) || lookup.value.config.notifications?.onExit !== true) return;
-    yield* deliverMacNotification(formatNotificationContent(request, lookup.value.workspace), dependencies);
-  });
-}
+  const notifications = yield* ExitNotifications;
+  yield* notifications.send(request);
+});
 
-function resolveNotificationWorkspace(cwd: string) {
-  const absoluteStart = path.resolve(cwd);
-  return runProcess(["git", "rev-parse", "--show-toplevel"], { cwd: absoluteStart }).pipe(
-    Effect.flatMap((result) => Effect.try(() => workspaceFromGitResult(absoluteStart, result))),
-  );
-}
-
-function loadNotificationConfig(workspace: string) {
-  return Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem;
-    const configPath = path.join(workspace, ".roark", "config.json");
-    const content = yield* fs.readFileString(configPath);
-    return yield* Effect.try(() => decodeRoarkConfig(JSON.parse(content), configPath));
-  });
-}
+export const deliverMacNotification = Effect.fnUntraced(function* (
+  content: NotificationContent,
+) {
+  const notifications = yield* ExitNotifications;
+  yield* notifications.deliver(content);
+});
 
 export function formatNotificationContent(
   request: ExitNotificationRequest,
@@ -77,30 +139,6 @@ export function formatNotificationContent(
   return { title, body: `${command}${target} · ${repository}` };
 }
 
-export function deliverMacNotification(
-  content: NotificationContent,
-  dependencies: NotificationDependencies = {},
-) {
-  return Effect.gen(function*() {
-    if ((dependencies.platform ?? process.platform) !== "darwin") return;
-    const delivered = yield* Effect.scoped(Effect.gen(function*() {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const child = yield* spawner.spawn(ChildProcess.make("/usr/bin/osascript", [
-        "-e", notificationScript, content.title, content.body,
-      ], { stdin: "ignore", stdout: "ignore", stderr: "ignore", killSignal: "SIGKILL" }));
-      return (yield* child.exitCode) === 0;
-    })).pipe(
-      Effect.timeoutOption(dependencies.timeoutMs ?? notificationTimeoutMs),
-      Effect.map((result) => Option.isSome(result) && result.value),
-      Effect.catch(() => Effect.succeed(false)),
-    );
-    if (!delivered) {
-      const warn = dependencies.warn ?? ((message: string) => { console.error(message); });
-      warn("Warning: Roark could not deliver the exit notification.");
-    }
-  });
-}
-
 function notificationCwd(argv: string[], fallback: string): string {
   for (let index = argv.length - 2; index >= 0; index--) {
     if (argv[index] !== "--cwd") continue;
@@ -111,7 +149,8 @@ function notificationCwd(argv: string[], fallback: string): string {
 }
 
 function commandIdentity(argv: string[]): string {
-  if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v")) return "version";
+  if (argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v"))
+    return "version";
   if (argv.includes("--help") || argv.includes("-h")) return "help";
   const command = argv[0];
   return command && isWorkflowCommand(command) ? command : "roark";
@@ -130,7 +169,10 @@ function targetIdentity(command: string, argv: string[]): string {
     return number ? ` #${number}` : "";
   }
 
-  if (isWorkflowCommand(command) && !["init", "workspace", "review-pr", "revise-pr"].includes(command)) {
+  if (
+    isWorkflowCommand(command) &&
+    !["init", "workspace", "review-pr", "revise-pr"].includes(command)
+  ) {
     const number = normalizedIssueNumber(argv[1]);
     return number ? ` #${number}` : "";
   }

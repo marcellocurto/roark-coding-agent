@@ -1,5 +1,9 @@
-import type { ApplicationExecution } from "../runtime/application.ts";
-import { runProcessOrThrowPromise } from "../cli/process.ts";
+import { GitHubRequestError } from "./errors.ts";
+import { decodeGitHubResponse } from "./errors.ts";
+import { Effect } from "effect";
+import type { GitHubError, GitHubRequirements } from "./errors.ts";
+
+import { runProcessOrThrow } from "../cli/process.ts";
 
 export interface PullRequestComment {
   id?: string | undefined;
@@ -7,7 +11,7 @@ export interface PullRequestComment {
   author?: string | undefined;
   body: string;
   createdAt?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
 }
 
 export type PullRequestReviewThreadComment = PullRequestComment & {
@@ -32,7 +36,7 @@ export interface PullRequestMetadata {
   number: number;
   title: string;
   body: string;
-  url?: string | undefined  ;
+  url?: string | undefined;
   state: string;
   isDraft?: boolean | undefined;
   baseRefName: string;
@@ -78,14 +82,22 @@ export interface PullRequestGraphQLResult {
   };
 }
 
-export const roarkPrRevisionSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+revision=\d+\s+phase=revision-summary\s*-->/;
-export const roarkPrReviewSummaryMarkerPattern = /<!--\s*roark:pr=\d+\s+phase=pr-review(?:\s+reviewer=[ab])?\s*-->/;
+export const roarkPrRevisionSummaryMarkerPattern =
+  /<!--\s*roark:pr=\d+\s+revision=\d+\s+phase=revision-summary\s*-->/;
+export const roarkPrReviewSummaryMarkerPattern =
+  /<!--\s*roark:pr=\d+\s+phase=pr-review(?:\s+reviewer=[ab])?\s*-->/;
 
 export function isRoarkGeneratedPrSummaryComment(body: string): boolean {
-  return roarkPrRevisionSummaryMarkerPattern.test(body) || roarkPrReviewSummaryMarkerPattern.test(body);
+  return (
+    roarkPrRevisionSummaryMarkerPattern.test(body) ||
+    roarkPrReviewSummaryMarkerPattern.test(body)
+  );
 }
 
-export function buildPullRequestFeedbackGraphqlArgv(input: { repo: string; prNumber: number }): string[] {
+export function buildPullRequestFeedbackGraphqlArgv(input: {
+  repo: string;
+  prNumber: number;
+}): string[] {
   const [owner, name] = splitRepo(input.repo);
   return [
     "gh",
@@ -102,61 +114,144 @@ export function buildPullRequestFeedbackGraphqlArgv(input: { repo: string; prNum
   ];
 }
 
-export async function fetchPullRequestFeedback(options: { cwd: string; repo?: string | undefined; prNumber: number }, application?: ApplicationExecution): Promise<PullRequestFeedback> {
-  const repo = await resolvePullRequestRepo({ cwd: options.cwd, repo: options.repo }, application);
-  const stdout = await runProcessOrThrowPromise(buildPullRequestFeedbackGraphqlArgv({ repo, prNumber: options.prNumber }), {
+export const fetchPullRequestFeedback = Effect.fn(
+  "GitHub.fetchPullRequestFeedback",
+)(function* (options: {
+  cwd: string;
+  repo?: string | undefined;
+  prNumber: number;
+}): Effect.fn.Return<PullRequestFeedback, GitHubError, GitHubRequirements> {
+  const repo = yield* resolvePullRequestRepo({
     cwd: options.cwd,
-    label: "gh api graphql pull request feedback",
-  }, application);
-  const feedback = parsePullRequestFeedback(stdout, { repo, prNumber: options.prNumber });
-  const closingIssues = await Promise.all((feedback.closingIssues ?? []).map(async (issue) => {
-    if (issue.repository?.toLowerCase() !== repo.toLowerCase()) return issue;
-    const raw = await runProcessOrThrowPromise([
-      "gh", "api", `repos/${repo}/issues/${issue.number}/comments`, "--paginate", "--slurp",
-    ], { cwd: options.cwd, label: `gh api closing issue #${issue.number} comments` }, application);
-    return { ...issue, comments: parseRestPullRequestComments(raw) };
-  }));
-  const commentsRaw = await runProcessOrThrowPromise([
-    "gh", "api", `repos/${repo}/issues/${options.prNumber}/comments`, "--paginate", "--slurp",
-  ], { cwd: options.cwd, label: "gh api pull request comments" }, application);
-  return withPlannerComments({ ...feedback, closingIssues }, parseRestPullRequestComments(commentsRaw));
-}
+    repo: options.repo,
+  });
+  const stdout = yield* runProcessOrThrow(
+    buildPullRequestFeedbackGraphqlArgv({ repo, prNumber: options.prNumber }),
+    {
+      cwd: options.cwd,
+      label: "gh api graphql pull request feedback",
+    },
+  );
+  const feedback = yield* decodeGitHubResponse(() =>
+    parsePullRequestFeedback(stdout, {
+      repo,
+      prNumber: options.prNumber,
+    }),
+  );
+  const closingIssues = yield* Effect.all(
+    (feedback.closingIssues ?? []).map(
+      Effect.fnUntraced(function* (issue) {
+        if (issue.repository?.toLowerCase() !== repo.toLowerCase())
+          return issue;
+        const raw = yield* runProcessOrThrow(
+          [
+            "gh",
+            "api",
+            `repos/${repo}/issues/${issue.number}/comments`,
+            "--paginate",
+            "--slurp",
+          ],
+          {
+            cwd: options.cwd,
+            label: `gh api closing issue #${issue.number} comments`,
+          },
+        );
+        return {
+          ...issue,
+          comments: yield* decodeGitHubResponse(() =>
+            parseRestPullRequestComments(raw),
+          ),
+        };
+      }),
+    ),
+    { concurrency: "unbounded" },
+  );
+  const commentsRaw = yield* runProcessOrThrow(
+    [
+      "gh",
+      "api",
+      `repos/${repo}/issues/${options.prNumber}/comments`,
+      "--paginate",
+      "--slurp",
+    ],
+    { cwd: options.cwd, label: "gh api pull request comments" },
+  );
+  return withPlannerComments(
+    { ...feedback, closingIssues },
+    yield* decodeGitHubResponse(() =>
+      parseRestPullRequestComments(commentsRaw),
+    ),
+  );
+});
 
-export async function resolvePullRequestRepo(options: { cwd: string; repo?: string  | undefined}, application?: ApplicationExecution): Promise<string> {
+export const resolvePullRequestRepo = Effect.fn(
+  "GitHub.resolvePullRequestRepo",
+)(function* (options: {
+  cwd: string;
+  repo?: string | undefined;
+}): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
   if (options.repo) return options.repo;
-  const stdout = await runProcessOrThrowPromise(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"], {
-    cwd: options.cwd,
-    label: "gh repo view",
-  }, application);
+  const stdout = yield* runProcessOrThrow(
+    ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+    {
+      cwd: options.cwd,
+      label: "gh repo view",
+    },
+  );
   const repo = stdout.trim();
-  if (!repo) throw new Error("Could not resolve GitHub repository. Pass --repo owner/repo.");
+  if (!repo)
+    return yield* Effect.fail(
+      new GitHubRequestError({
+        message: "Could not resolve GitHub repository. Pass --repo owner/repo.",
+      }),
+    );
   return repo;
-}
+});
 
-export function parsePullRequestFeedback(raw: string, input: { repo: string; prNumber: number }): PullRequestFeedback {
+export function parsePullRequestFeedback(
+  raw: string,
+  input: { repo: string; prNumber: number },
+): PullRequestFeedback {
   const parsed = JSON.parse(raw) as PullRequestGraphQLResult;
-  const pullRequest = parsed.data?.repository?.pullRequest ?? parsed.repository?.pullRequest;
-  if (!isRecord(pullRequest)) throw new Error(`GitHub GraphQL response did not include pull request #${input.prNumber}.`);
+  const pullRequest =
+    parsed.data?.repository?.pullRequest ?? parsed.repository?.pullRequest;
+  if (!isRecord(pullRequest))
+    throw new Error(
+      `GitHub GraphQL response did not include pull request #${input.prNumber}.`,
+    );
 
   const pr = normalizePullRequestMetadata(pullRequest, input.prNumber);
-  const comments = connectionNodes(pullRequest["comments"]).map(normalizePullRequestComment);
-  const reviewThreads = requiredConnectionNodes(pullRequest["reviewThreads"], "pull request reviewThreads").map(normalizeReviewThread);
-  const closingIssues = connectionNodes(pullRequest["closingIssuesReferences"]).map(normalizeClosingIssue);
-  return withPlannerComments({
-    repo: input.repo,
-    pr,
+  const comments = connectionNodes(pullRequest["comments"]).map(
+    normalizePullRequestComment,
+  );
+  const reviewThreads = requiredConnectionNodes(
+    pullRequest["reviewThreads"],
+    "pull request reviewThreads",
+  ).map(normalizeReviewThread);
+  const closingIssues = connectionNodes(
+    pullRequest["closingIssuesReferences"],
+  ).map(normalizeClosingIssue);
+  return withPlannerComments(
+    {
+      repo: input.repo,
+      pr,
+      comments,
+      reviewThreads,
+      plannerComments: [],
+      excludedRoarkSummaryCommentIds: [],
+      closingIssues,
+      reviewThreadsTruncated: connectionHasNextPage(
+        pullRequest["reviewThreads"],
+      ),
+      fetchedAt: new Date().toISOString(),
+    },
     comments,
-    reviewThreads,
-    plannerComments: [],
-    excludedRoarkSummaryCommentIds: [],
-    closingIssues,
-    reviewThreadsTruncated: connectionHasNextPage(pullRequest["reviewThreads"]),
-    fetchedAt: new Date().toISOString(),
-  }, comments);
+  );
 }
 
 function normalizeClosingIssue(value: unknown): PullRequestClosingIssue {
-  if (!isRecord(value)) return { number: 0, title: "", body: "", state: "UNKNOWN" };
+  if (!isRecord(value))
+    return { number: 0, title: "", body: "", state: "UNKNOWN" };
   return {
     number: numberField(value, "number") ?? 0,
     title: stringField(value, "title") ?? "",
@@ -167,20 +262,37 @@ function normalizeClosingIssue(value: unknown): PullRequestClosingIssue {
   };
 }
 
-function withPlannerComments(feedback: PullRequestFeedback, comments: PullRequestComment[]): PullRequestFeedback {
+function withPlannerComments(
+  feedback: PullRequestFeedback,
+  comments: PullRequestComment[],
+): PullRequestFeedback {
   const excludedRoarkSummaryCommentIds: (string | number)[] = [];
   const plannerComments = comments.filter((comment) => {
     if (!roarkPrRevisionSummaryMarkerPattern.test(comment.body)) return true;
-    excludedRoarkSummaryCommentIds.push(comment.databaseId ?? comment.id ?? "unknown");
+    excludedRoarkSummaryCommentIds.push(
+      comment.databaseId ?? comment.id ?? "unknown",
+    );
     return false;
   });
-  return { ...feedback, comments, plannerComments, excludedRoarkSummaryCommentIds };
+  return {
+    ...feedback,
+    comments,
+    plannerComments,
+    excludedRoarkSummaryCommentIds,
+  };
 }
 
-export function parseRestPullRequestComments(raw: string): PullRequestComment[] {
+export function parseRestPullRequestComments(
+  raw: string,
+): PullRequestComment[] {
   const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed)) throw new Error("GitHub REST response for pull request comments was not an array.");
-  const values = (parsed as unknown[]).flatMap<unknown>((page) => Array.isArray(page) ? page as unknown[] : [page]);
+  if (!Array.isArray(parsed))
+    throw new Error(
+      "GitHub REST response for pull request comments was not an array.",
+    );
+  const values = (parsed as unknown[]).flatMap<unknown>((page) =>
+    Array.isArray(page) ? (page as unknown[]) : [page],
+  );
   return values.map((value) => {
     if (!isRecord(value)) return { body: "" };
     return {
@@ -194,7 +306,10 @@ export function parseRestPullRequestComments(raw: string): PullRequestComment[] 
   });
 }
 
-function normalizePullRequestMetadata(value: Record<string, unknown>, fallbackNumber: number): PullRequestMetadata {
+function normalizePullRequestMetadata(
+  value: Record<string, unknown>,
+  fallbackNumber: number,
+): PullRequestMetadata {
   return {
     id: stringField(value, "id"),
     number: numberField(value, "number") ?? fallbackNumber,
@@ -227,10 +342,15 @@ function normalizePullRequestComment(value: unknown): PullRequestComment {
 }
 
 function normalizeReviewThread(value: unknown): PullRequestReviewThread {
-  if (!isRecord(value)) throw new Error("GitHub GraphQL response included an invalid review thread node.");
+  if (!isRecord(value))
+    throw new Error(
+      "GitHub GraphQL response included an invalid review thread node.",
+    );
   if (typeof value["isResolved"] !== "boolean") {
     const id = stringField(value, "id") ?? "unknown";
-    throw new Error(`GitHub GraphQL response for review thread ${id} did not include boolean isResolved.`);
+    throw new Error(
+      `GitHub GraphQL response for review thread ${id} did not include boolean isResolved.`,
+    );
   }
   return {
     id: stringField(value, "id") ?? "",
@@ -244,7 +364,9 @@ function normalizeReviewThread(value: unknown): PullRequestReviewThread {
       ...normalizePullRequestComment(comment),
       path: isRecord(comment) ? stringField(comment, "path") : undefined,
       line: isRecord(comment) ? numberField(comment, "line") : undefined,
-      originalLine: isRecord(comment) ? numberField(comment, "originalLine") : undefined,
+      originalLine: isRecord(comment)
+        ? numberField(comment, "originalLine")
+        : undefined,
     })),
   };
 }
@@ -256,18 +378,25 @@ function connectionNodes(value: unknown): unknown[] {
 
 function requiredConnectionNodes(value: unknown, label: string): unknown[] {
   if (!isRecord(value) || !Array.isArray(value["nodes"])) {
-    throw new Error(`GitHub GraphQL response did not include a valid ${label}.nodes connection.`);
+    throw new Error(
+      `GitHub GraphQL response did not include a valid ${label}.nodes connection.`,
+    );
   }
   return value["nodes"].filter((node) => node !== null && node !== undefined);
 }
 
 function connectionHasNextPage(value: unknown): boolean {
-  return isRecord(value) && isRecord(value["pageInfo"]) && value["pageInfo"]["hasNextPage"] === true;
+  return (
+    isRecord(value) &&
+    isRecord(value["pageInfo"]) &&
+    value["pageInfo"]["hasNextPage"] === true
+  );
 }
 
 function splitRepo(repo: string): [string, string] {
   const match = /^([^/]+)\/([^/]+)$/.exec(repo);
-  if (!match?.[1] || !match[2]) throw new Error(`Repository must be in owner/repo format. Got '${repo}'.`);
+  if (!match?.[1] || !match[2])
+    throw new Error(`Repository must be in owner/repo format. Got '${repo}'.`);
   return [match[1], match[2]];
 }
 
@@ -283,17 +412,26 @@ function login(value: unknown): string | undefined {
   return isRecord(value) ? stringField(value, "login") : undefined;
 }
 
-function stringField(value: Record<string, unknown>, key: string): string | undefined {
+function stringField(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
   const field = value[key];
   return typeof field === "string" ? field : undefined;
 }
 
-function numberField(value: Record<string, unknown>, key: string): number | undefined {
+function numberField(
+  value: Record<string, unknown>,
+  key: string,
+): number | undefined {
   const field = value[key];
   return typeof field === "number" ? field : undefined;
 }
 
-function booleanField(value: Record<string, unknown>, key: string): boolean | undefined {
+function booleanField(
+  value: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
   const field = value[key];
   return typeof field === "boolean" ? field : undefined;
 }

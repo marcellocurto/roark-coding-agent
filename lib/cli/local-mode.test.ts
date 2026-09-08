@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createWorkflowContext, writeJsonArtifact } from "../workflow/artifacts.ts";
+import { createWorkflowContext } from "../workflow/artifacts.ts";
+import { writeJsonArtifactPromise as writeJsonArtifact } from "../workflow/artifacts-promise.ts";
 import { readinessResult } from "../testing/workflow-results.ts";
 import {
   formatDoLocalModeStartMessage,
@@ -12,7 +13,8 @@ import {
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
 });
 
 describe("do local/manual mode messaging", () => {
@@ -39,11 +41,19 @@ describe("do local/manual mode messaging", () => {
       yes: false,
       maxFixPasses: 1,
     });
-    await writeJsonArtifact(context, "readiness", readinessResult("ready-for-pr"));
+    await writeJsonArtifact(
+      context,
+      "readiness",
+      readinessResult("ready-for-pr"),
+    );
 
     const logs: string[] = [];
-    await printDoLocalModeReadyMessageIfReady(context, (message) => logs.push(message));
+    await printDoLocalModeReadyMessageIfReady(context, (message) =>
+      logs.push(message),
+    );
 
-    expect(logs.join("\n")).toContain("no PR was opened because this was local/manual do mode");
+    expect(logs.join("\n")).toContain(
+      "no PR was opened because this was local/manual do mode",
+    );
   });
 });

@@ -40,39 +40,53 @@ Management
    → roark --help
 `;
 
-export async function resolveInteractiveArgv(options: {
-  stdin?: TtyInput | undefined;
-  stdout?: WritableOutput | undefined;
-} = {}): Promise<InteractiveArgv> {
+export async function resolveInteractiveArgv(
+  options: {
+    stdin?: TtyInput | undefined;
+    stdout?: WritableOutput | undefined;
+    signal?: AbortSignal | undefined;
+  } = {},
+): Promise<InteractiveArgv> {
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
 
   if (!stdin.isTTY) return ["--help"];
-  return runReadlinePrompt(stdin, stdout, promptForInteractiveArgv);
+  return runReadlinePrompt(
+    stdin,
+    stdout,
+    promptForInteractiveArgv,
+    options.signal,
+  );
 }
 
-export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promise<InteractiveArgv> {
+export async function promptForInteractiveArgv(
+  prompt: InteractivePrompt,
+): Promise<InteractiveArgv> {
   for (;;) {
     prompt.write?.(menu);
     const choice = (await prompt.question("Select an option: ")).trim();
 
     if (choice === "1") {
-      if (await confirm(prompt, "Work on the next ready issue?")) return ["auto"];
+      if (await confirm(prompt, "Work on the next ready issue?"))
+        return ["auto"];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
 
     if (choice === "2") {
       const issue = await promptRequiredIssue(prompt);
-      if (await confirm(prompt, `Work on issue ${issue}?`)) return ["auto", issue];
+      if (await confirm(prompt, `Work on issue ${issue}?`))
+        return ["auto", issue];
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
 
     if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
     if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
-    if (choice === "5") return ["review-pr", await promptRequiredPrNumber(prompt)];
-    if (choice === "6") return ["revise-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "5")
+      return ["review-pr", await promptRequiredPrNumber(prompt)];
+    if (choice === "6")
+      return ["revise-pr", await promptRequiredPrNumber(prompt)];
     if (choice === "7") return ["status", await promptRequiredIssue(prompt)];
 
     if (choice === "8") {
@@ -89,13 +103,25 @@ export async function resolveInteractiveWorkspaceRemoval(options: {
   workspacePaths: string[];
   stdin?: TtyInput | undefined;
   stdout?: WritableOutput | undefined;
+  signal?: AbortSignal | undefined;
 }): Promise<WorkspaceRemovalSelection | undefined> {
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
   if (!stdin.isTTY) {
-    throw new Error("Interactive workspace selection requires a TTY. Pass issue numbers or use --pr to select workspaces explicitly.");
+    throw new Error(
+      "Interactive workspace selection requires a TTY. Pass issue numbers or use --pr to select workspaces explicitly.",
+    );
   }
-  return runReadlinePrompt(stdin, stdout, (prompt) => promptForWorkspaceRemoval({ workspacePaths: options.workspacePaths, prompt }));
+  return runReadlinePrompt(
+    stdin,
+    stdout,
+    (prompt) =>
+      promptForWorkspaceRemoval({
+        workspacePaths: options.workspacePaths,
+        prompt,
+      }),
+    options.signal,
+  );
 }
 
 export async function promptForWorkspaceRemoval(options: {
@@ -105,11 +131,19 @@ export async function promptForWorkspaceRemoval(options: {
   const { prompt, workspacePaths } = options;
   prompt.write?.("Managed workspaces:\n");
   for (const [index, workspacePath] of workspacePaths.entries()) {
-    prompt.write?.(`  ${index + 1}. ${path.basename(workspacePath)}  ${workspacePath}\n`);
+    prompt.write?.(
+      `  ${index + 1}. ${path.basename(workspacePath)}  ${workspacePath}\n`,
+    );
   }
 
   for (;;) {
-    const answer = (await prompt.question("Select workspaces to remove (for example 1,3-5 or all; Enter to cancel): ")).trim().toLowerCase();
+    const answer = (
+      await prompt.question(
+        "Select workspaces to remove (for example 1,3-5 or all; Enter to cancel): ",
+      )
+    )
+      .trim()
+      .toLowerCase();
     if (!answer) {
       prompt.write?.("Cancelled.\n");
       return undefined;
@@ -117,11 +151,18 @@ export async function promptForWorkspaceRemoval(options: {
 
     const indexes = parseWorkspaceSelection(answer, workspacePaths.length);
     if (!indexes) {
-      prompt.write?.(`Invalid selection. Choose numbers from 1 to ${workspacePaths.length}, ranges, or all.\n`);
+      prompt.write?.(
+        `Invalid selection. Choose numbers from 1 to ${workspacePaths.length}, ranges, or all.\n`,
+      );
       continue;
     }
 
-    if (!await confirm(prompt, `Remove ${indexes.length} selected workspace${indexes.length === 1 ? "" : "s"}?`)) {
+    if (
+      !(await confirm(
+        prompt,
+        `Remove ${indexes.length} selected workspace${indexes.length === 1 ? "" : "s"}?`,
+      ))
+    ) {
       prompt.write?.("Cancelled.\n");
       return undefined;
     }
@@ -133,15 +174,19 @@ async function runReadlinePrompt<T>(
   stdin: TtyInput,
   stdout: WritableOutput,
   run: (prompt: InteractivePrompt) => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T | undefined> {
-  const rl = createInterface({ input: stdin, output: stdout as NodeJS.WriteStream });
+  const rl = createInterface({
+    input: stdin,
+    output: stdout as NodeJS.WriteStream,
+  });
   rl.on("SIGINT", () => {
     rl.close();
   });
 
   try {
     return await run({
-      question: (question) => rl.question(question),
+      question: (question) => rl.question(question, { signal }),
       write: (text) => stdout.write(text),
     });
   } catch (error) {
@@ -155,8 +200,12 @@ async function runReadlinePrompt<T>(
   }
 }
 
-function parseWorkspaceSelection(input: string, maximum: number): number[] | undefined {
-  if (input === "all") return Array.from({ length: maximum }, (_, index) => index + 1);
+function parseWorkspaceSelection(
+  input: string,
+  maximum: number,
+): number[] | undefined {
+  if (input === "all")
+    return Array.from({ length: maximum }, (_, index) => index + 1);
   const selected = new Set<number>();
   for (const part of input.split(",")) {
     const token = part.trim();
@@ -173,7 +222,9 @@ function parseWorkspaceSelection(input: string, maximum: number): number[] | und
     if (index < 1 || index > maximum) return undefined;
     selected.add(index);
   }
-  return selected.size > 0 ? [...selected].toSorted((left, right) => left - right) : undefined;
+  return selected.size > 0
+    ? [...selected].toSorted((left, right) => left - right)
+    : undefined;
 }
 
 async function promptRequiredIssue(prompt: InteractivePrompt): Promise<string> {
@@ -184,7 +235,9 @@ async function promptRequiredIssue(prompt: InteractivePrompt): Promise<string> {
   }
 }
 
-async function promptRequiredPrNumber(prompt: InteractivePrompt): Promise<string> {
+async function promptRequiredPrNumber(
+  prompt: InteractivePrompt,
+): Promise<string> {
   for (;;) {
     const prNumber = (await prompt.question("PR number: ")).trim();
     if (prNumber) return prNumber;
@@ -192,12 +245,20 @@ async function promptRequiredPrNumber(prompt: InteractivePrompt): Promise<string
   }
 }
 
-async function confirm(prompt: InteractivePrompt, message: string): Promise<boolean> {
-  const answer = (await prompt.question(`${message} [y/N] `)).trim().toLowerCase();
+async function confirm(
+  prompt: InteractivePrompt,
+  message: string,
+): Promise<boolean> {
+  const answer = (await prompt.question(`${message} [y/N] `))
+    .trim()
+    .toLowerCase();
   return answer === "y" || answer === "yes";
 }
 
 function isCleanReadlineExit(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return error.name === "AbortError" || error.message.toLowerCase().includes("readline was closed");
+  return (
+    error.name === "AbortError" ||
+    error.message.toLowerCase().includes("readline was closed")
+  );
 }

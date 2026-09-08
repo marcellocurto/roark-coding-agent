@@ -1,7 +1,7 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import type { ArtifactRef, WorkflowContext } from "../workflow/artifacts.ts";
 import {
   artifactAgentPath,
-  artifactExists,
   baselineResetLogRef,
   fixLogRef,
   implementationRestartLogRef,
@@ -10,6 +10,7 @@ import {
   reviewBRef,
   verificationBeforeFixRef,
 } from "../workflow/artifacts.ts";
+import { artifactExistsPromise as artifactExists } from "../workflow/artifacts-promise.ts";
 import {
   correctnessReviewLens,
   maintainabilityReviewLens,
@@ -62,9 +63,12 @@ export const sharedSystemPrompt = `<system_prompt>
 </system_prompt>`;
 
 const doNotBroadenScopeInstruction = "Do not broaden scope.";
-const doNotEditWorkflowArtifactsInstruction = "Do not edit .roark workflow artifacts.";
-const inspectionOnlyConstraint = "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
-const changedCodeValidationInstruction = "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
+const doNotEditWorkflowArtifactsInstruction =
+  "Do not edit .roark workflow artifacts.";
+const inspectionOnlyConstraint =
+  "Use shell commands freely for inspection and validation. Do not intentionally change repository files during this phase.";
+const changedCodeValidationInstruction =
+  "After changes, run the most relevant affordable validation: targeted tests for changed behavior, then typecheck/lint/build if applicable. If validation cannot run, record why, the exact command that should be run, and the next-best check performed.";
 const bugFeedbackLoopPolicy = `  <bug_feedback_loop_policy>
     <instruction>Apply this policy only when the requested work is a bug, regression, failing test, error, broken behavior, flaky behavior, or performance regression.</instruction>
     <instruction>Before changing production code, establish one exact command that exercises the user's specific symptom. Planning phases name the command; change phases run it and record the red result. If no runnable reproduction is possible, record why and the best available evidence instead of inventing certainty.</instruction>
@@ -123,7 +127,8 @@ const triageEvidencePolicy = `  <triage_evidence_policy>
     <instruction>Make every blocking question specific and actionable. Distinguish missing reporter information from a maintainer decision, even though both currently map to <value>needs-human-decision</value>.</instruction>
   </triage_evidence_policy>`;
 
-const workClassificationValues = "frontend, backend, full-stack, docs-config, test-only, unknown";
+const workClassificationValues =
+  "frontend, backend, full-stack, docs-config, test-only, unknown";
 
 interface WorkflowArtifactInput {
   kind: string;
@@ -146,7 +151,8 @@ interface XmlBlockOptions {
 }
 
 function renderWorkflowPhase(config: WorkflowPhasePrompt): string {
-  const passAttribute = config.pass === undefined ? "" : ` pass="${config.pass}"`;
+  const passAttribute =
+    config.pass === undefined ? "" : ` pass="${config.pass}"`;
 
   return `<workflow_phase name="${config.name}"${passAttribute}>
   <role>${config.role}</role>
@@ -163,14 +169,25 @@ ${config.outputContract}
 </workflow_phase>`;
 }
 
-function renderXmlBlock(tag: string, content: string, options: XmlBlockOptions = {}): string {
+function renderXmlBlock(
+  tag: string,
+  content: string,
+  options: XmlBlockOptions = {},
+): string {
   const blockIndent = options.blockIndent ?? "  ";
   const contentIndent = `${blockIndent}  `;
   return `${blockIndent}<${tag}>\n${indentLines(content, contentIndent)}\n${blockIndent}</${tag}>`;
 }
 
-function renderListBlock(blockTag: string, itemTag: string, items: readonly string[]): string {
-  return renderXmlBlock(blockTag, items.map((item) => `<${itemTag}>${item}</${itemTag}>`).join("\n"));
+function renderListBlock(
+  blockTag: string,
+  itemTag: string,
+  items: readonly string[],
+): string {
+  return renderXmlBlock(
+    blockTag,
+    items.map((item) => `<${itemTag}>${item}</${itemTag}>`).join("\n"),
+  );
 }
 
 function renderInstructions(instructions: readonly string[]): string {
@@ -181,11 +198,20 @@ function renderConstraints(constraints: readonly string[]): string {
   return renderListBlock("constraints", "constraint", constraints);
 }
 
-function renderInputArtifacts(context: WorkflowContext, inputs: readonly WorkflowArtifactInput[]): string[] {
-  return inputs.map(({ kind, artifact }) => renderInputArtifact(context, kind, artifact));
+function renderInputArtifacts(
+  context: WorkflowContext,
+  inputs: readonly WorkflowArtifactInput[],
+): string[] {
+  return inputs.map(({ kind, artifact }) =>
+    renderInputArtifact(context, kind, artifact),
+  );
 }
 
-function renderInputArtifact(context: WorkflowContext, kind: string, artifact: ArtifactRef): string {
+function renderInputArtifact(
+  context: WorkflowContext,
+  kind: string,
+  artifact: ArtifactRef,
+): string {
   return `    <artifact kind="${kind}">${artifactAgentPath(context, artifact)}</artifact>`;
 }
 
@@ -194,17 +220,24 @@ function renderInputBlock(tag: string, content: string): string {
 }
 
 function indentLines(content: string, indent: string): string {
-  return content.split("\n").map((line) => `${indent}${line}`).join("\n");
+  return content
+    .split("\n")
+    .map((line) => `${indent}${line}`)
+    .join("\n");
 }
 
 export function triagePrompt(context: WorkflowContext): string {
   return renderWorkflowPhase({
     name: "triage",
     role: "You are the triage agent.",
-    successCriteria: "Triage succeeds when the verdict is supported by the issue and repository evidence, blockers are only material external blockers, and the next step is clear.",
+    successCriteria:
+      "Triage succeeds when the verdict is supported by the issue and repository evidence, blockers are only material external blockers, and the next step is clear.",
     inputs: [
       ...renderInputArtifacts(context, [{ kind: "issue", artifact: "issue" }]),
-      renderInputBlock("repository_inspection_budget", "Use the minimum repository inspection needed to make a correct decision. Start from the issue artifact and short targeted searches. Read specific files only when they are likely to affect the triage verdict. Stop once you can cite enough repository evidence for the phase outcome."),
+      renderInputBlock(
+        "repository_inspection_budget",
+        "Use the minimum repository inspection needed to make a correct decision. Start from the issue artifact and short targeted searches. Read specific files only when they are likely to affect the triage verdict. Stop once you can cite enough repository evidence for the phase outcome.",
+      ),
     ],
     blocks: [
       triageEvidencePolicy,
@@ -226,7 +259,8 @@ export function triagePrompt(context: WorkflowContext): string {
       renderConstraints([inspectionOnlyConstraint]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_triage exactly once with the final triage result. The tool schema is authoritative. Do not return Markdown.",
+    outputContract:
+      "Call submit_triage exactly once with the final triage result. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -234,7 +268,8 @@ export function planDraftPrompt(context: WorkflowContext): string {
   return renderWorkflowPhase({
     name: "implementation_plan_draft",
     role: "You are the draft planning agent.",
-    successCriteria: "Draft planning succeeds when a refinement agent has a repository-grounded, bounded plan to taste-check before implementation.",
+    successCriteria:
+      "Draft planning succeeds when a refinement agent has a repository-grounded, bounded plan to taste-check before implementation.",
     inputs: renderInputArtifacts(context, [
       { kind: "issue", artifact: "issue" },
       { kind: "triage", artifact: "triage" },
@@ -250,7 +285,8 @@ export function planDraftPrompt(context: WorkflowContext): string {
       renderConstraints([inspectionOnlyConstraint]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_implementation_plan exactly once with the final draft plan. The tool schema is authoritative. Use an empty simplificationsFromDraft array for the draft. Do not return Markdown.",
+    outputContract:
+      "Call submit_implementation_plan exactly once with the final draft plan. The tool schema is authoritative. Use an empty simplificationsFromDraft array for the draft. Do not return Markdown.",
   });
 }
 
@@ -258,11 +294,15 @@ export function planPrompt(context: WorkflowContext): string {
   return renderWorkflowPhase({
     name: "implementation_plan_refinement",
     role: "You are the plan refinement/taste-check agent.",
-    successCriteria: "Plan refinement succeeds when the final plan is simpler, implementation-ready, scoped to the issue, and grounded in repository evidence.",
+    successCriteria:
+      "Plan refinement succeeds when the final plan is simpler, implementation-ready, scoped to the issue, and grounded in repository evidence.",
     inputs: renderInputArtifacts(context, [
       { kind: "issue", artifact: "issue" },
       { kind: "triage", artifact: "triage" },
-      { kind: "implementation_plan_draft", artifact: "implementationPlanDraft" },
+      {
+        kind: "implementation_plan_draft",
+        artifact: "implementationPlanDraft",
+      },
     ]),
     blocks: [
       bugFeedbackLoopPolicy,
@@ -281,15 +321,20 @@ export function planPrompt(context: WorkflowContext): string {
       renderConstraints([inspectionOnlyConstraint]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_implementation_plan exactly once with the final refined plan. The tool schema is authoritative. Do not return Markdown.",
+    outputContract:
+      "Call submit_implementation_plan exactly once with the final refined plan. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
-export function implementationPrompt(context: WorkflowContext, restartPass = 0): string {
+export function implementationPrompt(
+  context: WorkflowContext,
+  restartPass = 0,
+): string {
   return renderWorkflowPhase({
     name: "implementation",
     role: "You are the implementation agent.",
-    successCriteria: "Implementation succeeds when the issue requirement is satisfied, scope remains minimal, deviations from the plan are documented, and validation evidence is recorded.",
+    successCriteria:
+      "Implementation succeeds when the issue requirement is satisfied, scope remains minimal, deviations from the plan are documented, and validation evidence is recorded.",
     inputs: [
       ...renderInputArtifacts(context, [
         { kind: "issue", artifact: "issue" },
@@ -314,7 +359,8 @@ export function implementationPrompt(context: WorkflowContext, restartPass = 0):
       ]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_change_report exactly once with the final implementation report. The tool schema is authoritative. Do not return Markdown.",
+    outputContract:
+      "Call submit_change_report exactly once with the final implementation report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
@@ -331,9 +377,17 @@ const reviewAxisPolicy = `  <review_axis_policy>
 
 const reviewAConfig: ReviewPromptConfig = correctnessReviewLens;
 
-const reviewBConfig: ReviewPromptConfig = { ...maintainabilityReviewLens, smellLens: fullCodeSmellLens };
+const reviewBConfig: ReviewPromptConfig = {
+  ...maintainabilityReviewLens,
+  smellLens: fullCodeSmellLens,
+};
 
-function renderReviewPrompt(context: WorkflowContext, pass: number, config: ReviewPromptConfig): string {
+async function renderReviewPrompt(
+  context: WorkflowContext,
+  pass: number,
+  config: ReviewPromptConfig,
+  application?: ApplicationExecution,
+): Promise<string> {
   return renderWorkflowPhase({
     name: config.phase,
     pass,
@@ -344,63 +398,103 @@ function renderReviewPrompt(context: WorkflowContext, pass: number, config: Revi
         { kind: "issue", artifact: "issue" },
         { kind: "triage", artifact: "triage" },
         { kind: "implementation_plan", artifact: "implementationPlan" },
-        { kind: "pre_implementation_baseline", artifact: "preImplementationBaseline" },
+        {
+          kind: "pre_implementation_baseline",
+          artifact: "preImplementationBaseline",
+        },
         { kind: "implementation_log", artifact: "implementationLog" },
         { kind: "refinement_log", artifact: refinementLogRef(pass) },
       ]),
-      ...(pass === 0 ? [] : renderInputArtifacts(context, [{
-        kind: config.name === "correctness" ? "prior_review_a" : "prior_review_b",
-        artifact: config.name === "correctness" ? reviewARef(pass - 1) : reviewBRef(pass - 1),
-      }])),
-      ...failedVerificationInputLines(context, pass),
+      ...(pass === 0
+        ? []
+        : renderInputArtifacts(context, [
+            {
+              kind:
+                config.name === "correctness"
+                  ? "prior_review_a"
+                  : "prior_review_b",
+              artifact:
+                config.name === "correctness"
+                  ? reviewARef(pass - 1)
+                  : reviewBRef(pass - 1),
+            },
+          ])),
+      ...(await failedVerificationInputLines(context, pass, application)),
     ],
     blocks: [
       reviewAxisPolicy,
-      renderXmlBlock("review_diff_scope", [
-        `Read the baseline commit from ${artifactAgentPath(context, "preImplementationBaseline")}.`,
-        "Review exactly the tracked changes from that commit through the current working tree with: git diff &lt;baseline-head&gt; -- . ':(exclude).roark'",
-        "Use the same baseline for the stat with: git diff --stat &lt;baseline-head&gt; -- . ':(exclude).roark'",
-        "Also run git status --short and inspect untracked files outside .roark, because git diff does not include them.",
-        "Do not review pre-existing changes before the stored baseline.",
-      ].join("\n")),
-      renderXmlBlock("inspection_budget", `Start with the current refined diff/stat for cycle ${pass}. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the review verdict and any findings with concrete evidence.`),
+      renderXmlBlock(
+        "review_diff_scope",
+        [
+          `Read the baseline commit from ${artifactAgentPath(context, "preImplementationBaseline")}.`,
+          "Review exactly the tracked changes from that commit through the current working tree with: git diff &lt;baseline-head&gt; -- . ':(exclude).roark'",
+          "Use the same baseline for the stat with: git diff --stat &lt;baseline-head&gt; -- . ':(exclude).roark'",
+          "Also run git status --short and inspect untracked files outside .roark, because git diff does not include them.",
+          "Do not review pre-existing changes before the stored baseline.",
+        ].join("\n"),
+      ),
+      renderXmlBlock(
+        "inspection_budget",
+        `Start with the current refined diff/stat for cycle ${pass}. Inspect touched files and relevant callers/tests. Do not scan unrelated areas unless the diff points there. Stop once you can support the review verdict and any findings with concrete evidence.`,
+      ),
       renderReviewFocus(config, pass),
       renderInstructionsBlock("review_source_policy", config.sourcePolicy),
       ...(config.smellLens ? [codeSmellPolicy, config.smellLens] : []),
-      renderXmlBlock("required_fixes_policy", [
-        config.requiredFixesPolicy,
-        "Non-blocking concerns must be classified as <value>follow-up</value> or <value>suggestion</value>.",
-      ].join("\n")),
+      renderXmlBlock(
+        "required_fixes_policy",
+        [
+          config.requiredFixesPolicy,
+          "Non-blocking concerns must be classified as <value>follow-up</value> or <value>suggestion</value>.",
+        ].join("\n"),
+      ),
       renderStructuredReviewContract("the current issue", true),
       renderConstraints([...config.extraConstraints, inspectionOnlyConstraint]),
     ],
-    outputContract: "Call submit_review with the final structured result. Do not return Markdown.",
+    outputContract:
+      "Call submit_review with the final structured result. Do not return Markdown.",
     outputFormat: "structured-tool",
   });
 }
 
 function renderReviewFocus(config: ReviewPromptConfig, pass: number): string {
-  return renderXmlBlock("review_focus", [
-    `You are a ${config.focusName} Review agent. Review the final post-refinement code state for cycle ${pass}.`,
-    "Look specifically for:",
-    ...config.focusItems.map((item) => `<item>${item}</item>`),
-  ].join("\n"));
+  return renderXmlBlock(
+    "review_focus",
+    [
+      `You are a ${config.focusName} Review agent. Review the final post-refinement code state for cycle ${pass}.`,
+      "Look specifically for:",
+      ...config.focusItems.map((item) => `<item>${item}</item>`),
+    ].join("\n"),
+  );
 }
 
-export function reviewAPrompt(context: WorkflowContext, pass = 0): string {
-  return renderReviewPrompt(context, pass, reviewAConfig);
+export async function reviewAPrompt(
+  context: WorkflowContext,
+  pass = 0,
+  application?: ApplicationExecution,
+): Promise<string> {
+  return await renderReviewPrompt(context, pass, reviewAConfig, application);
 }
 
-export function reviewBPrompt(context: WorkflowContext, pass = 0): string {
-  return renderReviewPrompt(context, pass, reviewBConfig);
+export async function reviewBPrompt(
+  context: WorkflowContext,
+  pass = 0,
+  application?: ApplicationExecution,
+): Promise<string> {
+  return await renderReviewPrompt(context, pass, reviewBConfig, application);
 }
 
-export function codeRefinementPrompt(context: WorkflowContext, pass: number, source: "initial" | "fix" | "restart" = pass === 0 ? "initial" : "fix"): string {
+export async function codeRefinementPrompt(
+  context: WorkflowContext,
+  pass: number,
+  source: "initial" | "fix" | "restart" = pass === 0 ? "initial" : "fix",
+  application?: ApplicationExecution,
+): Promise<string> {
   return renderWorkflowPhase({
     name: "code_refinement",
     pass,
     role: `You are code refinement/taste-check agent pass ${pass}.`,
-    successCriteria: "Refinement succeeds when the just-written code is left unchanged if already appropriate or improved only where there is a concrete net benefit, while required behavior is preserved and material decisions are recorded.",
+    successCriteria:
+      "Refinement succeeds when the just-written code is left unchanged if already appropriate or improved only where there is a concrete net benefit, while required behavior is preserved and material decisions are recorded.",
     inputs: [
       ...renderInputArtifacts(context, [
         { kind: "issue", artifact: "issue" },
@@ -409,7 +503,7 @@ export function codeRefinementPrompt(context: WorkflowContext, pass: number, sou
       ]),
       ...codeRefinementSourceInputLines(context, pass, source),
       ...priorReviewInputLines(context, pass),
-      ...failedVerificationInputLines(context, pass),
+      ...(await failedVerificationInputLines(context, pass, application)),
       "    <current_git_diff />",
     ],
     blocks: [
@@ -423,24 +517,30 @@ export function codeRefinementPrompt(context: WorkflowContext, pass: number, sou
         "Preserve required behavior and public contracts. Do not introduce new behavior, dependencies, public interfaces, configuration, migrations, or architectural abstractions unless required by the issue, plan, or prior review.",
         "Prefer direct control flow, clear names, fewer layers, and less indirection. Extract or split helpers only when doing so makes the behavior materially easier to understand or test.",
         "Do not broaden scope, address unrelated suggestions, or edit .roark workflow artifacts.",
-        "In Behavior Risk Decisions, identify the affected file or behavior and explain the concrete improvement or reason for leaving complexity in place; do not make generic \"behavior preserved\" claims.",
+        'In Behavior Risk Decisions, identify the affected file or behavior and explain the concrete improvement or reason for leaving complexity in place; do not make generic "behavior preserved" claims.',
         "Run validation proportionate to any changes. If no code changed, report the existing relevant validation evidence instead of rerunning checks without a reason. If validation cannot run, record why.",
         "Call submit_change_report with the completed refinement report. Put material simplification, naming, behavior-risk, and plan-alignment decisions in deviations; use an empty addressedFindingIds array because review findings belong to the fix phase.",
       ]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_change_report exactly once with the final refinement report. The tool schema is authoritative. Do not return Markdown.",
+    outputContract:
+      "Call submit_change_report exactly once with the final refinement report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
-export function fixPrompt(context: WorkflowContext, pass: number): string {
+export async function fixPrompt(
+  context: WorkflowContext,
+  pass: number,
+  application?: ApplicationExecution,
+): Promise<string> {
   const previousCycle = Math.max(0, pass - 1);
 
   return renderWorkflowPhase({
     name: "fix",
     pass,
     role: `You are fix agent pass ${pass}.`,
-    successCriteria: "Fix succeeds when required unresolved review findings are addressed with minimal scope, remaining concerns are explicit, and validation evidence is recorded.",
+    successCriteria:
+      "Fix succeeds when required unresolved review findings are addressed with minimal scope, remaining concerns are explicit, and validation evidence is recorded.",
     inputs: [
       ...renderInputArtifacts(context, [
         { kind: "issue", artifact: "issue" },
@@ -449,7 +549,7 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
         { kind: "review_a", artifact: reviewARef(previousCycle) },
         { kind: "review_b", artifact: reviewBRef(previousCycle) },
       ]),
-      ...failedVerificationInputLines(context, pass),
+      ...(await failedVerificationInputLines(context, pass, application)),
     ],
     blocks: [
       bugFeedbackLoopPolicy,
@@ -467,29 +567,45 @@ export function fixPrompt(context: WorkflowContext, pass: number): string {
       ]),
     ],
     outputFormat: "structured-tool",
-    outputContract: "Call submit_change_report exactly once with the final fix report. The tool schema is authoritative. Do not return Markdown.",
+    outputContract:
+      "Call submit_change_report exactly once with the final fix report. The tool schema is authoritative. Do not return Markdown.",
   });
 }
 
-function renderInstructionsBlock(blockTag: string, instructions: readonly string[]): string {
+function renderInstructionsBlock(
+  blockTag: string,
+  instructions: readonly string[],
+): string {
   return renderListBlock(blockTag, "instruction", instructions);
 }
 
-function codeRefinementSourceInputLines(context: WorkflowContext, pass: number, source: "initial" | "fix" | "restart"): string[] {
+function codeRefinementSourceInputLines(
+  context: WorkflowContext,
+  pass: number,
+  source: "initial" | "fix" | "restart",
+): string[] {
   if (pass === 0 || source === "initial") {
-    return [renderInputArtifact(context, "implementation_log", "implementationLog")];
+    return [
+      renderInputArtifact(context, "implementation_log", "implementationLog"),
+    ];
   }
   if (source === "restart") {
     return renderInputArtifacts(context, [
       { kind: "implementation_log", artifact: "implementationLog" },
       { kind: "baseline_reset", artifact: baselineResetLogRef(pass) },
-      { kind: "implementation_restart_log", artifact: implementationRestartLogRef(pass) },
+      {
+        kind: "implementation_restart_log",
+        artifact: implementationRestartLogRef(pass),
+      },
     ]);
   }
   return [renderInputArtifact(context, "fix_log", fixLogRef(pass))];
 }
 
-function priorReviewInputLines(context: WorkflowContext, pass: number): string[] {
+function priorReviewInputLines(
+  context: WorkflowContext,
+  pass: number,
+): string[] {
   if (pass <= 0) return [];
   return renderInputArtifacts(context, [
     { kind: "prior_review_a", artifact: reviewARef(pass - 1) },
@@ -497,7 +613,10 @@ function priorReviewInputLines(context: WorkflowContext, pass: number): string[]
   ]);
 }
 
-function restartReviewInputLines(context: WorkflowContext, restartPass: number): string[] {
+function restartReviewInputLines(
+  context: WorkflowContext,
+  restartPass: number,
+): string[] {
   if (restartPass <= 0) return [];
   const previousCycle = restartPass - 1;
   return renderInputArtifacts(context, [
@@ -506,14 +625,25 @@ function restartReviewInputLines(context: WorkflowContext, restartPass: number):
   ]);
 }
 
-function failedVerificationInputLines(context: WorkflowContext, pass: number): string[] {
-  const artifact = failedVerificationArtifact(context, pass);
-  return artifact === undefined ? [] : [renderInputArtifact(context, "failed_verification", artifact)];
+async function failedVerificationInputLines(
+  context: WorkflowContext,
+  pass: number,
+  application?: ApplicationExecution,
+): Promise<string[]> {
+  const artifact = await failedVerificationArtifact(context, pass, application);
+  return artifact === undefined
+    ? []
+    : [renderInputArtifact(context, "failed_verification", artifact)];
 }
 
-function failedVerificationArtifact(context: WorkflowContext, pass: number): ArtifactRef | undefined {
+async function failedVerificationArtifact(
+  context: WorkflowContext,
+  pass: number,
+  application?: ApplicationExecution,
+): Promise<ArtifactRef | undefined> {
   const archived = verificationBeforeFixRef(pass);
-  if (artifactExists(context, archived)) return archived;
-  if (artifactExists(context, "verification")) return "verification";
+  if (await artifactExists(context, archived, application)) return archived;
+  if (await artifactExists(context, "verification", application))
+    return "verification";
   return undefined;
 }

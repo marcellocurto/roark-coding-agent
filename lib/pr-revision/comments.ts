@@ -1,6 +1,9 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
 import type { VerificationResult } from "../autorun/verification.ts";
-import { postIssueComment, truncateGitHubIssueComment } from "../github/comments.ts";
+import { truncateGitHubIssueComment } from "../github/comments.ts";
+import { postIssueCommentPromise as postIssueComment } from "../github/promise.ts";
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import type { PrRevisionContext } from "./artifacts.ts";
 import type { RevisionFeedbackDisposition } from "./execution.ts";
@@ -15,20 +18,33 @@ export interface RevisionSummaryInput {
   commitSha?: string | undefined;
 }
 
-export function buildPrRevisionSummaryMarker(input: { prNumber: number; revision: number }): string {
+export function buildPrRevisionSummaryMarker(input: {
+  prNumber: number;
+  revision: number;
+}): string {
   return `<!-- roark:pr=${input.prNumber} revision=${input.revision} phase=revision-summary -->`;
 }
 
-export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): string {
+export function formatPrRevisionSummaryComment(
+  input: RevisionSummaryInput,
+): string {
   const { context } = input;
   const lines: string[] = [];
-  lines.push(buildPrRevisionSummaryMarker({ prNumber: context.prNumber, revision: context.revision }));
+  lines.push(
+    buildPrRevisionSummaryMarker({
+      prNumber: context.prNumber,
+      revision: context.revision,
+    }),
+  );
   lines.push("", `## Roark PR revision ${context.revision} summary`);
   lines.push("");
   lines.push(`- Outcome: ${input.outcome}`);
-  if (input.reviewVerdict) lines.push(`- Review verdict: ${input.reviewVerdict}`);
+  if (input.reviewVerdict)
+    lines.push(`- Review verdict: ${input.reviewVerdict}`);
   if (input.verification) {
-    lines.push(`- Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`);
+    lines.push(
+      `- Verification: ${input.verification.ok ? "passed" : "failed"} (\`${sanitizePublicMarkdown(input.verification.command)}\`, exit ${input.verification.exitCode})`,
+    );
   }
   if (input.commitSha) lines.push(`- Commit: ${input.commitSha}`);
   lines.push("");
@@ -40,26 +56,46 @@ export function formatPrRevisionSummaryComment(input: RevisionSummaryInput): str
   return truncateGitHubIssueComment(`${lines.join("\n").trimEnd()}\n`);
 }
 
-export async function postPrRevisionSummaryComment(input: RevisionSummaryInput, application?: ApplicationExecution): Promise<void> {
+export async function postPrRevisionSummaryComment(
+  input: RevisionSummaryInput,
+  application?: ApplicationExecution,
+): Promise<void> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        postPrRevisionSummaryComment(input, application),
+      ),
+      application,
+    );
+
   if (!input.context.comment) return;
-  await postIssueComment({
-    cwd: input.context.controlCwd,
-    repo: input.context.repo,
-    issueNumber: input.context.prNumber,
-    body: formatPrRevisionSummaryComment(input),
-  }, application);
+  await postIssueComment(
+    {
+      cwd: input.context.controlCwd,
+      repo: input.context.repo,
+      issueNumber: input.context.prNumber,
+      body: formatPrRevisionSummaryComment(input),
+    },
+    application,
+  );
 }
 
-function pushDispositions(lines: string[], dispositions: RevisionFeedbackDisposition[]): void {
+function pushDispositions(
+  lines: string[],
+  dispositions: RevisionFeedbackDisposition[],
+): void {
   if (dispositions.length === 0) {
     lines.push("- None.");
     return;
   }
   for (const item of dispositions) {
-    const sources = item.sourceIds.length === 1 && item.sourceIds[0] === item.feedbackId
-      ? ""
-      : ` (sources: ${item.sourceIds.map((source) => `\`${sanitizePublicMarkdown(source)}\``).join(", ")})`;
-    lines.push(`- \`${sanitizePublicMarkdown(item.feedbackId)}\` **${item.status}** — ${sanitizePublicMarkdown(item.summary)}${sources}: ${sanitizePublicMarkdown(item.details)}`);
+    const sources =
+      item.sourceIds.length === 1 && item.sourceIds[0] === item.feedbackId
+        ? ""
+        : ` (sources: ${item.sourceIds.map((source) => `\`${sanitizePublicMarkdown(source)}\``).join(", ")})`;
+    lines.push(
+      `- \`${sanitizePublicMarkdown(item.feedbackId)}\` **${item.status}** — ${sanitizePublicMarkdown(item.summary)}${sources}: ${sanitizePublicMarkdown(item.details)}`,
+    );
   }
 }
 

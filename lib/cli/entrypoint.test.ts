@@ -1,141 +1,259 @@
-import { Effect } from "effect";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { runWithPresenter } from "../testing/presentation.ts";
+import { applicationLayer, fromLegacyPromise } from "../runtime/application.ts";
+import { runVerificationPromise } from "../autorun/verification.ts";
+import {
+  Verification,
+  CommandExecution,
+  ExitNotifications,
+  Presentation,
+} from "../runtime/services.ts";
+import type { ExitNotificationRequest } from "./notifications.ts";
+import { Cause, Effect, Exit } from "effect";
+import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { presentAutorunOutcome, runCliPromise, workflowOutcomeStatus } from "../../roark.ts";
-import { configurePresenter, Presenter, presenter } from "../presentation/presenter.ts";
-import { runProcessPromise, runProcessOrThrowPromise } from "./process.ts";
+import {
+  presentAutorunOutcome,
+  runCli,
+  workflowOutcomeStatus,
+} from "../../roark.ts";
+import { Presenter } from "../presentation/presenter.ts";
+import {
+  runProcessPromise,
+  runProcessOrThrowPromise,
+} from "./process-promise.ts";
 
 const projectRoot = path.resolve(import.meta.dir, "../..");
 const entrypoint = path.join(projectRoot, "roark.ts");
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
 
-describe("runCliPromise lifecycle", () => {
-  test("presents published, stopped, blocked, readiness-failed, and verification-failed outcomes distinctly", () => {
+describe("CLI lifecycle services", () => {
+  test("verification defects survive the Promise route and bypass ordinary CLI failure handling", async () => {
+    const defect = new Error("verification service defect");
     let output = "";
-    configurePresenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
-    try {
-      presentAutorunOutcome({ issueNumber: 1, outcome: "published", outcomeDetail: null });
-      presentAutorunOutcome({ issueNumber: 2, outcome: "triage-stopped", outcomeDetail: "not actionable" });
-      presentAutorunOutcome({ issueNumber: 3, outcome: "failed-readiness", outcomeDetail: "not ready" });
-      presentAutorunOutcome({ issueNumber: 4, outcome: "failed-verification", outcomeDetail: "tests failed" });
-
-      expect(output).toContain("SUCCESS #1 · published");
-      expect(output).toContain("STOPPED #2 · not actionable");
-      expect(output).toContain("FAILED #3 · not ready");
-      expect(output).toContain("FAILED #4 · tests failed");
-      expect(output).not.toContain("continue:");
-      expect(workflowOutcomeStatus("review-blocked")).toBe("BLOCKED");
-    } finally {
-      configurePresenter({ titleEnabled: false });
-    }
-  });
-
-  test("preserves a discovered autorun target in the final failure", async () => {
-    let output = "";
-    const presentation = new Presenter({ stream: { isTTY: false, columns: 80, write(chunk) { output += chunk; } } });
-    const exitCode = await runCliPromise(["auto"], {
-      presentation,
-      execute: () => {
-        presenter().run({ command: "auto", repository: "owner/repo" });
-        presenter().updateTarget("#140");
-        return Promise.reject(new Error("failed"));
+    let notified = false;
+    const stream = {
+      isTTY: false,
+      write(chunk: string) {
+        output += chunk;
       },
-      notify: () => Effect.void,
-      reportError: () => {
-        // The expected failure is asserted through the operational output.
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(output).toContain("FAILED #140 · run failed");
-    expect(output).not.toContain("FAILED auto");
-  });
-
-  test("dispatches exactly once after a successful quick command", async () => {
-    const notifications: { argv: string[]; succeeded: boolean }[] = [];
-    const exitCode = await runCliPromise(["status", "--all"], {
-      execute: () => Promise.resolve(),
-      notify: (request) => Effect.sync(() => { notifications.push(request); }),
-    });
-
-    expect(exitCode).toBe(0);
-    expect(notifications).toEqual([{ argv: ["status", "--all"], succeeded: true }]);
-  });
-
-  test("dispatches once after a caught failure and preserves the failed result when notification delivery fails", async () => {
-    const notifications: { argv: string[]; succeeded: boolean }[] = [];
-    const reported: unknown[] = [];
-    const consoleError = spyOn(console, "error").mockImplementation(() => {
-      // Suppress the expected notification warning in test output.
-    });
-    try {
-      const exitCode = await runCliPromise(["do", "95"], {
-        execute: () => Promise.reject(new Error("raw SECRET failure")),
-        notify: (request) => Effect.sync(() => { notifications.push(request); }).pipe(
-          Effect.andThen(Effect.fail(new Error("notifier failed"))),
+    };
+    const exit = await Effect.runPromiseExit(
+      runCli(["do", "1"]).pipe(
+        Effect.provideService(CommandExecution, {
+          execute: () =>
+            fromLegacyPromise(async (application) => {
+              await runVerificationPromise(
+                { command: "unused", cwd: process.cwd() },
+                application,
+              );
+            }),
+        }),
+        Effect.provideService(Verification, {
+          execute: () => Effect.die(defect),
+        }),
+        Effect.provideService(ExitNotifications, {
+          send: () =>
+            Effect.sync(() => {
+              notified = true;
+            }),
+          deliver: () => Effect.void,
+        }),
+        Effect.provideService(
+          Presentation,
+          new Presenter({ stream, errorStream: stream }),
         ),
-        reportError: (error) => reported.push(error),
-      });
+        Effect.provide(applicationLayer),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(true);
+      expect(Cause.hasFails(exit.cause)).toBe(false);
+      expect(Cause.squash(exit.cause)).toBe(defect);
+    }
+    expect(output).not.toContain("FAILED");
+    expect(output).not.toContain(defect.message);
+    expect(notified).toBe(false);
+  });
 
-      expect(exitCode).toBe(1);
-      expect(notifications).toEqual([{ argv: ["do", "95"], succeeded: false }]);
-      expect(reported).toHaveLength(1);
-      expect(consoleError).toHaveBeenCalledTimes(1);
-    } finally {
-      consoleError.mockRestore();
+  test("presents published and stopped outcomes distinctly", async () => {
+    let output = "";
+    await runWithPresenter(
+      new Presenter({
+        stream: {
+          isTTY: false,
+          write(chunk) {
+            output += chunk;
+          },
+        },
+      }),
+      async (application) => {
+        presentAutorunOutcome(
+          { issueNumber: 1, outcome: "published", outcomeDetail: null },
+          application,
+        );
+        presentAutorunOutcome(
+          {
+            issueNumber: 2,
+            outcome: "triage-stopped",
+            outcomeDetail: "not actionable",
+          },
+          application,
+        );
+        expect(workflowOutcomeStatus("review-blocked")).toBe("BLOCKED");
+        await Promise.resolve();
+      },
+    );
+    expect(output).toContain("SUCCESS #1 · published");
+    expect(output).toContain("STOPPED #2 · not actionable");
+  });
+
+  test("preserves a discovered target and notifies once after an execution failure", async () => {
+    let output = "";
+    const presentation = new Presenter({
+      stream: {
+        isTTY: false,
+        write(chunk) {
+          output += chunk;
+        },
+      },
+      errorStream: {
+        isTTY: false,
+        write(chunk) {
+          output += chunk;
+        },
+      },
+    });
+    const notices: ExitNotificationRequest[] = [];
+    const code = await Effect.runPromise(
+      runCli(["auto"]).pipe(
+        Effect.provideService(CommandExecution, {
+          execute: () =>
+            Effect.sync(() => {
+              presentation.run({ command: "auto", repository: "owner/repo" });
+              presentation.updateTarget("#140");
+            }).pipe(Effect.andThen(Effect.fail(new Error("failed")))),
+        }),
+        Effect.provideService(ExitNotifications, {
+          send: (request) =>
+            Effect.sync(() => {
+              notices.push(request);
+            }),
+          deliver: () => Effect.void,
+        }),
+        Effect.provideService(Presentation, presentation),
+        Effect.provide(applicationLayer),
+      ),
+    );
+    expect(code).toBe(1);
+    expect(output).toContain("FAILED #140 · run failed");
+    expect(notices).toEqual([{ argv: ["auto"], succeeded: false }]);
+  });
+
+  test("notification failures preserve the command exit status and warn once", async () => {
+    for (const succeeds of [true, false]) {
+      let errors = "";
+      const notices: ExitNotificationRequest[] = [];
+      const presentation = new Presenter({
+        stream: {
+          isTTY: false,
+          write(chunk) {
+            errors += chunk;
+          },
+        },
+        errorStream: {
+          isTTY: false,
+          write(chunk) {
+            errors += chunk;
+          },
+        },
+      });
+      const code = await Effect.runPromise(
+        runCli(["status", "--all"]).pipe(
+          Effect.provideService(CommandExecution, {
+            execute: () =>
+              succeeds ? Effect.void : Effect.fail(new Error("failed")),
+          }),
+          Effect.provideService(ExitNotifications, {
+            send: (request) =>
+              Effect.sync(() => {
+                notices.push(request);
+              }).pipe(
+                Effect.andThen(Effect.fail(new Error("notifier failed"))),
+              ),
+            deliver: () => Effect.void,
+          }),
+          Effect.provideService(Presentation, presentation),
+          Effect.provide(applicationLayer),
+        ),
+      );
+      expect(code).toBe(succeeds ? 0 : 1);
+      expect(notices).toEqual([
+        { argv: ["status", "--all"], succeeded: succeeds },
+      ]);
+      expect(errors.match(/could not deliver/g)).toHaveLength(1);
     }
   });
 
-  test("preserves multiline CLI errors and reports non-Error throws", async () => {
-    const reported: string[] = [];
-    const consoleError = spyOn(console, "error").mockImplementation((value) => {
-      reported.push(String(value));
-    });
-    try {
-      expect(await runCliPromise(["do", "95"], {
-        execute: () => Promise.reject(new Error("Invalid input\n\nUsage:\n  roark do <issue>")),
-        notify: () => Effect.void,
-      })).toBe(1);
-      expect(await runCliPromise(["do", "95"], {
-        // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- the CLI boundary must report arbitrary JavaScript throw values
-        execute: () => Promise.reject({ code: "E_OBJECT" }),
-        notify: () => Effect.void,
-      })).toBe(1);
-
-      expect(reported[0]).toBe("Invalid input\n\nUsage:\n  roark do <issue>");
-      expect(reported[1]).toBe("[object Object]");
-    } finally {
-      consoleError.mockRestore();
-    }
-  });
-
-  test("preserves success when notification delivery fails", async () => {
-    const consoleError = spyOn(console, "error").mockImplementation(() => {
-      // Suppress the expected warning in test output.
-    });
-    try {
-      const exitCode = await runCliPromise(["status", "--all"], {
-        execute: () => Promise.resolve(),
-        notify: () => Effect.fail(new Error("notifier failed")),
-      });
-      expect(exitCode).toBe(0);
-      expect(consoleError).toHaveBeenCalledTimes(1);
-    } finally {
-      consoleError.mockRestore();
+  test("preserves multiline errors and reports non-Error failures", async () => {
+    for (const failure of [
+      new Error("Invalid input\n\nUsage:\n  roark do <issue>"),
+      { code: "E_OBJECT" },
+    ]) {
+      let errors = "";
+      const code = await Effect.runPromise(
+        runCli(["do", "95"]).pipe(
+          Effect.provideService(CommandExecution, {
+            execute: () => Effect.fail(failure),
+          }),
+          Effect.provideService(ExitNotifications, {
+            send: () => Effect.void,
+            deliver: () => Effect.void,
+          }),
+          Effect.provideService(
+            Presentation,
+            new Presenter({
+              stream: {
+                isTTY: false,
+                write(chunk) {
+                  errors += chunk;
+                },
+              },
+              errorStream: {
+                isTTY: false,
+                write(chunk) {
+                  errors += chunk;
+                },
+              },
+            }),
+          ),
+          Effect.provide(applicationLayer),
+        ),
+      );
+      expect(code).toBe(1);
+      expect(errors).toContain(
+        failure instanceof Error ? failure.message : "[object Object]",
+      );
     }
   });
 });
 
 describe("roark executable", () => {
   test("prints the package version", async () => {
-    const packageJson = await Bun.file(path.join(projectRoot, "package.json")).json() as { version: string };
-    const result = await runProcessPromise([entrypoint, "--version"], { cwd: projectRoot });
+    const packageJson = (await Bun.file(
+      path.join(projectRoot, "package.json"),
+    ).json()) as { version: string };
+    const result = await runProcessPromise([entrypoint, "--version"], {
+      cwd: projectRoot,
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -143,7 +261,9 @@ describe("roark executable", () => {
   });
 
   test("prints help successfully", async () => {
-    const result = await runProcessPromise([entrypoint, "--help"], { cwd: projectRoot });
+    const result = await runProcessPromise([entrypoint, "--help"], {
+      cwd: projectRoot,
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -151,10 +271,14 @@ describe("roark executable", () => {
   });
 
   test("reports invalid commands on stderr with a nonzero exit", async () => {
-    const result = await runProcessPromise([entrypoint, "not-a-command"], { cwd: projectRoot });
+    const result = await runProcessPromise([entrypoint, "not-a-command"], {
+      cwd: projectRoot,
+    });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Unknown command 'not-a-command'.\n\nroark <command> [issue] [options]\n\nCommands:");
+    expect(result.stderr).toContain(
+      "Unknown command 'not-a-command'.\n\nroark <command> [issue] [options]\n\nCommands:",
+    );
   });
 
   test("dispatches a hydrated status command", async () => {
@@ -162,15 +286,10 @@ describe("roark executable", () => {
     tempDirs.push(repo);
     await runProcessOrThrowPromise(["git", "init", repo]);
 
-    const result = await runProcessPromise([
-      entrypoint,
-      "status",
-      "--all",
-      "--cwd",
-      repo,
-      "--repo",
-      "owner/repo",
-    ], { cwd: projectRoot });
+    const result = await runProcessPromise(
+      [entrypoint, "status", "--all", "--cwd", repo, "--repo", "owner/repo"],
+      { cwd: projectRoot },
+    );
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
@@ -182,16 +301,28 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   test(`runtime ${signal} interrupts verification through the Promise boundary and reaps its descendants`, async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-runtime-signal-"));
     tempDirs.push(cwd);
-    const fixture = path.join(projectRoot, "lib/testing/fixtures/runtime-signal.ts");
-    const child = Bun.spawn([process.execPath, fixture], { cwd, stdout: "pipe", stderr: "pipe" });
+    const fixture = path.join(
+      projectRoot,
+      "lib/testing/fixtures/runtime-signal.ts",
+    );
+    const child = Bun.spawn([process.execPath, fixture], {
+      cwd,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
     const stderr = new Response(child.stderr).text();
     const stdout = new Response(child.stdout).text();
     let descendant: number | undefined;
     try {
       const deadline = Date.now() + 4_000;
       while (Date.now() < deadline) {
-        const value = await readFile(path.join(cwd, "child.pid"), "utf8").catch(() => "");
-        if (/^\d+\n$/.test(value)) { descendant = Number(value); break; }
+        const value = await readFile(path.join(cwd, "child.pid"), "utf8").catch(
+          () => "",
+        );
+        if (/^\d+\n$/.test(value)) {
+          descendant = Number(value);
+          break;
+        }
         if (child.exitCode !== null) throw new Error(await stderr);
         await Bun.sleep(10);
       }
@@ -205,7 +336,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         const deadline = Date.now() + 1_000;
         let alive = true;
         while (alive && Date.now() < deadline) {
-          try { process.kill(descendant, 0); } catch { alive = false; }
+          try {
+            process.kill(descendant, 0);
+          } catch {
+            alive = false;
+          }
           if (alive) await Bun.sleep(10);
         }
         expect(alive).toBe(false);
@@ -213,7 +348,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     } finally {
       child.kill("SIGKILL");
       if (descendant !== undefined) {
-        try { process.kill(descendant, "SIGKILL"); } catch { /* Already reaped. */ }
+        try {
+          process.kill(descendant, "SIGKILL");
+        } catch {
+          /* Already reaped. */
+        }
       }
       await child.exited;
       await Promise.all([stdout, stderr]);

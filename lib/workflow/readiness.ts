@@ -1,13 +1,12 @@
+import type { ApplicationExecution } from "../runtime/application.ts";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
+import { reviewARef, reviewBRef, type WorkflowContext } from "./artifacts.ts";
 import {
-  artifactExists,
-  latestCompleteReviewCycle,
-  readArtifact,
-  reviewARef,
-  reviewBRef,
-  type WorkflowContext,
-} from "./artifacts.ts";
+  artifactExistsPromise as artifactExists,
+  latestCompleteReviewCyclePromise as latestCompleteReviewCycle,
+} from "./artifacts-promise.ts";
+import { readArtifactPromise as readArtifact } from "./artifacts-promise.ts";
 import { decideReadiness } from "./verdicts.ts";
 import {
   escapeReviewMarkdownText,
@@ -20,47 +19,56 @@ import {
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
 
-const readinessDecisionSchema = Type.Object({
-  status: Type.Union([Type.Literal("ready-for-pr"), Type.Literal("not-ready")]),
-  triageVerdict: Type.Union([
-    Type.Literal("proceed"),
-    Type.Literal("blocked"),
-    Type.Literal("reject"),
-    Type.Literal("needs-human-decision"),
-    Type.Literal("missing"),
-  ]),
-  reviewAVerdict: Type.Union([
-    Type.Literal("approve"),
-    Type.Literal("fixes-required"),
-    Type.Literal("restart-required"),
-    Type.Literal("blocked"),
-    Type.Literal("missing"),
-  ]),
-  reviewBVerdict: Type.Union([
-    Type.Literal("approve"),
-    Type.Literal("fixes-required"),
-    Type.Literal("restart-required"),
-    Type.Literal("blocked"),
-    Type.Literal("missing"),
-  ]),
-  planReady: Type.Boolean(),
-  fixesWereNeeded: Type.Boolean(),
-  restartRequired: Type.Boolean(),
-  blockedByReview: Type.Boolean(),
-  currentIssueBlockingFindings: Type.Array(normalizedReviewerFindingSchema),
-  externalBlockers: Type.Array(normalizedReviewBlockerSchema),
-  followUpFindings: Type.Array(normalizedReviewerFindingSchema),
-  suggestions: Type.Array(normalizedReviewerFindingSchema),
-}, { additionalProperties: false });
+const readinessDecisionSchema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal("ready-for-pr"),
+      Type.Literal("not-ready"),
+    ]),
+    triageVerdict: Type.Union([
+      Type.Literal("proceed"),
+      Type.Literal("blocked"),
+      Type.Literal("reject"),
+      Type.Literal("needs-human-decision"),
+      Type.Literal("missing"),
+    ]),
+    reviewAVerdict: Type.Union([
+      Type.Literal("approve"),
+      Type.Literal("fixes-required"),
+      Type.Literal("restart-required"),
+      Type.Literal("blocked"),
+      Type.Literal("missing"),
+    ]),
+    reviewBVerdict: Type.Union([
+      Type.Literal("approve"),
+      Type.Literal("fixes-required"),
+      Type.Literal("restart-required"),
+      Type.Literal("blocked"),
+      Type.Literal("missing"),
+    ]),
+    planReady: Type.Boolean(),
+    fixesWereNeeded: Type.Boolean(),
+    restartRequired: Type.Boolean(),
+    blockedByReview: Type.Boolean(),
+    currentIssueBlockingFindings: Type.Array(normalizedReviewerFindingSchema),
+    externalBlockers: Type.Array(normalizedReviewBlockerSchema),
+    followUpFindings: Type.Array(normalizedReviewerFindingSchema),
+    suggestions: Type.Array(normalizedReviewerFindingSchema),
+  },
+  { additionalProperties: false },
+);
 
-export const readinessResultSchema = Type.Object({
-  version: Type.Literal(2),
-  issueNumber: Type.String({ minLength: 1 }),
-  runDirectory: Type.String({ minLength: 1 }),
-  latestReviewCycle: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
-  maxFixPasses: Type.Integer({ minimum: 0 }),
-  decision: readinessDecisionSchema,
-}, { additionalProperties: false });
+export const readinessResultSchema = Type.Object(
+  {
+    version: Type.Literal(2),
+    issueNumber: Type.String({ minLength: 1 }),
+    runDirectory: Type.String({ minLength: 1 }),
+    latestReviewCycle: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    maxFixPasses: Type.Integer({ minimum: 0 }),
+    decision: readinessDecisionSchema,
+  },
+  { additionalProperties: false },
+);
 
 export type ReadinessResult = Static<typeof readinessResultSchema>;
 export type ReadinessStatus = ReadinessResult["decision"]["status"];
@@ -70,45 +78,91 @@ export function parseReadinessResultJson(content: string): ReadinessResult {
   try {
     parsed = JSON.parse(content);
   } catch (error) {
-    throw new Error(`Readiness artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Readiness artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   if (!Value.Check(readinessResultSchema, parsed)) {
     const first = Value.Errors(readinessResultSchema, parsed)[0];
-    const location = first?.instancePath ?? first?.schemaPath ?? "readiness result";
-    throw new Error(`Readiness artifact does not satisfy the structured contract at ${location}.`);
+    const location =
+      first?.instancePath ?? first?.schemaPath ?? "readiness result";
+    throw new Error(
+      `Readiness artifact does not satisfy the structured contract at ${location}.`,
+    );
   }
-  const expectedStatus: ReadinessStatus = parsed.decision.triageVerdict === "proceed" &&
-      parsed.decision.planReady &&
-      parsed.decision.reviewAVerdict === "approve" &&
-      parsed.decision.reviewBVerdict === "approve"
-    ? "ready-for-pr"
-    : "not-ready";
+  const expectedStatus: ReadinessStatus =
+    parsed.decision.triageVerdict === "proceed" &&
+    parsed.decision.planReady &&
+    parsed.decision.reviewAVerdict === "approve" &&
+    parsed.decision.reviewBVerdict === "approve"
+      ? "ready-for-pr"
+      : "not-ready";
   if (parsed.decision.status !== expectedStatus) {
-    throw new Error(`Readiness status '${parsed.decision.status}' conflicts with its decision inputs; expected '${expectedStatus}'.`);
+    throw new Error(
+      `Readiness status '${parsed.decision.status}' conflicts with its decision inputs; expected '${expectedStatus}'.`,
+    );
   }
-  if (parsed.decision.fixesWereNeeded !== (parsed.decision.currentIssueBlockingFindings.length > 0)) {
-    throw new Error("Readiness fixesWereNeeded conflicts with currentIssueBlockingFindings.");
+  if (
+    parsed.decision.fixesWereNeeded !==
+    parsed.decision.currentIssueBlockingFindings.length > 0
+  ) {
+    throw new Error(
+      "Readiness fixesWereNeeded conflicts with currentIssueBlockingFindings.",
+    );
   }
-  if (parsed.decision.blockedByReview !== (parsed.decision.externalBlockers.length > 0)) {
-    throw new Error("Readiness blockedByReview conflicts with externalBlockers.");
+  if (
+    parsed.decision.blockedByReview !==
+    parsed.decision.externalBlockers.length > 0
+  ) {
+    throw new Error(
+      "Readiness blockedByReview conflicts with externalBlockers.",
+    );
   }
   return parsed;
 }
 
-export async function buildReadinessArtifacts(context: WorkflowContext): Promise<{ result: ReadinessResult; markdown: string }> {
-  const triage = artifactExists(context, "triage")
-    ? parseTriageResultJson(await readArtifact(context, "triage"))
+export async function buildReadinessArtifacts(
+  context: WorkflowContext,
+  application?: ApplicationExecution,
+): Promise<{ result: ReadinessResult; markdown: string }> {
+  const triage = (await artifactExists(context, "triage", application))
+    ? parseTriageResultJson(await readArtifact(context, "triage", application))
     : undefined;
-  const plan = artifactExists(context, "implementationPlan")
-    ? parseImplementationPlanResultJson(await readArtifact(context, "implementationPlan"))
+  const plan = (await artifactExists(
+    context,
+    "implementationPlan",
+    application,
+  ))
+    ? parseImplementationPlanResultJson(
+        await readArtifact(context, "implementationPlan", application),
+      )
     : undefined;
-  const latestReviewCycle = latestCompleteReviewCycle(context);
-  const reviewA = latestReviewCycle === undefined
-    ? undefined
-    : parseReviewResultJson(await readArtifact(context, reviewARef(latestReviewCycle)), { allowRestart: true });
-  const reviewB = latestReviewCycle === undefined
-    ? undefined
-    : parseReviewResultJson(await readArtifact(context, reviewBRef(latestReviewCycle)), { allowRestart: true });
+  const latestReviewCycle = await latestCompleteReviewCycle(
+    context,
+    application,
+  );
+  const reviewA =
+    latestReviewCycle === undefined
+      ? undefined
+      : parseReviewResultJson(
+          await readArtifact(
+            context,
+            reviewARef(latestReviewCycle),
+            application,
+          ),
+          { allowRestart: true },
+        );
+  const reviewB =
+    latestReviewCycle === undefined
+      ? undefined
+      : parseReviewResultJson(
+          await readArtifact(
+            context,
+            reviewBRef(latestReviewCycle),
+            application,
+          ),
+          { allowRestart: true },
+        );
   const decision = decideReadiness({ triage, plan, reviewA, reviewB });
   const result: ReadinessResult = {
     version: 2,
@@ -170,18 +224,31 @@ See workflow artifacts in ${result.runDirectory}.
 `;
 }
 
-function renderFindings(findings: readonly (NormalizedReviewerFinding | NormalizedReviewBlocker)[]): string {
+function renderFindings(
+  findings: readonly (NormalizedReviewerFinding | NormalizedReviewBlocker)[],
+): string {
   if (findings.length === 0) return "None";
-  return findings.map((finding) => {
-    const details = "severity" in finding
-      ? `classification: ${finding.classification}; severity: ${finding.severity}; confidence: ${finding.confidence}`
-      : `classification: ${finding.classification}`;
-    const suffixes = [
-      finding.currentIssueImpact ? `Impact: ${escapeReviewMarkdownText(finding.currentIssueImpact)}` : undefined,
-      finding.recommendedHandling ? `Handling: ${escapeReviewMarkdownText(finding.recommendedHandling)}` : undefined,
-      finding.evidence.length > 0 ? `Evidence: ${finding.evidence.map(escapeReviewMarkdownText).join("; ")}` : undefined,
-      finding.suggestedIssueTitle ? `Suggested issue: ${escapeReviewMarkdownText(finding.suggestedIssueTitle)}` : undefined,
-    ].filter((value): value is string => value !== undefined);
-    return `- ${finding.workflowId} — ${escapeReviewMarkdownText(finding.title)} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
-  }).join("\n");
+  return findings
+    .map((finding) => {
+      const details =
+        "severity" in finding
+          ? `classification: ${finding.classification}; severity: ${finding.severity}; confidence: ${finding.confidence}`
+          : `classification: ${finding.classification}`;
+      const suffixes = [
+        finding.currentIssueImpact
+          ? `Impact: ${escapeReviewMarkdownText(finding.currentIssueImpact)}`
+          : undefined,
+        finding.recommendedHandling
+          ? `Handling: ${escapeReviewMarkdownText(finding.recommendedHandling)}`
+          : undefined,
+        finding.evidence.length > 0
+          ? `Evidence: ${finding.evidence.map(escapeReviewMarkdownText).join("; ")}`
+          : undefined,
+        finding.suggestedIssueTitle
+          ? `Suggested issue: ${escapeReviewMarkdownText(finding.suggestedIssueTitle)}`
+          : undefined,
+      ].filter((value): value is string => value !== undefined);
+      return `- ${finding.workflowId} — ${escapeReviewMarkdownText(finding.title)} (${details})${suffixes.length > 0 ? `. ${suffixes.join(" ")}` : ""}`;
+    })
+    .join("\n");
 }

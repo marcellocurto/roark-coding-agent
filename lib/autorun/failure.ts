@@ -1,6 +1,16 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
-import { runProcessOrThrowPromise } from "../cli/process.ts";
-import { formatBoundedMarkdownDetails, postIssueComment, postOrUpdateIssueCommentByMarker, truncateGitHubIssueComment, type GitHubCommentRef } from "../github/comments.ts";
+import { runProcessOrThrowPromise } from "../cli/process-promise.ts";
+import {
+  formatBoundedMarkdownDetails,
+  truncateGitHubIssueComment,
+  type GitHubCommentRef,
+} from "../github/comments.ts";
+import {
+  postIssueCommentPromise as postIssueComment,
+  postOrUpdateIssueCommentByMarkerPromise as postOrUpdateIssueCommentByMarker,
+} from "../github/promise.ts";
 import { redactLocalPaths, sanitizePublicMarkdown } from "./public-output.ts";
 import { presenter } from "../presentation/presenter.ts";
 
@@ -8,29 +18,29 @@ export const defaultAutorunFailureLabel = "agent-failed";
 
 export interface FailureCommentInput {
   issueNumber: number;
-  issueUrl?: string | undefined  ;
+  issueUrl?: string | undefined;
   phase: string;
   reason: string;
   branchName?: string | undefined;
   worktreePath?: string | undefined;
-  workspacePath?: string | undefined  ;
+  workspacePath?: string | undefined;
   artifactContent?: string | undefined;
-  recoveryCommand?: string | undefined  ;
+  recoveryCommand?: string | undefined;
 }
 
 export interface MarkIssueFailedOptions {
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   issueNumber: number;
   label: string;
   comment: string;
   removeLabels?: string[] | undefined;
   marker?: string | undefined;
-  existingCommentId?: number | undefined  ;
+  existingCommentId?: number | undefined;
 }
 
 export interface FailureLabelArgvOptions {
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   issueNumber: number;
   label: string;
 }
@@ -44,63 +54,134 @@ export function formatFailureComment(input: FailureCommentInput): string {
   if (input.recoveryCommand) {
     lines.push("", "## Recovery");
     lines.push("From the same checkout, run:");
-    lines.push(formatFencedBlock(formatPublicRecoveryCommand(input.recoveryCommand), "bash"));
+    lines.push(
+      formatFencedBlock(
+        formatPublicRecoveryCommand(input.recoveryCommand),
+        "bash",
+      ),
+    );
   }
 
   if (input.artifactContent !== undefined && input.phase !== "verification") {
-    lines.push("", formatBoundedMarkdownDetails("Failure artifact excerpt", sanitizePublicMarkdown(input.artifactContent)));
+    lines.push(
+      "",
+      formatBoundedMarkdownDetails(
+        "Failure artifact excerpt",
+        sanitizePublicMarkdown(input.artifactContent),
+      ),
+    );
   }
 
   return truncateGitHubIssueComment(`${lines.join("\n")}\n`);
 }
 
-export function buildFailureLabelArgv(options: FailureLabelArgvOptions): string[] {
+export function buildFailureLabelArgv(
+  options: FailureLabelArgvOptions,
+): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "edit", String(options.issueNumber), "--add-label", options.label, ...repoArgs];
+  return [
+    "gh",
+    "issue",
+    "edit",
+    String(options.issueNumber),
+    "--add-label",
+    options.label,
+    ...repoArgs,
+  ];
 }
 
-export function buildRemoveLabelArgv(options: FailureLabelArgvOptions): string[] {
+export function buildRemoveLabelArgv(
+  options: FailureLabelArgvOptions,
+): string[] {
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return ["gh", "issue", "edit", String(options.issueNumber), "--remove-label", options.label, ...repoArgs];
+  return [
+    "gh",
+    "issue",
+    "edit",
+    String(options.issueNumber),
+    "--remove-label",
+    options.label,
+    ...repoArgs,
+  ];
 }
 
-export async function markIssueFailed(options: MarkIssueFailedOptions, application?: ApplicationExecution): Promise<GitHubCommentRef | undefined> {
+export async function markIssueFailed(
+  options: MarkIssueFailedOptions,
+  application?: ApplicationExecution,
+): Promise<GitHubCommentRef | undefined> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) => markIssueFailed(options, application)),
+      application,
+    );
+
   const labelArgv = buildFailureLabelArgv({
     repo: options.repo,
     issueNumber: options.issueNumber,
     label: options.label,
   });
   try {
-    await runProcessOrThrowPromise(labelArgv, { cwd: options.cwd, label: "gh issue edit --add-label (failure)" }, application);
+    await runProcessOrThrowPromise(
+      labelArgv,
+      { cwd: options.cwd, label: "gh issue edit --add-label (failure)" },
+      application,
+    );
   } catch (error) {
-    presenter().warning(`failed to apply failure label '${options.label}': ${formatError(error)}`);
+    presenter(application).warning(
+      `failed to apply failure label '${options.label}': ${formatError(error)}`,
+    );
   }
 
-  for (const label of uniqueLabels(options.removeLabels ?? []).filter((label) => label !== options.label)) {
+  for (const label of uniqueLabels(options.removeLabels ?? []).filter(
+    (label) => label !== options.label,
+  )) {
     try {
       await runProcessOrThrowPromise(
-        buildRemoveLabelArgv({ repo: options.repo, issueNumber: options.issueNumber, label }),
-        { cwd: options.cwd, label: "gh issue edit --remove-label (failure cleanup)" }, application
+        buildRemoveLabelArgv({
+          repo: options.repo,
+          issueNumber: options.issueNumber,
+          label,
+        }),
+        {
+          cwd: options.cwd,
+          label: "gh issue edit --remove-label (failure cleanup)",
+        },
+        application,
       );
     } catch (error) {
-      presenter().warning(`failed to remove label '${label}': ${formatError(error)}`);
+      presenter(application).warning(
+        `failed to remove label '${label}': ${formatError(error)}`,
+      );
     }
   }
 
   try {
     if (options.marker) {
-      return await postOrUpdateIssueCommentByMarker({
+      return await postOrUpdateIssueCommentByMarker(
+        {
+          cwd: options.cwd,
+          repo: options.repo,
+          issueNumber: options.issueNumber,
+          marker: options.marker,
+          body: options.comment,
+          existingCommentId: options.existingCommentId,
+        },
+        application,
+      );
+    }
+    await postIssueComment(
+      {
         cwd: options.cwd,
         repo: options.repo,
         issueNumber: options.issueNumber,
-        marker: options.marker,
         body: options.comment,
-        existingCommentId: options.existingCommentId,
-      }, application);
-    }
-    await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber, body: options.comment }, application);
+      },
+      application,
+    );
   } catch (error) {
-    presenter().warning(`failed to post failure comment: ${formatError(error)}`);
+    presenter(application).warning(
+      `failed to post failure comment: ${formatError(error)}`,
+    );
   }
   return undefined;
 }
@@ -119,8 +200,16 @@ interface ShellWord {
   value: string;
 }
 
-function shouldKeepPublicRecoveryToken(token: ShellWord, index: number, tokens: ShellWord[]): boolean {
-  return token.value !== "--cwd" && tokens[index - 1]?.value !== "--cwd" && !token.value.startsWith("--cwd=");
+function shouldKeepPublicRecoveryToken(
+  token: ShellWord,
+  index: number,
+  tokens: ShellWord[],
+): boolean {
+  return (
+    token.value !== "--cwd" &&
+    tokens[index - 1]?.value !== "--cwd" &&
+    !token.value.startsWith("--cwd=")
+  );
 }
 
 function parseShellWords(value: string): ShellWord[] {

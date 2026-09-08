@@ -1,23 +1,44 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
-import { runPiAgent } from "../pi/agent.ts";
-import { issuePublishingPrompt, issuePublishingSystemPrompt } from "../prompts/issue-publishing-prompt.ts";
-import { publishIssueWithGitHub, type IssuePublisher } from "../issue-publishing/github.ts";
-import { formatIssueDraftMarkdown, type IssueDraftCollection, type IssueDraftRenderingContext } from "../issue-publishing/result.ts";
+import { runAgentPromise } from "../workflow/agent-runner.ts";
+import {
+  issuePublishingPrompt,
+  issuePublishingSystemPrompt,
+} from "../prompts/issue-publishing-prompt.ts";
+import {
+  publishIssueWithGitHub,
+  type IssuePublisher,
+} from "../issue-publishing/github.ts";
+import {
+  formatIssueDraftMarkdown,
+  type IssueDraftCollection,
+  type IssueDraftRenderingContext,
+} from "../issue-publishing/result.ts";
 import { issueDraftArtifactDefinition } from "../issue-publishing/artifact.ts";
 import type { AgentRunner } from "../workflow/agent-runner.ts";
-import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import {
+  presenter,
+  type AgentDisplayContext,
+} from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import {
   artifactAgentPath,
-  artifactExists,
   artifactRelativePath,
-  readArtifact,
   type WorkflowContext,
-  writeArtifact,
-  writeJsonArtifact,
 } from "../workflow/artifacts.ts";
-import type { DuplicateGroup, IssueCurationPlan, IssuePlanClassification } from "../workflow/issue-curation.ts";
+import { artifactExistsPromise as artifactExists } from "../workflow/artifacts-promise.ts";
+import {
+  readArtifactPromise as readArtifact,
+  writeArtifactPromise as writeArtifact,
+  writeJsonArtifactPromise as writeJsonArtifact,
+} from "../workflow/artifacts-promise.ts";
+import type {
+  DuplicateGroup,
+  IssueCurationPlan,
+  IssuePlanClassification,
+} from "../workflow/issue-curation.ts";
 import {
   ensureReviewerIssueLabels,
   reviewerIssueClassificationLabels,
@@ -32,7 +53,7 @@ export interface IssueCreationCreatedEntry {
   planItemId: string;
   kind: IssuePlanKind;
   title: string;
-  url?: string | undefined  ;
+  url?: string | undefined;
   number?: number | undefined;
   stdout?: string | undefined;
   source: "current-run" | "existing-result";
@@ -68,7 +89,7 @@ export interface IssueCreationRelationshipOutcomeEntry {
   targetPlanItemId?: string | undefined;
   sourceIssueNumber?: number | undefined;
   targetIssueNumber?: number | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
 }
 
 export interface IssueCreationResults {
@@ -78,7 +99,7 @@ export interface IssueCreationResults {
   approved: boolean;
   sourcePlanPath: string;
   resultPath: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   sourceIssue?: IssueCurationPlan["sourceIssue"] | undefined;
   created: IssueCreationCreatedEntry[];
   failed: IssueCreationFailedEntry[];
@@ -106,7 +127,12 @@ export interface CreateIssuesOptions {
   clock?: { now(): Date } | undefined;
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
-  labelEnsurer?: ((...args: Parameters<typeof ensureReviewerIssueLabels>) => Promise<unknown>) | false | undefined;
+  labelEnsurer?:
+    | ((
+        ...args: Parameters<typeof ensureReviewerIssueLabels>
+      ) => Promise<unknown>)
+    | false
+    | undefined;
   issuePublisher?: IssuePublisher | undefined;
 }
 
@@ -123,26 +149,67 @@ interface ValidPlanItem {
 
 const issueCreationDefaultClock = { now: () => new Date() };
 
-export async function createIssuesPhase(context: WorkflowContext, agentRunner: AgentRunner = runPiAgent, application?: ApplicationExecution): Promise<IssueCreationResults> {
-  const result = await createIssuesFromCurationPlan({ context, agentRunner }, application);
+export async function createIssuesPhase(
+  context: WorkflowContext,
+  agentRunner: AgentRunner = runAgentPromise,
+  application?: ApplicationExecution,
+): Promise<IssueCreationResults> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        createIssuesPhase(context, agentRunner, application),
+      ),
+      application,
+    );
+
+  const result = await createIssuesFromCurationPlan(
+    { context, agentRunner },
+    application,
+  );
   if (context.yes && result.failed.length > 0) {
-    throw new Error(`Issue creation failed for ${result.failed.length} plan item(s). See ${artifactRelativePath(context, "issueCreationResults")}.`);
+    throw new Error(
+      `Issue creation failed for ${result.failed.length} plan item(s). See ${artifactRelativePath(context, "issueCreationResults")}.`,
+    );
   }
   return result;
 }
 
-export async function createIssuesFromCurationPlan(options: CreateIssuesOptions, application?: ApplicationExecution): Promise<IssueCreationResults> {
-  const { context, agentRunner = runPiAgent, clock = issueCreationDefaultClock } = options;
+export async function createIssuesFromCurationPlan(
+  options: CreateIssuesOptions,
+  application?: ApplicationExecution,
+): Promise<IssueCreationResults> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        createIssuesFromCurationPlan(options, application),
+      ),
+      application,
+    );
+
+  const {
+    context,
+    agentRunner = runAgentPromise,
+    clock = issueCreationDefaultClock,
+  } = options;
   const approved = options.approved ?? context.yes;
-  const approvalReason = options.approvalReason ?? (context.yes ? "The user passed --yes" : "An internal caller explicitly approved publishing");
-  const plan = await readIssueCurationPlan(context);
+  const approvalReason =
+    options.approvalReason ??
+    (context.yes
+      ? "The user passed --yes"
+      : "An internal caller explicitly approved publishing");
+  const plan = await readIssueCurationPlan(context, application);
   const sourcePlanPath = artifactRelativePath(context, "issueCurationPlan");
   const resultPath = artifactRelativePath(context, "issueCreationResults");
-  const existingCreated = await readExistingCreatedEntries(context);
+  const existingCreated = await readExistingCreatedEntries(
+    context,
+    application,
+  );
 
   const collected = collectPlanItems(plan);
   const skipped: IssueCreationSkippedEntry[] = [...collected.malformed];
-  const existingCreatedIds = new Set(existingCreated.map((entry) => entry.planItemId));
+  const existingCreatedIds = new Set(
+    existingCreated.map((entry) => entry.planItemId),
+  );
   const creatable = collected.valid.filter((item) => {
     if (!context.force && existingCreatedIds.has(item.planItemId)) {
       skipped.push({
@@ -150,7 +217,8 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions,
         kind: item.kind,
         title: item.title,
         reason: "already-created",
-        message: "Skipped because issue-creation-results.json already records this plan item as created. Pass --force to create it again.",
+        message:
+          "Skipped because issue-creation-results.json already records this plan item as created. Pass --force to create it again.",
       });
       return false;
     }
@@ -180,7 +248,7 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions,
       relationshipOutcomes: [],
       countsInput: collected.counts,
     });
-    printDryRunSummary(context, result);
+    printDryRunSummary(context, result, application);
     return result;
   }
 
@@ -188,7 +256,10 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions,
     const labelEnsurer = options.labelEnsurer ?? ensureReviewerIssueLabels;
     if (labelEnsurer !== false) {
       try {
-        await labelEnsurer({ cwd: context.agentCwd, repo: context.repo }, application);
+        await labelEnsurer(
+          { cwd: context.agentCwd, repo: context.repo },
+          application,
+        );
       } catch (error) {
         const message = `Required reviewer-generated issue labels could not be ensured: ${error instanceof Error ? error.message : String(error)}`;
         const result = buildResult({
@@ -201,40 +272,60 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions,
           approved: true,
           existingCreated,
           createdCurrentRun: [],
-          failed: creatable.map((item) => ({ planItemId: item.planItemId, kind: item.kind, title: item.title, message })),
+          failed: creatable.map((item) => ({
+            planItemId: item.planItemId,
+            kind: item.kind,
+            title: item.title,
+            message,
+          })),
           skipped,
           wouldCreate: [],
           relationshipOutcomes: [],
           countsInput: collected.counts,
         });
-        await writeJsonArtifact(context, "issueCreationResults", result);
-        printApprovedSummary(context, result);
+        await writeJsonArtifact(
+          context,
+          "issueCreationResults",
+          result,
+          application,
+        );
+        printApprovedSummary(context, result, application);
         return result;
       }
     }
   }
 
-  const display: AgentDisplayContext | undefined = creatable.length === 0 ? undefined : {
-    command: context.displayCommand ?? "create-issues",
-    repository: context.repo,
-    target: `#${context.issueNumber}`,
-    phaseId: "issue-publishing",
-    phaseLabel: "Author and create issues",
-    expectedArtifact: resultPath,
-    operation: "publish",
-  };
+  const display: AgentDisplayContext | undefined =
+    creatable.length === 0
+      ? undefined
+      : {
+          command: context.displayCommand ?? "create-issues",
+          repository: context.repo,
+          target: `#${context.issueNumber}`,
+          phaseId: "issue-publishing",
+          phaseLabel: "Author and create issues",
+          expectedArtifact: resultPath,
+          operation: "publish",
+        };
   const create = async () => {
-    const publishResult = display === undefined
-      ? { createdCurrentRun: [], failed: [], relationshipOutcomes: [] }
-      : await authorAndPublishIssues({
-        context,
-        promptSourcePlanPath: artifactAgentPath(context, "issueCurationPlan"),
-        creatable,
-        agentRunner,
-        approvalReason,
-        display,
-        issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
-      }, application);
+    const publishResult =
+      display === undefined
+        ? { createdCurrentRun: [], failed: [], relationshipOutcomes: [] }
+        : await authorAndPublishIssues(
+            {
+              context,
+              promptSourcePlanPath: artifactAgentPath(
+                context,
+                "issueCurationPlan",
+              ),
+              creatable,
+              agentRunner,
+              approvalReason,
+              display,
+              issuePublisher: options.issuePublisher ?? publishIssueWithGitHub,
+            },
+            application,
+          );
 
     const result = buildResult({
       context,
@@ -252,17 +343,28 @@ export async function createIssuesFromCurationPlan(options: CreateIssuesOptions,
       relationshipOutcomes: publishResult.relationshipOutcomes,
       countsInput: collected.counts,
     });
-    await writeJsonArtifact(context, "issueCreationResults", result);
+    await writeJsonArtifact(
+      context,
+      "issueCreationResults",
+      result,
+      application,
+    );
     return result;
   };
   const result = display
-    ? await runPresentedPhase(display, create, (created) => ({
-      outcome: `created ${created.counts.createdCurrentRun}, failed ${created.failed.length}`,
-      artifact: resultPath,
-      failed: created.failed.length > 0,
-    }))
+    ? await runPresentedPhase(
+        display,
+        create,
+        (created) => ({
+          outcome: `created ${created.counts.createdCurrentRun}, failed ${created.failed.length}`,
+          artifact: resultPath,
+          failed: created.failed.length > 0,
+        }),
+        undefined,
+        application,
+      )
     : await create();
-  printApprovedSummary(context, result);
+  printApprovedSummary(context, result, application);
   return result;
 }
 
@@ -272,47 +374,68 @@ interface PublishResult {
   relationshipOutcomes: IssueCreationRelationshipOutcomeEntry[];
 }
 
-async function authorAndPublishIssues(input: {
-  context: WorkflowContext;
-  promptSourcePlanPath: string;
-  creatable: ValidPlanItem[];
-  agentRunner: AgentRunner;
-  approvalReason: string;
-  issuePublisher: IssuePublisher;
-  display: AgentDisplayContext;
-}, application?: ApplicationExecution): Promise<PublishResult> {
-  const { context, promptSourcePlanPath, creatable, agentRunner, approvalReason, issuePublisher, display } = input;
+async function authorAndPublishIssues(
+  input: {
+    context: WorkflowContext;
+    promptSourcePlanPath: string;
+    creatable: ValidPlanItem[];
+    agentRunner: AgentRunner;
+    approvalReason: string;
+    issuePublisher: IssuePublisher;
+    display: AgentDisplayContext;
+  },
+  application?: ApplicationExecution,
+): Promise<PublishResult> {
+  const {
+    context,
+    promptSourcePlanPath,
+    creatable,
+    agentRunner,
+    approvalReason,
+    issuePublisher,
+    display,
+  } = input;
 
   try {
     const itemsById = new Map(creatable.map((item) => [item.planItemId, item]));
     const localRoots = [context.controlCwd, context.agentCwd];
-    const renderDrafts = (drafts: IssueDraftCollection) => renderIssueDrafts(drafts, itemsById, localRoots);
-    const artifact = await runStructuredArtifact({
-      cwd: context.agentCwd,
-      model: effectiveModelForStage(context.model, "issuePublishing"),
-      thinkingLevel: context.thinkingConfig.issuePublishing,
-      systemPrompt: issuePublishingSystemPrompt(),
-      prompt: issuePublishingPrompt({
-        context,
-        sourcePlanPath: promptSourcePlanPath,
-        approvalReason,
-        allowedItems: creatable.map((item) => ({
-          planItemId: item.planItemId,
-          kind: item.kind,
-          suggestedTitle: item.title,
-          labels: labelsForPlanItem(item),
-        })),
+    const renderDrafts = (drafts: IssueDraftCollection) =>
+      renderIssueDrafts(drafts, itemsById, localRoots);
+    const artifact = await runStructuredArtifact(
+      {
+        cwd: context.agentCwd,
+        model: effectiveModelForStage(context.model, "issuePublishing"),
+        thinkingLevel: context.thinkingConfig.issuePublishing,
+        systemPrompt: issuePublishingSystemPrompt(),
+        prompt: issuePublishingPrompt({
+          context,
+          sourcePlanPath: promptSourcePlanPath,
+          approvalReason,
+          allowedItems: creatable.map((item) => ({
+            planItemId: item.planItemId,
+            kind: item.kind,
+            suggestedTitle: item.title,
+            labels: labelsForPlanItem(item),
+          })),
+        }),
+        fileEditingToolsEnabled: false,
+        observer: context.observer,
+        display,
+      },
+      agentRunner,
+      issueDraftArtifactDefinition({
+        expectedPlanItemIds: creatable.map((item) => item.planItemId),
+        formatMarkdown: (drafts) =>
+          formatIssueDraftCollectionMarkdown(drafts, renderDrafts(drafts)),
       }),
-      fileEditingToolsEnabled: false,
-      observer: context.observer,
-      display,
-    }, agentRunner, issueDraftArtifactDefinition({
-      expectedPlanItemIds: creatable.map((item) => item.planItemId),
-      formatMarkdown: (drafts) => formatIssueDraftCollectionMarkdown(drafts, renderDrafts(drafts)),
-    }), {
-      writeJson: (content) => writeArtifact(context, "issueDrafts", content),
-      writeMarkdown: (content) => writeArtifact(context, "issueDraftsMarkdown", content),
-    });
+      {
+        writeJson: (content) =>
+          writeArtifact(context, "issueDrafts", content, application),
+        writeMarkdown: (content) =>
+          writeArtifact(context, "issueDraftsMarkdown", content, application),
+      },
+      application,
+    );
 
     const drafts = artifact.value;
     const renderedById = renderDrafts(drafts);
@@ -321,23 +444,34 @@ async function authorAndPublishIssues(input: {
     const failed: IssueCreationFailedEntry[] = [];
     for (const draft of drafts.issues) {
       const item = itemsById.get(draft.planItemId);
-      if (!item) throw new Error(`Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`);
+      if (!item)
+        throw new Error(
+          `Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`,
+        );
       const rendered = renderedById.get(draft.planItemId);
-      if (!rendered) throw new Error(`Structured issue draft '${draft.planItemId}' was not rendered.`);
+      if (!rendered)
+        throw new Error(
+          `Structured issue draft '${draft.planItemId}' was not rendered.`,
+        );
       try {
-        const published = await issuePublisher({
-          cwd: context.agentCwd,
-          repo: context.repo,
-          title: rendered.title,
-          body: rendered.body,
-          labels: labelsForPlanItem(item),
-        }, application);
+        const published = await issuePublisher(
+          {
+            cwd: context.agentCwd,
+            repo: context.repo,
+            title: rendered.title,
+            body: rendered.body,
+            labels: labelsForPlanItem(item),
+          },
+          application,
+        );
         createdCurrentRun.push({
           planItemId: item.planItemId,
           kind: item.kind,
           title: rendered.title,
           url: published.url,
-          ...(published.number !== undefined ? { number: published.number } : {}),
+          ...(published.number !== undefined
+            ? { number: published.number }
+            : {}),
           ...(published.stdout ? { stdout: published.stdout } : {}),
           source: "current-run",
         });
@@ -370,44 +504,75 @@ function renderIssueDrafts(
   itemsById: ReadonlyMap<string, ValidPlanItem>,
   localRoots: readonly string[],
 ): Map<string, { title: string; body: string }> {
-  return new Map(drafts.issues.map((draft) => {
-    const item = itemsById.get(draft.planItemId);
-    if (!item) throw new Error(`Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`);
-    return [draft.planItemId, {
-      title: sanitizePublicMarkdown(draft.title, { localRoots }),
-      body: sanitizePublicMarkdown(formatIssueDraftMarkdown(draft, item.renderingContext), { localRoots }),
-    }] as const;
-  }));
+  return new Map(
+    drafts.issues.map((draft) => {
+      const item = itemsById.get(draft.planItemId);
+      if (!item)
+        throw new Error(
+          `Structured issue draft referenced unknown planItemId '${draft.planItemId}'.`,
+        );
+      return [
+        draft.planItemId,
+        {
+          title: sanitizePublicMarkdown(draft.title, { localRoots }),
+          body: sanitizePublicMarkdown(
+            formatIssueDraftMarkdown(draft, item.renderingContext),
+            { localRoots },
+          ),
+        },
+      ] as const;
+    }),
+  );
 }
 
 function formatIssueDraftCollectionMarkdown(
   drafts: IssueDraftCollection,
   renderedById: ReadonlyMap<string, { title: string; body: string }>,
 ): string {
-  return drafts.issues.map((draft) => {
-    const rendered = renderedById.get(draft.planItemId);
-    if (!rendered) throw new Error(`Structured issue draft '${draft.planItemId}' was not rendered.`);
-    return [`# ${rendered.title}`, "", rendered.body].join("\n");
-  }).join("\n---\n\n");
+  return drafts.issues
+    .map((draft) => {
+      const rendered = renderedById.get(draft.planItemId);
+      if (!rendered)
+        throw new Error(
+          `Structured issue draft '${draft.planItemId}' was not rendered.`,
+        );
+      return [`# ${rendered.title}`, "", rendered.body].join("\n");
+    })
+    .join("\n---\n\n");
 }
 
-async function readIssueCurationPlan(context: WorkflowContext): Promise<IssueCurationPlan> {
-  if (!artifactExists(context, "issueCurationPlan")) {
-    throw new Error(`Missing issue curation plan: ${artifactRelativePath(context, "issueCurationPlan")}. Run 'curate-issues' first.`);
+async function readIssueCurationPlan(
+  context: WorkflowContext,
+  application?: ApplicationExecution,
+): Promise<IssueCurationPlan> {
+  if (!(await artifactExists(context, "issueCurationPlan", application))) {
+    throw new Error(
+      `Missing issue curation plan: ${artifactRelativePath(context, "issueCurationPlan")}. Run 'curate-issues' first.`,
+    );
   }
 
   try {
-    return JSON.parse(await readArtifact(context, "issueCurationPlan")) as IssueCurationPlan;
+    return JSON.parse(
+      await readArtifact(context, "issueCurationPlan", application),
+    ) as IssueCurationPlan;
   } catch (error) {
-    throw new Error(`Could not parse ${artifactRelativePath(context, "issueCurationPlan")}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Could not parse ${artifactRelativePath(context, "issueCurationPlan")}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 
-async function readExistingCreatedEntries(context: WorkflowContext): Promise<IssueCreationCreatedEntry[]> {
-  if (!artifactExists(context, "issueCreationResults")) return [];
+async function readExistingCreatedEntries(
+  context: WorkflowContext,
+  application?: ApplicationExecution,
+): Promise<IssueCreationCreatedEntry[]> {
+  if (!(await artifactExists(context, "issueCreationResults", application)))
+    return [];
 
   try {
-    const parsed = JSON.parse(await readArtifact(context, "issueCreationResults")) as { created?: unknown };
+    const parsed = JSON.parse(
+      await readArtifact(context, "issueCreationResults", application),
+    ) as { created?: unknown };
     if (!Array.isArray(parsed.created)) return [];
     return parsed.created.flatMap((entry) => {
       if (!isRecord(entry)) return [];
@@ -415,18 +580,29 @@ async function readExistingCreatedEntries(context: WorkflowContext): Promise<Iss
       const title = asNonEmptyString(entry["title"]);
       const kind = parseIssuePlanKind(entry["kind"]);
       if (!planItemId || !title || !kind) return [];
-      return [{
-        planItemId,
-        kind,
-        title,
-        ...(asNonEmptyString(entry["url"]) ? { url: asNonEmptyString(entry["url"]) } : {}),
-        ...(typeof entry["number"] === "number" && Number.isInteger(entry["number"]) ? { number: entry["number"] } : {}),
-        ...(asNonEmptyString(entry["stdout"]) ? { stdout: asNonEmptyString(entry["stdout"]) } : {}),
-        source: "existing-result" as const,
-      }];
+      return [
+        {
+          planItemId,
+          kind,
+          title,
+          ...(asNonEmptyString(entry["url"])
+            ? { url: asNonEmptyString(entry["url"]) }
+            : {}),
+          ...(typeof entry["number"] === "number" &&
+          Number.isInteger(entry["number"])
+            ? { number: entry["number"] }
+            : {}),
+          ...(asNonEmptyString(entry["stdout"])
+            ? { stdout: asNonEmptyString(entry["stdout"]) }
+            : {}),
+          source: "existing-result" as const,
+        },
+      ];
     });
   } catch (error) {
-    presenter().warning(`could not parse existing ${artifactRelativePath(context, "issueCreationResults")}; rerun idempotence will not use it: ${error instanceof Error ? error.message : String(error)}`);
+    presenter(application).warning(
+      `could not parse existing ${artifactRelativePath(context, "issueCreationResults")}; rerun idempotence will not use it: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return [];
   }
 }
@@ -434,30 +610,59 @@ async function readExistingCreatedEntries(context: WorkflowContext): Promise<Iss
 function collectPlanItems(plan: IssueCurationPlan): {
   valid: ValidPlanItem[];
   malformed: IssueCreationSkippedEntry[];
-  counts: Pick<IssueCreationResults["counts"], "acceptedPlanItems" | "skippedRejectedCandidates" | "skippedDuplicateGroups" | "skippedDuplicateSourceFindings" | "skippedParserWarnings" | "skippedMalformed">;
+  counts: Pick<
+    IssueCreationResults["counts"],
+    | "acceptedPlanItems"
+    | "skippedRejectedCandidates"
+    | "skippedDuplicateGroups"
+    | "skippedDuplicateSourceFindings"
+    | "skippedParserWarnings"
+    | "skippedMalformed"
+  >;
 } {
   const normalized = (plan as Partial<IssueCurationPlan>).issuesToCreate;
   const classificationMalformed: IssueCreationSkippedEntry[] = [];
   const accepted = Array.isArray(normalized)
     ? normalized.flatMap((item, index) => {
-      const record = isRecord(item) ? item : undefined;
-      const classification = parseIssuePlanClassification(record?.classification);
-      if (!classification) {
-        classificationMalformed.push(malformedSkip(
-          record ? asNonEmptyString(record.planItemId) ?? `unclassified-${index + 1}` : `unclassified-${index + 1}`,
-          "unknown",
-          record ? asNonEmptyString(record.proposedTitle) : undefined,
-          "Missing or invalid required field(s): classification. Expected one of: external-blocker, follow-up, suggestion.",
-        ));
-        return [];
-      }
-      return [{ raw: item, kind: classification, index }];
-    })
+        const record = isRecord(item) ? item : undefined;
+        const classification = parseIssuePlanClassification(
+          record?.classification,
+        );
+        if (!classification) {
+          classificationMalformed.push(
+            malformedSkip(
+              record
+                ? (asNonEmptyString(record.planItemId) ??
+                    `unclassified-${index + 1}`)
+                : `unclassified-${index + 1}`,
+              "unknown",
+              record ? asNonEmptyString(record.proposedTitle) : undefined,
+              "Missing or invalid required field(s): classification. Expected one of: external-blocker, follow-up, suggestion.",
+            ),
+          );
+          return [];
+        }
+        return [{ raw: item, kind: classification, index }];
+      })
     : [
-      ...asArray((plan as Partial<IssueCurationPlan>).blockingIssuesToCreate).map((item, index) => ({ raw: item, kind: "blocking" as const, index })),
-      ...asArray((plan as Partial<IssueCurationPlan>).followUpIssuesToCreate).map((item, index) => ({ raw: item, kind: "follow-up" as const, index })),
-    ];
-  const acceptedPlanItemCount = Array.isArray(normalized) ? normalized.length : accepted.length;
+        ...asArray(
+          (plan as Partial<IssueCurationPlan>).blockingIssuesToCreate,
+        ).map((item, index) => ({
+          raw: item,
+          kind: "blocking" as const,
+          index,
+        })),
+        ...asArray(
+          (plan as Partial<IssueCurationPlan>).followUpIssuesToCreate,
+        ).map((item, index) => ({
+          raw: item,
+          kind: "follow-up" as const,
+          index,
+        })),
+      ];
+  const acceptedPlanItemCount = Array.isArray(normalized)
+    ? normalized.length
+    : accepted.length;
 
   const valid: ValidPlanItem[] = [];
   const malformed: IssueCreationSkippedEntry[] = [...classificationMalformed];
@@ -467,8 +672,12 @@ function collectPlanItems(plan: IssueCurationPlan): {
     else malformed.push(parsed.skipped);
   }
 
-  const rejectedCandidates = asArray((plan as Partial<IssueCurationPlan>).rejectedCandidates);
-  const duplicatesMerged = asArray((plan as Partial<IssueCurationPlan>).duplicatesMerged) as DuplicateGroup[];
+  const rejectedCandidates = asArray(
+    (plan as Partial<IssueCurationPlan>).rejectedCandidates,
+  );
+  const duplicatesMerged = asArray(
+    (plan as Partial<IssueCurationPlan>).duplicatesMerged,
+  ) as DuplicateGroup[];
   const warnings = asArray((plan as Partial<IssueCurationPlan>).warnings);
   return {
     valid,
@@ -477,20 +686,37 @@ function collectPlanItems(plan: IssueCurationPlan): {
       acceptedPlanItems: acceptedPlanItemCount,
       skippedRejectedCandidates: rejectedCandidates.length,
       skippedDuplicateGroups: duplicatesMerged.length,
-      skippedDuplicateSourceFindings: duplicatesMerged.reduce((total, group) => {
-        const ids = isRecord(group) && Array.isArray(group.mergedSourceFindingIds) ? group.mergedSourceFindingIds : [];
-        return total + ids.length;
-      }, 0),
+      skippedDuplicateSourceFindings: duplicatesMerged.reduce(
+        (total, group) => {
+          const ids =
+            isRecord(group) && Array.isArray(group.mergedSourceFindingIds)
+              ? group.mergedSourceFindingIds
+              : [];
+          return total + ids.length;
+        },
+        0,
+      ),
       skippedParserWarnings: warnings.length,
       skippedMalformed: malformed.length,
     },
   };
 }
 
-function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): { item: ValidPlanItem } | { skipped: IssueCreationSkippedEntry } {
+function parseValidPlanItem(
+  raw: unknown,
+  kind: IssuePlanKind,
+  index: number,
+): { item: ValidPlanItem } | { skipped: IssueCreationSkippedEntry } {
   const fallbackId = `${kind}-${index + 1}`;
   if (!isRecord(raw)) {
-    return { skipped: malformedSkip(fallbackId, kind, undefined, "Plan entry is not an object.") };
+    return {
+      skipped: malformedSkip(
+        fallbackId,
+        kind,
+        undefined,
+        "Plan entry is not an object.",
+      ),
+    };
   }
 
   const planItemId = asNonEmptyString(raw["planItemId"]);
@@ -502,7 +728,14 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
     ...(renderingContext ? [] : ["structured issue context"]),
   ];
   if (missing.length > 0 || !planItemId || !title || !renderingContext) {
-    return { skipped: malformedSkip(planItemId ?? fallbackId, kind, title, `Missing required field(s): ${missing.join(", ")}.`) };
+    return {
+      skipped: malformedSkip(
+        planItemId ?? fallbackId,
+        kind,
+        title,
+        `Missing required field(s): ${missing.join(", ")}.`,
+      ),
+    };
   }
   const { proposedLabels } = raw;
 
@@ -511,29 +744,41 @@ function parseValidPlanItem(raw: unknown, kind: IssuePlanKind, index: number): {
       kind,
       planItemId,
       title,
-      labels: Array.isArray(proposedLabels) ? proposedLabels.filter((label): label is string => typeof label === "string") : [],
+      labels: Array.isArray(proposedLabels)
+        ? proposedLabels.filter(
+            (label): label is string => typeof label === "string",
+          )
+        : [],
       renderingContext,
     },
   };
 }
 
-function parseIssueDraftRenderingContext(value: Record<string, unknown>, kind: IssuePlanKind): IssueDraftRenderingContext | undefined {
+function parseIssueDraftRenderingContext(
+  value: Record<string, unknown>,
+  kind: IssuePlanKind,
+): IssueDraftRenderingContext | undefined {
   const sourceIssue = value["sourceIssueContext"];
   const runContext = value["runContext"];
-  if (!isStringArray(value["sourceFindingIds"])
-    || !isStringArray(value["reviewerSources"])
-    || !isRecord(sourceIssue)
-    || typeof sourceIssue["number"] !== "number"
-    || !Number.isInteger(sourceIssue["number"])
-    || typeof sourceIssue["title"] !== "string"
-    || !isRecord(runContext)
-    || typeof runContext["runDirRelative"] !== "string"
-    || !isStringArray(runContext["artifactPaths"])) return undefined;
+  if (
+    !isStringArray(value["sourceFindingIds"]) ||
+    !isStringArray(value["reviewerSources"]) ||
+    !isRecord(sourceIssue) ||
+    typeof sourceIssue["number"] !== "number" ||
+    !Number.isInteger(sourceIssue["number"]) ||
+    typeof sourceIssue["title"] !== "string" ||
+    !isRecord(runContext) ||
+    typeof runContext["runDirRelative"] !== "string" ||
+    !isStringArray(runContext["artifactPaths"])
+  )
+    return undefined;
   const sourceUrl = asNonEmptyString(sourceIssue["url"]);
   const relatedPrUrl = asNonEmptyString(runContext["prUrl"]);
-  const attempt = typeof runContext["attempt"] === "number" && Number.isInteger(runContext["attempt"])
-    ? runContext["attempt"]
-    : undefined;
+  const attempt =
+    typeof runContext["attempt"] === "number" &&
+    Number.isInteger(runContext["attempt"])
+      ? runContext["attempt"]
+      : undefined;
   return {
     sourceIssue: {
       number: sourceIssue["number"],
@@ -549,10 +794,17 @@ function parseIssueDraftRenderingContext(value: Record<string, unknown>, kind: I
 }
 
 function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
 }
 
-function malformedSkip(planItemId: string, kind: IssueCreationSkippedKind, title: string | undefined, message: string): IssueCreationSkippedEntry {
+function malformedSkip(
+  planItemId: string,
+  kind: IssueCreationSkippedKind,
+  title: string | undefined,
+  message: string,
+): IssueCreationSkippedEntry {
   return {
     planItemId,
     kind,
@@ -567,7 +819,9 @@ function parseIssuePlanKind(value: unknown): IssuePlanKind | undefined {
   return parseIssuePlanClassification(value);
 }
 
-function parseIssuePlanClassification(value: unknown): IssuePlanClassification | undefined {
+function parseIssuePlanClassification(
+  value: unknown,
+): IssuePlanClassification | undefined {
   return reviewerIssueClassificationLabels.find((label) => label === value);
 }
 
@@ -585,7 +839,15 @@ function buildResult(input: {
   skipped: IssueCreationSkippedEntry[];
   wouldCreate: IssueCreationWouldCreateEntry[];
   relationshipOutcomes: IssueCreationRelationshipOutcomeEntry[];
-  countsInput: Pick<IssueCreationResults["counts"], "acceptedPlanItems" | "skippedRejectedCandidates" | "skippedDuplicateGroups" | "skippedDuplicateSourceFindings" | "skippedParserWarnings" | "skippedMalformed">;
+  countsInput: Pick<
+    IssueCreationResults["counts"],
+    | "acceptedPlanItems"
+    | "skippedRejectedCandidates"
+    | "skippedDuplicateGroups"
+    | "skippedDuplicateSourceFindings"
+    | "skippedParserWarnings"
+    | "skippedMalformed"
+  >;
 }): IssueCreationResults {
   const created = [...input.existingCreated, ...input.createdCurrentRun];
   return {
@@ -608,14 +870,22 @@ function buildResult(input: {
       createdCurrentRun: input.createdCurrentRun.length,
       createdTotalRecorded: created.length,
       failed: input.failed.length,
-      skippedAlreadyCreated: input.skipped.filter((entry) => entry.reason === "already-created").length,
+      skippedAlreadyCreated: input.skipped.filter(
+        (entry) => entry.reason === "already-created",
+      ).length,
     },
   };
 }
 
-function labelsForPlanItem(item: Pick<ValidPlanItem, "kind" | "labels">): string[] {
-  const managedLabels = new Set<string>(reviewerIssueManagedLabels.map((label) => label.toLowerCase()));
-  const additionalLabels = item.labels.filter((label) => !managedLabels.has(label.trim().toLowerCase()));
+function labelsForPlanItem(
+  item: Pick<ValidPlanItem, "kind" | "labels">,
+): string[] {
+  const managedLabels = new Set<string>(
+    reviewerIssueManagedLabels.map((label) => label.toLowerCase()),
+  );
+  const additionalLabels = item.labels.filter(
+    (label) => !managedLabels.has(label.trim().toLowerCase()),
+  );
   return normalizeLabels([
     ...reviewerIssueTriageLabels,
     reviewerIssueLabelForClassification(classificationForKind(item.kind)),
@@ -639,47 +909,88 @@ function normalizeLabels(labels: string[]): string[] {
   return normalized;
 }
 
-function printDryRunSummary(context: WorkflowContext, result: IssueCreationResults): void {
-  presenter().line(`Dry run: create issues from ${result.sourcePlanPath}`);
-  presenter().line("No GitHub issues were created. Pass --yes to create approved plan items.");
-  presenter().line(`Target repo: ${context.repo ?? "gh default repository"}`);
+function printDryRunSummary(
+  context: WorkflowContext,
+  result: IssueCreationResults,
+  application?: ApplicationExecution,
+): void {
+  presenter(application).line(
+    `Dry run: create issues from ${result.sourcePlanPath}`,
+  );
+  presenter(application).line(
+    "No GitHub issues were created. Pass --yes to create approved plan items.",
+  );
+  presenter(application).line(
+    `Target repo: ${context.repo ?? "gh default repository"}`,
+  );
   if (result.wouldCreate.length === 0) {
-    presenter().line(`No approved plan items would be created. ${zeroCreatedExplanation(result)}`);
+    presenter(application).line(
+      `No approved plan items would be created. ${zeroCreatedExplanation(result)}`,
+    );
   } else {
     for (const item of result.wouldCreate) {
-      presenter().line(`- ${item.planItemId} [${item.kind}]: ${item.title}`);
-      presenter().line(`labels: ${item.labels.join(", ")}`);
+      presenter(application).line(
+        `- ${item.planItemId} [${item.kind}]: ${item.title}`,
+      );
+      presenter(application).line(`labels: ${item.labels.join(", ")}`);
     }
   }
-  printSkippedCounts(result);
+  printSkippedCounts(result, application);
 }
 
-function printApprovedSummary(context: WorkflowContext, result: IssueCreationResults): void {
-  presenter().line(`Issue creation: wrote ${artifactRelativePath(context, "issueCreationResults")}`);
-  presenter().line(`Created this run: ${result.counts.createdCurrentRun}; failed: ${result.failed.length}; skipped already-created: ${result.counts.skippedAlreadyCreated}; malformed: ${result.counts.skippedMalformed}.`);
-  if (result.counts.createdCurrentRun === 0) presenter().line(`Zero created explanation: ${zeroCreatedExplanation(result)}`);
-  for (const entry of result.created.filter((created) => created.source === "current-run")) {
-    presenter().line(`- created ${entry.planItemId}${entry.url ? `: ${entry.url}` : ""}`);
+function printApprovedSummary(
+  context: WorkflowContext,
+  result: IssueCreationResults,
+  application?: ApplicationExecution,
+): void {
+  presenter(application).line(
+    `Issue creation: wrote ${artifactRelativePath(context, "issueCreationResults")}`,
+  );
+  presenter(application).line(
+    `Created this run: ${result.counts.createdCurrentRun}; failed: ${result.failed.length}; skipped already-created: ${result.counts.skippedAlreadyCreated}; malformed: ${result.counts.skippedMalformed}.`,
+  );
+  if (result.counts.createdCurrentRun === 0)
+    presenter(application).line(
+      `Zero created explanation: ${zeroCreatedExplanation(result)}`,
+    );
+  for (const entry of result.created.filter(
+    (created) => created.source === "current-run",
+  )) {
+    presenter(application).line(
+      `- created ${entry.planItemId}${entry.url ? `: ${entry.url}` : ""}`,
+    );
   }
   for (const entry of result.failed) {
-    presenter().line(`- failed ${entry.planItemId}: ${entry.message}`);
+    presenter(application).line(
+      `- failed ${entry.planItemId}: ${entry.message}`,
+    );
   }
-  printSkippedCounts(result);
+  printSkippedCounts(result, application);
 }
 
-function printSkippedCounts(result: IssueCreationResults): void {
-  presenter().line(`Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`);
+function printSkippedCounts(
+  result: IssueCreationResults,
+  application?: ApplicationExecution,
+): void {
+  presenter(application).line(
+    `Skipped rejected candidates: ${result.counts.skippedRejectedCandidates}; duplicate groups: ${result.counts.skippedDuplicateGroups}; plan warnings: ${result.counts.skippedParserWarnings}.`,
+  );
 }
 
 function zeroCreatedExplanation(result: IssueCreationResults): string {
   if (result.counts.acceptedPlanItems === 0) {
-    if (result.counts.skippedParserWarnings > 0) return "No accepted candidates were found; review warnings and missing artifacts in the curation plan.";
-    if (result.counts.skippedRejectedCandidates > 0) return "All reviewer findings were rejected by curation policy; inspect rejectedCandidates for reasons.";
+    if (result.counts.skippedParserWarnings > 0)
+      return "No accepted candidates were found; review warnings and missing artifacts in the curation plan.";
+    if (result.counts.skippedRejectedCandidates > 0)
+      return "All reviewer findings were rejected by curation policy; inspect rejectedCandidates for reasons.";
     return "The curation plan contains no accepted reviewer findings.";
   }
-  if (result.counts.skippedAlreadyCreated >= result.counts.acceptedPlanItems) return "All accepted plan items were already recorded as created; use --force only if you intentionally want duplicates.";
-  if (result.counts.skippedMalformed > 0) return "Accepted plan items were malformed and skipped; inspect skipped entries in issue-creation-results.json.";
-  if (result.failed.length > 0) return "Publishing or label setup failed; inspect failed entries in issue-creation-results.json.";
+  if (result.counts.skippedAlreadyCreated >= result.counts.acceptedPlanItems)
+    return "All accepted plan items were already recorded as created; use --force only if you intentionally want duplicates.";
+  if (result.counts.skippedMalformed > 0)
+    return "Accepted plan items were malformed and skipped; inspect skipped entries in issue-creation-results.json.";
+  if (result.failed.length > 0)
+    return "Publishing or label setup failed; inspect failed entries in issue-creation-results.json.";
   return "No creatable plan items remained after idempotence and validation checks.";
 }
 
@@ -688,7 +999,9 @@ function asArray(value: unknown): unknown[] {
 }
 
 function asNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+  return typeof value === "string" && value.trim() !== ""
+    ? value.trim()
+    : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

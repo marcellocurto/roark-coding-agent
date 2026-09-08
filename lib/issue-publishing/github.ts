@@ -1,5 +1,10 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
-import { runProcessPromise, runProcessOrThrowPromise } from "../cli/process.ts";
+import {
+  runProcessPromise,
+  runProcessOrThrowPromise,
+} from "../cli/process-promise.ts";
 
 export interface IssuePublishRequest {
   cwd: string;
@@ -15,54 +20,110 @@ export interface IssuePublishResult {
   stdout?: string | undefined;
 }
 
-export type IssuePublisher = (request: IssuePublishRequest, application?: ApplicationExecution) => Promise<IssuePublishResult>;
+export type IssuePublisher = (
+  request: IssuePublishRequest,
+  application?: ApplicationExecution,
+) => Promise<IssuePublishResult>;
 
-export async function publishIssueWithGitHub(request: IssuePublishRequest, application?: ApplicationExecution): Promise<IssuePublishResult> {
+export async function publishIssueWithGitHub(
+  request: IssuePublishRequest,
+  application?: ApplicationExecution,
+): Promise<IssuePublishResult> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        publishIssueWithGitHub(request, application),
+      ),
+      application,
+    );
+
   const repoArgs = request.repo ? ["--repo", request.repo] : [];
-  const duplicateSearch = await runProcessPromise([
-    "gh", "issue", "list",
-    "--state", "all",
-    "--search", `\"${request.title}\" in:title`,
-    "--json", "number,title,url",
-    "--limit", "20",
-    ...repoArgs,
-  ], { cwd: request.cwd }, application);
+  const duplicateSearch = await runProcessPromise(
+    [
+      "gh",
+      "issue",
+      "list",
+      "--state",
+      "all",
+      "--search",
+      `\"${request.title}\" in:title`,
+      "--json",
+      "number,title,url",
+      "--limit",
+      "20",
+      ...repoArgs,
+    ],
+    { cwd: request.cwd },
+    application,
+  );
   if (duplicateSearch.exitCode !== 0) {
-    throw new Error(`gh issue duplicate search failed with exit code ${duplicateSearch.exitCode}:\n${duplicateSearch.stderr || duplicateSearch.stdout}`);
+    throw new Error(
+      `gh issue duplicate search failed with exit code ${duplicateSearch.exitCode}:\n${duplicateSearch.stderr || duplicateSearch.stdout}`,
+    );
   }
   const duplicate = exactTitleMatch(duplicateSearch.stdout, request.title);
-  if (duplicate) throw new Error(`An issue with the same title already exists: ${duplicate.url ?? `#${duplicate.number ?? "unknown"}`}`);
+  if (duplicate)
+    throw new Error(
+      `An issue with the same title already exists: ${duplicate.url ?? `#${duplicate.number ?? "unknown"}`}`,
+    );
 
-  const stdout = await runProcessOrThrowPromise([
-    "gh", "issue", "create",
-    "--title", request.title,
-    "--body-file", "-",
-    ...request.labels.flatMap((label) => ["--label", label]),
-    ...repoArgs,
-  ], { cwd: request.cwd, label: "gh issue create", input: request.body }, application);
-  const url = /https?:\/\/\S+\/issues\/\d+/.exec(stdout)?.[0]?.replace(/[),.;]+$/, "");
-  if (!url) throw new Error("gh issue create succeeded but did not return an issue URL.");
+  const stdout = await runProcessOrThrowPromise(
+    [
+      "gh",
+      "issue",
+      "create",
+      "--title",
+      request.title,
+      "--body-file",
+      "-",
+      ...request.labels.flatMap((label) => ["--label", label]),
+      ...repoArgs,
+    ],
+    { cwd: request.cwd, label: "gh issue create", input: request.body },
+    application,
+  );
+  const url = /https?:\/\/\S+\/issues\/\d+/
+    .exec(stdout)?.[0]
+    ?.replace(/[),.;]+$/, "");
+  if (!url)
+    throw new Error(
+      "gh issue create succeeded but did not return an issue URL.",
+    );
   const number = Number.parseInt(/\/issues\/(\d+)/.exec(url)?.[1] ?? "", 10);
   return { url, ...(Number.isInteger(number) ? { number } : {}), stdout };
 }
 
-function exactTitleMatch(output: string, title: string): { number?: number; title?: string; url?: string } | undefined {
+function exactTitleMatch(
+  output: string,
+  title: string,
+): { number?: number; title?: string; url?: string } | undefined {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
   } catch (error) {
-    throw new Error(`Could not parse gh issue duplicate search response: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(
+      `Could not parse gh issue duplicate search response: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  if (!Array.isArray(parsed)) throw new Error("gh issue duplicate search response was not an array.");
+  if (!Array.isArray(parsed))
+    throw new Error("gh issue duplicate search response was not an array.");
   const normalizedTitle = normalizeTitle(title);
   for (const entry of parsed) {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) continue;
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
     const candidate = entry as Record<string, unknown>;
-    if (typeof candidate["title"] !== "string" || normalizeTitle(candidate["title"]) !== normalizedTitle) continue;
+    if (
+      typeof candidate["title"] !== "string" ||
+      normalizeTitle(candidate["title"]) !== normalizedTitle
+    )
+      continue;
     return {
       title: candidate["title"],
-      ...(typeof candidate["url"] === "string" ? { url: candidate["url"] } : {}),
-      ...(typeof candidate["number"] === "number" && Number.isInteger(candidate["number"])
+      ...(typeof candidate["url"] === "string"
+        ? { url: candidate["url"] }
+        : {}),
+      ...(typeof candidate["number"] === "number" &&
+      Number.isInteger(candidate["number"])
         ? { number: candidate["number"] }
         : {}),
     };

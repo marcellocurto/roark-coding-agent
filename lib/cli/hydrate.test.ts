@@ -3,13 +3,19 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { defaultMaxFixPasses, parseArgs } from "./args.ts";
-import { hydrateCliOptions, inferVerifyCommand, loadRoarkConfig, parseGithubRepoFromOrigin } from "./hydrate.ts";
-import { runProcessOrThrowPromise } from "./process.ts";
+import {
+  hydrateCliOptions,
+  inferVerifyCommand,
+  loadRoarkConfigPromise,
+  parseGithubRepoFromOrigin,
+} from "./hydrate.ts";
+import { runProcessOrThrowPromise } from "./process-promise.ts";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
-  for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
 });
 
 describe("hydrateCliOptions", () => {
@@ -57,7 +63,17 @@ describe("hydrateCliOptions", () => {
     expect(hydrated.repo).toBe("cli/repo");
     expect(hydrated.verifyCommand).toBe("bun run cli-check");
     expect(hydrated.readyLabel).toBe("cli-ready");
-    expect(hydrated.skipLabels).toEqual(["cli-skip", "config-progress", "config-failed", "config-success", "needs-triage", "blocked", "needs-human", "triage-rejected", "wont-fix"]);
+    expect(hydrated.skipLabels).toEqual([
+      "cli-skip",
+      "config-progress",
+      "config-failed",
+      "config-success",
+      "needs-triage",
+      "blocked",
+      "needs-human",
+      "triage-rejected",
+      "wont-fix",
+    ]);
     expect(hydrated.baseBranch).toBe("cli-main");
     expect(hydrated.maxFixPasses).toBe(5);
     expect(hydrated.inProgressLabel).toBe("config-progress");
@@ -93,7 +109,8 @@ describe("hydrateCliOptions", () => {
     if ("help" in autoRaw) throw new Error("expected options");
     const autoHydrated = await hydrateCliOptions(autoRaw);
     expect(autoHydrated.command).toBe("auto");
-    if (autoHydrated.command !== "auto") throw new Error("expected auto options");
+    if (autoHydrated.command !== "auto")
+      throw new Error("expected auto options");
     expect(autoHydrated.workspace).toEqual({
       root: "~/custom-roark-workspaces",
       strategy: "clone",
@@ -114,7 +131,8 @@ describe("hydrateCliOptions", () => {
     if ("help" in workspaceRaw) throw new Error("expected options");
     const workspaceHydrated = await hydrateCliOptions(workspaceRaw);
     expect(workspaceHydrated.command).toBe("remove");
-    if (workspaceHydrated.command !== "remove") throw new Error("expected remove options");
+    if (workspaceHydrated.command !== "remove")
+      throw new Error("expected remove options");
     expect(workspaceHydrated.targets).toEqual([{ kind: "issue", number: 4 }]);
     expect(workspaceHydrated.force).toBe(true);
     expect(workspaceHydrated.workspace.cloneRemote).toBe("upstream");
@@ -123,70 +141,140 @@ describe("hydrateCliOptions", () => {
 
   test("rejects invalid workspace, hook, and sandbox config", async () => {
     const withUnknownNested = await tempGitRepo();
-    await writeConfig(withUnknownNested, { workspace: { unknown: true }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withUnknownNested, {
+      workspace: { unknown: true },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const unknownRaw = parseArgs(["auto", "--cwd", withUnknownNested]);
     if ("help" in unknownRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'workspace.unknown'");
+    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow(
+      "Unknown Roark config key 'workspace.unknown'",
+    );
 
     const withWorktreeStrategy = await tempGitRepo();
-    await writeConfig(withWorktreeStrategy, { workspace: { strategy: "worktree" }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withWorktreeStrategy, {
+      workspace: { strategy: "worktree" },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const strategyRaw = parseArgs(["auto", "--cwd", withWorktreeStrategy]);
     if ("help" in strategyRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(strategyRaw)).rejects.toThrow("workspace.strategy' must be 'clone'");
+    expect(hydrateCliOptions(strategyRaw)).rejects.toThrow(
+      "workspace.strategy' must be 'clone'",
+    );
 
     const withInvalidCopy = await tempGitRepo();
-    await writeConfig(withInvalidCopy, { workspace: { copyToWorktree: [".secrets/env", "../escape"] }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withInvalidCopy, {
+      workspace: { copyToWorktree: [".secrets/env", "../escape"] },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const invalidCopyRaw = parseArgs(["auto", "--cwd", withInvalidCopy]);
     if ("help" in invalidCopyRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(invalidCopyRaw)).rejects.toThrow("workspace.copyToWorktree[1]");
+    expect(hydrateCliOptions(invalidCopyRaw)).rejects.toThrow(
+      "workspace.copyToWorktree[1]",
+    );
 
     const withGlobCopy = await tempGitRepo();
-    await writeConfig(withGlobCopy, { workspace: { copyToWorktree: ["secrets/*"] }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withGlobCopy, {
+      workspace: { copyToWorktree: ["secrets/*"] },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const globCopyRaw = parseArgs(["auto", "--cwd", withGlobCopy]);
     if ("help" in globCopyRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(globCopyRaw)).rejects.toThrow("globs are not supported");
+    expect(hydrateCliOptions(globCopyRaw)).rejects.toThrow(
+      "globs are not supported",
+    );
 
-    for (const [entry, message] of [["/abs", "must be a relative path"], [".git/config", "must not target .git"], ["", "non-empty"], [42, "non-empty string"]] as const) {
+    for (const [entry, message] of [
+      ["/abs", "must be a relative path"],
+      [".git/config", "must not target .git"],
+      ["", "non-empty"],
+      [42, "non-empty string"],
+    ] as const) {
       const repo = await tempGitRepo();
-      await writeConfig(repo, { workspace: { copyToWorktree: [entry] }, verify: "bun test", repo: "owner/repo" });
+      await writeConfig(repo, {
+        workspace: { copyToWorktree: [entry] },
+        verify: "bun test",
+        repo: "owner/repo",
+      });
       const raw = parseArgs(["auto", "--cwd", repo]);
       if ("help" in raw) throw new Error("expected options");
       expect(hydrateCliOptions(raw)).rejects.toThrow(message);
     }
 
     const withInvalidHook = await tempGitRepo();
-    await writeConfig(withInvalidHook, { hooks: { beforeRun: "" }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withInvalidHook, {
+      hooks: { beforeRun: "" },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const hookRaw = parseArgs(["auto", "--cwd", withInvalidHook]);
     if ("help" in hookRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(hookRaw)).rejects.toThrow("hooks.beforeRun' must be a non-empty string");
+    expect(hydrateCliOptions(hookRaw)).rejects.toThrow(
+      "hooks.beforeRun' must be a non-empty string",
+    );
 
     const withSandbox = await tempGitRepo();
-    await writeConfig(withSandbox, { sandbox: { provider: "docker" }, verify: "bun test", repo: "owner/repo" });
+    await writeConfig(withSandbox, {
+      sandbox: { provider: "docker" },
+      verify: "bun test",
+      repo: "owner/repo",
+    });
     const sandboxRaw = parseArgs(["auto", "--cwd", withSandbox]);
     if ("help" in sandboxRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow("sandbox.provider' must be 'host'");
+    expect(hydrateCliOptions(sandboxRaw)).rejects.toThrow(
+      "sandbox.provider' must be 'host'",
+    );
   });
 
   test("keeps presentation flags at the entrypoint instead of duplicating hydrated state", async () => {
     const repo = await tempGitRepo();
-    const defaultsRaw = parseArgs(["do", "12", "--cwd", repo, "--repo", "owner/repo"]);
+    const defaultsRaw = parseArgs([
+      "do",
+      "12",
+      "--cwd",
+      repo,
+      "--repo",
+      "owner/repo",
+    ]);
     if ("help" in defaultsRaw) throw new Error("expected options");
     const defaults = await hydrateCliOptions(defaultsRaw);
     if (defaults.command !== "do") throw new Error("expected issue options");
     expect(defaults).not.toHaveProperty("verbose");
     expect(defaults).not.toHaveProperty("title");
 
-    const overrideRaw = parseArgs(["review-pr", "42", "--cwd", repo, "--repo", "owner/repo", "--verbose", "--no-title"]);
+    const overrideRaw = parseArgs([
+      "review-pr",
+      "42",
+      "--cwd",
+      repo,
+      "--repo",
+      "owner/repo",
+      "--verbose",
+      "--no-title",
+    ]);
     if ("help" in overrideRaw) throw new Error("expected options");
     const override = await hydrateCliOptions(overrideRaw);
-    if (override.command !== "review-pr") throw new Error("expected review options");
+    if (override.command !== "review-pr")
+      throw new Error("expected review options");
     expect(override).not.toHaveProperty("verbose");
     expect(override).not.toHaveProperty("title");
   });
 
   test("preserves CLI thinking profile selection", async () => {
     const repo = await tempGitRepo();
-    const raw = parseArgs(["do", "12", "--cwd", repo, "--repo", "owner/repo", "--fast"]);
+    const raw = parseArgs([
+      "do",
+      "12",
+      "--cwd",
+      repo,
+      "--repo",
+      "owner/repo",
+      "--fast",
+    ]);
     if ("help" in raw) throw new Error("expected options");
 
     const hydrated = await hydrateCliOptions(raw);
@@ -211,7 +299,8 @@ describe("hydrateCliOptions", () => {
 
     const hydrated = await hydrateCliOptions(raw);
     expect(hydrated.command).toBe("continue");
-    if (hydrated.command !== "continue") throw new Error("expected continue options");
+    if (hydrated.command !== "continue")
+      throw new Error("expected continue options");
     expect(hydrated.repo).toBe("config/repo");
     expect(hydrated.verifyCommand).toBe("bun run config-test");
     expect(hydrated.inProgressLabel).toBe("busy");
@@ -232,7 +321,8 @@ describe("hydrateCliOptions", () => {
 
     const hydrated = await hydrateCliOptions(raw);
     expect(hydrated.command).toBe("revise-pr");
-    if (hydrated.command !== "revise-pr") throw new Error("expected revise-pr options");
+    if (hydrated.command !== "revise-pr")
+      throw new Error("expected revise-pr options");
     expect(hydrated.maxFixPasses).toBe(defaultMaxFixPasses);
     expect(hydrated.verifyCommand).toBe("bun run typecheck");
     expect(hydrated.remote).toBe("origin");
@@ -250,20 +340,38 @@ describe("hydrateCliOptions", () => {
       workspace: { root: "~/review-workspaces", copyToWorktree: ["local.env"] },
       hooks: { beforeRun: "bun install", timeoutMs: 2222 },
     });
-    const configuredRaw = parseArgs(["review-pr", "12", "--cwd", repo, "--repo", "owner/repo"]);
+    const configuredRaw = parseArgs([
+      "review-pr",
+      "12",
+      "--cwd",
+      repo,
+      "--repo",
+      "owner/repo",
+    ]);
     if ("help" in configuredRaw) throw new Error("expected options");
     const configured = await hydrateCliOptions(configuredRaw);
-    if (configured.command !== "review-pr") throw new Error("expected review-pr options");
+    if (configured.command !== "review-pr")
+      throw new Error("expected review-pr options");
     expect(configured.verifyCommand).toBe("bun run configured-check");
     expect(configured.repo).toBe("owner/repo");
     expect(configured.workspace?.copyToWorktree).toEqual(["local.env"]);
     expect(configured.hooks?.beforeRun).toBe("bun install");
     expect(configured.hooks?.timeoutMs).toBe(2222);
 
-    const explicitRaw = parseArgs(["review-pr", "12", "--cwd", repo, "--repo", "owner/repo", "--verify", "bun test"]);
+    const explicitRaw = parseArgs([
+      "review-pr",
+      "12",
+      "--cwd",
+      repo,
+      "--repo",
+      "owner/repo",
+      "--verify",
+      "bun test",
+    ]);
     if ("help" in explicitRaw) throw new Error("expected options");
     const explicit = await hydrateCliOptions(explicitRaw);
-    if (explicit.command !== "review-pr") throw new Error("expected review-pr options");
+    if (explicit.command !== "review-pr")
+      throw new Error("expected review-pr options");
     expect(explicit.verifyCommand).toBe("bun test");
     expect(explicit.workspace?.copyToWorktree).toEqual(["local.env"]);
   });
@@ -272,41 +380,79 @@ describe("hydrateCliOptions", () => {
     const repo = await tempGitRepo();
     await writeConfig(repo, { repo: "config/repo" });
 
-    const urlRaw = parseArgs(["fetch", "https://github.com/url/repo/issues/123", "--cwd", repo]);
+    const urlRaw = parseArgs([
+      "fetch",
+      "https://github.com/url/repo/issues/123",
+      "--cwd",
+      repo,
+    ]);
     if ("help" in urlRaw) throw new Error("expected options");
     const urlHydrated = await hydrateCliOptions(urlRaw);
     expect(urlHydrated.command).toBe("fetch");
-    if (urlHydrated.command !== "fetch") throw new Error("expected fetch options");
+    if (urlHydrated.command !== "fetch")
+      throw new Error("expected fetch options");
     expect(urlHydrated.repo).toBe("url/repo");
 
-    const shorthandRaw = parseArgs(["fetch", "owner/shorthand#123", "--cwd", repo]);
+    const shorthandRaw = parseArgs([
+      "fetch",
+      "owner/shorthand#123",
+      "--cwd",
+      repo,
+    ]);
     if ("help" in shorthandRaw) throw new Error("expected options");
     const shorthandHydrated = await hydrateCliOptions(shorthandRaw);
     expect(shorthandHydrated.command).toBe("fetch");
-    if (shorthandHydrated.command !== "fetch") throw new Error("expected fetch options");
+    if (shorthandHydrated.command !== "fetch")
+      throw new Error("expected fetch options");
     expect(shorthandHydrated.repo).toBe("owner/shorthand");
 
     const originRepo = await tempGitRepo();
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/origin/repo.git"], { cwd: originRepo });
-    const originRaw = parseArgs(["fetch", "https://github.com/url/repo/issues/123", "--cwd", originRepo]);
+    await runProcessOrThrowPromise(
+      ["git", "remote", "add", "origin", "https://github.com/origin/repo.git"],
+      { cwd: originRepo },
+    );
+    const originRaw = parseArgs([
+      "fetch",
+      "https://github.com/url/repo/issues/123",
+      "--cwd",
+      originRepo,
+    ]);
     if ("help" in originRaw) throw new Error("expected options");
     const originHydrated = await hydrateCliOptions(originRaw);
     expect(originHydrated.command).toBe("fetch");
-    if (originHydrated.command !== "fetch") throw new Error("expected fetch options");
+    if (originHydrated.command !== "fetch")
+      throw new Error("expected fetch options");
     expect(originHydrated.repo).toBe("url/repo");
 
-    const repoOverrideRaw = parseArgs(["fetch", "owner/shorthand#123", "--cwd", repo, "--repo", "cli/repo"]);
+    const repoOverrideRaw = parseArgs([
+      "fetch",
+      "owner/shorthand#123",
+      "--cwd",
+      repo,
+      "--repo",
+      "cli/repo",
+    ]);
     if ("help" in repoOverrideRaw) throw new Error("expected options");
     const repoOverrideHydrated = await hydrateCliOptions(repoOverrideRaw);
     expect(repoOverrideHydrated.command).toBe("fetch");
-    if (repoOverrideHydrated.command !== "fetch") throw new Error("expected fetch options");
+    if (repoOverrideHydrated.command !== "fetch")
+      throw new Error("expected fetch options");
     expect(repoOverrideHydrated.repo).toBe("cli/repo");
   });
 
   test("infers repo from GitHub origin and verify from package.json when config is missing", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "git@github.com:owner/inferred.git"], { cwd: repo });
-    await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc --noEmit", test: "bun test" } }), "utf8");
+    await runProcessOrThrowPromise(
+      ["git", "remote", "add", "origin", "git@github.com:owner/inferred.git"],
+      { cwd: repo },
+    );
+    await writeFile(
+      path.join(repo, "package.json"),
+      JSON.stringify({
+        scripts: { typecheck: "tsc --noEmit", test: "bun test" },
+      }),
+      "utf8",
+    );
 
     const raw = parseArgs(["auto", "--cwd", repo, "--dry-run"]);
     if ("help" in raw) throw new Error("expected options");
@@ -326,9 +472,20 @@ describe("hydrateCliOptions", () => {
 
   test("ignores root-level roark.config.json and loads only .roark/config.json", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/origin.git"], { cwd: repo });
-    await writeFile(path.join(repo, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }), "utf8");
-    await writeFile(path.join(repo, "roark.config.json"), JSON.stringify({ repo: "wrong/repo", model: "bad" }), "utf8");
+    await runProcessOrThrowPromise(
+      ["git", "remote", "add", "origin", "https://github.com/owner/origin.git"],
+      { cwd: repo },
+    );
+    await writeFile(
+      path.join(repo, "package.json"),
+      JSON.stringify({ scripts: { test: "bun test" } }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(repo, "roark.config.json"),
+      JSON.stringify({ repo: "wrong/repo", model: "bad" }),
+      "utf8",
+    );
 
     const raw = parseArgs(["auto", "--cwd", repo, "--dry-run"]);
     if ("help" in raw) throw new Error("expected options");
@@ -345,84 +502,133 @@ describe("hydrateCliOptions", () => {
     await writeConfig(withUnsupported, { model: "provider/model" });
     const unsupportedRaw = parseArgs(["auto", "--cwd", withUnsupported]);
     if ("help" in unsupportedRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(unsupportedRaw)).rejects.toThrow("Unsupported Roark config key 'model'");
+    expect(hydrateCliOptions(unsupportedRaw)).rejects.toThrow(
+      "Unsupported Roark config key 'model'",
+    );
 
     const withUnknown = await tempGitRepo();
     await writeConfig(withUnknown, { notAKey: true });
     const unknownRaw = parseArgs(["auto", "--cwd", withUnknown]);
     if ("help" in unknownRaw) throw new Error("expected options");
-    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow("Unknown Roark config key 'notAKey'");
+    expect(hydrateCliOptions(unknownRaw)).rejects.toThrow(
+      "Unknown Roark config key 'notAKey'",
+    );
   });
 
   test("fails clearly outside git repositories", async () => {
     const dir = await tempDir();
     const raw = parseArgs(["auto", "--cwd", dir]);
     if ("help" in raw) throw new Error("expected options");
-    expect(hydrateCliOptions(raw)).rejects.toThrow("must be run inside a git repository");
+    expect(hydrateCliOptions(raw)).rejects.toThrow(
+      "must be run inside a git repository",
+    );
   });
 
   test("auto and continue fail before running when verify cannot be configured or inferred", async () => {
     const repo = await tempGitRepo();
-    await runProcessOrThrowPromise(["git", "remote", "add", "origin", "https://github.com/owner/repo.git"], { cwd: repo });
+    await runProcessOrThrowPromise(
+      ["git", "remote", "add", "origin", "https://github.com/owner/repo.git"],
+      { cwd: repo },
+    );
 
-    for (const argv of [["auto", "--cwd", repo], ["continue", "1", "--cwd", repo]]) {
+    for (const argv of [
+      ["auto", "--cwd", repo],
+      ["continue", "1", "--cwd", repo],
+    ]) {
       const raw = parseArgs(argv);
       if ("help" in raw) throw new Error("expected options");
-      expect(hydrateCliOptions(raw)).rejects.toThrow("Could not determine verification command");
+      expect(hydrateCliOptions(raw)).rejects.toThrow(
+        "Could not determine verification command",
+      );
     }
   });
 });
 
-describe("loadRoarkConfig notifications", () => {
+describe("loadRoarkConfigPromise notifications", () => {
   test("parses the exit notification opt-in and defaults to disabled when absent", async () => {
     const enabledRepo = await tempGitRepo();
     await writeConfig(enabledRepo, { notifications: { onExit: true } });
-    expect((await loadRoarkConfig(enabledRepo)).notifications).toEqual({ onExit: true });
+    expect((await loadRoarkConfigPromise(enabledRepo)).notifications).toEqual({
+      onExit: true,
+    });
 
     const defaultRepo = await tempGitRepo();
     await writeConfig(defaultRepo, {});
-    expect((await loadRoarkConfig(defaultRepo)).notifications?.onExit ?? false).toBe(false);
+    expect(
+      (await loadRoarkConfigPromise(defaultRepo)).notifications?.onExit ??
+        false,
+    ).toBe(false);
   });
 
   test("rejects invalid notification values and unknown nested keys", async () => {
     const invalidTypeRepo = await tempGitRepo();
     await writeConfig(invalidTypeRepo, { notifications: { onExit: "yes" } });
-    expect(loadRoarkConfig(invalidTypeRepo)).rejects.toThrow("notifications.onExit' must be a boolean");
+    expect(loadRoarkConfigPromise(invalidTypeRepo)).rejects.toThrow(
+      "notifications.onExit' must be a boolean",
+    );
 
     const unknownKeyRepo = await tempGitRepo();
-    await writeConfig(unknownKeyRepo, { notifications: { onExit: true, sound: true } });
-    expect(loadRoarkConfig(unknownKeyRepo)).rejects.toThrow("Unknown Roark config key 'notifications.sound'");
+    await writeConfig(unknownKeyRepo, {
+      notifications: { onExit: true, sound: true },
+    });
+    expect(loadRoarkConfigPromise(unknownKeyRepo)).rejects.toThrow(
+      "Unknown Roark config key 'notifications.sound'",
+    );
   });
 });
 
 describe("parseGithubRepoFromOrigin", () => {
   test("parses GitHub HTTPS and SSH origin URLs", () => {
-    expect(parseGithubRepoFromOrigin("https://github.com/owner/repo.git")).toBe("owner/repo");
-    expect(parseGithubRepoFromOrigin("https://github.com/owner/repo")).toBe("owner/repo");
-    expect(parseGithubRepoFromOrigin("git@github.com:owner/repo.git")).toBe("owner/repo");
-    expect(parseGithubRepoFromOrigin("ssh://git@github.com/owner/repo.git")).toBe("owner/repo");
-    expect(parseGithubRepoFromOrigin("https://example.com/owner/repo.git")).toBeUndefined();
+    expect(parseGithubRepoFromOrigin("https://github.com/owner/repo.git")).toBe(
+      "owner/repo",
+    );
+    expect(parseGithubRepoFromOrigin("https://github.com/owner/repo")).toBe(
+      "owner/repo",
+    );
+    expect(parseGithubRepoFromOrigin("git@github.com:owner/repo.git")).toBe(
+      "owner/repo",
+    );
+    expect(
+      parseGithubRepoFromOrigin("ssh://git@github.com/owner/repo.git"),
+    ).toBe("owner/repo");
+    expect(
+      parseGithubRepoFromOrigin("https://example.com/owner/repo.git"),
+    ).toBeUndefined();
   });
 });
 
 describe("inferVerifyCommand", () => {
   test("uses Bun for JS repos and falls back to Makefile test target", async () => {
     const withTypecheck = await tempDir();
-    await writeFile(path.join(withTypecheck, "package.json"), JSON.stringify({ scripts: { typecheck: "tsc", test: "bun test" } }), "utf8");
+    await writeFile(
+      path.join(withTypecheck, "package.json"),
+      JSON.stringify({ scripts: { typecheck: "tsc", test: "bun test" } }),
+      "utf8",
+    );
     expect(await inferVerifyCommand(withTypecheck)).toBe("bun run typecheck");
 
     const withTest = await tempDir();
-    await writeFile(path.join(withTest, "package.json"), JSON.stringify({ scripts: { test: "bun test" } }), "utf8");
+    await writeFile(
+      path.join(withTest, "package.json"),
+      JSON.stringify({ scripts: { test: "bun test" } }),
+      "utf8",
+    );
     expect(await inferVerifyCommand(withTest)).toBe("bun run test");
 
     const withMakefile = await tempDir();
-    await writeFile(path.join(withMakefile, "Makefile"), "test:\n\techo ok\n", "utf8");
+    await writeFile(
+      path.join(withMakefile, "Makefile"),
+      "test:\n\techo ok\n",
+      "utf8",
+    );
     expect(await inferVerifyCommand(withMakefile)).toBe("make test");
   });
 });
 
 async function tempDir(): Promise<string> {
-  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "roark-hydrate-")));
+  const dir = await realpath(
+    await mkdtemp(path.join(tmpdir(), "roark-hydrate-")),
+  );
   tempDirs.push(dir);
   return dir;
 }
@@ -433,7 +639,14 @@ async function tempGitRepo(): Promise<string> {
   return dir;
 }
 
-async function writeConfig(repo: string, config: Record<string, unknown>): Promise<void> {
+async function writeConfig(
+  repo: string,
+  config: Record<string, unknown>,
+): Promise<void> {
   await mkdir(path.join(repo, ".roark"), { recursive: true });
-  await writeFile(path.join(repo, ".roark", "config.json"), JSON.stringify(config), "utf8");
+  await writeFile(
+    path.join(repo, ".roark", "config.json"),
+    JSON.stringify(config),
+    "utf8",
+  );
 }

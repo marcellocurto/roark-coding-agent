@@ -1,12 +1,25 @@
+import { fromLegacyPromise } from "../runtime/application.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
 import type { ApplicationExecution } from "../runtime/application.ts";
-import { ensureGitHubLabels, type EnsureGitHubLabelsResult, type RequiredGitHubLabel } from "../github/labels.ts";
+import {
+  type EnsureGitHubLabelsResult,
+  type RequiredGitHubLabel,
+} from "../github/labels.ts";
+import { ensureGitHubLabelsPromise as ensureGitHubLabels } from "../github/promise.ts";
 
 export const reviewerIssueTriageLabels = ["needs-triage"] as const;
-export const reviewerIssueClassificationLabels = ["external-blocker", "follow-up", "suggestion"] as const;
+export const reviewerIssueClassificationLabels = [
+  "external-blocker",
+  "follow-up",
+  "suggestion",
+] as const;
 
-export type ReviewerIssueClassificationLabel = typeof reviewerIssueClassificationLabels[number];
+export type ReviewerIssueClassificationLabel =
+  (typeof reviewerIssueClassificationLabels)[number];
 
-export function reviewerIssueLabelForClassification(classification: ReviewerIssueClassificationLabel): string {
+export function reviewerIssueLabelForClassification(
+  classification: ReviewerIssueClassificationLabel,
+): string {
   return `review:${classification}`;
 }
 
@@ -28,13 +41,15 @@ export const requiredReviewerIssueLabels: RequiredGitHubLabel[] = [
     role: "reviewer-generated-external-blocker",
     name: "review:external-blocker",
     color: "D73A4A",
-    description: "Reviewer classification for an issue generated from an external blocker finding.",
+    description:
+      "Reviewer classification for an issue generated from an external blocker finding.",
   },
   {
     role: "reviewer-generated-follow-up",
     name: "review:follow-up",
     color: "0E8A16",
-    description: "Reviewer classification for generated non-blocking follow-up work.",
+    description:
+      "Reviewer classification for generated non-blocking follow-up work.",
   },
   {
     role: "reviewer-generated-suggestion",
@@ -44,6 +59,24 @@ export const requiredReviewerIssueLabels: RequiredGitHubLabel[] = [
   },
 ];
 
-export async function ensureReviewerIssueLabels(options: { cwd: string; repo?: string | undefined }, application?: ApplicationExecution): Promise<EnsureGitHubLabelsResult> {
-  return ensureGitHubLabels({ cwd: options.cwd, repo: options.repo, labels: requiredReviewerIssueLabels }, application);
+export async function ensureReviewerIssueLabels(
+  options: { cwd: string; repo?: string | undefined },
+  application?: ApplicationExecution,
+): Promise<EnsureGitHubLabelsResult> {
+  if (!application)
+    return runApplicationPromise(
+      fromLegacyPromise((application) =>
+        ensureReviewerIssueLabels(options, application),
+      ),
+      application,
+    );
+
+  return ensureGitHubLabels(
+    {
+      cwd: options.cwd,
+      repo: options.repo,
+      labels: requiredReviewerIssueLabels,
+    },
+    application,
+  );
 }

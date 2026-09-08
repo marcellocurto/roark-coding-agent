@@ -1,4 +1,6 @@
-import { readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import type { ApplicationExecution } from "../runtime/application.ts";
+import { type WorkflowContext } from "../workflow/artifacts.ts";
+import { readArtifactPromise as readArtifact } from "../workflow/artifacts-promise.ts";
 import { parseReadinessResultJson } from "../workflow/readiness.ts";
 
 export function formatDoLocalModeStartMessage(issue: string): string {
@@ -16,9 +18,12 @@ export function formatDoLocalModeReadyMessage(issue: string): string {
 export async function printDoLocalModeReadyMessageIfReady(
   context: WorkflowContext,
   log: (message: string) => void = console.log,
+  application?: ApplicationExecution,
 ): Promise<void> {
   try {
-    const readiness = parseReadinessResultJson(await readArtifact(context, "readiness"));
+    const readiness = parseReadinessResultJson(
+      await readArtifact(context, "readiness", application),
+    );
     if (readiness.decision.status === "ready-for-pr") {
       log(`\n${formatDoLocalModeReadyMessage(context.issueInput)}`);
     }

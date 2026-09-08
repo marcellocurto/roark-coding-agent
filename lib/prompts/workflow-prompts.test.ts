@@ -13,7 +13,11 @@ import {
   sharedSystemPrompt,
   triagePrompt,
 } from "./workflow-prompts.ts";
-import { verificationBeforeFixRef, writeArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import {
+  verificationBeforeFixRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
+import { writeArtifactPromise as writeArtifact } from "../workflow/artifacts-promise.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 
 const context = {
@@ -37,16 +41,16 @@ const splitContext = {
 
 const tempDirs: string[] = [];
 
-function phasePrompts(testContext: WorkflowContext): string[] {
+async function phasePrompts(testContext: WorkflowContext): Promise<string[]> {
   return [
     triagePrompt(testContext),
     planDraftPrompt(testContext),
     planPrompt(testContext),
     implementationPrompt(testContext),
-    codeRefinementPrompt(testContext, 0),
-    reviewAPrompt(testContext),
-    reviewBPrompt(testContext),
-    fixPrompt(testContext, 1),
+    await codeRefinementPrompt(testContext, 0),
+    await reviewAPrompt(testContext),
+    await reviewBPrompt(testContext),
+    await fixPrompt(testContext, 1),
   ];
 }
 
@@ -55,14 +59,15 @@ function matchCount(value: string, pattern: RegExp): number {
 }
 
 afterEach(async () => {
-  for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
 });
 
 describe("workflow prompt structure and inputs", () => {
-  test("shared and phase prompts keep one balanced XML envelope", () => {
+  test("shared and phase prompts keep one balanced XML envelope", async () => {
     expect(sharedSystemPrompt).toContain("<system_prompt>");
     expect(sharedSystemPrompt).toContain("</system_prompt>");
-    for (const prompt of phasePrompts(context)) {
+    for (const prompt of await phasePrompts(context)) {
       expect(matchCount(prompt, /<workflow_phase\b/g)).toBe(1);
       expect(matchCount(prompt, /<\/workflow_phase>/g)).toBe(1);
       expect(matchCount(prompt, /<success_criteria>/g)).toBe(1);
@@ -76,31 +81,41 @@ describe("workflow prompt structure and inputs", () => {
 
   test("phase input artifact paths are reachable from split agent cwd", () => {
     const prompt = implementationPrompt(splitContext);
-    expect(prompt).toContain('<artifact kind="issue">../../runs/issue/123/issue.md</artifact>');
-    expect(prompt).toContain('<artifact kind="triage">../../runs/issue/123/triage.json</artifact>');
-    expect(prompt).not.toContain('<artifact kind="issue">.roark/runs/issue/123/issue.md</artifact>');
+    expect(prompt).toContain(
+      '<artifact kind="issue">../../runs/issue/123/issue.md</artifact>',
+    );
+    expect(prompt).toContain(
+      '<artifact kind="triage">../../runs/issue/123/triage.json</artifact>',
+    );
+    expect(prompt).not.toContain(
+      '<artifact kind="issue">.roark/runs/issue/123/issue.md</artifact>',
+    );
   });
 });
 
 describe("structured review contract", () => {
-  test("review agent B does not receive review agent A's artifact", () => {
-    const prompt = reviewBPrompt(context);
+  test("review agent B does not receive review agent A's artifact", async () => {
+    const prompt = await reviewBPrompt(context);
     expect(prompt).not.toContain('artifact kind="review_a"');
   });
 
-  test("later review passes receive only their own prior stable finding IDs", () => {
-    const reviewA = reviewAPrompt(context, 1);
-    const reviewB = reviewBPrompt(context, 1);
-    expect(reviewA).toContain('<artifact kind="prior_review_a">.roark/runs/issue/123/review-a-0.json</artifact>');
+  test("later review passes receive only their own prior stable finding IDs", async () => {
+    const reviewA = await reviewAPrompt(context, 1);
+    const reviewB = await reviewBPrompt(context, 1);
+    expect(reviewA).toContain(
+      '<artifact kind="prior_review_a">.roark/runs/issue/123/review-a-0.json</artifact>',
+    );
     expect(reviewA).not.toContain('kind="prior_review_b"');
-    expect(reviewB).toContain('<artifact kind="prior_review_b">.roark/runs/issue/123/review-b-0.json</artifact>');
+    expect(reviewB).toContain(
+      '<artifact kind="prior_review_b">.roark/runs/issue/123/review-b-0.json</artifact>',
+    );
     expect(reviewB).not.toContain('kind="prior_review_a"');
   });
 });
 
 describe("fix and refinement prompt inputs", () => {
-  test("restart code refinement prompt reads restarted implementation context instead of a fix log", () => {
-    const prompt = codeRefinementPrompt(context, 1, "restart");
+  test("restart code refinement prompt reads restarted implementation context instead of a fix log", async () => {
+    const prompt = await codeRefinementPrompt(context, 1, "restart");
 
     expect(prompt).toContain('<artifact kind="implementation_log">');
     expect(prompt).toContain('<artifact kind="baseline_reset">');
@@ -109,7 +124,9 @@ describe("fix and refinement prompt inputs", () => {
   });
 
   test("fix and subsequent workflow prompts include failed verification when present", async () => {
-    const runDir = await mkdtemp(path.join(tmpdir(), "roark-prompt-verification-"));
+    const runDir = await mkdtemp(
+      path.join(tmpdir(), "roark-prompt-verification-"),
+    );
     tempDirs.push(runDir);
     const verificationContext = {
       ...context,
@@ -119,10 +136,20 @@ describe("fix and refinement prompt inputs", () => {
       runDir,
       runDirRelative: ".",
     } satisfies WorkflowContext;
-    await writeArtifact(verificationContext, verificationBeforeFixRef(1), "# Verification\n\n## Exit Code\n1\n");
+    await writeArtifact(
+      verificationContext,
+      verificationBeforeFixRef(1),
+      "# Verification\n\n## Exit Code\n1\n",
+    );
 
-    expect(fixPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
-    expect(codeRefinementPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
-    expect(reviewAPrompt(verificationContext, 1)).toContain('<artifact kind="failed_verification">verification-before-fix-1.md</artifact>');
+    expect(await fixPrompt(verificationContext, 1)).toContain(
+      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+    );
+    expect(await codeRefinementPrompt(verificationContext, 1)).toContain(
+      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+    );
+    expect(await reviewAPrompt(verificationContext, 1)).toContain(
+      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+    );
   });
 });
