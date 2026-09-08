@@ -2,6 +2,7 @@
   "name": "roark-coding-agent",
   "version": "0.2.0",
   "description": "A CLI for running coding agents against GitHub issues and pull requests.",
+  "homepage": "https://agent.roark.at",
   "license": "MIT",
   "repository": {
     "type": "git",
