@@ -213,9 +213,11 @@ export const writePrRevisionJsonArtifact = Effect.fn(
   );
 }, Effect.uninterruptible);
 function artifactFilename(artifact: string): string {
-  return artifact in artifactFilenames
-    ? artifactFilenames[artifact as PrRevisionArtifactName]
-    : artifact;
+  return (
+    Object.entries(artifactFilenames).find(
+      ([name]) => name === artifact,
+    )?.[1] ?? artifact
+  );
 }
 export function formatPrFeedbackMarkdown(
   feedback: PullRequestFeedback,

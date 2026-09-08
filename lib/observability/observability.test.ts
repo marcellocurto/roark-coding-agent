@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +12,7 @@ import {
 import { createEventWriter } from "./events.ts";
 import { createFileRunObserver } from "./observer.ts";
 import { renderStatus } from "./status.ts";
-import { updateRunSummary } from "./summary.ts";
+import { readRunSummary, updateRunSummary } from "./summary.ts";
 
 const tempDirs: string[] = [];
 
@@ -149,23 +150,25 @@ describe("observability summary writing", () => {
     );
     await runApplicationPromise(observer.runCompleted({ status: "completed" }));
 
-    const summary = JSON.parse(
-      await readFile(path.join(runContext.runDir, "summary.json"), "utf8"),
-    ) as {
-      status: string;
-      attempt: number;
-      phases: {
-        triage: {
-          status: string;
-          artifactPath: string;
-          sessionId: string;
-          thinkingLevel: string;
-          requestedThinkingLevel: string;
-          effectiveThinkingLevel: string;
-        };
-      };
-      totals: Record<string, unknown>;
-    };
+    const summary = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          status: Schema.String,
+          attempt: Schema.Number,
+          phases: Schema.Struct({
+            triage: Schema.Struct({
+              status: Schema.String,
+              artifactPath: Schema.String,
+              sessionId: Schema.String,
+              thinkingLevel: Schema.String,
+              requestedThinkingLevel: Schema.String,
+              effectiveThinkingLevel: Schema.String,
+            }),
+          }),
+          totals: Schema.Record(Schema.String, Schema.Unknown),
+        }),
+      ),
+    )(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
     expect(summary.status).toBe("completed");
     expect(summary.attempt).toBe(2);
     expect(summary.phases.triage.status).toBe("completed");
@@ -219,13 +222,15 @@ describe("observability summary writing", () => {
 
     await runApplicationPromise(observer.runStarted({ command: "triage" }));
 
-    const summary = JSON.parse(
-      await readFile(path.join(runContext.runDir, "summary.json"), "utf8"),
-    ) as {
-      status: string;
-      phases: Record<string, unknown>;
-      totals: Record<string, unknown>;
-    };
+    const summary = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          status: Schema.String,
+          phases: Schema.Record(Schema.String, Schema.Unknown),
+          totals: Schema.Record(Schema.String, Schema.Unknown),
+        }),
+      ),
+    )(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
     expect(summary.status).toBe("running");
     expect(summary.phases).toEqual({});
     expect(summary.totals).toMatchObject({
@@ -271,14 +276,16 @@ describe("observability summary writing", () => {
       outcomeDetail: "verification failed",
     });
 
-    const summary = JSON.parse(
-      await readFile(path.join(runContext.runDir, "summary.json"), "utf8"),
-    ) as {
-      status: string;
-      endedAt: string;
-      durationMs: number;
-      lastError: string;
-    };
+    const summary = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          status: Schema.String,
+          endedAt: Schema.String,
+          durationMs: Schema.Number,
+          lastError: Schema.String,
+        }),
+      ),
+    )(await readFile(path.join(runContext.runDir, "summary.json"), "utf8"));
     expect(summary.status).toBe("failed");
     expect(summary.endedAt).toBe("2026-05-07T00:00:05.000Z");
     expect(summary.durationMs).toBe(5000);
@@ -306,6 +313,17 @@ describe("observability summary writing", () => {
 });
 
 describe("status rendering", () => {
+  test("ignores invalid summary data instead of passing it to status rendering", async () => {
+    const cwd = await tempDir();
+    const summaryPath = path.join(cwd, "summary.json");
+    await writeFile(
+      summaryPath,
+      JSON.stringify({ version: 1, status: "running", phases: null }),
+    );
+    expect(
+      await runApplicationPromise(readRunSummary(summaryPath)),
+    ).toBeUndefined();
+  });
   test("renders a specific attempt summary", async () => {
     const cwd = await tempDir();
     const summaryDir = path.join(cwd, ".roark/runs/issue/42/attempts/2");

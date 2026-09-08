@@ -233,13 +233,25 @@ export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] 
     "verification",
   ] as const;
 
-const staticArtifactByName = Object.fromEntries(
-  STATIC_ARTIFACTS.map((artifact) => [artifact.name, artifact]),
-) as Record<StaticArtifactName, StaticArtifactDefinition>;
+function staticArtifactByName(
+  name: StaticArtifactName,
+): StaticArtifactDefinition {
+  const definition = STATIC_ARTIFACTS.find(
+    (artifact) => artifact.name === name,
+  );
+  if (!definition) throw new Error(`Unknown static artifact: ${name}`);
+  return definition;
+}
 
-const numberedArtifactByName = Object.fromEntries(
-  NUMBERED_ARTIFACTS.map((artifact) => [artifact.name, artifact]),
-) as Record<NumberedArtifactName, NumberedArtifactDefinition>;
+function numberedArtifactByName(
+  name: NumberedArtifactName,
+): NumberedArtifactDefinition {
+  const definition = NUMBERED_ARTIFACTS.find(
+    (artifact) => artifact.name === name,
+  );
+  if (!definition) throw new Error(`Unknown numbered artifact: ${name}`);
+  return definition;
+}
 
 const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> =
   {};
@@ -316,8 +328,8 @@ export function baselineResetLogRef(pass: number): ArtifactRef {
 
 export function artifactFilename(artifact: ArtifactRef): string {
   if (typeof artifact === "string")
-    return staticArtifactByName[artifact].filename;
-  const definition = numberedArtifactByName[artifact.name];
+    return staticArtifactByName(artifact).filename;
+  const definition = numberedArtifactByName(artifact.name);
   return `${definition.filenamePrefix}-${artifact.pass}${definition.filenameSuffix ?? ""}.${definition.extension ?? "md"}`;
 }
 
@@ -328,7 +340,7 @@ export function formatArtifactRef(artifact: ArtifactRef): string {
 
 export function artifactIdentity(artifact: ArtifactRef): ArtifactIdentity {
   if (typeof artifact === "string") {
-    const definition = staticArtifactByName[artifact];
+    const definition = staticArtifactByName(artifact);
     return {
       name: definition.name,
       kind: "static",
@@ -337,7 +349,7 @@ export function artifactIdentity(artifact: ArtifactRef): ArtifactIdentity {
     };
   }
 
-  const definition = numberedArtifactByName[artifact.name];
+  const definition = numberedArtifactByName(artifact.name);
   return {
     name: definition.name,
     kind: "numbered",

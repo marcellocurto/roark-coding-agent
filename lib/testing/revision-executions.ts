@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type { RevisionExecutionResult } from "../pr-revision/execution.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
@@ -41,7 +42,7 @@ export async function submitRevisionExecution(
     result,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

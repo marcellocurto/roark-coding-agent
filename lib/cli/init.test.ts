@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { Schema, Effect } from "effect";
+
 import { runApplicationPromise } from "../runtime/application.ts";
 import { runProcessOrThrow, runProcess } from "./process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -272,9 +273,9 @@ async function expectConfig(
   expect(await readConfig(repo)).toEqual(expected);
 }
 async function readConfig(repo: string): Promise<Record<string, unknown>> {
-  return JSON.parse(
-    await readFile(path.join(repo, ".roark", "config.json"), "utf8"),
-  ) as Record<string, unknown>;
+  return Schema.decodeUnknownSync(
+    Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+  )(await readFile(path.join(repo, ".roark", "config.json"), "utf8"));
 }
 async function tempDir(): Promise<string> {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), "roark-init-")));

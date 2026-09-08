@@ -1,3 +1,4 @@
+import { Predicate } from "effect";
 import { shortenPath } from "../presentation/terminal.ts";
 
 export { formatToolDuration } from "../presentation/duration.ts";
@@ -143,9 +144,7 @@ function truncate(value: string, maxLength: number): string {
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+  return Predicate.isObject(value) ? value : undefined;
 }
 
 function toPositiveInteger(value: unknown): number | undefined {

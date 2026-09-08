@@ -47,6 +47,60 @@ export type AttemptSummary = Pick<
   "attempt" | "branch" | "startedAt" | "endedAt" | "outcome" | "runArtifactPath"
 >;
 
+const attemptSummarySchema = Schema.Struct({
+  attempt: Schema.Number,
+  branch: Schema.String,
+  startedAt: Schema.String,
+  endedAt: Schema.NullOr(Schema.String),
+  runArtifactPath: Schema.String,
+  outcome: Schema.Literals([
+    "in-progress",
+    "published",
+    "triage-stopped",
+    "failed-readiness",
+    "failed-verification",
+    "failed-output-contract",
+    "errored",
+  ]),
+});
+const attemptMetadataSchema = Schema.Struct({
+  ...attemptSummarySchema.fields,
+  issueNumber: Schema.Number,
+  baseBranch: Schema.String,
+  worktreePath: Schema.String,
+  outcomeDetail: Schema.NullOr(Schema.String),
+  workspace: Schema.optional(
+    Schema.Struct({
+      path: Schema.String,
+      strategy: Schema.Literal("clone"),
+      cloneRemote: Schema.String,
+      cloneUrl: Schema.optional(Schema.String),
+      createdNow: Schema.Boolean,
+    }),
+  ),
+  githubComments: Schema.optionalKey(
+    Schema.Struct({
+      issue: Schema.optional(
+        Schema.Record(
+          Schema.String,
+          Schema.Struct({
+            id: Schema.Number,
+            url: Schema.optional(Schema.String),
+            marker: Schema.String,
+            updatedAt: Schema.String,
+          }),
+        ),
+      ),
+    }),
+  ),
+});
+const parseAttemptSummaries = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.mutable(Schema.Array(attemptSummarySchema))),
+);
+const parseAttemptMetadata = Schema.decodeUnknownSync(
+  Schema.fromJsonString(attemptMetadataSchema),
+);
+
 export interface Clock {
   now(): Date;
 }
@@ -223,8 +277,7 @@ export const attemptStoreLayer = Layer.effect(
         const raw = yield* fs.readFileString(file);
         return yield* Effect.try({
           try: () => {
-            const parsed: unknown = JSON.parse(raw);
-            return Array.isArray(parsed) ? (parsed as AttemptSummary[]) : [];
+            return parseAttemptSummaries(raw, { onExcessProperty: "preserve" });
           },
           catch: (cause) => new AttemptDataError({ path: file, cause }),
         });
@@ -273,7 +326,8 @@ export const attemptStoreLayer = Layer.effect(
         const file = attemptMetadataPath(issueDir, attempt);
         const raw = yield* fs.readFileString(file);
         return yield* Effect.try({
-          try: () => JSON.parse(raw) as AttemptMetadata,
+          try: () =>
+            parseAttemptMetadata(raw, { onExcessProperty: "preserve" }),
           catch: (cause) => new AttemptDataError({ path: file, cause }),
         });
       }),

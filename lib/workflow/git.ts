@@ -7,6 +7,15 @@ export interface PreImplementationBaseline {
   capturedAt: string;
   excludes: readonly [".roark"];
 }
+export const parsePreImplementationBaseline = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      head: Schema.String,
+      capturedAt: Schema.String,
+      excludes: Schema.Tuple([Schema.Literal(".roark")]),
+    }),
+  ),
+);
 export const assertCleanGit = Effect.fn("assertCleanGit")(function* (context: {
   cwd: string;
   yes: boolean;

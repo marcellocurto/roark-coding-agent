@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { Schema, Effect } from "effect";
+
 import {
   createIssuesFromCurationPlan,
   type CreateIssuesOptions,
@@ -112,11 +113,14 @@ describe("createIssuesFromCurationPlan", () => {
   test("dry-run reports approved plan items without calling GitHub or writing results", async () => {
     await Promise.resolve();
     const context = await tempContext({ yes: false });
-    const plan = basePlan();
-    plan.issuesToCreate.push({
-      planItemId: "bad",
-      proposedTitle: "Bad",
-    } as never);
+    const validPlan = basePlan();
+    const plan = {
+      ...validPlan,
+      issuesToCreate: [
+        ...validPlan.issuesToCreate,
+        { planItemId: "bad", proposedTitle: "Bad" },
+      ],
+    };
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
@@ -183,15 +187,12 @@ describe("createIssuesFromCurationPlan", () => {
   });
   test("invalid normalized classifications are skipped as malformed instead of defaulting to follow-up", async () => {
     const context = await tempContext({ yes: false });
-    const plan = basePlan();
-    const invalidItem = planItem(
-      "bad-kind-1",
-      "Bad kind",
-      ["follow-up"],
-      "follow-up",
-    ) as unknown as Record<string, unknown>;
-    invalidItem["classification"] = "blocking";
-    plan.issuesToCreate = [invalidItem as never];
+    const validPlan = basePlan();
+    const item = planItem("bad-kind-1", "Bad kind", ["follow-up"], "follow-up");
+    const plan = {
+      ...validPlan,
+      issuesToCreate: [{ ...item, classification: "blocking" }],
+    };
     await runApplicationPromise(
       writeJsonArtifact(context, "issueCurationPlan", plan),
     );
@@ -559,14 +560,18 @@ describe("createIssuesFromCurationPlan", () => {
         message: "rate limited",
       },
     ]);
-    const written = JSON.parse(
+    const written = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          created: Schema.mutable(Schema.Array(Schema.Unknown)),
+          failed: Schema.mutable(Schema.Array(Schema.Unknown)),
+        }),
+      ),
+    )(
       await runApplicationPromise(
         readArtifact(context, "issueCreationResults"),
       ),
-    ) as {
-      created: unknown[];
-      failed: unknown[];
-    };
+    );
     expect(written.created).toHaveLength(1);
     expect(written.failed).toHaveLength(1);
   });

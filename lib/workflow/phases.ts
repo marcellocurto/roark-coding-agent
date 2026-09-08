@@ -1,4 +1,3 @@
-import { decodeJson } from "./validation.ts";
 import { GitHub } from "../github/service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Cause, Effect, Exit, FileSystem } from "effect";
@@ -31,7 +30,7 @@ import {
   assertCleanGit,
   capturePreImplementationBaseline,
   resetWorktreeToPreImplementationBaseline,
-  type PreImplementationBaseline,
+  parsePreImplementationBaseline,
 } from "./git.ts";
 import { createIssuesPhase } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "./issue-curation.ts";
@@ -313,9 +312,10 @@ export const resetBaselinePhase = Effect.fn("resetBaselinePhase")(function* (
   return yield* runPresentedPhase(
     display,
     Effect.fnUntraced(function* () {
-      const baseline = (yield* decodeJson(
-        yield* readArtifact(context, "preImplementationBaseline"),
-      )) as PreImplementationBaseline;
+      const raw = yield* readArtifact(context, "preImplementationBaseline");
+      const baseline = yield* Effect.try(() =>
+        parsePreImplementationBaseline(raw),
+      );
       yield* resetWorktreeToPreImplementationBaseline({
         cwd: context.agentCwd,
         baseline,

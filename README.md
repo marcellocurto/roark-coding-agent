@@ -127,3 +127,11 @@ bun run check
 `bun run lint:full` runs the same complete check. Both exclude `repos/`
 and disable nested lint configurations. Formatting is separate: use
 `bun run format` or `bun run format:check`.
+
+Linting also checks for unsafe type assertions and common Effect mistakes:
+discarded Effects, incorrect generator yields, nested Effects, async work inside
+`Effect.sync`, missing services, and unsafe Effect casts. The lint command first
+runs `lint:setup`, which applies the official `@effect/tsgo` Oxlint integration to
+the local development dependencies. This step is repeatable after a fresh
+install and never runs when installing the published CLI. Keep `@effect/tsgo`,
+`oxlint`, and `oxlint-tsgolint` pinned to compatible versions.

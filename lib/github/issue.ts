@@ -1,5 +1,5 @@
 import { decodeGitHubResponse } from "./errors.ts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { GitHubError, GitHubRequirements } from "./errors.ts";
 
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
@@ -10,6 +10,41 @@ export interface ParsedIssueRef {
   issueNumber: string;
   repo?: string | undefined;
 }
+
+const issueLabelSchema = Schema.Struct({ name: Schema.String });
+const issueListItemSchema = Schema.Struct({
+  number: Schema.Number,
+  title: Schema.String,
+  body: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  createdAt: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.mutable(Schema.Array(issueLabelSchema))),
+});
+const issueSchema = Schema.Struct({
+  ...issueListItemSchema.fields,
+  state: Schema.optional(Schema.String),
+  assignees: Schema.optional(
+    Schema.mutable(Schema.Array(Schema.Struct({ login: Schema.String }))),
+  ),
+  milestone: Schema.optional(
+    Schema.NullOr(Schema.Struct({ title: Schema.String })),
+  ),
+  comments: Schema.optionalKey(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          author: Schema.optional(Schema.Struct({ login: Schema.String })),
+          body: Schema.optional(Schema.String),
+          createdAt: Schema.optional(Schema.String),
+        }),
+      ),
+    ),
+  ),
+});
+const parseIssueList = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.mutable(Schema.Array(issueListItemSchema))),
+);
+const parseIssue = Schema.decodeUnknownSync(Schema.fromJsonString(issueSchema));
 
 export interface GitHubIssue {
   number: number;
@@ -140,9 +175,7 @@ export const listOpenGitHubIssues = Effect.fn("GitHub.listOpenGitHubIssues")(
       cwd: options.cwd,
       label: "gh issue list",
     });
-    return (yield* decodeGitHubResponse(
-      () => JSON.parse(stdout) as unknown,
-    )) as GitHubIssueListItem[];
+    return yield* decodeGitHubResponse(() => parseIssueList(stdout));
   },
 );
 
@@ -295,9 +328,7 @@ export const fetchGitHubIssue = Effect.fn("GitHub.fetchGitHubIssue")(function* (
     cwd: options.cwd,
     label: "gh issue view",
   });
-  const issue = (yield* decodeGitHubResponse(
-    () => JSON.parse(stdout) as unknown,
-  )) as GitHubIssue;
+  const issue = yield* decodeGitHubResponse(() => parseIssue(stdout));
   const repo = yield* resolveGitHubIssueRepo({
     cwd: options.cwd,
     explicitRepo: parsed.repo,

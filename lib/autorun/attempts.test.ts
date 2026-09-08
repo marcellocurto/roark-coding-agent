@@ -1,5 +1,6 @@
+import { Schema, Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
-import { Effect } from "effect";
+
 import {
   AttemptStore,
   attemptArtifactRelativePath,
@@ -177,6 +178,44 @@ describe("allocateNextAttempt", () => {
   });
 });
 describe("writeAttemptMetadata + readAttemptMetadata", () => {
+  test("rejects well-formed JSON with invalid metadata fields", async () => {
+    const issueDir = await makeIssueDir();
+    const metadata = formatAttemptMetadata(baseInput);
+    await mkdir(attemptDir(issueDir, metadata.attempt), { recursive: true });
+    await writeFile(
+      attemptMetadataPath(issueDir, metadata.attempt),
+      JSON.stringify({ ...metadata, attempt: "invalid" }),
+    );
+    const result = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(issueDir, metadata.attempt),
+      ).pipe(Effect.result),
+    );
+    expect(result).toMatchObject({
+      _tag: "Failure",
+      failure: { _tag: "AttemptDataError" },
+    });
+  });
+
+  test("preserves additional metadata fields when reading existing attempts", async () => {
+    const issueDir = await makeIssueDir();
+    const metadata = {
+      ...formatAttemptMetadata(baseInput),
+      extension: { detail: "retained" },
+    };
+    await mkdir(attemptDir(issueDir, metadata.attempt), { recursive: true });
+    await writeFile(
+      attemptMetadataPath(issueDir, metadata.attempt),
+      JSON.stringify(metadata),
+    );
+    const parsed = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(issueDir, metadata.attempt),
+      ),
+    );
+    expect(parsed).toEqual(metadata);
+  });
+
   test("round-trips metadata as JSON with stable formatting", async () => {
     const issueDir = await makeIssueDir();
     const metadata = formatAttemptMetadata({
@@ -281,11 +320,11 @@ describe("updateAttemptIndex", () => {
       ),
     );
     expect(second.map((entry) => entry.attempt)).toEqual([1, 2]);
-    const persisted = JSON.parse(
-      await readFile(attemptIndexPath(issueDir), "utf8"),
-    ) as {
-      attempt: number;
-    }[];
+    const persisted = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.mutable(Schema.Array(Schema.Struct({ attempt: Schema.Number }))),
+      ),
+    )(await readFile(attemptIndexPath(issueDir), "utf8"));
     expect(Array.isArray(persisted)).toBe(true);
     expect(persisted).toHaveLength(2);
     expect(persisted[1]?.attempt).toBe(2);

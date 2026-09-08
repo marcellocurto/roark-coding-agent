@@ -1,10 +1,5 @@
 import {
-  type ProcessResult,
-  runProcessOrThrow,
-  runProcess,
-  type ProcessOptions,
-} from "../cli/process.ts";
-import {
+  Schema,
   Scope,
   Cause,
   Deferred,
@@ -13,6 +8,13 @@ import {
   Fiber,
   FileSystem,
 } from "effect";
+import {
+  type ProcessResult,
+  runProcessOrThrow,
+  runProcess,
+  type ProcessOptions,
+} from "../cli/process.ts";
+
 import {
   runApplicationPromise,
   type ApplicationExecution,
@@ -458,12 +460,11 @@ describe("managed clone workspaces", () => {
         error instanceof Error &&
         error.message.includes("afterCreate hook failed"),
     );
-    const state = JSON.parse(
-      await readFile(path.join(workspacePath, workspaceStateFile), "utf8"),
-    ) as {
-      hook: string;
-      stderrTail: string;
-    };
+    const state = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({ hook: Schema.String, stderrTail: Schema.String }),
+      ),
+    )(await readFile(path.join(workspacePath, workspaceStateFile), "utf8"));
     expect(state.hook).toBe("afterCreate");
     expect(state.stderrTail).toContain("install failed");
     await rm(root, { recursive: true, force: true });
@@ -1182,13 +1183,15 @@ async function readWorkspaceLockOwner(lockDir: string): Promise<{
   pid?: unknown;
   createdAt?: unknown;
 }> {
-  return JSON.parse(
-    await readFile(path.join(lockDir, "owner.json"), "utf8"),
-  ) as {
-    token?: unknown;
-    pid?: unknown;
-    createdAt?: unknown;
-  };
+  return Schema.decodeUnknownSync(
+    Schema.fromJsonString(
+      Schema.Struct({
+        token: Schema.optional(Schema.Unknown),
+        pid: Schema.optional(Schema.Unknown),
+        createdAt: Schema.optional(Schema.Unknown),
+      }),
+    ),
+  )(await readFile(path.join(lockDir, "owner.json"), "utf8"));
 }
 function findDeadPid(): number {
   for (const pid of [2147483647, 2147483646, 999999, 424242]) {

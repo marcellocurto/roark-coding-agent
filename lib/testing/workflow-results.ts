@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
 import type { TriageResult, TriageVerdict } from "../triage/result.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
@@ -107,7 +108,7 @@ async function submit(
     result,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

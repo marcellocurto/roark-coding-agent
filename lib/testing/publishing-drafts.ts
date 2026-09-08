@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type {
   IssueDraft,
   IssueDraftCollection,
@@ -36,7 +37,7 @@ export async function submitPrDraft(
     draft,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }
@@ -73,7 +74,7 @@ export async function submitIssueDrafts(
     collection,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

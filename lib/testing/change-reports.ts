@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type { ChangeReport } from "../change-report/result.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
@@ -39,7 +40,7 @@ export async function submitChangeReport(
     report,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

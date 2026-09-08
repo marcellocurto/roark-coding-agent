@@ -12,8 +12,8 @@ export interface WorkspaceRemovalSelection {
   selectedIndexes: number[];
 }
 
-type TtyInput = NodeJS.ReadStream & { isTTY?: boolean };
-type WritableOutput = NodeJS.WriteStream | { write(text: string): unknown };
+type TtyInput = NodeJS.ReadableStream & { isTTY?: boolean };
+type WritableOutput = NodeJS.WritableStream;
 
 const menu = `Issue workflows
 1. Work on next ready issue
@@ -50,7 +50,7 @@ export async function resolveInteractiveArgv(
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
 
-  if (!stdin.isTTY) return ["--help"];
+  if (stdin.isTTY !== true) return ["--help"];
   return runReadlinePrompt(
     stdin,
     stdout,
@@ -107,7 +107,7 @@ export async function resolveInteractiveWorkspaceRemoval(options: {
 }): Promise<WorkspaceRemovalSelection | undefined> {
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
-  if (!stdin.isTTY) {
+  if (stdin.isTTY !== true) {
     throw new Error(
       "Interactive workspace selection requires a TTY. Pass issue numbers or use --pr to select workspaces explicitly.",
     );
@@ -178,7 +178,7 @@ async function runReadlinePrompt<T>(
 ): Promise<T | undefined> {
   const rl = createInterface({
     input: stdin,
-    output: stdout as NodeJS.WriteStream,
+    output: stdout,
   });
   rl.on("SIGINT", () => {
     rl.close();

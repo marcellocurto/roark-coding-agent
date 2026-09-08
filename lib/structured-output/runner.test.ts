@@ -1,3 +1,5 @@
+import { Schema } from "effect";
+import { toolContext } from "../testing/tool-context.ts";
 import {
   fromLegacyPromise,
   runApplicationPromise,
@@ -54,7 +56,7 @@ describe("runStructuredArtifact", () => {
       markdown?: string;
     } = {};
     const writeOrder: string[] = [];
-    const result = await runTestArtifact(
+    const result = await runTestArtifact<{ summary: string }>(
       request,
       async (agentRequest) => {
         const tool = agentRequest.customTools?.find(
@@ -66,7 +68,7 @@ describe("runStructuredArtifact", () => {
           { summary: "accepted" },
           undefined,
           undefined,
-          {} as never,
+          toolContext,
         );
         return "ignored agent prose";
       },
@@ -78,10 +80,9 @@ describe("runStructuredArtifact", () => {
           { summary: Type.String({ minLength: 1 }) },
           { additionalProperties: false },
         ),
-        validate: (value) =>
-          value as {
-            summary: string;
-          },
+        validate: Schema.decodeUnknownSync(
+          Schema.Struct({ summary: Schema.String }),
+        ),
         formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
         createError: (message) => new Error(message),
       },
@@ -110,7 +111,7 @@ describe("runStructuredArtifact", () => {
   });
   test("writes nothing when the agent does not submit", async () => {
     let writes = 0;
-    const run = runTestArtifact(
+    const run = runTestArtifact<{ summary: string }>(
       request,
       () => Promise.resolve('{"summary":"not submitted"}'),
       {
@@ -118,10 +119,9 @@ describe("runStructuredArtifact", () => {
         label: "Example",
         noun: "example",
         parameters: Type.Object({ summary: Type.String() }),
-        validate: (value) =>
-          value as {
-            summary: string;
-          },
+        validate: Schema.decodeUnknownSync(
+          Schema.Struct({ summary: Schema.String }),
+        ),
         formatMarkdown: (value) => value.summary,
         createError: (message) => new Error(message),
       },
@@ -142,7 +142,7 @@ describe("runStructuredArtifact", () => {
   });
   test("does not commit canonical JSON when Markdown persistence fails", async () => {
     let jsonWrites = 0;
-    const run = runTestArtifact(
+    const run = runTestArtifact<{ summary: string }>(
       request,
       async (agentRequest) => {
         const tool = agentRequest.customTools?.find(
@@ -154,7 +154,7 @@ describe("runStructuredArtifact", () => {
           { summary: "accepted" },
           undefined,
           undefined,
-          {} as never,
+          toolContext,
         );
         return "";
       },
@@ -163,10 +163,9 @@ describe("runStructuredArtifact", () => {
         label: "Example",
         noun: "example",
         parameters: Type.Object({ summary: Type.String() }),
-        validate: (value) =>
-          value as {
-            summary: string;
-          },
+        validate: Schema.decodeUnknownSync(
+          Schema.Struct({ summary: Schema.String }),
+        ),
         formatMarkdown: (value) => value.summary,
         createError: (message) => new Error(message),
       },

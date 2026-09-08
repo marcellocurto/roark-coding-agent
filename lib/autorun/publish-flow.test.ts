@@ -1,3 +1,4 @@
+import { Schema, Effect, PlatformError } from "effect";
 import {
   readArtifact,
   writeArtifact,
@@ -16,7 +17,7 @@ import {
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { Effect, PlatformError } from "effect";
+
 import { ProcessExecutionError } from "../cli/process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
@@ -623,21 +624,27 @@ describe("verification repair planning", () => {
         prUrl: "https://github.com/owner/repo/pull/10",
       }),
     );
-    const plan = JSON.parse(
-      await runApplicationPromise(readArtifact(context, "issueCurationPlan")),
-    ) as {
-      run: {
-        prUrl?: string;
-        artifactPaths: string[];
-      };
-      issuesToCreate: {
-        planItemId: string;
-        sourceFindingIds: string[];
-        runContext: {
-          prUrl?: string;
-        };
-      }[];
-    };
+    const plan = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          run: Schema.Struct({
+            prUrl: Schema.optional(Schema.String),
+            artifactPaths: Schema.mutable(Schema.Array(Schema.String)),
+          }),
+          issuesToCreate: Schema.mutable(
+            Schema.Array(
+              Schema.Struct({
+                planItemId: Schema.String,
+                sourceFindingIds: Schema.mutable(Schema.Array(Schema.String)),
+                runContext: Schema.Struct({
+                  prUrl: Schema.optional(Schema.String),
+                }),
+              }),
+            ),
+          ),
+        }),
+      ),
+    )(await runApplicationPromise(readArtifact(context, "issueCurationPlan")));
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/10");
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.planItemId).toBe("follow-up-1");

@@ -1,3 +1,4 @@
+import { PassThrough } from "node:stream";
 import { describe, expect, test } from "bun:test";
 import {
   promptForInteractiveArgv,
@@ -134,11 +135,12 @@ describe("promptForWorkspaceRemoval", () => {
 describe("resolveInteractiveArgv", () => {
   test("returns help argv for no-args non-TTY mode without waiting for input", async () => {
     await Promise.resolve();
-    const stdin = { isTTY: false } as NodeJS.ReadStream & {
-      isTTY?: boolean;
-    };
+    const stdin = Object.assign(new PassThrough(), { isTTY: false });
     const writes: string[] = [];
-    const stdout = { write: (text: string) => writes.push(text) };
+    const stdout = new PassThrough();
+    stdout.on("data", (chunk: Buffer) => {
+      writes.push(chunk.toString());
+    });
     expect(resolveInteractiveArgv({ stdin, stdout })).resolves.toEqual([
       "--help",
     ]);

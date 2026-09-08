@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type {
   RevisionPlanResult,
   RevisionPlanStatus,
@@ -58,7 +59,7 @@ export async function submitRevisionPlan(
     result,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -19,7 +20,11 @@ describe("bundled skills", () => {
       "convex-migration-helper",
       "convex-performance-audit",
     ]);
-    expect(bundledSkillNames).not.toContain("design-taste-frontend" as never);
+    expect(
+      bundledSkillNames.some(
+        (name: string) => name === "design-taste-frontend",
+      ),
+    ).toBe(false);
     expect(() => {
       assertBundledSkillsPresent();
     }).not.toThrow();
@@ -43,14 +48,18 @@ describe("bundled skills", () => {
   });
 
   test("includes skills in the published package manifest", async () => {
-    const packageJson = JSON.parse(
+    const packageJson = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          files: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+        }),
+      ),
+    )(
       await readFile(
         path.resolve(import.meta.dir, "../../package.json"),
         "utf8",
       ),
-    ) as {
-      files?: string[];
-    };
+    );
     expect(packageJson.files).toContain("skills");
   });
 });

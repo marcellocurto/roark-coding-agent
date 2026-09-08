@@ -212,9 +212,13 @@ export function parsePullRequestFeedback(
   raw: string,
   input: { repo: string; prNumber: number },
 ): PullRequestFeedback {
-  const parsed = JSON.parse(raw) as PullRequestGraphQLResult;
+  const parsed: unknown = JSON.parse(raw);
+  const data = isRecord(parsed) ? parsed["data"] : undefined;
+  const dataRepository = isRecord(data) ? data["repository"] : undefined;
+  const rootRepository = isRecord(parsed) ? parsed["repository"] : undefined;
   const pullRequest =
-    parsed.data?.repository?.pullRequest ?? parsed.repository?.pullRequest;
+    (isRecord(dataRepository) ? dataRepository["pullRequest"] : undefined) ??
+    (isRecord(rootRepository) ? rootRepository["pullRequest"] : undefined);
   if (!isRecord(pullRequest))
     throw new Error(
       `GitHub GraphQL response did not include pull request #${input.prNumber}.`,

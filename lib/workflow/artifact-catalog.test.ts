@@ -13,6 +13,7 @@ import {
   verificationBeforeFixRef,
   verificationBeforeFixFullRef,
   type StaticArtifactName,
+  STATIC_ARTIFACTS,
 } from "./artifact-catalog.ts";
 
 const expectedStaticFilenames: Record<StaticArtifactName, string> = {
@@ -41,11 +42,12 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
 
 describe("artifact catalog", () => {
   test("resolves persisted static artifact filenames", () => {
-    for (const [name, filename] of Object.entries(expectedStaticFilenames) as [
-      StaticArtifactName,
-      string,
-    ][]) {
-      expect(artifactFilename(name)).toBe(filename);
+    for (const [name, filename] of Object.entries(expectedStaticFilenames)) {
+      const definition = STATIC_ARTIFACTS.find(
+        (artifact) => artifact.name === name,
+      );
+      if (!definition) throw new Error(`Missing artifact definition: ${name}`);
+      expect(artifactFilename(definition.name)).toBe(filename);
     }
   });
 

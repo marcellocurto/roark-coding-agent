@@ -6,6 +6,7 @@ import {
   Fiber,
   Layer,
   Queue,
+  Predicate,
   Schema,
   Stream,
 } from "effect";
@@ -467,23 +468,25 @@ export function extractAgentErrorMessage(
   messages: readonly unknown[],
 ): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as {
-      role?: string;
-      stopReason?: string;
-      errorMessage?: unknown;
-      provider?: string;
-      model?: string | undefined;
-    };
-    if (message.role !== "assistant") continue;
-    if (message.stopReason !== "error" && message.errorMessage === undefined)
+    const message = messages[index];
+    if (!Predicate.isObject(message)) continue;
+    if (message["role"] !== "assistant") continue;
+    if (
+      message["stopReason"] !== "error" &&
+      message["errorMessage"] === undefined
+    )
       continue;
 
-    const providerModel = [message.provider, message.model]
-      .filter(Boolean)
+    const providerModel = [message["provider"], message["model"]]
+      .filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      )
       .join("/");
     const detail =
-      typeof message.errorMessage === "string" && message.errorMessage.trim()
-        ? message.errorMessage.trim()
+      typeof message["errorMessage"] === "string" &&
+      message["errorMessage"].trim()
+        ? message["errorMessage"].trim()
         : "agent provider returned an error without a message";
     return providerModel ? `${providerModel} failed: ${detail}` : detail;
   }
@@ -492,9 +495,10 @@ export function extractAgentErrorMessage(
 
 function extractLastAssistantText(messages: readonly unknown[]): string {
   for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index] as { role?: string; content?: unknown };
-    if (message.role !== "assistant") continue;
-    return extractTextContent(message.content).trim();
+    const message = messages[index];
+    if (!Predicate.isObject(message)) continue;
+    if (message["role"] !== "assistant") continue;
+    return extractTextContent(message["content"]).trim();
   }
   return "";
 }

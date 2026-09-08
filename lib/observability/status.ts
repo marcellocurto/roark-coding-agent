@@ -4,6 +4,7 @@ import path from "node:path";
 import type { StatusCliOptions } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
 import type { PhaseSummary, RunSummary } from "./summary.ts";
+import { parseRunSummary } from "./summary.ts";
 
 export async function renderStatus(options: StatusCliOptions): Promise<string> {
   const cwd = path.resolve(options.cwd);
@@ -119,7 +120,7 @@ async function readSummary(
   summaryPath: string,
 ): Promise<RunSummary | undefined> {
   try {
-    return JSON.parse(await readFile(summaryPath, "utf8")) as RunSummary;
+    return parseRunSummary(await readFile(summaryPath, "utf8"));
   } catch {
     return undefined;
   }

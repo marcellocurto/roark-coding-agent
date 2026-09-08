@@ -266,12 +266,15 @@ function isVersionArgv(argv: string[]): boolean {
   return argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v");
 }
 async function readPackageVersion(): Promise<string> {
-  const packageJson = (await Bun.file(
+  const packageJson: unknown = await Bun.file(
     new URL("./package.json", import.meta.url),
-  ).json()) as {
-    version?: unknown;
-  };
-  if (typeof packageJson.version !== "string")
+  ).json();
+  if (
+    typeof packageJson !== "object" ||
+    packageJson === null ||
+    !("version" in packageJson) ||
+    typeof packageJson.version !== "string"
+  )
     throw new Error("package.json is missing a string version.");
   return packageJson.version;
 }

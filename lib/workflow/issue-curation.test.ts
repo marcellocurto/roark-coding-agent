@@ -1,3 +1,4 @@
+import { Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
   writeArtifact,
@@ -610,9 +611,13 @@ describe("issue curation phase", () => {
     const raw = await runApplicationPromise(
       readArtifact(context, "issueCurationPlan"),
     );
-    const plan = JSON.parse(raw) as {
-      issuesToCreate: unknown[];
-    };
+    const plan = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          issuesToCreate: Schema.mutable(Schema.Array(Schema.Unknown)),
+        }),
+      ),
+    )(raw);
     expect(plan.issuesToCreate).toHaveLength(1);
   });
 });

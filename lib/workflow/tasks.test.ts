@@ -260,7 +260,7 @@ describe("structured task failures", () => {
     }
     expect(calls).toBe(1);
     expect(thrown).toBeInstanceOf(AgentTaskRunError);
-    expect((thrown as AgentTaskRunError).phase).toBe("agent-error");
+    expect(thrown).toMatchObject({ phase: "agent-error" });
     expect(await runApplicationPromise(artifactExists(context, "triage"))).toBe(
       false,
     );
@@ -285,7 +285,7 @@ describe("structured task failures", () => {
     }
     expect(calls).toBe(1);
     expect(thrown).toBeInstanceOf(AgentTaskRunError);
-    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(thrown).toMatchObject({ phase: "output-contract" });
     expect(await runApplicationPromise(artifactExists(context, "triage"))).toBe(
       false,
     );
@@ -309,7 +309,7 @@ describe("structured task failures", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(AgentTaskRunError);
-    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(thrown).toMatchObject({ phase: "output-contract" });
     expect(
       await runApplicationPromise(artifactExists(context, "implementationLog")),
     ).toBe(false);
@@ -352,7 +352,7 @@ describe("runReviewTask failures", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(AgentTaskRunError);
-    expect((thrown as AgentTaskRunError).phase).toBe("agent-error");
+    expect(thrown).toMatchObject({ phase: "agent-error" });
     expect(
       await runApplicationPromise(artifactExists(context, reviewARef(0))),
     ).toBe(false);
@@ -388,7 +388,7 @@ describe("runReviewTask failures", () => {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(AgentTaskRunError);
-    expect((thrown as AgentTaskRunError).phase).toBe("output-contract");
+    expect(thrown).toMatchObject({ phase: "output-contract" });
     expect(
       await runApplicationPromise(artifactExists(context, reviewARef(0))),
     ).toBe(false);

@@ -1,7 +1,7 @@
 import { decodeJson } from "../workflow/validation.ts";
 import { IssuePublishing } from "../issue-publishing/service.ts";
 import { Presentation } from "../runtime/services.ts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import {
   issuePublishingPrompt,
   issuePublishingSystemPrompt,
@@ -27,7 +27,6 @@ import {
   writeJsonArtifact,
 } from "../workflow/artifacts.ts";
 import type {
-  DuplicateGroup,
   IssueCurationPlan,
   IssuePlanClassification,
 } from "../workflow/issue-curation.ts";
@@ -469,6 +468,27 @@ function formatIssueDraftCollectionMarkdown(
     })
     .join("\n---\n\n");
 }
+// Plan entries are validated individually below so malformed candidates remain
+// reportable skips instead of making the entire plan unreadable.
+const persistedPlanSchema = Schema.Struct({
+  sourceIssue: Schema.optional(
+    Schema.Struct({
+      number: Schema.Number,
+      title: Schema.String,
+      url: Schema.optional(Schema.String),
+    }),
+  ),
+  issuesToCreate: Schema.optional(Schema.Unknown),
+  blockingIssuesToCreate: Schema.optional(Schema.Unknown),
+  followUpIssuesToCreate: Schema.optional(Schema.Unknown),
+  rejectedCandidates: Schema.optional(Schema.Unknown),
+  duplicatesMerged: Schema.optional(Schema.Unknown),
+  warnings: Schema.optional(Schema.Unknown),
+});
+type PersistedPlan = typeof persistedPlanSchema.Type;
+const decodePersistedPlan = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(persistedPlanSchema),
+);
 const readIssueCurationPlan = Effect.fn("readIssueCurationPlan")(function* (
   context: WorkflowContext,
 ) {
@@ -480,9 +500,9 @@ const readIssueCurationPlan = Effect.fn("readIssueCurationPlan")(function* (
     );
   }
   return yield* Effect.gen(function* () {
-    return (yield* decodeJson(
+    return yield* decodePersistedPlan(
       yield* readArtifact(context, "issueCurationPlan"),
-    )) as IssueCurationPlan;
+    );
   }).pipe(
     Effect.catch((error) =>
       Effect.gen(function* () {
@@ -499,13 +519,11 @@ const readExistingCreatedEntries = Effect.fn("readExistingCreatedEntries")(
   function* (context: WorkflowContext) {
     if (!(yield* artifactExists(context, "issueCreationResults"))) return [];
     return yield* Effect.gen(function* () {
-      const parsed = (yield* decodeJson(
+      const parsed = yield* decodeJson(
         yield* readArtifact(context, "issueCreationResults"),
-      )) as {
-        created?: unknown;
-      };
-      if (!Array.isArray(parsed.created)) return [];
-      return parsed.created.flatMap((entry) => {
+      );
+      if (!isRecord(parsed) || !Array.isArray(parsed["created"])) return [];
+      return parsed["created"].flatMap((entry) => {
         if (!isRecord(entry)) return [];
         const planItemId = asNonEmptyString(entry["planItemId"]);
         const title = asNonEmptyString(entry["title"]);
@@ -542,7 +560,7 @@ const readExistingCreatedEntries = Effect.fn("readExistingCreatedEntries")(
     );
   },
 );
-function collectPlanItems(plan: IssueCurationPlan): {
+function collectPlanItems(plan: PersistedPlan): {
   valid: ValidPlanItem[];
   malformed: IssueCreationSkippedEntry[];
   counts: Pick<
@@ -555,23 +573,25 @@ function collectPlanItems(plan: IssueCurationPlan): {
     | "skippedMalformed"
   >;
 } {
-  const normalized = (plan as Partial<IssueCurationPlan>).issuesToCreate;
+  const normalized = Array.isArray(plan.issuesToCreate)
+    ? asArray(plan.issuesToCreate)
+    : undefined;
   const classificationMalformed: IssueCreationSkippedEntry[] = [];
   const accepted = Array.isArray(normalized)
     ? normalized.flatMap((item, index) => {
         const record = isRecord(item) ? item : undefined;
         const classification = parseIssuePlanClassification(
-          record?.classification,
+          record?.["classification"],
         );
         if (!classification) {
           classificationMalformed.push(
             malformedSkip(
               record
-                ? (asNonEmptyString(record.planItemId) ??
+                ? (asNonEmptyString(record["planItemId"]) ??
                     `unclassified-${index + 1}`)
                 : `unclassified-${index + 1}`,
               "unknown",
-              record ? asNonEmptyString(record.proposedTitle) : undefined,
+              record ? asNonEmptyString(record["proposedTitle"]) : undefined,
               "Missing or invalid required field(s): classification. Expected one of: external-blocker, follow-up, suggestion.",
             ),
           );
@@ -580,16 +600,12 @@ function collectPlanItems(plan: IssueCurationPlan): {
         return [{ raw: item, kind: classification, index }];
       })
     : [
-        ...asArray(
-          (plan as Partial<IssueCurationPlan>).blockingIssuesToCreate,
-        ).map((item, index) => ({
+        ...asArray(plan.blockingIssuesToCreate).map((item, index) => ({
           raw: item,
           kind: "blocking" as const,
           index,
         })),
-        ...asArray(
-          (plan as Partial<IssueCurationPlan>).followUpIssuesToCreate,
-        ).map((item, index) => ({
+        ...asArray(plan.followUpIssuesToCreate).map((item, index) => ({
           raw: item,
           kind: "follow-up" as const,
           index,
@@ -605,13 +621,9 @@ function collectPlanItems(plan: IssueCurationPlan): {
     if ("item" in parsed) valid.push(parsed.item);
     else malformed.push(parsed.skipped);
   }
-  const rejectedCandidates = asArray(
-    (plan as Partial<IssueCurationPlan>).rejectedCandidates,
-  );
-  const duplicatesMerged = asArray(
-    (plan as Partial<IssueCurationPlan>).duplicatesMerged,
-  ) as DuplicateGroup[];
-  const warnings = asArray((plan as Partial<IssueCurationPlan>).warnings);
+  const rejectedCandidates = asArray(plan.rejectedCandidates);
+  const duplicatesMerged = asArray(plan.duplicatesMerged);
+  const warnings = asArray(plan.warnings);
   return {
     valid,
     malformed,
@@ -619,11 +631,11 @@ function collectPlanItems(plan: IssueCurationPlan): {
       acceptedPlanItems: acceptedPlanItemCount,
       skippedRejectedCandidates: rejectedCandidates.length,
       skippedDuplicateGroups: duplicatesMerged.length,
-      skippedDuplicateSourceFindings: duplicatesMerged.reduce(
+      skippedDuplicateSourceFindings: duplicatesMerged.reduce<number>(
         (total, group) => {
           const ids =
-            isRecord(group) && Array.isArray(group.mergedSourceFindingIds)
-              ? group.mergedSourceFindingIds
+            isRecord(group) && Array.isArray(group["mergedSourceFindingIds"])
+              ? group["mergedSourceFindingIds"]
               : [];
           return total + ids.length;
         },
@@ -757,7 +769,7 @@ function parseIssuePlanClassification(
 }
 function buildResult(input: {
   context: WorkflowContext;
-  plan: IssueCurationPlan;
+  plan: PersistedPlan;
   sourcePlanPath: string;
   resultPath: string;
   generatedAt: string;

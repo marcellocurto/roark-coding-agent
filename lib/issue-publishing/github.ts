@@ -1,4 +1,5 @@
-import { Effect } from "effect";
+import { Predicate, Effect } from "effect";
+
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 export interface IssuePublishRequest {
   cwd: string;
@@ -95,9 +96,8 @@ function exactTitleMatch(
     throw new Error("gh issue duplicate search response was not an array.");
   const normalizedTitle = normalizeTitle(title);
   for (const entry of parsed) {
-    if (entry === null || typeof entry !== "object" || Array.isArray(entry))
-      continue;
-    const candidate = entry as Record<string, unknown>;
+    if (!Predicate.isObject(entry)) continue;
+    const candidate = entry;
     if (
       typeof candidate["title"] !== "string" ||
       normalizeTitle(candidate["title"]) !== normalizedTitle

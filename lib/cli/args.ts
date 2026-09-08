@@ -352,12 +352,13 @@ const commands = new Set<WorkflowCommand>([
 ]);
 
 export function isWorkflowCommand(value: string): value is WorkflowCommand {
-  return commands.has(value as WorkflowCommand);
+  return [...commands].some((command) => command === value);
 }
 
 export function isLongRunningCommand(value: string | undefined): boolean {
   return (
-    value !== undefined && longRunningCommands.has(value as WorkflowCommand)
+    value !== undefined &&
+    [...longRunningCommands].some((command) => command === value)
   );
 }
 
@@ -932,8 +933,8 @@ function parsePositiveInteger(value: string, flag: string): number {
 }
 
 function parseThinkingLevel(value: string, flag: string): ThinkingLevel {
-  if ((thinkingLevels as readonly string[]).includes(value))
-    return value as ThinkingLevel;
+  const level = thinkingLevels.find((level) => level === value);
+  if (level !== undefined) return level;
   throw new Error(
     `${flag} must be one of: ${thinkingLevels.join(", ")}. Got '${value}'.`,
   );

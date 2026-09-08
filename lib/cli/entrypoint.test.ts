@@ -1,3 +1,4 @@
+import { Schema, Cause, Effect, Exit } from "effect";
 import {
   runApplicationPromise,
   applicationLayer,
@@ -13,7 +14,7 @@ import {
   Presentation,
 } from "../runtime/services.ts";
 import { type ExitNotificationRequest } from "./notifications.ts";
-import { Cause, Effect, Exit } from "effect";
+
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -244,11 +245,9 @@ describe("CLI lifecycle services", () => {
 });
 describe("roark executable", () => {
   test("prints the package version", async () => {
-    const packageJson = (await Bun.file(
-      path.join(projectRoot, "package.json"),
-    ).json()) as {
-      version: string;
-    };
+    const packageJson = Schema.decodeUnknownSync(
+      Schema.Struct({ version: Schema.String }),
+    )(await Bun.file(path.join(projectRoot, "package.json")).json());
     const result = await runApplicationPromise(
       runProcess([entrypoint, "--version"], {
         cwd: projectRoot,

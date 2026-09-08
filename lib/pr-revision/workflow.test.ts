@@ -1,3 +1,4 @@
+import { Schema, Effect, PlatformError } from "effect";
 import type * as nativeWorkspace from "../autorun/workspace.ts";
 import {
   type ProcessOptions,
@@ -137,7 +138,7 @@ function runPrRevisionPromise(
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { Effect, PlatformError } from "effect";
+
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -931,14 +932,16 @@ describe("runPrRevisionPromise", () => {
         path.join(result.context.revisionDir, "verification-before-fix-1.md"),
       ),
     ).toBe(false);
-    const metadata = JSON.parse(
+    const metadata = Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({ verificationFailureReason: Schema.String }),
+      ),
+    )(
       await readFile(
         path.join(result.context.revisionDir, "metadata.json"),
         "utf8",
       ),
-    ) as {
-      verificationFailureReason: string;
-    };
+    );
     expect(metadata.verificationFailureReason).toContain(
       "Verification failed after 1 fix passes",
     );

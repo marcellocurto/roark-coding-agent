@@ -1,3 +1,4 @@
+import { Type } from "typebox";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { AgentExecution } from "../runtime/services.ts";
 import {
@@ -185,7 +186,10 @@ describe("Pi agent settings", () => {
             description: "Example skill.",
             filePath: "/repo/skills/example-skill/SKILL.md",
             baseDir: "/repo/skills/example-skill",
-            sourceInfo: {} as never,
+            sourceInfo: PiCodingAgent.createSyntheticSourceInfo(
+              "/repo/skills/example-skill/SKILL.md",
+              { source: "test" },
+            ),
             disableModelInvocation: false,
           },
         ],
@@ -347,7 +351,13 @@ describe("Pi custom tool boundary", () => {
       PiCodingAgent,
       "createAgentSession",
     ).mockRejectedValue(stop);
-    const submitReview = { name: "submit_review" } as never;
+    const submitReview = PiCodingAgent.defineTool({
+      name: "submit_review",
+      label: "Submit review",
+      description: "Test review tool",
+      parameters: Type.Object({}),
+      execute: () => Promise.resolve({ content: [], details: undefined }),
+    });
     try {
       let thrown: unknown;
       try {

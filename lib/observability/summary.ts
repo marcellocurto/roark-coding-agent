@@ -1,4 +1,4 @@
-import { Effect, FileSystem } from "effect";
+import { Effect, FileSystem, Schema } from "effect";
 import path from "node:path";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 
@@ -65,6 +65,54 @@ export interface SummaryOptions {
   warn?: ((message: string) => void) | undefined;
 }
 
+const totalsSchema = Schema.Struct({
+  inputTokens: Schema.Number,
+  outputTokens: Schema.Number,
+  cacheReadTokens: Schema.Number,
+  cacheWriteTokens: Schema.Number,
+  totalTokens: Schema.Number,
+  cost: Schema.Number,
+  toolCalls: Schema.Number,
+});
+const phaseSummarySchema = Schema.Struct({
+  phase: Schema.String,
+  label: Schema.optional(Schema.String),
+  status: Schema.Literals(["running", "completed", "failed", "skipped"]),
+  startedAt: Schema.optional(Schema.String),
+  endedAt: Schema.optional(Schema.String),
+  durationMs: Schema.optional(Schema.Number),
+  artifactPath: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  thinkingLevel: Schema.optional(Schema.String),
+  requestedThinkingLevel: Schema.optional(Schema.String),
+  effectiveThinkingLevel: Schema.optional(Schema.String),
+  sessionId: Schema.optional(Schema.String),
+  reused: Schema.optional(Schema.Boolean),
+  errorMessage: Schema.optional(Schema.String),
+  totals: Schema.optional(totalsSchema),
+});
+const runSummarySchema = Schema.Struct({
+  version: Schema.Literal(1),
+  issueNumber: Schema.String,
+  attempt: Schema.optional(Schema.Number),
+  runDir: Schema.String,
+  status: Schema.Literals(["running", "completed", "failed", "stopped"]),
+  startedAt: Schema.optional(Schema.String),
+  endedAt: Schema.optional(Schema.String),
+  durationMs: Schema.optional(Schema.Number),
+  phases: Schema.Record(Schema.String, phaseSummarySchema),
+  totals: totalsSchema,
+  lastError: Schema.optional(Schema.String),
+  recoveryCommand: Schema.optional(Schema.String),
+});
+const decodeRunSummary = Schema.decodeUnknownSync(
+  Schema.fromJsonString(runSummarySchema),
+);
+
+export function parseRunSummary(raw: string): RunSummary {
+  return decodeRunSummary(raw, { onExcessProperty: "preserve" });
+}
+
 export function emptyTotals(): ObservabilityTotals {
   return {
     inputTokens: 0,
@@ -81,7 +129,7 @@ export const readRunSummary = Effect.fn("readRunSummary")(
   function* (summaryPath: string) {
     const fs = yield* FileSystem.FileSystem;
     const raw = yield* fs.readFileString(summaryPath);
-    return yield* Effect.try(() => JSON.parse(raw) as RunSummary);
+    return yield* Effect.try(() => parseRunSummary(raw));
   },
   Effect.catch(() => Effect.succeed(undefined)),
 );

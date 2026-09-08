@@ -1,6 +1,6 @@
 {
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["typescript"],
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "plugins": ["typescript", "effecttsgo"],
   "categories": {
     "correctness": "off"
   },
@@ -168,7 +168,15 @@
         "allowString": true
       }
     ],
-    "typescript/switch-exhaustiveness-check": "error"
+    "typescript/switch-exhaustiveness-check": "error",
+    "effecttsgo/floating-effect": "error",
+    "effecttsgo/missing-star-in-yield-effect-gen": "error",
+    "effecttsgo/return-effect-in-gen": "error",
+    "effecttsgo/lazy-promise-in-effect-sync": "error",
+    "effecttsgo/missing-effect-context": "error",
+    "effecttsgo/missing-layer-context": "error",
+    "effecttsgo/unsafe-effect-type-assertion": "error",
+    "typescript/no-unsafe-type-assertion": "error"
   },
   "overrides": [
     {

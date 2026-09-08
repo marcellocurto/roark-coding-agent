@@ -1,3 +1,4 @@
+import { toolContext } from "./tool-context.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 import type {
   ReviewConcernClassification,
@@ -64,7 +65,7 @@ export async function submitReview(
     result,
     undefined,
     undefined,
-    {} as never,
+    toolContext,
   );
   return "";
 }

@@ -86,7 +86,7 @@ export function getWorkflowThinkingConfig(
 function uniformWorkflowThinkingConfig(
   level: ThinkingLevel,
 ): WorkflowThinkingConfig {
-  return Object.fromEntries(
-    workflowThinkingStages.map((stage) => [stage, level]),
-  ) as WorkflowThinkingConfig;
+  const config = { ...workflowThinkingProfiles.default };
+  for (const stage of workflowThinkingStages) config[stage] = level;
+  return config;
 }
