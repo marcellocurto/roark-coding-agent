@@ -126,8 +126,8 @@ bun run check
 `bun run typecheck` runs the native TypeScript 7 compiler (`tsc --noEmit`).
 `bun run lint` runs type-aware Oxlint with the repository's import restrictions.
 `bun run lint:full` runs the same complete check. Both exclude `repos/`
-and disable nested lint configurations. Formatting is separate: use
-`bun run format` or `bun run format:check`.
+and disable nested lint configurations. `bun run check` checks formatting,
+types, lint, and tests. Use `bun run format` to apply formatting changes.
 
 Linting also checks for unsafe type assertions and common Effect mistakes:
 discarded Effects, incorrect generator yields, nested Effects, async work inside

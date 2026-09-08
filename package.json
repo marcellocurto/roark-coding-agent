@@ -38,7 +38,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "bun run lint:setup && oxlint --disable-nested-config .",
     "lint:full": "bun run lint",
-    "check": "bun run typecheck && bun run lint && bun test",
+    "check": "bun run format:check && bun run typecheck && bun run lint && bun test",
     "release:check": "bun run check && bun run release:check-package",
     "release:check-package": "bun run scripts/check-package.ts",
     "version:patch": "bun run release:check && bun pm version patch",
