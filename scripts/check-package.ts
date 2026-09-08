@@ -48,6 +48,32 @@ try {
     assert.equal(realpathSync(skills.bundledSkillsRoot), path.join(root, "skills"));
   `, installedRoot], { cwd: target });
 
+  console.log("Checking installed Astra model support without local model configuration...");
+  await runProcessOrThrow([process.execPath, "--eval", `
+    import assert from "node:assert/strict";
+    import path from "node:path";
+    import { pathToFileURL } from "node:url";
+    const root = Bun.argv[1];
+    const load = (relative) => import(pathToFileURL(path.join(root, relative)).href);
+    const { ModelRuntime } = await import(import.meta.resolve("@earendil-works/pi-coding-agent", path.join(root, "package.json")));
+    const { InMemoryCredentialStore } = await import(import.meta.resolve("@earendil-works/pi-ai", path.join(root, "package.json")));
+    const { requestedModelSpec, resolveModel } = await load("lib/pi/agent.ts");
+    const { resolveThinkingLevel } = await load("lib/pi/thinking-level.ts");
+    const { workflowThinkingProfiles } = await load("lib/workflow/thinking.ts");
+    const { effectiveModelForStage } = await load("lib/workflow/model-routing.ts");
+    const runtime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
+    const model = resolveModel(runtime, requestedModelSpec());
+    assert.equal(model.id, "gpt-6-astra");
+    assert.equal(model.api, "openai-codex-responses");
+    for (const profile of Object.values(workflowThinkingProfiles)) {
+      for (const [stage, level] of Object.entries(profile)) {
+        assert.equal(effectiveModelForStage(undefined, stage), requestedModelSpec());
+        assert.equal(resolveThinkingLevel(model, level).clamped, false);
+      }
+    }
+    assert.equal(resolveThinkingLevel(model, "max").effective, "max");
+  `, installedRoot], { cwd: target });
+
   console.log("Checking installed Effect verification and artifacts in a noninteractive target...");
   await runProcessOrThrow([process.execPath, "--eval", `
     import assert from "node:assert/strict";
@@ -92,7 +118,7 @@ try {
     ]);
     assert(source.equals(installed), `Installed resource differs: ${resource}`);
   }
-  console.log(`Package check passed on Bun ${Bun.version}: CLI, Effect verification, bundled skill resolution, and ${resources.length} resource files.`);
+  console.log(`Package check passed on Bun ${Bun.version}: CLI, Astra profiles, Effect verification, bundled skill resolution, and ${resources.length} resource files.`);
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }

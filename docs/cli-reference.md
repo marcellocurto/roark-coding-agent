@@ -75,6 +75,8 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--out <path>` | Workflow commands | Runs directory. Defaults to `.roark/runs`. |
 | `--model <provider/id>` | Agent-backed phases | Optional Pi model override, for example `anthropic/claude-sonnet-4-5`. |
 | `--thinking <level>` | Agent-backed phases | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Unsupported levels are clamped by Pi to a supported level and reported. |
+| `--fast` | Agent-backed phases | Use the fast thinking profile. Cannot combine with `--deep` or `--thinking`. |
+| `--deep` | Agent-backed phases | Use the deep thinking profile. Cannot combine with `--fast` or `--thinking`. |
 | `--max-fix-passes <n>` | `auto`, `do`, `continue` | Maximum automatic fix/review cycles. Defaults to `3`. |
 | `--fix-pass <n>` | `fix` | Fix pass number. |
 | `--attempt <n>` | issue, `continue`, `status` | Use a specific autorun attempt directory. |
@@ -85,6 +87,26 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 | `--no-title` | long-running agent commands | Disable Roark terminal-title management. |
 | `-v`, `--version` | top-level only | Print the installed Roark version. |
 | `-h`, `--help` | all commands | Show help. |
+
+## Models and thinking profiles
+
+All agent-backed phases default to `openai-codex/gpt-6-astra`. `--model` overrides the model across phases; `--thinking` applies one explicit level across phases.
+
+| Phase | Fast | Default | Deep |
+| --- | --- | --- | --- |
+| Triage | low | medium | high |
+| Plan draft and refinement | low | high | xhigh |
+| Implementation | low | medium | high |
+| Code refinement | low | medium | high |
+| Reviews A and B | medium | high | xhigh |
+| Fixes | low | medium | high |
+| Issue/PR publishing | low | low | low |
+| Revision planning | low | high | xhigh |
+| Revision implementation | low | medium | high |
+| Revision review | low | high | xhigh |
+| Revision fixes | low | medium | high |
+
+`max` remains available through `--thinking max`. Astra has no non-reasoning mode: Pi clamps `off` to its `minimal` level, and sends both `off` and `minimal` selections to Astra as `low` effort.
 
 ## Live output
 

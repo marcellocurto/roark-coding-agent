@@ -1,26 +1,24 @@
 import type { WorkflowThinkingStage } from "./thinking.ts";
 
 export const models = {
-  gpt56Sol: "openai-codex/gpt-5.6-sol",
-  gpt56Terra: "openai-codex/gpt-5.6-terra",
-  gpt56Luna: "openai-codex/gpt-5.6-luna",
+  gpt6Astra: "openai-codex/gpt-6-astra",
 } as const;
 
-export const defaultRoarkModel = models.gpt56Sol;
+export const defaultRoarkModel = models.gpt6Astra;
 
 export const workflowModelRoutes: Record<WorkflowThinkingStage, string> = {
-  triage: models.gpt56Sol,
-  plan: models.gpt56Sol,
-  implement: models.gpt56Sol,
-  codeRefinement: models.gpt56Sol,
-  reviewA: models.gpt56Sol,
-  reviewB: models.gpt56Sol,
-  fix: models.gpt56Sol,
-  issuePublishing: models.gpt56Sol,
-  revisionPlan: models.gpt56Sol,
-  revisionImplementation: models.gpt56Sol,
-  revisionReview: models.gpt56Sol,
-  revisionFix: models.gpt56Sol,
+  triage: models.gpt6Astra,
+  plan: models.gpt6Astra,
+  implement: models.gpt6Astra,
+  codeRefinement: models.gpt6Astra,
+  reviewA: models.gpt6Astra,
+  reviewB: models.gpt6Astra,
+  fix: models.gpt6Astra,
+  issuePublishing: models.gpt6Astra,
+  revisionPlan: models.gpt6Astra,
+  revisionImplementation: models.gpt6Astra,
+  revisionReview: models.gpt6Astra,
+  revisionFix: models.gpt6Astra,
 };
 
 export function effectiveModelForStage(explicitModel: string | undefined, stage: WorkflowThinkingStage): string {

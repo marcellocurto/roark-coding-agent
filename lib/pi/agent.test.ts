@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, spyOn, test } from "bun:test";
 import * as PiCodingAgent from "@earendil-works/pi-coding-agent";
-import { AuthStorage, createAgentSession, DefaultResourceLoader, getAgentDir, ModelRegistry, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { prPublishingSystemPrompt } from "../prompts/pr-publishing-prompt.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { assertNoResourceLoadErrors, assertRequestedSkillsLoaded, buildRoarkResourceLoaderSecurityOptions, createRoarkResourceLoader, extractAgentErrorMessage, requestedModelSpec, resolveModel, roarkPiSettings, runPiAgent, toolsForFileEditingMode } from "./agent.ts";
@@ -54,13 +55,11 @@ async function createPromptTestSession(options: {
   assertNoResourceLoadErrors(loadedSkills.diagnostics, "skill");
   assertRequestedSkillsLoaded(loadedSkills.skills, [options.skillPath], loadedSkills.diagnostics);
 
-  const authStorage = AuthStorage.inMemory();
-  const modelRegistry = ModelRegistry.inMemory(authStorage);
-  const model = resolveModel(modelRegistry, requestedModelSpec());
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
+  const model = resolveModel(modelRuntime, requestedModelSpec());
   const { session } = await createAgentSession({
     cwd: options.cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model,
     resourceLoader: loader,
     sessionManager: SessionManager.inMemory(options.cwd),
@@ -287,14 +286,14 @@ describe("Pi custom tool boundary", () => {
 });
 
 describe("Pi agent model selection", () => {
-  test("defaults to the built-in GPT-5.6 Sol catalog entry", () => {
-    expect(requestedModelSpec()).toBe("openai-codex/gpt-5.6-sol");
-    const registry = ModelRegistry.create(AuthStorage.create());
-    expect(resolveModel(registry, requestedModelSpec()).id).toBe("gpt-5.6-sol");
+  test("defaults to the built-in GPT-6 Astra catalog entry", async () => {
+    expect(requestedModelSpec()).toBe("openai-codex/gpt-6-astra");
+    const registry = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
+    expect(resolveModel(registry, requestedModelSpec()).id).toBe("gpt-6-astra");
   });
 
-  test("fails clearly for an unavailable model", () => {
-    const registry = ModelRegistry.create(AuthStorage.create());
+  test("fails clearly for an unavailable model", async () => {
+    const registry = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null, refreshOnCreate: false });
     expect(() => resolveModel(registry, "openai-codex/not-a-real-model")).toThrow("Model not found");
   });
 

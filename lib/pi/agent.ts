@@ -1,10 +1,9 @@
 import path from "node:path";
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   type ResourceDiagnostic,
   SessionManager,
   type Skill,
@@ -71,9 +70,8 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
   const modelSpec = requestedModelSpec(options.model);
   const presentation = presenter();
   if (presentation.verbose) presentation.line(`model: ${modelSpec}`);
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
-  const model = resolveModel(modelRegistry, modelSpec);
+  const modelRuntime = await ModelRuntime.create();
+  const model = resolveModel(modelRuntime, modelSpec);
   const thinking = resolveThinkingLevel(model, options.thinkingLevel);
   if (presentation.verbose) presentation.line(thinking.clamped
     ? `thinking: ${thinking.requested} -> ${thinking.effective} (${thinking.requested} unsupported by ${modelSpec})`
@@ -94,8 +92,7 @@ export async function runPiAgent(options: AgentRunRequest): Promise<string> {
 
   const { session, modelFallbackMessage } = await createAgentSession({
     cwd: options.cwd,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model,
     thinkingLevel: thinking.effective,
     resourceLoader: loader,
@@ -198,14 +195,14 @@ export function requestedModelSpec(explicitModel?: string): string {
   return explicitModel ?? defaultRoarkModel;
 }
 
-export function resolveModel(modelRegistry: Pick<ModelRegistry, "find">, spec: string) {
+export function resolveModel(modelRuntime: Pick<ModelRuntime, "getModel">, spec: string) {
   const separator = spec.includes("/") ? "/" : spec.includes(":") ? ":" : undefined;
   if (!separator) throw new Error(`Invalid --model '${spec}'. Use provider/model or provider:model.`);
 
   const [provider, ...idParts] = spec.split(separator);
   const id = idParts.join(separator);
   if (!provider || !id) throw new Error(`Invalid --model '${spec}'. Use provider/model or provider:model.`);
-  const model = modelRegistry.find(provider, id);
+  const model = modelRuntime.getModel(provider, id);
   if (!model) throw new Error(`Model not found: ${spec}`);
   return model;
 }

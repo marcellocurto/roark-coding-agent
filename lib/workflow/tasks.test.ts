@@ -74,7 +74,7 @@ describe("runAgentTask skill loading", () => {
     await runTriageTask(await createContext(), runner);
     await runTriageTask(await createContext({ model: "anthropic/claude-opus-4-7" }), runner);
 
-    expect(requests).toEqual(["openai-codex/gpt-5.6-sol", "anthropic/claude-opus-4-7"]);
+    expect(requests).toEqual(["openai-codex/gpt-6-astra", "anthropic/claude-opus-4-7"]);
   });
 });
 
