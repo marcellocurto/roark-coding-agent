@@ -121,7 +121,8 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
   const clock = yield* Clock.Clock;
   if (presentation.verbose) presentation.line(`model: ${modelSpec}`);
   const modelRuntime = yield* Effect.tryPromise({
-    try: () => ModelRuntime.create(),
+    // Keep built-in models independent of the invoking user's Pi catalog.
+    try: () => ModelRuntime.create({ modelsPath: null }),
     catch: (cause) =>
       new AgentExecutionError({ operation: "Load models", cause }),
   });

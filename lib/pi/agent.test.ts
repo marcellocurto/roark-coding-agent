@@ -395,6 +395,66 @@ describe("Pi custom tool boundary", () => {
   });
 });
 describe("Pi agent model selection", () => {
+  test("production sessions ignore ambient model catalog overrides", async () => {
+    const fixture = await createPromptFixture();
+    const previousAgentDir = process.env["PI_CODING_AGENT_DIR"];
+    const stop = new Error("stop before executing the agent");
+    const createSession = spyOn(
+      PiCodingAgent,
+      "createAgentSession",
+    ).mockRejectedValue(stop);
+    try {
+      process.env["PI_CODING_AGENT_DIR"] = fixture.agentDir;
+      await writeFile(
+        path.join(fixture.agentDir, "models.json"),
+        JSON.stringify({
+          providers: {
+            "openai-codex": { baseUrl: "https://ambient.invalid/v1" },
+          },
+        }),
+      );
+      const builtin = await ModelRuntime.create({
+        credentials: new InMemoryCredentialStore(),
+        modelsPath: null,
+        refreshOnCreate: false,
+      });
+      let thrown: unknown;
+      try {
+        await runApplicationPromise(
+          Effect.flatMap(AgentExecution, (agent) =>
+            agent.run({
+              cwd: fixture.cwd,
+              thinkingLevel: "low",
+              systemPrompt: "Review the change.",
+              prompt: "Inspect the diff.",
+              fileEditingToolsEnabled: false,
+              display: {
+                command: "review-pr",
+                target: "PR #1",
+                phaseId: "pr-review-a",
+                phaseLabel: "PR review A",
+                operation: "review",
+              },
+            }),
+          ),
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(AgentExecutionError);
+      if (thrown instanceof AgentExecutionError)
+        expect(thrown.cause).toBe(stop);
+      const model = createSession.mock.calls[0]?.[0]?.model;
+      expect(model).toEqual(resolveModel(builtin, requestedModelSpec()));
+      expect(model?.baseUrl).not.toBe("https://ambient.invalid/v1");
+    } finally {
+      createSession.mockRestore();
+      if (previousAgentDir === undefined)
+        delete process.env["PI_CODING_AGENT_DIR"];
+      else process.env["PI_CODING_AGENT_DIR"] = previousAgentDir;
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
   test("defaults to the built-in GPT-6 Astra catalog entry", async () => {
     expect(requestedModelSpec()).toBe("openai-codex/gpt-6-astra");
     const registry = await ModelRuntime.create({
