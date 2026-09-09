@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import { decideReadiness, hasBlockedReview, needsFix, needsRestart } from "./verdicts.ts";
-import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import {
+  decideReadiness,
+  hasBlockedReview,
+  needsFix,
+  needsRestart,
+} from "./verdicts.ts";
+import {
+  implementationPlanResult,
+  triageResult,
+} from "../testing/workflow-results.ts";
 
 const triage = triageResult();
 const plan = implementationPlanResult();
@@ -22,7 +30,9 @@ describe("classification-aware verdict decisions", () => {
     const reviewA = reviewResult([reviewFinding("must-fix-current")]);
     const reviewB = reviewResult();
     expect(needsFix(reviewA, reviewB)).toBe(true);
-    expect(decideReadiness({ triage, plan, reviewA, reviewB }).status).toBe("not-ready");
+    expect(decideReadiness({ triage, plan, reviewA, reviewB }).status).toBe(
+      "not-ready",
+    );
   });
 
   test("external blockers stop the workflow without invoking fixes", () => {
@@ -34,7 +44,12 @@ describe("classification-aware verdict decisions", () => {
 
   test("restart recommendation drives restart independently of Markdown", () => {
     const finding = reviewFinding("must-fix-current");
-    const reviewA = reviewResult([finding], { restartRecommendation: { findingIds: [finding.id], rationale: "The implementation direction is unsafe." } });
+    const reviewA = reviewResult([finding], {
+      restartRecommendation: {
+        findingIds: [finding.id],
+        rationale: "The implementation direction is unsafe.",
+      },
+    });
     expect(needsRestart(reviewA)).toBe(true);
   });
 });

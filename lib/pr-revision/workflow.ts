@@ -1,8 +1,11 @@
-import { readdir, readFile } from "node:fs/promises";
+import { Workspace } from "../autorun/workspace-service.ts";
+import { GitHub } from "../github/service.ts";
+import { Presentation } from "../runtime/services.ts";
+import { Cause, DateTime, Effect, Exit, FileSystem, Schema } from "effect";
 import path from "node:path";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
-import type { RevisePrCliOptions } from "../cli/args.ts";
-import type { WorkflowThinkingStage } from "../workflow/thinking.ts";
+import { type RevisePrCliOptions } from "../cli/args.ts";
+import { type WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { effectiveModelForStage } from "../workflow/model-routing.ts";
 import { artifactOutcome } from "../workflow/markdown-token.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
@@ -10,17 +13,13 @@ import {
   classifyVerificationFailure,
   formatCompleteVerificationArtifact,
   formatVerificationArtifact,
-  runVerification,
   verificationFailureReason,
   type VerificationResult,
-  type VerificationRunner,
+  runVerification,
 } from "../autorun/verification.ts";
-import { fetchPullRequestFeedback, type PullRequestFeedback } from "../github/pr.ts";
-import { runPiAgent } from "../pi/agent.ts";
+import { type PullRequestFeedback } from "../github/pr.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
-import { noopAsync } from "../utils/async.ts";
-import type { AgentRunner } from "../workflow/agent-runner.ts";
-import { presenter, type AgentDisplayContext } from "../presentation/presenter.ts";
+import { type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
 import { assertCleanGitTree, gitDirtyLines } from "../workflow/git.ts";
 import {
@@ -36,15 +35,19 @@ import {
 import {
   defaultLifecycleHooks,
   defaultWorkspaceConfig,
-  preparePrRevisionWorkspace,
-  runLifecycleHook,
-  type PreparedPrRevisionWorkspace,
 } from "../autorun/workspace.ts";
 import { validatePrBranchSafety } from "./branch.ts";
-import type { checkoutPrHeadBranch } from "./branch.ts";
-import { postPrRevisionSummaryComment } from "./comments.ts";
-import { revisionImplementationPrompt, revisionPlanPrompt, revisionReviewPrompt } from "./prompts.ts";
-import { isUnblockedCurrentFix, reviewDisposition, type ReviewResult } from "../review/result.ts";
+import { RevisionReporting } from "./comments.ts";
+import {
+  revisionImplementationPrompt,
+  revisionPlanPrompt,
+  revisionReviewPrompt,
+} from "./prompts.ts";
+import {
+  isUnblockedCurrentFix,
+  reviewDisposition,
+  type ReviewResult,
+} from "../review/result.ts";
 import { reviewArtifactDefinition } from "../review/artifact.ts";
 import {
   revisionPlanArtifactDefinition,
@@ -54,10 +57,8 @@ import {
 import {
   revisionFeedbackDispositions,
   revisionExecutionArtifactDefinition,
-  type RevisionExecutionResult,
 } from "./execution.ts";
 import { runStructuredArtifact } from "../structured-output/runner.ts";
-
 export type PrRevisionOutcome =
   | "no-action-needed"
   | "needs-human"
@@ -65,7 +66,6 @@ export type PrRevisionOutcome =
   | "verification-failed"
   | "no-code-changes"
   | "published";
-
 export interface PrRevisionResult {
   outcome: PrRevisionOutcome;
   context: PrRevisionContext;
@@ -73,207 +73,161 @@ export interface PrRevisionResult {
   reviewVerdict?: RevisionReviewVerdict | undefined;
   verification?: VerificationResult | undefined;
 }
-
 type RevisionReviewVerdict = "approve" | "fixes-required" | "blocked";
-
-export interface RunPrRevisionDependencies {
-  fetchFeedback?: typeof fetchPullRequestFeedback | undefined;
-  checkout?: typeof checkoutPrHeadBranch | undefined;
-  prepareWorkspace?: typeof preparePrRevisionWorkspace | undefined;
-  runLifecycleHook?: typeof runLifecycleHook | undefined;
-  agentRunner?: AgentRunner | undefined;
-  verificationRunner?: VerificationRunner | undefined;
-  postSummaryComment?: typeof postPrRevisionSummaryComment | undefined;
-}
-
-export async function runPrRevision(
+export const runPrRevision = Effect.fn("runPrRevision")(function* (
   options: RevisePrCliOptions,
-  deps: RunPrRevisionDependencies = {},
-): Promise<PrRevisionResult> {
+) {
   const controlCwd = options.cwd;
-  await assertCleanGitTree({ cwd: controlCwd, yes: options.yes });
-
-  const fetchFeedback = deps.fetchFeedback ?? fetchPullRequestFeedback;
-  const feedback = await fetchFeedback({ cwd: controlCwd, repo: options.repo, prNumber: options.prNumber });
+  yield* assertCleanGitTree({ cwd: controlCwd, yes: options.yes });
+  const fetchFeedback = (yield* GitHub).fetchPullRequestFeedback;
+  const workspaces = yield* Workspace;
+  const feedback = yield* fetchFeedback({
+    cwd: controlCwd,
+    repo: options.repo,
+    prNumber: options.prNumber,
+  });
   if (feedback.reviewThreadsTruncated === true) {
-    throw new Error(`PR #${options.prNumber} has more review threads than Roark can fetch safely in one request. Refusing a partial revision plan.`);
+    return yield* Effect.fail(
+      new PrRevisionError({
+        message: `PR #${options.prNumber} has more review threads than Roark can fetch safely in one request. Refusing a partial revision plan.`,
+      }),
+    );
   }
   const repo = feedback.repo;
-  validatePrBranchSafety(feedback.pr, repo);
-
-  presenter().transition("Revision preparation", `PR #${feedback.pr.number}`, { operation: "edit" });
-  const preparedWorkspace = await prepareRevisionWorkspace({ options, repo, feedback, deps });
-  const hookRunner = deps.runLifecycleHook ?? runLifecycleHook;
+  yield* validatePrBranchSafety(feedback.pr, repo);
+  (yield* Presentation).transition(
+    "Revision preparation",
+    `PR #${feedback.pr.number}`,
+    { operation: "edit" },
+  );
+  const preparedWorkspace = yield* workspaces.preparePrRevision({
+    controlCwd: options.cwd,
+    repo,
+    prNumber: options.prNumber,
+    headRefName: feedback.pr.headRefName,
+    workspace: options.workspace ?? defaultWorkspaceConfig,
+    hooks: options.hooks ?? defaultLifecycleHooks,
+  });
+  const hookRunner = workspaces.runHook;
   const hooks = options.hooks ?? defaultLifecycleHooks;
-
-  try {
-    const context = await createPrRevisionContext({ ...options, repo, controlCwd, agentCwd: preparedWorkspace.path });
-    presenter().transition("Revision preparation", `PR #${context.prNumber}`, { revision: context.revision, operation: "edit" });
-    presenter().line(`Run directory: ${context.revisionDirRelative}`);
-    if (context.agentCwd !== context.controlCwd) presenter().line(`Revision workspace: ${path.basename(context.agentCwd)}`);
-
-    await hookRunner("beforeRun", hooks, context.agentCwd);
-    await writeInitialArtifacts(context, feedback);
-
-    const runner = deps.agentRunner ?? runPiAgent;
-    const postSummary = deps.postSummaryComment ?? postPrRevisionSummaryComment;
-
-    const plan = await runRevisionPlanPhase(context, runner, revisionFeedbackSources(feedback));
-    const planStatus = plan.status;
-    await updateMetadata(context, feedback, { outcome: "planned", planStatus });
-
-    if (planStatus === "no-action-needed") {
-      await updateMetadata(context, feedback, { outcome: "no-action-needed", planStatus, endedAt: new Date().toISOString() });
-      presenter().line(context.comment
+  yield* Effect.addFinalizer(() =>
+    workspaces
+      .runHook("afterRun", hooks, preparedWorkspace.path)
+      .pipe(Effect.orDie),
+  );
+  const context = yield* createPrRevisionContext({
+    ...options,
+    repo,
+    controlCwd,
+    agentCwd: preparedWorkspace.path,
+  });
+  yield* Effect.addFinalizer((exit) =>
+    finalizeRevision(context, feedback, exit).pipe(Effect.orDie),
+  );
+  (yield* Presentation).transition(
+    "Revision preparation",
+    `PR #${context.prNumber}`,
+    { revision: context.revision, operation: "edit" },
+  );
+  (yield* Presentation).line(`Run directory: ${context.revisionDirRelative}`);
+  if (context.agentCwd !== context.controlCwd)
+    (yield* Presentation).line(
+      `Revision workspace: ${path.basename(context.agentCwd)}`,
+    );
+  yield* hookRunner("beforeRun", hooks, context.agentCwd);
+  yield* writeInitialArtifacts(context, feedback);
+  const postSummary = (yield* RevisionReporting).postSummary;
+  const plan = yield* runRevisionPlanPhase(
+    context,
+    revisionFeedbackSources(feedback),
+  );
+  const planStatus = plan.status;
+  yield* updateMetadata(context, feedback, { outcome: "planned", planStatus });
+  if (planStatus === "no-action-needed") {
+    yield* updateMetadata(context, feedback, {
+      outcome: "no-action-needed",
+      planStatus,
+      endedAt: DateTime.formatIso(yield* DateTime.now),
+    });
+    (yield* Presentation).line(
+      context.comment
         ? "No action needed; not mutating code, committing, or pushing. Posting summary comment."
-        : "No action needed; not mutating code, committing, pushing, or commenting.");
-      if (context.comment) {
-        await postSummary({
-          context,
-          outcome: "no-action-needed",
-          dispositions: revisionFeedbackDispositions(plan),
-        });
-      }
-      await removeAgentPrRevisionArtifacts(context);
-      return { outcome: "no-action-needed", context, planStatus };
-    }
-
-    if (planStatus === "needs-human") {
-      await updateMetadata(context, feedback, { outcome: "needs-human", planStatus, endedAt: new Date().toISOString() });
-      await removeAgentPrRevisionArtifacts(context);
-      await postSummary({
+        : "No action needed; not mutating code, committing, pushing, or commenting.",
+    );
+    if (context.comment) {
+      yield* postSummary({
         context,
-        outcome: "needs-human",
+        outcome: "no-action-needed",
         dispositions: revisionFeedbackDispositions(plan),
       });
-      return { outcome: "needs-human", context, planStatus };
     }
-
-    let execution = await runRevisionExecutionPhase(context, runner, {
-      plan,
-      phaseId: "revision-implementation",
-      label: "Revision implementation",
-      artifact: "revision-log.json",
-      title: "Revision Log",
-      thinkingStage: "revisionImplementation",
-      prompt: revisionImplementationPrompt(context, 0),
+    return {
+      outcome: "no-action-needed",
+      context,
+      planStatus,
+    } satisfies PrRevisionResult;
+  }
+  if (planStatus === "needs-human") {
+    yield* updateMetadata(context, feedback, {
+      outcome: "needs-human",
+      planStatus,
+      endedAt: DateTime.formatIso(yield* DateTime.now),
     });
-
-    let review = await runRevisionReviewAgent(context, runner, {
-      phaseId: "revision-review",
-      label: "Revision review",
-      artifact: "revision-review.json",
-      prompt: revisionReviewPrompt(context, 0),
+    yield* postSummary({
+      context,
+      outcome: "needs-human",
+      dispositions: revisionFeedbackDispositions(plan),
     });
-    let reviewVerdict = revisionReviewVerdict(review);
-    let fixPassesUsed = 0;
-    let verification: VerificationResult | undefined;
-
-    for (;;) {
-      if (reviewVerdict === "fixes-required") {
-        if (fixPassesUsed >= context.maxFixPasses) {
-          await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
-          await removeAgentPrRevisionArtifacts(context);
-          await postSummary({
-            context,
-            outcome: "review-blocked",
-            reviewVerdict,
-            dispositions: revisionFeedbackDispositions(plan, execution),
-          });
-          return { outcome: "review-blocked", context, planStatus, reviewVerdict };
-        }
-
-        const pass = ++fixPassesUsed;
-        const logArtifact = `revision-log-fix-pass-${pass}.json`;
-        execution = await runRevisionExecutionPhase(context, runner, {
-          plan,
-          phaseId: `revision-fix-${pass}`,
-          pass,
-          label: `Revision fix pass ${pass}`,
-          artifact: logArtifact,
-          title: `Revision Log Fix Pass ${pass}`,
-          thinkingStage: "revisionFix",
-          prompt: revisionImplementationPrompt(context, pass),
+    return {
+      outcome: "needs-human",
+      context,
+      planStatus,
+    } satisfies PrRevisionResult;
+  }
+  let execution = yield* runRevisionExecutionPhase(context, {
+    plan,
+    phaseId: "revision-implementation",
+    label: "Revision implementation",
+    artifact: "revision-log.json",
+    title: "Revision Log",
+    thinkingStage: "revisionImplementation",
+    prompt: revisionImplementationPrompt(context, 0),
+  });
+  let review = yield* runRevisionReviewAgent(context, {
+    phaseId: "revision-review",
+    label: "Revision review",
+    artifact: "revision-review.json",
+    prompt: revisionReviewPrompt(context, 0),
+  });
+  let reviewVerdict = yield* revisionReviewVerdict(review);
+  let fixPassesUsed = 0;
+  let verification: VerificationResult | undefined;
+  for (;;) {
+    if (reviewVerdict === "fixes-required") {
+      if (fixPassesUsed >= context.maxFixPasses) {
+        yield* updateMetadata(context, feedback, {
+          outcome: "review-blocked",
+          planStatus,
+          reviewVerdict,
+          fixPassesUsed,
+          endedAt: DateTime.formatIso(yield* DateTime.now),
         });
-
-        const reviewArtifact = `revision-review-pass-${pass}.json`;
-        review = await runRevisionReviewAgent(context, runner, {
-          phaseId: `revision-review-${pass}`,
-          pass,
-          label: `Revision review pass ${pass}`,
-          artifact: reviewArtifact,
-          prompt: revisionReviewPrompt(context, pass),
-        });
-        reviewVerdict = revisionReviewVerdict(review);
-        continue;
-      }
-
-      if (reviewVerdict === "blocked") {
-        await updateMetadata(context, feedback, { outcome: "review-blocked", planStatus, reviewVerdict, fixPassesUsed, endedAt: new Date().toISOString() });
-        await removeAgentPrRevisionArtifacts(context);
-        await postSummary({
+        yield* postSummary({
           context,
           outcome: "review-blocked",
           reviewVerdict,
           dispositions: revisionFeedbackDispositions(plan, execution),
         });
-        return { outcome: "review-blocked", context, planStatus, reviewVerdict };
-      }
-
-      await hookRunner("beforeVerify", hooks, context.agentCwd);
-      verification = await runVerification({
-        command: context.verifyCommand,
-        cwd: context.agentCwd,
-        runner: deps.verificationRunner,
-        display: {
-          target: `PR #${context.prNumber}`,
-          repository: context.repo,
-          revision: context.revision,
-          ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
-        },
-      });
-      await writePrRevisionArtifact(context, "verification.md", formatVerificationArtifact(verification));
-      await writePrRevisionArtifact(context, "verification-full.md", formatCompleteVerificationArtifact(verification));
-      presenter().artifact(prRevisionArtifactRelativePath(context, "verification.md"));
-
-      if (verification.ok) break;
-
-      const classification = classifyVerificationFailure(verification);
-      const failedReason = classification.repairable
-        ? `Verification failed after ${context.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
-        : verificationFailureReason(verification);
-
-      if (!classification.repairable || fixPassesUsed >= context.maxFixPasses) {
-        presenter().line(`ACTION user action required: ${classification.recoveryGuidance ?? failedReason}`);
-        await updateMetadata(context, feedback, {
-          outcome: "verification-failed",
+        return {
+          outcome: "review-blocked",
+          context,
           planStatus,
           reviewVerdict,
-          verification,
-          verificationFailureReason: failedReason,
-          fixPassesUsed,
-          endedAt: new Date().toISOString(),
-        });
-        await removeAgentPrRevisionArtifacts(context);
-        await postSummary({
-          context,
-          outcome: "verification-failed",
-          reviewVerdict,
-          verification,
-          dispositions: revisionFeedbackDispositions(plan, execution),
-        });
-        return { outcome: "verification-failed", context, planStatus, reviewVerdict, verification };
+        } satisfies PrRevisionResult;
       }
-
       const pass = ++fixPassesUsed;
-      presenter().line(`Verification repair will run as fix pass ${pass}`);
-      const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
-      await writePrRevisionArtifact(context, verificationBeforeFixArtifact, formatVerificationArtifact(verification));
-      await writePrRevisionArtifact(context, `verification-before-fix-${pass}-full.md`, formatCompleteVerificationArtifact(verification));
-      presenter().artifact(prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact));
-
       const logArtifact = `revision-log-fix-pass-${pass}.json`;
-      execution = await runRevisionExecutionPhase(context, runner, {
+      execution = yield* runRevisionExecutionPhase(context, {
         plan,
         phaseId: `revision-fix-${pass}`,
         pass,
@@ -283,184 +237,351 @@ export async function runPrRevision(
         thinkingStage: "revisionFix",
         prompt: revisionImplementationPrompt(context, pass),
       });
-
       const reviewArtifact = `revision-review-pass-${pass}.json`;
-      review = await runRevisionReviewAgent(context, runner, {
+      review = yield* runRevisionReviewAgent(context, {
         phaseId: `revision-review-${pass}`,
         pass,
         label: `Revision review pass ${pass}`,
         artifact: reviewArtifact,
         prompt: revisionReviewPrompt(context, pass),
       });
-      reviewVerdict = revisionReviewVerdict(review);
+      reviewVerdict = yield* revisionReviewVerdict(review);
+      continue;
     }
-
-    if ((await dirtyLinesOutsideRoark(context.agentCwd)).length === 0) {
-      await updateMetadata(context, feedback, { outcome: "no-code-changes", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
-      await removeAgentPrRevisionArtifacts(context);
-      await postSummary({
+    if (reviewVerdict === "blocked") {
+      yield* updateMetadata(context, feedback, {
+        outcome: "review-blocked",
+        planStatus,
+        reviewVerdict,
+        fixPassesUsed,
+        endedAt: DateTime.formatIso(yield* DateTime.now),
+      });
+      yield* postSummary({
         context,
-        outcome: "no-code-changes",
+        outcome: "review-blocked",
+        reviewVerdict,
+        dispositions: revisionFeedbackDispositions(plan, execution),
+      });
+      return {
+        outcome: "review-blocked",
+        context,
+        planStatus,
+        reviewVerdict,
+      } satisfies PrRevisionResult;
+    }
+    yield* hookRunner("beforeVerify", hooks, context.agentCwd);
+    verification = yield* runVerification({
+      command: context.verifyCommand,
+      cwd: context.agentCwd,
+      display: {
+        target: `PR #${context.prNumber}`,
+        repository: context.repo,
+        revision: context.revision,
+        ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
+      },
+    });
+    yield* writePrRevisionArtifact(
+      context,
+      "verification.md",
+      formatVerificationArtifact(verification),
+    );
+    yield* writePrRevisionArtifact(
+      context,
+      "verification-full.md",
+      formatCompleteVerificationArtifact(verification),
+    );
+    (yield* Presentation).artifact(
+      prRevisionArtifactRelativePath(context, "verification.md"),
+    );
+    if (verification.ok) break;
+    const classification = classifyVerificationFailure(verification);
+    const failedReason = classification.repairable
+      ? `Verification failed after ${context.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
+      : verificationFailureReason(verification);
+    if (!classification.repairable || fixPassesUsed >= context.maxFixPasses) {
+      (yield* Presentation).line(
+        `ACTION user action required: ${classification.recoveryGuidance ?? failedReason}`,
+      );
+      yield* updateMetadata(context, feedback, {
+        outcome: "verification-failed",
+        planStatus,
+        reviewVerdict,
+        verification,
+        verificationFailureReason: failedReason,
+        fixPassesUsed,
+        endedAt: DateTime.formatIso(yield* DateTime.now),
+      });
+      yield* postSummary({
+        context,
+        outcome: "verification-failed",
         reviewVerdict,
         verification,
         dispositions: revisionFeedbackDispositions(plan, execution),
       });
-      return { outcome: "no-code-changes", context, planStatus, reviewVerdict, verification };
+      return {
+        outcome: "verification-failed",
+        context,
+        planStatus,
+        reviewVerdict,
+        verification,
+      } satisfies PrRevisionResult;
     }
-
-    const changedFiles = await changedFilesOutsideRoark(context.agentCwd);
-    await updateMetadata(context, feedback, { outcome: "published", planStatus, reviewVerdict, verification, endedAt: new Date().toISOString() });
-    const publishDisplay: AgentDisplayContext = {
-      command: "revise-pr",
-      repository: context.repo,
-      target: `PR #${context.prNumber}`,
-      phaseId: "pr-revision-publish",
-      phaseLabel: "Commit and push revision",
-      revision: context.revision,
-      operation: "publish",
-    };
-    const commitSha = await runPresentedPhase(
-      publishDisplay,
-      () => commitAndPushRevision(context, feedback.pr.headRefName),
-      (sha) => ({ outcome: sha ? `pushed ${sha.slice(0, 12)}` : "pushed" }),
+    const pass = ++fixPassesUsed;
+    (yield* Presentation).line(
+      `Verification repair will run as fix pass ${pass}`,
     );
-    await postSummary({
+    const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
+    yield* writePrRevisionArtifact(
       context,
-      outcome: "published",
+      verificationBeforeFixArtifact,
+      formatVerificationArtifact(verification),
+    );
+    yield* writePrRevisionArtifact(
+      context,
+      `verification-before-fix-${pass}-full.md`,
+      formatCompleteVerificationArtifact(verification),
+    );
+    (yield* Presentation).artifact(
+      prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact),
+    );
+    const logArtifact = `revision-log-fix-pass-${pass}.json`;
+    execution = yield* runRevisionExecutionPhase(context, {
+      plan,
+      phaseId: `revision-fix-${pass}`,
+      pass,
+      label: `Revision fix pass ${pass}`,
+      artifact: logArtifact,
+      title: `Revision Log Fix Pass ${pass}`,
+      thinkingStage: "revisionFix",
+      prompt: revisionImplementationPrompt(context, pass),
+    });
+    const reviewArtifact = `revision-review-pass-${pass}.json`;
+    review = yield* runRevisionReviewAgent(context, {
+      phaseId: `revision-review-${pass}`,
+      pass,
+      label: `Revision review pass ${pass}`,
+      artifact: reviewArtifact,
+      prompt: revisionReviewPrompt(context, pass),
+    });
+    reviewVerdict = yield* revisionReviewVerdict(review);
+  }
+  if ((yield* dirtyLinesOutsideRoark(context.agentCwd)).length === 0) {
+    yield* updateMetadata(context, feedback, {
+      outcome: "no-code-changes",
+      planStatus,
+      reviewVerdict,
+      verification,
+      endedAt: DateTime.formatIso(yield* DateTime.now),
+    });
+    yield* postSummary({
+      context,
+      outcome: "no-code-changes",
       reviewVerdict,
       verification,
       dispositions: revisionFeedbackDispositions(plan, execution),
-      changedFiles,
-      commitSha,
     });
-
-    return { outcome: "published", context, planStatus, reviewVerdict, verification };
-  } finally {
-    try {
-      await hookRunner("afterRun", hooks, preparedWorkspace.path);
-    } finally {
-      await preparedWorkspace.releaseLock();
-    }
-  }
-}
-
-async function prepareRevisionWorkspace(input: {
-  options: RevisePrCliOptions;
-  repo: string;
-  feedback: PullRequestFeedback;
-  deps: RunPrRevisionDependencies;
-}): Promise<PreparedPrRevisionWorkspace> {
-  const { options, repo, feedback, deps } = input;
-  if (deps.prepareWorkspace) {
-    return deps.prepareWorkspace({
-      controlCwd: options.cwd,
-      repo,
-      prNumber: options.prNumber,
-      headRefName: feedback.pr.headRefName,
-      workspace: options.workspace ?? defaultWorkspaceConfig,
-      hooks: options.hooks ?? defaultLifecycleHooks,
-    });
-  }
-
-  if (deps.checkout) {
-    await deps.checkout({ cwd: options.cwd, repo, pr: feedback.pr });
     return {
-      path: options.cwd,
-      metadata: { path: options.cwd, strategy: "clone", cloneRemote: options.remote, createdNow: false },
-      releaseLock: noopAsync,
-    };
+      outcome: "no-code-changes",
+      context,
+      planStatus,
+      reviewVerdict,
+      verification,
+    } satisfies PrRevisionResult;
   }
-
-  return preparePrRevisionWorkspace({
-    controlCwd: options.cwd,
-    repo,
-    prNumber: options.prNumber,
-    headRefName: feedback.pr.headRefName,
-    workspace: options.workspace ?? defaultWorkspaceConfig,
-    hooks: options.hooks ?? defaultLifecycleHooks,
+  const changedFiles = yield* changedFilesOutsideRoark(context.agentCwd);
+  const publishDisplay: AgentDisplayContext = {
+    command: "revise-pr",
+    repository: context.repo,
+    target: `PR #${context.prNumber}`,
+    phaseId: "pr-revision-publish",
+    phaseLabel: "Commit and push revision",
+    revision: context.revision,
+    operation: "publish",
+  };
+  const commitSha = yield* runPresentedPhase(
+    publishDisplay,
+    () =>
+      Effect.uninterruptibleMask((restore) =>
+        restore(commitAndPushRevision(context, feedback.pr.headRefName)).pipe(
+          // Once the push is acknowledged, persist publication before accepting interruption.
+          Effect.tap(() =>
+            Effect.gen(function* () {
+              yield* updateMetadata(context, feedback, {
+                outcome: "published",
+                planStatus,
+                reviewVerdict,
+                verification,
+                endedAt: DateTime.formatIso(yield* DateTime.now),
+              });
+            }),
+          ),
+        ),
+      ),
+    (sha) => ({ outcome: sha ? `pushed ${sha.slice(0, 12)}` : "pushed" }),
+  );
+  yield* postSummary({
+    context,
+    outcome: "published",
+    reviewVerdict,
+    verification,
+    dispositions: revisionFeedbackDispositions(plan, execution),
+    changedFiles,
+    commitSha,
   });
-}
-
-async function runRevisionExecutionPhase(
+  return {
+    outcome: "published",
+    context,
+    planStatus,
+    reviewVerdict,
+    verification,
+  } satisfies PrRevisionResult;
+}, Effect.scoped);
+const runRevisionExecutionPhase = Effect.fn("runRevisionExecutionPhase")(
+  function* (
+    context: PrRevisionContext,
+    input: {
+      phaseId: string;
+      plan: RevisionPlanResult;
+      label: string;
+      artifact: string;
+      title: string;
+      thinkingStage: WorkflowThinkingStage;
+      prompt: string;
+      pass?: number | undefined;
+    },
+  ) {
+    const display = revisionDisplay(context, input, "edit");
+    const artifact = yield* runPresentedPhase(
+      display,
+      () =>
+        runStructuredArtifact(
+          {
+            cwd: context.agentCwd,
+            model: effectiveModelForStage(context.model, input.thinkingStage),
+            thinkingLevel: context.thinkingConfig[input.thinkingStage],
+            systemPrompt: sharedSystemPrompt,
+            prompt: input.prompt,
+            fileEditingToolsEnabled: true,
+            display,
+          },
+          revisionExecutionArtifactDefinition(input.title, input.plan),
+          {
+            writeJson: (content) =>
+              writePrRevisionArtifact(context, input.artifact, content),
+            writeMarkdown: (content) =>
+              writePrRevisionArtifact(
+                context,
+                input.artifact.replace(/\.json$/, ".md"),
+                content,
+              ),
+          },
+        ),
+      (result) => ({
+        outcome: artifactOutcome(result.markdown),
+        artifact: display.expectedArtifact,
+      }),
+      undefined,
+    );
+    return artifact.value;
+  },
+);
+const runRevisionPlanPhase = Effect.fn("runRevisionPlanPhase")(function* (
   context: PrRevisionContext,
-  runner: AgentRunner,
+  feedbackSources: readonly RevisionFeedbackSource[],
+) {
+  const input = {
+    phaseId: "revision-plan",
+    label: "Revision plan",
+    artifact: "revision-plan.json",
+  };
+  const display = revisionDisplay(context, input, "inspect");
+  const artifact = yield* runPresentedPhase(
+    display,
+    () =>
+      runStructuredArtifact(
+        {
+          cwd: context.agentCwd,
+          model: effectiveModelForStage(context.model, "revisionPlan"),
+          thinkingLevel: context.thinkingConfig.revisionPlan,
+          systemPrompt: sharedSystemPrompt,
+          prompt: revisionPlanPrompt(context),
+          fileEditingToolsEnabled: false,
+          display,
+        },
+        revisionPlanArtifactDefinition(
+          new Set(feedbackSources.map((source) => source.id)),
+        ),
+        {
+          writeJson: (content) =>
+            writePrRevisionArtifact(context, "revision-plan.json", content),
+          writeMarkdown: (content) =>
+            writePrRevisionArtifact(context, "revision-plan.md", content),
+        },
+      ),
+    (result) => ({
+      outcome: artifactOutcome(result.markdown),
+      artifact: display.expectedArtifact,
+    }),
+    undefined,
+  );
+  return artifact.value;
+});
+const runRevisionReviewAgent = Effect.fn("runRevisionReviewAgent")(function* (
+  context: PrRevisionContext,
   input: {
     phaseId: string;
-    plan: RevisionPlanResult;
     label: string;
     artifact: string;
-    title: string;
-    thinkingStage: WorkflowThinkingStage;
     prompt: string;
     pass?: number | undefined;
   },
-): Promise<RevisionExecutionResult> {
-  const display = revisionDisplay(context, input, "edit");
-  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
-      cwd: context.agentCwd,
-      model: effectiveModelForStage(context.model, input.thinkingStage),
-      thinkingLevel: context.thinkingConfig[input.thinkingStage],
-      systemPrompt: sharedSystemPrompt,
-      prompt: input.prompt,
-      fileEditingToolsEnabled: true,
-      display,
-    }, runner, revisionExecutionArtifactDefinition(input.title, input.plan), {
-      writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
-      writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
-    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
-  return artifact.value;
-}
-
-async function runRevisionPlanPhase(
-  context: PrRevisionContext,
-  runner: AgentRunner,
-  feedbackSources: readonly RevisionFeedbackSource[],
-): Promise<RevisionPlanResult> {
-  const input = { phaseId: "revision-plan", label: "Revision plan", artifact: "revision-plan.json" };
-  const display = revisionDisplay(context, input, "inspect");
-  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
-      cwd: context.agentCwd,
-      model: effectiveModelForStage(context.model, "revisionPlan"),
-      thinkingLevel: context.thinkingConfig.revisionPlan,
-      systemPrompt: sharedSystemPrompt,
-      prompt: revisionPlanPrompt(context),
-      fileEditingToolsEnabled: false,
-      display,
-    }, runner, revisionPlanArtifactDefinition(new Set(feedbackSources.map((source) => source.id))), {
-      writeJson: (content) => writePrRevisionArtifact(context, "revision-plan.json", content),
-      writeMarkdown: (content) => writePrRevisionArtifact(context, "revision-plan.md", content),
-    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
-  return artifact.value;
-}
-
-async function runRevisionReviewAgent(
-  context: PrRevisionContext,
-  runner: AgentRunner,
-  input: { phaseId: string; label: string; artifact: string; prompt: string; pass?: number | undefined },
-): Promise<ReviewResult> {
+) {
   const display = revisionDisplay(context, input, "review");
-  const artifact = await runPresentedPhase(display, () => runStructuredArtifact({
-      cwd: context.agentCwd,
-      model: effectiveModelForStage(context.model, "revisionReview"),
-      thinkingLevel: context.thinkingConfig.revisionReview,
-      systemPrompt: sharedSystemPrompt,
-      prompt: input.prompt,
-      fileEditingToolsEnabled: false,
-      display,
-    }, runner, reviewArtifactDefinition({
-      allowRestart: false,
-      title: input.label,
-      source: "revision-review",
-    }), {
-      writeJson: (content) => writePrRevisionArtifact(context, input.artifact, content),
-      writeMarkdown: (content) => writePrRevisionArtifact(context, input.artifact.replace(/\.json$/, ".md"), content),
-    }), (result) => ({ outcome: artifactOutcome(result.markdown), artifact: display.expectedArtifact }));
+  const artifact = yield* runPresentedPhase(
+    display,
+    () =>
+      runStructuredArtifact(
+        {
+          cwd: context.agentCwd,
+          model: effectiveModelForStage(context.model, "revisionReview"),
+          thinkingLevel: context.thinkingConfig.revisionReview,
+          systemPrompt: sharedSystemPrompt,
+          prompt: input.prompt,
+          fileEditingToolsEnabled: false,
+          display,
+        },
+        reviewArtifactDefinition({
+          allowRestart: false,
+          title: input.label,
+          source: "revision-review",
+        }),
+        {
+          writeJson: (content) =>
+            writePrRevisionArtifact(context, input.artifact, content),
+          writeMarkdown: (content) =>
+            writePrRevisionArtifact(
+              context,
+              input.artifact.replace(/\.json$/, ".md"),
+              content,
+            ),
+        },
+      ),
+    (result) => ({
+      outcome: artifactOutcome(result.markdown),
+      artifact: display.expectedArtifact,
+    }),
+    undefined,
+  );
   return artifact.value;
-}
-
+});
 function revisionDisplay(
   context: PrRevisionContext,
-  input: { phaseId: string; label: string; artifact: string; pass?: number | undefined },
+  input: {
+    phaseId: string;
+    label: string;
+    artifact: string;
+    pass?: number | undefined;
+  },
   operation: AgentDisplayContext["operation"],
 ): AgentDisplayContext {
   return {
@@ -471,34 +592,59 @@ function revisionDisplay(
     phaseLabel: input.label,
     revision: context.revision,
     ...(input.pass === undefined ? {} : { pass: input.pass }),
-    expectedArtifact: prRevisionArtifactRelativePath(context, input.artifact.replace(/\.json$/, ".md")),
+    expectedArtifact: prRevisionArtifactRelativePath(
+      context,
+      input.artifact.replace(/\.json$/, ".md"),
+    ),
     operation,
   };
 }
-
-async function writeInitialArtifacts(context: PrRevisionContext, feedback: PullRequestFeedback): Promise<void> {
-  await writePrRevisionJsonArtifact(context, "pr-feedback.json", plannerFacingFeedback(feedback));
-  await writePrRevisionArtifact(context, "pr-feedback.md", formatPrFeedbackMarkdown(feedback));
-  await updateMetadata(context, feedback, { outcome: "started" });
-}
-
+const writeInitialArtifacts = Effect.fn("writeInitialArtifacts")(function* (
+  context: PrRevisionContext,
+  feedback: PullRequestFeedback,
+) {
+  yield* writePrRevisionJsonArtifact(
+    context,
+    "pr-feedback.json",
+    plannerFacingFeedback(feedback),
+  );
+  yield* writePrRevisionArtifact(
+    context,
+    "pr-feedback.md",
+    formatPrFeedbackMarkdown(feedback),
+  );
+  yield* updateMetadata(context, feedback, { outcome: "started" });
+});
 interface RevisionFeedbackSource {
   id: string;
-  kind: "pr-description" | "review-thread" | "pr-comment" | "closing-issue" | "closing-issue-comment";
+  kind:
+    | "pr-description"
+    | "review-thread"
+    | "pr-comment"
+    | "closing-issue"
+    | "closing-issue-comment";
   url?: string | undefined;
 }
-
-function plannerFacingFeedback(feedback: PullRequestFeedback): PullRequestFeedback & { feedbackSources: RevisionFeedbackSource[] } {
+function plannerFacingFeedback(
+  feedback: PullRequestFeedback,
+): PullRequestFeedback & {
+  feedbackSources: RevisionFeedbackSource[];
+} {
   return {
     ...feedback,
     comments: feedback.plannerComments,
     feedbackSources: revisionFeedbackSources(feedback),
   };
 }
-
-function revisionFeedbackSources(feedback: PullRequestFeedback): RevisionFeedbackSource[] {
+function revisionFeedbackSources(
+  feedback: PullRequestFeedback,
+): RevisionFeedbackSource[] {
   return [
-    { id: `pr:${feedback.pr.number}`, kind: "pr-description" as const, url: feedback.pr.url },
+    {
+      id: `pr:${feedback.pr.number}`,
+      kind: "pr-description" as const,
+      url: feedback.pr.url,
+    },
     ...feedback.reviewThreads.map((thread, index) => ({
       id: `thread:${thread.id || index + 1}`,
       kind: "review-thread" as const,
@@ -510,7 +656,11 @@ function revisionFeedbackSources(feedback: PullRequestFeedback): RevisionFeedbac
       url: comment.url,
     })),
     ...(feedback.closingIssues ?? []).flatMap((issue) => [
-      { id: `issue:${issue.number}`, kind: "closing-issue" as const, url: issue.url },
+      {
+        id: `issue:${issue.number}`,
+        kind: "closing-issue" as const,
+        url: issue.url,
+      },
       ...(issue.comments ?? []).map((comment, index) => ({
         id: `issue-comment:${issue.number}:${comment.databaseId ?? comment.id ?? index + 1}`,
         kind: "closing-issue-comment" as const,
@@ -519,127 +669,238 @@ function revisionFeedbackSources(feedback: PullRequestFeedback): RevisionFeedbac
     ]),
   ];
 }
-
-async function updateMetadata(
+const updateMetadata = Effect.fn("updateMetadata")(function* (
   context: PrRevisionContext,
   feedback: PullRequestFeedback,
   update: Record<string, unknown>,
-): Promise<void> {
-  await writePrRevisionJsonArtifact(context, "metadata.json", {
+) {
+  yield* writePrRevisionJsonArtifact(context, "metadata.json", {
     prNumber: context.prNumber,
     revision: context.revision,
     repo: feedback.repo,
     startedAt: feedback.fetchedAt,
-    inferredIssue: await inferIssueForRevision(context, feedback),
+    inferredIssue: yield* inferIssueForRevision(context, feedback),
     pr: feedback.pr,
     excludedRoarkSummaryCommentIds: feedback.excludedRoarkSummaryCommentIds,
     ...update,
   });
-}
-
-async function inferIssueForRevision(context: PrRevisionContext, feedback: PullRequestFeedback): Promise<number | undefined> {
-  return inferIssueFromPrBody(feedback.pr.body) ?? await inferIssueFromAttemptMetadata(context, feedback.pr.headRefName);
-}
-
-async function inferIssueFromAttemptMetadata(context: PrRevisionContext, headRefName: string): Promise<number | undefined> {
-  const issueRoot = path.join(context.outDir, "issue");
-  let issueDirs: string[];
-  try {
-    issueDirs = await readdir(issueRoot);
-  } catch {
-    return undefined;
-  }
-
-  for (const issueDir of issueDirs) {
-    const attemptsDir = path.join(issueRoot, issueDir, "attempts");
-    let attempts: string[];
-    try {
-      attempts = await readdir(attemptsDir);
-    } catch {
-      continue;
-    }
+});
+const inferIssueForRevision = Effect.fn("inferIssueForRevision")(function* (
+  context: PrRevisionContext,
+  feedback: PullRequestFeedback,
+) {
+  return (
+    inferIssueFromPrBody(feedback.pr.body) ??
+    (yield* inferIssueFromAttemptMetadata(context, feedback.pr.headRefName))
+  );
+});
+const historicalAttempt = Schema.Struct({
+  branch: Schema.String,
+  issueNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+});
+const decodeHistoricalAttempt = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(historicalAttempt),
+);
+const inferIssueFromAttemptMetadata = Effect.fnUntraced(function* (
+  context: PrRevisionContext,
+  headRefName: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const root = path.join(context.outDir, "issue");
+  const issues = yield* fs
+    .readDirectory(root)
+    .pipe(Effect.catch(() => Effect.succeed([])));
+  for (const issue of issues) {
+    const dir = path.join(root, issue, "attempts");
+    const attempts = yield* fs
+      .readDirectory(dir)
+      .pipe(Effect.catch(() => Effect.succeed([])));
     for (const attempt of attempts) {
-      try {
-        const raw = await readFile(path.join(attemptsDir, attempt, "attempt.json"), "utf8");
-        const metadata = JSON.parse(raw) as { branch?: unknown; issueNumber?: unknown };
-        if (metadata.branch === headRefName && typeof metadata.issueNumber === "number") return metadata.issueNumber;
-      } catch {
-        // Ignore malformed or missing historical metadata; this inference is best-effort.
-      }
+      const metadata = yield* fs
+        .readFileString(path.join(dir, attempt, "attempt.json"))
+        .pipe(
+          Effect.flatMap(decodeHistoricalAttempt),
+          Effect.catch(() => Effect.succeed(undefined)),
+        );
+      if (metadata?.branch === headRefName) return metadata.issueNumber;
     }
   }
-
   return undefined;
-}
-
-function revisionReviewVerdict(review: ReviewResult): RevisionReviewVerdict {
+});
+const revisionReviewVerdict = Effect.fnUntraced(function* (
+  review: ReviewResult,
+) {
   if (review.restartRecommendation !== undefined) {
-    throw new Error("Revision reviews cannot request an implementation restart.");
+    return yield* new PrRevisionError({
+      message: "Revision reviews cannot request an implementation restart.",
+    });
   }
   if (review.findings.some(isUnblockedCurrentFix)) return "fixes-required";
   const disposition = reviewDisposition(review);
-  if (disposition === "restart-required") throw new Error("Revision reviews cannot request an implementation restart.");
+  if (disposition === "restart-required")
+    return yield* new PrRevisionError({
+      message: "Revision reviews cannot request an implementation restart.",
+    });
   return disposition;
-}
-
-async function dirtyLinesOutsideRoark(cwd: string): Promise<string[]> {
-  return (await gitDirtyLines(cwd)).filter((line) => !statusLinePaths(line).every(isRoarkPath));
-}
-
+});
+const dirtyLinesOutsideRoark = Effect.fn("dirtyLinesOutsideRoark")(function* (
+  cwd: string,
+) {
+  return (yield* gitDirtyLines(cwd)).filter(
+    (line) => !statusLinePaths(line).every(isRoarkPath),
+  );
+});
 function statusLinePaths(line: string): string[] {
   const pathPart = line.slice(3).trim();
   if (!pathPart) return [];
-  return pathPart.split(" -> ").map((filePath) => filePath.replace(/^"|"$/g, ""));
+  return pathPart
+    .split(" -> ")
+    .map((filePath) => filePath.replace(/^"|"$/g, ""));
 }
-
 function isRoarkPath(filePath: string): boolean {
   return filePath === ".roark" || filePath.startsWith(".roark/");
 }
-
-async function commitAndPushRevision(context: PrRevisionContext, branchName: string): Promise<string | undefined> {
-  await ensurePushRemote(context);
-  await runProcessOrThrow(["git", "add", "-A", "--", ".", ":(exclude).roark"], { cwd: context.agentCwd, label: "git add revision changes" });
-  await runProcessOrThrow(buildCommitArgv({ message: `roark: revise PR #${context.prNumber} (revision ${context.revision})` }), {
-    cwd: context.agentCwd,
-    label: "git commit",
-  });
-  await runProcessOrThrow(["git", "push", context.remote, `HEAD:${branchName}`], { cwd: context.agentCwd, label: `git push ${context.remote}` });
-  try {
-    return (await runProcessOrThrow(["git", "rev-parse", "--short", "HEAD"], { cwd: context.agentCwd, label: "git rev-parse HEAD" })).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-async function changedFilesOutsideRoark(cwd: string): Promise<string[]> {
-  const paths = (await gitDirtyLines(cwd))
-    .flatMap(statusLinePaths)
-    .filter((filePath) => !isRoarkPath(filePath));
-  return [...new Set(paths)];
-}
-
-async function ensurePushRemote(context: PrRevisionContext): Promise<void> {
-  const agentRemote = await runProcess(["git", "remote", "get-url", context.remote], { cwd: context.agentCwd });
+const commitAndPushRevision = Effect.fn("commitAndPushRevision")(function* (
+  context: PrRevisionContext,
+  branchName: string,
+) {
+  yield* ensurePushRemote(context);
+  yield* runProcessOrThrow(
+    ["git", "add", "-A", "--", ".", ":(exclude).roark"],
+    { cwd: context.agentCwd, label: "git add revision changes" },
+  );
+  yield* runProcessOrThrow(
+    buildCommitArgv({
+      message: `roark: revise PR #${context.prNumber} (revision ${context.revision})`,
+    }),
+    {
+      cwd: context.agentCwd,
+      label: "git commit",
+    },
+  );
+  const commitSha = yield* runProcessOrThrow(
+    ["git", "rev-parse", "--short", "HEAD"],
+    { cwd: context.agentCwd, label: "git rev-parse HEAD" },
+  ).pipe(
+    Effect.map((value) => value.trim()),
+    Effect.catch(() => Effect.succeed(undefined)),
+  );
+  yield* runProcessOrThrow(
+    ["git", "push", context.remote, `HEAD:${branchName}`],
+    { cwd: context.agentCwd, label: `git push ${context.remote}` },
+  );
+  return commitSha;
+});
+const changedFilesOutsideRoark = Effect.fn("changedFilesOutsideRoark")(
+  function* (cwd: string) {
+    const paths = (yield* gitDirtyLines(cwd))
+      .flatMap(statusLinePaths)
+      .filter((filePath) => !isRoarkPath(filePath));
+    return [...new Set(paths)];
+  },
+);
+const ensurePushRemote = Effect.fn("ensurePushRemote")(function* (
+  context: PrRevisionContext,
+) {
+  const agentRemote = yield* runProcess(
+    ["git", "remote", "get-url", context.remote],
+    { cwd: context.agentCwd },
+  );
   if (path.resolve(context.agentCwd) === path.resolve(context.controlCwd)) {
     if (agentRemote.exitCode === 0 && agentRemote.stdout.trim()) return;
-    throw new Error(`Git remote '${context.remote}' is not configured in '${context.agentCwd}'.`);
+    return yield* Effect.fail(
+      new PrRevisionError({
+        message: `Git remote '${context.remote}' is not configured in '${context.agentCwd}'.`,
+      }),
+    );
   }
-
-  const fetchUrl = (await runProcessOrThrow(["git", "remote", "get-url", context.remote], {
-    cwd: context.controlCwd,
-    label: `git remote get-url ${context.remote}`,
-  })).trim();
-  const pushUrl = (await runProcessOrThrow(["git", "remote", "get-url", "--push", context.remote], {
-    cwd: context.controlCwd,
-    label: `git remote get-url --push ${context.remote}`,
-  })).trim();
-
+  const fetchUrl = (yield* runProcessOrThrow(
+    ["git", "remote", "get-url", context.remote],
+    {
+      cwd: context.controlCwd,
+      label: `git remote get-url ${context.remote}`,
+    },
+  )).trim();
+  const pushUrl = (yield* runProcessOrThrow(
+    ["git", "remote", "get-url", "--push", context.remote],
+    {
+      cwd: context.controlCwd,
+      label: `git remote get-url --push ${context.remote}`,
+    },
+  )).trim();
   if (agentRemote.exitCode !== 0 || !agentRemote.stdout.trim()) {
-    await runProcessOrThrow(["git", "remote", "add", context.remote, fetchUrl], { cwd: context.agentCwd, label: `git remote add ${context.remote}` });
+    yield* runProcessOrThrow(
+      ["git", "remote", "add", context.remote, fetchUrl],
+      { cwd: context.agentCwd, label: `git remote add ${context.remote}` },
+    );
   }
-
-  const agentPushUrl = await runProcess(["git", "remote", "get-url", "--push", context.remote], { cwd: context.agentCwd });
-  if (pushUrl && (agentPushUrl.exitCode !== 0 || agentPushUrl.stdout.trim() !== pushUrl)) {
-    await runProcessOrThrow(["git", "remote", "set-url", "--push", context.remote, pushUrl], { cwd: context.agentCwd, label: `git remote set-url --push ${context.remote}` });
+  const agentPushUrl = yield* runProcess(
+    ["git", "remote", "get-url", "--push", context.remote],
+    { cwd: context.agentCwd },
+  );
+  if (
+    pushUrl &&
+    (agentPushUrl.exitCode !== 0 || agentPushUrl.stdout.trim() !== pushUrl)
+  ) {
+    yield* runProcessOrThrow(
+      ["git", "remote", "set-url", "--push", context.remote, pushUrl],
+      {
+        cwd: context.agentCwd,
+        label: `git remote set-url --push ${context.remote}`,
+      },
+    );
   }
-}
+});
+const metadataSchema = Schema.fromJsonString(
+  Schema.Record(Schema.String, Schema.Unknown),
+);
+const terminalOutcome = Schema.Literals([
+  "no-action-needed",
+  "needs-human",
+  "review-blocked",
+  "verification-failed",
+  "no-code-changes",
+  "published",
+]);
+const finalizeRevision = Effect.fnUntraced(function* (
+  context: PrRevisionContext,
+  feedback: PullRequestFeedback,
+  exit: Exit.Exit<unknown, unknown>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const saved = yield* fs
+    .readFileString(path.join(context.revisionDir, "metadata.json"))
+    .pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(metadataSchema)),
+      Effect.catch(() => Effect.succeed<Record<string, unknown>>({})),
+    );
+  const terminal = Schema.is(terminalOutcome)(saved["outcome"]);
+  yield* Effect.gen(function* () {
+    if (Exit.isSuccess(exit)) return;
+    yield* updateMetadata(context, feedback, {
+      ...saved,
+      ...(terminal
+        ? {}
+        : {
+            outcome: Cause.hasInterruptsOnly(exit.cause)
+              ? "interrupted"
+              : "errored",
+          }),
+      error:
+        Cause.prettyErrors(exit.cause)
+          .map((error) => error.message)
+          .join("\n") || "Interrupted.",
+      endedAt: DateTime.formatIso(yield* DateTime.now),
+    });
+  }).pipe(
+    Effect.ensuring(
+      terminal && saved["outcome"] !== "published"
+        ? removeAgentPrRevisionArtifacts(context).pipe(Effect.orDie)
+        : Effect.void,
+    ),
+  );
+});
+export class PrRevisionError extends Schema.TaggedError<PrRevisionError>()(
+  "PrRevisionError",
+  { message: Schema.String },
+) {}

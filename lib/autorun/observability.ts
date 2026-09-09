@@ -1,3 +1,4 @@
+import { DateTime, Effect } from "effect";
 import { createEventWriter } from "../observability/events.ts";
 import { updateRunSummary, type RunStatus } from "../observability/summary.ts";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
@@ -10,13 +11,18 @@ export interface FinalizeAttemptObservabilityInput {
   endedAt?: Date | string | undefined;
 }
 
-export async function finalizeAttemptObservability(input: FinalizeAttemptObservabilityInput): Promise<void> {
+export const finalizeAttemptObservability = Effect.fn(
+  "finalizeAttemptObservability",
+)(function* (input: FinalizeAttemptObservabilityInput) {
   const { context, outcome, outcomeDetail } = input;
-  const timestamp = toIsoString(input.endedAt ?? new Date());
+  const timestamp =
+    input.endedAt === undefined
+      ? DateTime.formatIso(yield* DateTime.now)
+      : toIsoString(input.endedAt);
   const status = runStatusForAttemptOutcome(outcome);
-  const writer = createEventWriter(context.runDir);
+  const writer = yield* createEventWriter(context.runDir);
 
-  await writer.write({
+  yield* writer.write({
     type: eventTypeForRunStatus(status),
     timestamp,
     issueNumber: context.issueNumber,
@@ -27,7 +33,7 @@ export async function finalizeAttemptObservability(input: FinalizeAttemptObserva
     outcomeDetail,
   });
 
-  await updateRunSummary(context, (summary) => {
+  yield* updateRunSummary(context, (summary) => {
     summary.status = status;
     if (status === "running") {
       summary.endedAt = undefined;
@@ -39,7 +45,7 @@ export async function finalizeAttemptObservability(input: FinalizeAttemptObserva
     if (status === "failed" && outcomeDetail) summary.lastError = outcomeDetail;
     else if (status !== "failed") summary.lastError = undefined;
   });
-}
+});
 
 export function runStatusForAttemptOutcome(outcome: AttemptOutcome): RunStatus {
   if (outcome === "in-progress") return "running";

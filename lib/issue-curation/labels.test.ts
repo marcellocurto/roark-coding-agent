@@ -14,6 +14,8 @@ describe("reviewer issue labels", () => {
       "review:follow-up",
       "review:suggestion",
     ]);
-    expect(reviewerIssueLabelForClassification("follow-up")).toBe("review:follow-up");
+    expect(reviewerIssueLabelForClassification("follow-up")).toBe(
+      "review:follow-up",
+    );
   });
 });

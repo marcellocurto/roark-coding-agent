@@ -1,93 +1,131 @@
-import { existsSync } from "node:fs";
-import { readdir, readFile } from "node:fs/promises";
+import { Effect, FileSystem, Option, Schema } from "effect";
+
 import path from "node:path";
 import type { StatusCliOptions } from "../cli/args.ts";
 import { parseIssueRef } from "../github/issue.ts";
 import type { PhaseSummary, RunSummary } from "./summary.ts";
-
-export async function renderStatus(options: StatusCliOptions): Promise<string> {
+import { readRunSummary } from "./summary.ts";
+export const renderStatus = Effect.fn("renderStatus")(function* (
+  options: StatusCliOptions,
+) {
   const cwd = path.resolve(options.cwd);
   const outDir = path.resolve(cwd, options.outDir);
-  if (options.all) return renderAllStatus(await readAllSummaries(outDir));
-  if (!options.issue) throw new Error("Missing issue for status command.");
-
-  const parsed = parseIssueRef(options.issue, options.repo);
-  const summary = options.attempt !== undefined
-    ? await readAttemptSummary(outDir, parsed.issueNumber, options.attempt)
-    : await readLatestIssueSummary(outDir, parsed.issueNumber);
-  if (!summary) return `No observability summary found for issue #${parsed.issueNumber}.`;
+  if (options.all) return renderAllStatus(yield* readAllSummaries(outDir));
+  const issue = options.issue;
+  if (!issue)
+    return yield* Effect.fail(
+      new StatusError({ message: "Missing issue for status command." }),
+    );
+  const parsed = yield* Effect.try({
+    try: () => parseIssueRef(issue, options.repo),
+    catch: (cause) =>
+      new StatusError({
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
+  const summary =
+    options.attempt !== undefined
+      ? yield* readAttemptSummary(outDir, parsed.issueNumber, options.attempt)
+      : yield* readLatestIssueSummary(outDir, parsed.issueNumber);
+  if (!summary)
+    return `No observability summary found for issue #${parsed.issueNumber}.`;
   return renderOneStatus(summary);
-}
-
-export async function readLatestIssueSummary(outDir: string, issueNumber: string): Promise<RunSummary | undefined> {
-  return (await readIssueSummaries(outDir, issueNumber)).sort(compareSummaryRecency).at(-1);
-}
-
-export async function readAttemptSummary(outDir: string, issueNumber: string, attempt: number): Promise<RunSummary | undefined> {
-  return readSummary(path.join(outDir, "issue", issueNumber, "attempts", String(attempt), "summary.json"));
-}
-
+});
+export const readLatestIssueSummary = Effect.fn("readLatestIssueSummary")(
+  function* (outDir: string, issueNumber: string) {
+    return (yield* readIssueSummaries(outDir, issueNumber))
+      .sort(compareSummaryRecency)
+      .at(-1);
+  },
+);
+export const readAttemptSummary = Effect.fn("readAttemptSummary")(function* (
+  outDir: string,
+  issueNumber: string,
+  attempt: number,
+) {
+  return yield* readRunSummary(
+    path.join(
+      outDir,
+      "issue",
+      issueNumber,
+      "attempts",
+      String(attempt),
+      "summary.json",
+    ),
+  );
+});
 export function renderOneStatus(summary: RunSummary): string {
   const lines = [
     `Issue #${summary.issueNumber}${summary.attempt !== undefined ? ` attempt ${summary.attempt}` : ""}`,
     `Status: ${summary.status}`,
     `Run directory: ${summary.runDir}`,
   ];
-  if (summary.durationMs !== undefined) lines.push(`Duration: ${formatDuration(summary.durationMs)}`);
+  if (summary.durationMs !== undefined)
+    lines.push(`Duration: ${formatDuration(summary.durationMs)}`);
   lines.push(formatTotals(summary));
   if (summary.lastError) lines.push(`Last error: ${summary.lastError}`);
-  if (summary.recoveryCommand && summary.status !== "completed") lines.push(`Recovery: ${summary.recoveryCommand}`);
+  if (summary.recoveryCommand && summary.status !== "completed")
+    lines.push(`Recovery: ${summary.recoveryCommand}`);
   lines.push("", "Phases:");
   const phases = Object.values(summary.phases).sort(comparePhases);
   if (phases.length === 0) lines.push("- none");
   for (const phase of phases) lines.push(formatPhase(phase));
   return lines.join("\n");
 }
-
 function renderAllStatus(summaries: readonly RunSummary[]): string {
   if (summaries.length === 0) return "No observability summaries found.";
   const lines = ["Known Roark runs:"];
-  for (const summary of [...summaries].sort((a, b) => Number(a.issueNumber) - Number(b.issueNumber))) {
-    const attempt = summary.attempt !== undefined ? ` attempt ${summary.attempt}` : "";
+  for (const summary of [...summaries].sort(
+    (a, b) => Number(a.issueNumber) - Number(b.issueNumber),
+  )) {
+    const attempt =
+      summary.attempt !== undefined ? ` attempt ${summary.attempt}` : "";
     const error = summary.lastError ? ` last_error=${summary.lastError}` : "";
-    lines.push(`- #${summary.issueNumber}${attempt}: ${summary.status}, ${formatDuration(summary.durationMs ?? 0)}, tokens=${summary.totals.totalTokens}, cost=${formatCost(summary.totals.cost)}${error}`);
+    lines.push(
+      `- #${summary.issueNumber}${attempt}: ${summary.status}, ${formatDuration(summary.durationMs ?? 0)}, tokens=${summary.totals.totalTokens}, cost=${formatCost(summary.totals.cost)}${error}`,
+    );
   }
   return lines.join("\n");
 }
-
-async function readAllSummaries(outDir: string): Promise<RunSummary[]> {
-  const issuesDir = path.join(outDir, "issue");
-  if (!existsSync(issuesDir)) return [];
-  const summaries: RunSummary[] = [];
-  for (const entry of await readdir(issuesDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    summaries.push(...await readIssueSummaries(outDir, entry.name));
+const directoryNames = Effect.fnUntraced(function* (directory: string) {
+  const fs = yield* FileSystem.FileSystem;
+  if (!(yield* fs.exists(directory))) return [];
+  const directories: string[] = [];
+  for (const name of yield* fs.readDirectory(directory)) {
+    const file = path.join(directory, name);
+    if (Option.isSome(yield* fs.readLink(file).pipe(Effect.option))) continue;
+    if ((yield* fs.stat(file)).type === "Directory") directories.push(name);
   }
-  return summaries;
-}
-
-async function readIssueSummaries(outDir: string, issueNumber: string): Promise<RunSummary[]> {
+  return directories;
+});
+const readAllSummaries = Effect.fnUntraced(function* (outDir: string) {
   const summaries: RunSummary[] = [];
-  const direct = await readSummary(path.join(outDir, "issue", issueNumber, "summary.json"));
+  for (const issue of yield* directoryNames(path.join(outDir, "issue")))
+    summaries.push(...(yield* readIssueSummaries(outDir, issue)));
+  return summaries;
+});
+const readIssueSummaries = Effect.fnUntraced(function* (
+  outDir: string,
+  issueNumber: string,
+) {
+  const summaries: RunSummary[] = [];
+  const directory = path.join(outDir, "issue", issueNumber);
+  const direct = yield* readRunSummary(path.join(directory, "summary.json"));
   if (direct) summaries.push(direct);
-  const attemptsDir = path.join(outDir, "issue", issueNumber, "attempts");
-  if (existsSync(attemptsDir)) {
-    for (const entry of await readdir(attemptsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const summary = await readSummary(path.join(attemptsDir, entry.name, "summary.json"));
-      if (summary) summaries.push(summary);
-    }
+  for (const attempt of yield* directoryNames(
+    path.join(directory, "attempts"),
+  )) {
+    const summary = yield* readRunSummary(
+      path.join(directory, "attempts", attempt, "summary.json"),
+    );
+    if (summary) summaries.push(summary);
   }
   return summaries;
-}
-
-async function readSummary(summaryPath: string): Promise<RunSummary | undefined> {
-  try {
-    return JSON.parse(await readFile(summaryPath, "utf8")) as RunSummary;
-  } catch {
-    return undefined;
-  }
-}
+});
+export class StatusError extends Schema.TaggedError<StatusError>()(
+  "StatusError",
+  { message: Schema.String },
+) {}
 
 function compareSummaryRecency(a: RunSummary, b: RunSummary): number {
   const at = Date.parse(a.endedAt ?? a.startedAt ?? "");
@@ -95,17 +133,17 @@ function compareSummaryRecency(a: RunSummary, b: RunSummary): number {
   if (at !== bt) return at - bt;
   return (a.attempt ?? 0) - (b.attempt ?? 0);
 }
-
 function comparePhases(a: PhaseSummary, b: PhaseSummary): number {
   const at = Date.parse(a.startedAt ?? "");
   const bt = Date.parse(b.startedAt ?? "");
   if (at !== bt) return at - bt;
   return a.phase.localeCompare(b.phase);
 }
-
 function formatPhase(phase: PhaseSummary): string {
   const details = [
-    phase.durationMs !== undefined ? formatDuration(phase.durationMs) : undefined,
+    phase.durationMs !== undefined
+      ? formatDuration(phase.durationMs)
+      : undefined,
     phase.artifactPath,
     phase.model ? `model=${phase.model}` : undefined,
     phase.thinkingLevel ? `thinking=${phase.thinkingLevel}` : undefined,
@@ -113,18 +151,17 @@ function formatPhase(phase: PhaseSummary): string {
     phase.totals ? `tokens=${phase.totals.totalTokens}` : undefined,
     phase.totals ? `cost=${formatCost(phase.totals.cost)}` : undefined,
     phase.errorMessage ? `error=${phase.errorMessage}` : undefined,
-  ].filter(Boolean).join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
   return `- ${phase.label ?? phase.phase}: ${phase.status}${details ? ` (${details})` : ""}`;
 }
-
 function formatTotals(summary: RunSummary): string {
   return `Totals: tokens=${summary.totals.totalTokens} input=${summary.totals.inputTokens} output=${summary.totals.outputTokens} tool_calls=${summary.totals.toolCalls} cost=${formatCost(summary.totals.cost)}`;
 }
-
 function formatCost(value: number): string {
   return `$${value.toFixed(6)}`;
 }
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const seconds = ms / 1000;

@@ -19,22 +19,28 @@ export const workflowThinkingStages = [
 ] as const;
 
 export type WorkflowThinkingStage = (typeof workflowThinkingStages)[number];
-export type WorkflowThinkingConfig = Record<WorkflowThinkingStage, ThinkingLevel>;
+export type WorkflowThinkingConfig = Record<
+  WorkflowThinkingStage,
+  ThinkingLevel
+>;
 
-export const workflowThinkingProfiles: Record<ThinkingProfileName, WorkflowThinkingConfig> = {
+export const workflowThinkingProfiles: Record<
+  ThinkingProfileName,
+  WorkflowThinkingConfig
+> = {
   default: {
-    triage: "high",
+    triage: "medium",
     plan: "high",
-    implement: "high",
-    codeRefinement: "high",
+    implement: "medium",
+    codeRefinement: "medium",
     reviewA: "high",
     reviewB: "high",
-    fix: "high",
-    issuePublishing: "high",
+    fix: "medium",
+    issuePublishing: "low",
     revisionPlan: "high",
-    revisionImplementation: "high",
+    revisionImplementation: "medium",
     revisionReview: "high",
-    revisionFix: "high",
+    revisionFix: "medium",
   },
   fast: {
     triage: "low",
@@ -51,29 +57,36 @@ export const workflowThinkingProfiles: Record<ThinkingProfileName, WorkflowThink
     revisionFix: "low",
   },
   deep: {
-    triage: "xhigh",
+    triage: "high",
     plan: "xhigh",
     implement: "high",
-    codeRefinement: "xhigh",
+    codeRefinement: "high",
     reviewA: "xhigh",
     reviewB: "xhigh",
     fix: "high",
-    issuePublishing: "high",
-    revisionPlan: "high",
+    issuePublishing: "low",
+    revisionPlan: "xhigh",
     revisionImplementation: "high",
     revisionReview: "xhigh",
     revisionFix: "high",
   },
 };
 
-export function getWorkflowThinkingConfig(input: {
-  profile?: ThinkingProfileName | undefined  ;
-  explicitThinkingLevel?: ThinkingLevel | undefined  ;
-} = {}): WorkflowThinkingConfig {
-  if (input.explicitThinkingLevel) return uniformWorkflowThinkingConfig(input.explicitThinkingLevel);
+export function getWorkflowThinkingConfig(
+  input: {
+    profile?: ThinkingProfileName | undefined;
+    explicitThinkingLevel?: ThinkingLevel | undefined;
+  } = {},
+): WorkflowThinkingConfig {
+  if (input.explicitThinkingLevel)
+    return uniformWorkflowThinkingConfig(input.explicitThinkingLevel);
   return { ...workflowThinkingProfiles[input.profile ?? "default"] };
 }
 
-function uniformWorkflowThinkingConfig(level: ThinkingLevel): WorkflowThinkingConfig {
-  return Object.fromEntries(workflowThinkingStages.map((stage) => [stage, level])) as WorkflowThinkingConfig;
+function uniformWorkflowThinkingConfig(
+  level: ThinkingLevel,
+): WorkflowThinkingConfig {
+  const config = { ...workflowThinkingProfiles.default };
+  for (const stage of workflowThinkingStages) config[stage] = level;
+  return config;
 }

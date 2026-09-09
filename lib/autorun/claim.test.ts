@@ -7,14 +7,20 @@ describe("autorun claim planning", () => {
   });
 
   test("builds claim comments with an assignee and branch", () => {
-    expect(buildClaimComment({ issueNumber: 123, branchName: "roark/issue-123", assignee: "roark-codes" })).toBe(
+    expect(
+      buildClaimComment({
+        issueNumber: 123,
+        branchName: "roark/issue-123",
+        assignee: "roark-codes",
+      }),
+    ).toBe(
       "@roark-codes is attempting this issue in branch `roark/issue-123`.",
     );
   });
 
   test("builds claim comments without an assignee", () => {
-    expect(buildClaimComment({ issueNumber: 123, branchName: "roark/issue-123" })).toBe(
-      "Roark is attempting this issue in branch `roark/issue-123`.",
-    );
+    expect(
+      buildClaimComment({ issueNumber: 123, branchName: "roark/issue-123" }),
+    ).toBe("Roark is attempting this issue in branch `roark/issue-123`.");
   });
 });

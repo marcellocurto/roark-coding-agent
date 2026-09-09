@@ -1,5 +1,11 @@
-export function extractMarkdownToken(markdown: string, section: string): string | undefined {
-  const candidate = new RegExp(`##\\s+${escapeRegExp(section)}\\s*\\r?\\n+\\s*([^\\r\\n]+)`, "i").exec(markdown)?.[1];
+export function extractMarkdownToken(
+  markdown: string,
+  section: string,
+): string | undefined {
+  const candidate = new RegExp(
+    `##\\s+${escapeRegExp(section)}\\s*\\r?\\n+\\s*([^\\r\\n]+)`,
+    "i",
+  ).exec(markdown)?.[1];
   if (!candidate) return undefined;
   return candidate
     .toLowerCase()
@@ -19,7 +25,11 @@ export function requireMarkdownToken<const T extends readonly string[]>(
 }
 
 export function artifactOutcome(markdown: string): string {
-  return extractMarkdownToken(markdown, "Verdict") ?? extractMarkdownToken(markdown, "Status") ?? "completed";
+  return (
+    extractMarkdownToken(markdown, "Verdict") ??
+    extractMarkdownToken(markdown, "Status") ??
+    "completed"
+  );
 }
 
 function escapeRegExp(value: string): string {

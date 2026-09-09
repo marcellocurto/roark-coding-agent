@@ -1,8 +1,36 @@
+import type { ApplicationServices } from "../runtime/application.ts";
+import type { Scope } from "effect";
+import { Cause, Exit, Effect } from "effect";
+import { Schema } from "effect";
+import { toolContext } from "../testing/tool-context.ts";
+import { runApplicationPromise } from "../runtime/application.ts";
+import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
+import { type AgentRunRequest } from "../workflow/agent-runner.ts";
+import {
+  runStructuredArtifact,
+  type StructuredArtifactDefinition,
+} from "./runner.ts";
+interface TestArtifactWriters {
+  writeJson: (
+    content: string,
+  ) => Effect.Effect<void, unknown, ApplicationServices | Scope.Scope>;
+  writeMarkdown: (
+    content: string,
+  ) => Effect.Effect<void, unknown, ApplicationServices | Scope.Scope>;
+}
+const runTestArtifact = Effect.fnUntraced(function* <T>(
+  request: AgentRunRequest,
+  runner: AgentRunner,
+  definition: StructuredArtifactDefinition<T>,
+  writers: TestArtifactWriters,
+) {
+  return yield* runStructuredArtifact(request, definition, writers).pipe(
+    provideTestAgent(runner),
+    Effect.scoped,
+  );
+});
 import { describe, expect, test } from "bun:test";
-import { Type } from "typebox";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import { runStructuredArtifact } from "./runner.ts";
-
+import { artifactContract } from "./contract.ts";
 const request: AgentRunRequest = {
   cwd: "/repo",
   model: "openai-codex/gpt-5.6-sol",
@@ -18,79 +46,305 @@ const request: AgentRunRequest = {
     operation: "inspect",
   },
 };
-
 describe("runStructuredArtifact", () => {
   test("accepts one terminating submission and persists matching JSON and Markdown", async () => {
-    const written: { json?: string; markdown?: string } = {};
+    const written: {
+      json?: string;
+      markdown?: string;
+    } = {};
     const writeOrder: string[] = [];
-    const result = await runStructuredArtifact(request, async (agentRequest) => {
-      const tool = agentRequest.customTools?.find((candidate) => candidate.name === "submit_example");
-      if (!tool) throw new Error("missing tool");
-      await tool.execute("submit", { summary: "accepted" }, undefined, undefined, {} as never);
-      return "ignored agent prose";
-    }, {
-      toolName: "submit_example",
-      label: "Example",
-      noun: "example",
-      parameters: Type.Object({ summary: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
-      validate: (value) => value as { summary: string },
-      formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
-      createError: (message) => new Error(message),
-    }, {
-      writeJson: (content) => { writeOrder.push("json"); written.json = content; return Promise.resolve(); },
-      writeMarkdown: (content) => { writeOrder.push("markdown"); written.markdown = content; return Promise.resolve(); },
+    const result = await runApplicationPromise(
+      runTestArtifact<{
+        summary: string;
+      }>(
+        request,
+        Effect.fnUntraced(function* (agentRequest) {
+          const tool = agentRequest.customTools?.find(
+            (candidate) => candidate.name === "submit_example",
+          );
+          if (!tool) return yield* Effect.fail(new Error("missing tool"));
+          yield* Effect.tryPromise({
+            try: () =>
+              tool.execute(
+                "submit",
+                { summary: "accepted" },
+                undefined,
+                undefined,
+                toolContext,
+              ),
+            catch: (error) => error,
+          });
+          return "ignored agent prose";
+        }),
+        {
+          toolName: "submit_example",
+          label: "Example",
+          noun: "example",
+          parameters: Schema.Struct({ summary: Schema.NonEmptyString }),
+          validate: artifactContract(
+            "Example",
+            Schema.Struct({ summary: Schema.String }),
+          ).decode,
+          formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
+        },
+        {
+          writeJson: Effect.fnUntraced(function* (content) {
+            writeOrder.push("json");
+            written.json = content;
+            return yield* Effect.void;
+          }),
+          writeMarkdown: Effect.fnUntraced(function* (content) {
+            writeOrder.push("markdown");
+            written.markdown = content;
+            return yield* Effect.void;
+          }),
+        },
+      ),
+    );
+    expect(result).toEqual({
+      value: { summary: "accepted" },
+      markdown: "# Example\n\naccepted\n",
     });
-
-    expect(result).toEqual({ value: { summary: "accepted" }, markdown: "# Example\n\naccepted\n" });
     expect(written).toEqual({
       json: '{\n  "summary": "accepted"\n}',
       markdown: "# Example\n\naccepted\n",
     });
     expect(writeOrder).toEqual(["markdown", "json"]);
   });
-
   test("writes nothing when the agent does not submit", async () => {
     let writes = 0;
-    const run = runStructuredArtifact(request, () => Promise.resolve('{"summary":"not submitted"}'), {
-      toolName: "submit_example",
-      label: "Example",
-      noun: "example",
-      parameters: Type.Object({ summary: Type.String() }),
-      validate: (value) => value as { summary: string },
-      formatMarkdown: (value) => value.summary,
-      createError: (message) => new Error(message),
-    }, {
-      writeJson: () => { writes += 1; return Promise.resolve(); },
-      writeMarkdown: () => { writes += 1; return Promise.resolve(); },
-    });
-
+    const run = runApplicationPromise(
+      runTestArtifact<{
+        summary: string;
+      }>(
+        request,
+        Effect.fnUntraced(function* () {
+          return yield* Effect.succeed('{"summary":"not submitted"}');
+        }),
+        {
+          toolName: "submit_example",
+          label: "Example",
+          noun: "example",
+          parameters: Schema.Struct({ summary: Schema.String }),
+          validate: artifactContract(
+            "Example",
+            Schema.Struct({ summary: Schema.String }),
+          ).decode,
+          formatMarkdown: (value) => value.summary,
+        },
+        {
+          writeJson: Effect.fnUntraced(function* () {
+            writes += 1;
+            return yield* Effect.void;
+          }),
+          writeMarkdown: Effect.fnUntraced(function* () {
+            writes += 1;
+            return yield* Effect.void;
+          }),
+        },
+      ),
+    );
     expect(run).rejects.toThrow("without calling submit_example");
     await run.catch(() => undefined);
     expect(writes).toBe(0);
   });
-
   test("does not commit canonical JSON when Markdown persistence fails", async () => {
     let jsonWrites = 0;
-    const run = runStructuredArtifact(request, async (agentRequest) => {
-      const tool = agentRequest.customTools?.find((candidate) => candidate.name === "submit_example");
-      if (!tool) throw new Error("missing tool");
-      await tool.execute("submit", { summary: "accepted" }, undefined, undefined, {} as never);
-      return "";
-    }, {
-      toolName: "submit_example",
-      label: "Example",
-      noun: "example",
-      parameters: Type.Object({ summary: Type.String() }),
-      validate: (value) => value as { summary: string },
-      formatMarkdown: (value) => value.summary,
-      createError: (message) => new Error(message),
-    }, {
-      writeJson: () => { jsonWrites += 1; return Promise.resolve(); },
-      writeMarkdown: () => Promise.reject(new Error("disk full")),
-    });
-
+    const run = runApplicationPromise(
+      runTestArtifact<{
+        summary: string;
+      }>(
+        request,
+        Effect.fnUntraced(function* (agentRequest) {
+          const tool = agentRequest.customTools?.find(
+            (candidate) => candidate.name === "submit_example",
+          );
+          if (!tool) return yield* Effect.fail(new Error("missing tool"));
+          yield* Effect.tryPromise({
+            try: () =>
+              tool.execute(
+                "submit",
+                { summary: "accepted" },
+                undefined,
+                undefined,
+                toolContext,
+              ),
+            catch: (error) => error,
+          });
+          return "";
+        }),
+        {
+          toolName: "submit_example",
+          label: "Example",
+          noun: "example",
+          parameters: Schema.Struct({ summary: Schema.String }),
+          validate: artifactContract(
+            "Example",
+            Schema.Struct({ summary: Schema.String }),
+          ).decode,
+          formatMarkdown: (value) => value.summary,
+        },
+        {
+          writeJson: Effect.fnUntraced(function* () {
+            jsonWrites += 1;
+            return yield* Effect.void;
+          }),
+          writeMarkdown: Effect.fnUntraced(function* () {
+            return yield* Effect.tryPromise({
+              try: () => Promise.reject(new Error("disk full")),
+              catch: (error) => error,
+            });
+          }),
+        },
+      ),
+    );
     expect(run).rejects.toThrow("disk full");
     await run.catch(() => undefined);
     expect(jsonWrites).toBe(0);
   });
+});
+
+for (const phase of ["validation", "formatting"] as const) {
+  test(`${phase} defects escape even when the SDK handles tool errors`, async () => {
+    const defect = new Error(`${phase} bug`);
+    let writes = 0;
+    const schema = Schema.Struct({ summary: Schema.String });
+    const contract = artifactContract(
+      "Example",
+      schema.check(
+        Schema.makeFilter(() => {
+          if (phase === "validation") throw defect;
+          return true;
+        }),
+      ),
+    );
+    const exit = await runApplicationPromise(
+      Effect.exit(
+        runTestArtifact(
+          request,
+          Effect.fnUntraced(function* (request) {
+            const tool = request.customTools?.find(
+              (tool) => tool.name === "submit_example",
+            );
+            if (!tool) return yield* Effect.die(new Error("missing tool"));
+            // Pi reports rejected tool calls to the agent instead of failing the session.
+            yield* Effect.tryPromise({
+              try: () =>
+                tool.execute(
+                  "submit",
+                  { summary: "accepted" },
+                  undefined,
+                  undefined,
+                  toolContext,
+                ),
+              catch: (error) => error,
+            }).pipe(Effect.catch(() => Effect.void));
+            return "agent continued after the tool result";
+          }),
+          {
+            toolName: "submit_example",
+            label: "Example",
+            noun: "example",
+            parameters: schema,
+            validate: contract.decode,
+            formatMarkdown: (value) => {
+              if (phase === "formatting") throw defect;
+              return value.summary;
+            },
+          },
+          {
+            writeJson: () =>
+              Effect.sync(() => {
+                writes += 1;
+              }),
+            writeMarkdown: () =>
+              Effect.sync(() => {
+                writes += 1;
+              }),
+          },
+        ),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(true);
+      expect(Cause.hasFails(exit.cause)).toBe(false);
+      expect(Cause.squash(exit.cause)).toBe(defect);
+    }
+    expect(writes).toBe(0);
+  });
+}
+
+test("allows correcting invalid output and accepts exactly one concurrent submission", async () => {
+  let json = "";
+  let writes = 0;
+  const schema = Schema.Struct({ summary: Schema.NonEmptyString });
+  const contract = artifactContract("Example", schema);
+  const result = await runApplicationPromise(
+    runTestArtifact(
+      request,
+      Effect.fnUntraced(function* (request) {
+        const tool = request.customTools?.find(
+          (tool) => tool.name === "submit_example",
+        );
+        if (!tool) return yield* Effect.die(new Error("missing tool"));
+        const invalid = yield* Effect.tryPromise({
+          try: () =>
+            tool.execute(
+              "invalid",
+              { summary: "" },
+              undefined,
+              undefined,
+              toolContext,
+            ),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        expect(invalid._tag).toBe("Failure");
+        expect(writes).toBe(0);
+        const submitted = yield* Effect.all(
+          ["first", "second"].map((summary) =>
+            Effect.tryPromise({
+              try: () =>
+                tool.execute(
+                  summary,
+                  { summary },
+                  undefined,
+                  undefined,
+                  toolContext,
+                ),
+              catch: (error) => error,
+            }).pipe(Effect.result),
+          ),
+          { concurrency: "unbounded" },
+        );
+        expect(
+          submitted.filter((result) => result._tag === "Success"),
+        ).toHaveLength(1);
+        expect(
+          submitted.filter((result) => result._tag === "Failure"),
+        ).toHaveLength(1);
+        return "";
+      }),
+      {
+        toolName: "submit_example",
+        label: "Example",
+        noun: "example",
+        parameters: schema,
+        validate: (value) =>
+          contract.decode(value).pipe(Effect.delay("1 millis")),
+        formatMarkdown: (value) => value.summary,
+      },
+      {
+        writeJson: (content) =>
+          Effect.sync(() => {
+            json = content;
+            writes += 1;
+          }),
+        writeMarkdown: () => Effect.void,
+      },
+    ),
+  );
+  expect(writes).toBe(1);
+  expect(JSON.parse(json)).toEqual(result.value);
+  expect(["first", "second"]).toContain(result.value.summary);
 });

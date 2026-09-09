@@ -60,41 +60,41 @@ Runs write only the files they need. Fix logs, for example, appear only after a 
 
 ## Start here
 
-| Question | Start with |
-| --- | --- |
-| What happened overall? | `summary.json` |
-| Why did publishing stop? | `readiness.md` for the human view, `readiness.json` for the gate state, then `verification.md` |
-| What command failed? | `verification.md` |
-| What did the agent change? | `implementation-log.md`, then the Git diff in the managed workspace |
-| What did reviewers find? | `review-a-<n>.md` and `review-b-<n>.md`; use the matching JSON files for exact field values |
-| Can this be continued? | `attempt.json`, `attempts.json`, managed workspace state |
-| What follow-up issues were planned? | `issue-curation-plan.json` |
-| What follow-up issue content was accepted? | `issue-drafts.md`; use `issue-drafts.json` for exact field values |
-| What follow-up issues were created? | `issue-creation-results.json` |
-| What PR content was submitted and published? | `pr-draft.md`; use `pr-draft.json` for exact field values |
+| Question                                     | Start with                                                                                     |
+| -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| What happened overall?                       | `summary.json`                                                                                 |
+| Why did publishing stop?                     | `readiness.md` for the human view, `readiness.json` for the gate state, then `verification.md` |
+| What command failed?                         | `verification.md`                                                                              |
+| What did the agent change?                   | `implementation-log.md`, then the Git diff in the managed workspace                            |
+| What did reviewers find?                     | `review-a-<n>.md` and `review-b-<n>.md`; use the matching JSON files for exact field values    |
+| Can this be continued?                       | `attempt.json`, `attempts.json`, managed workspace state                                       |
+| What follow-up issues were planned?          | `issue-curation-plan.json`                                                                     |
+| What follow-up issue content was accepted?   | `issue-drafts.md`; use `issue-drafts.json` for exact field values                              |
+| What follow-up issues were created?          | `issue-creation-results.json`                                                                  |
+| What PR content was submitted and published? | `pr-draft.md`; use `pr-draft.json` for exact field values                                      |
 
 ## Issue files
 
-| File | Purpose |
-| --- | --- |
-| `issue.md` | Fetched issue context. |
-| `triage.json`, `triage.md` | Triage result as structured data and readable Markdown. |
-| `implementation-plan-draft.json`, `implementation-plan-draft.md` | Draft plan as structured data and readable Markdown. |
-| `implementation-plan.json`, `implementation-plan.md` | Final plan as structured data and readable Markdown. |
-| `implementation-log.json`, `implementation-log.md` | Implementation report as structured data and readable Markdown. |
-| `refinement-log-<n>.json`, `refinement-log-<n>.md` | Report from code-refinement pass `n`. |
-| `review-a-<n>.json`, `review-b-<n>.json` and matching `.md` files | The two reviews. JSON records evidence, limitations, finding IDs, handling, and external blockers. |
-| `fix-log-<n>.json`, `fix-log-<n>.md` | Report from fix pass `n`, including the review findings it addressed. |
-| `readiness.json`, `readiness.md` | The publish-gate decision and its readable form. |
-| `verification.md` | Latest verification command, exit code, stdout tail, and stderr tail. |
-| `verification-full.md` | Complete stdout and stderr from the latest verification command. |
-| `verification-before-fix-<n>.md` | Archived failed verification output tail that triggered fix pass `n`. |
-| `verification-before-fix-<n>-full.md` | Complete stdout and stderr for the archived failed verification. |
-| `pr-draft.json`, `pr-draft.md` | PR data and the body published to GitHub. Roark rebuilds the body when it adds follow-up issue links. |
-| `issue-drafts.json`, `issue-drafts.md` | Follow-up issue data and the bodies published to GitHub. |
-| `attempt.json` | Branch, workspace, and lifecycle metadata. |
-| `summary.json` | Artifact index and run summary. |
-| `events.jsonl` | Observable phase events. |
+| File                                                              | Purpose                                                                                               |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `issue.md`                                                        | Fetched issue context.                                                                                |
+| `triage.json`, `triage.md`                                        | Triage result as structured data and readable Markdown.                                               |
+| `implementation-plan-draft.json`, `implementation-plan-draft.md`  | Draft plan as structured data and readable Markdown.                                                  |
+| `implementation-plan.json`, `implementation-plan.md`              | Final plan as structured data and readable Markdown.                                                  |
+| `implementation-log.json`, `implementation-log.md`                | Implementation report as structured data and readable Markdown.                                       |
+| `refinement-log-<n>.json`, `refinement-log-<n>.md`                | Report from code-refinement pass `n`.                                                                 |
+| `review-a-<n>.json`, `review-b-<n>.json` and matching `.md` files | The two reviews. JSON records evidence, limitations, finding IDs, handling, and external blockers.    |
+| `fix-log-<n>.json`, `fix-log-<n>.md`                              | Report from fix pass `n`, including the review findings it addressed.                                 |
+| `readiness.json`, `readiness.md`                                  | The publish-gate decision and its readable form.                                                      |
+| `verification.md`                                                 | Latest verification command, exit code, stdout tail, and stderr tail.                                 |
+| `verification-full.md`                                            | Complete stdout and stderr from the latest verification command.                                      |
+| `verification-before-fix-<n>.md`                                  | Archived failed verification output tail that triggered fix pass `n`.                                 |
+| `verification-before-fix-<n>-full.md`                             | Complete stdout and stderr for the archived failed verification.                                      |
+| `pr-draft.json`, `pr-draft.md`                                    | PR data and the body published to GitHub. Roark rebuilds the body when it adds follow-up issue links. |
+| `issue-drafts.json`, `issue-drafts.md`                            | Follow-up issue data and the bodies published to GitHub.                                              |
+| `attempt.json`                                                    | Branch, workspace, and lifecycle metadata.                                                            |
+| `summary.json`                                                    | Artifact index and run summary.                                                                       |
+| `events.jsonl`                                                    | Observable phase events.                                                                              |
 
 ## Attempt index
 

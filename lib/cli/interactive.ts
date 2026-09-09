@@ -1,20 +1,18 @@
+import { Deferred, Effect, Exit, Schema } from "effect";
 import { createInterface } from "node:readline/promises";
 import path from "node:path";
-
 export type InteractiveArgv = string[] | undefined;
-
 export interface InteractivePrompt {
-  question(prompt: string): Promise<string>;
+  question: (prompt: string) => Effect.Effect<string, InteractivePromptError>;
   write?(text: string): void;
 }
-
 export interface WorkspaceRemovalSelection {
   selectedIndexes: number[];
 }
-
-type TtyInput = NodeJS.ReadStream & { isTTY?: boolean };
-type WritableOutput = NodeJS.WriteStream | { write(text: string): unknown };
-
+type TtyInput = NodeJS.ReadableStream & {
+  isTTY?: boolean;
+};
+type WritableOutput = NodeJS.WritableStream;
 const menu = `Issue workflows
 1. Work on next ready issue
    → roark auto
@@ -39,124 +37,182 @@ Management
 9. Help and command reference
    → roark --help
 `;
-
-export async function resolveInteractiveArgv(options: {
-  stdin?: TtyInput | undefined;
-  stdout?: WritableOutput | undefined;
-} = {}): Promise<InteractiveArgv> {
-  const stdin = options.stdin ?? process.stdin;
-  const stdout = options.stdout ?? process.stdout;
-
-  if (!stdin.isTTY) return ["--help"];
-  return runReadlinePrompt(stdin, stdout, promptForInteractiveArgv);
-}
-
-export async function promptForInteractiveArgv(prompt: InteractivePrompt): Promise<InteractiveArgv> {
-  for (;;) {
-    prompt.write?.(menu);
-    const choice = (await prompt.question("Select an option: ")).trim();
-
-    if (choice === "1") {
-      if (await confirm(prompt, "Work on the next ready issue?")) return ["auto"];
-      prompt.write?.("Cancelled.\n");
-      return undefined;
+export const resolveInteractiveArgv = Effect.fn("resolveInteractiveArgv")(
+  function* (
+    options: {
+      stdin?: TtyInput | undefined;
+      stdout?: WritableOutput | undefined;
+    } = {},
+  ) {
+    const stdin = options.stdin ?? process.stdin;
+    const stdout = options.stdout ?? process.stdout;
+    if (stdin.isTTY !== true) return ["--help"];
+    return yield* runReadlinePrompt(stdin, stdout, promptForInteractiveArgv);
+  },
+);
+export const promptForInteractiveArgv = Effect.fn("promptForInteractiveArgv")(
+  function* (prompt: InteractivePrompt) {
+    for (;;) {
+      prompt.write?.(menu);
+      const choice = (yield* prompt.question("Select an option: ")).trim();
+      if (choice === "1") {
+        if (yield* confirm(prompt, "Work on the next ready issue?"))
+          return ["auto"];
+        prompt.write?.("Cancelled.\n");
+        return undefined;
+      }
+      if (choice === "2") {
+        const issue = yield* promptRequiredIssue(prompt);
+        if (yield* confirm(prompt, `Work on issue ${issue}?`))
+          return ["auto", issue];
+        prompt.write?.("Cancelled.\n");
+        return undefined;
+      }
+      if (choice === "3")
+        return ["continue", yield* promptRequiredIssue(prompt)];
+      if (choice === "4") return ["do", yield* promptRequiredIssue(prompt)];
+      if (choice === "5")
+        return ["review-pr", yield* promptRequiredPrNumber(prompt)];
+      if (choice === "6")
+        return ["revise-pr", yield* promptRequiredPrNumber(prompt)];
+      if (choice === "7") return ["status", yield* promptRequiredIssue(prompt)];
+      if (choice === "8") {
+        return ["remove"];
+      }
+      if (choice === "9") return ["--help"];
+      prompt.write?.("Invalid choice. Please choose 1-9.\n");
     }
-
-    if (choice === "2") {
-      const issue = await promptRequiredIssue(prompt);
-      if (await confirm(prompt, `Work on issue ${issue}?`)) return ["auto", issue];
-      prompt.write?.("Cancelled.\n");
-      return undefined;
-    }
-
-    if (choice === "3") return ["continue", await promptRequiredIssue(prompt)];
-    if (choice === "4") return ["do", await promptRequiredIssue(prompt)];
-    if (choice === "5") return ["review-pr", await promptRequiredPrNumber(prompt)];
-    if (choice === "6") return ["revise-pr", await promptRequiredPrNumber(prompt)];
-    if (choice === "7") return ["status", await promptRequiredIssue(prompt)];
-
-    if (choice === "8") {
-      return ["remove"];
-    }
-
-    if (choice === "9") return ["--help"];
-
-    prompt.write?.("Invalid choice. Please choose 1-9.\n");
-  }
-}
-
-export async function resolveInteractiveWorkspaceRemoval(options: {
+  },
+);
+export const resolveInteractiveWorkspaceRemoval = Effect.fn(
+  "resolveInteractiveWorkspaceRemoval",
+)(function* (options: {
   workspacePaths: string[];
   stdin?: TtyInput | undefined;
   stdout?: WritableOutput | undefined;
-}): Promise<WorkspaceRemovalSelection | undefined> {
+}) {
   const stdin = options.stdin ?? process.stdin;
   const stdout = options.stdout ?? process.stdout;
-  if (!stdin.isTTY) {
-    throw new Error("Interactive workspace selection requires a TTY. Pass issue numbers or use --pr to select workspaces explicitly.");
+  if (stdin.isTTY !== true) {
+    return yield* Effect.fail(
+      new InteractivePromptError({
+        message:
+          "Interactive workspace selection requires a TTY. Pass issue numbers or use --pr to select workspaces explicitly.",
+      }),
+    );
   }
-  return runReadlinePrompt(stdin, stdout, (prompt) => promptForWorkspaceRemoval({ workspacePaths: options.workspacePaths, prompt }));
-}
-
-export async function promptForWorkspaceRemoval(options: {
-  workspacePaths: string[];
-  prompt: InteractivePrompt;
-}): Promise<WorkspaceRemovalSelection | undefined> {
-  const { prompt, workspacePaths } = options;
-  prompt.write?.("Managed workspaces:\n");
-  for (const [index, workspacePath] of workspacePaths.entries()) {
-    prompt.write?.(`  ${index + 1}. ${path.basename(workspacePath)}  ${workspacePath}\n`);
-  }
-
-  for (;;) {
-    const answer = (await prompt.question("Select workspaces to remove (for example 1,3-5 or all; Enter to cancel): ")).trim().toLowerCase();
-    if (!answer) {
-      prompt.write?.("Cancelled.\n");
-      return undefined;
+  return yield* runReadlinePrompt(stdin, stdout, (prompt) =>
+    promptForWorkspaceRemoval({
+      workspacePaths: options.workspacePaths,
+      prompt,
+    }),
+  );
+});
+export const promptForWorkspaceRemoval = Effect.fn("promptForWorkspaceRemoval")(
+  function* (options: { workspacePaths: string[]; prompt: InteractivePrompt }) {
+    const { prompt, workspacePaths } = options;
+    prompt.write?.("Managed workspaces:\n");
+    for (const [index, workspacePath] of workspacePaths.entries()) {
+      prompt.write?.(
+        `  ${index + 1}. ${path.basename(workspacePath)}  ${workspacePath}\n`,
+      );
     }
-
-    const indexes = parseWorkspaceSelection(answer, workspacePaths.length);
-    if (!indexes) {
-      prompt.write?.(`Invalid selection. Choose numbers from 1 to ${workspacePaths.length}, ranges, or all.\n`);
-      continue;
+    for (;;) {
+      const answer = (yield* prompt.question(
+        "Select workspaces to remove (for example 1,3-5 or all; Enter to cancel): ",
+      ))
+        .trim()
+        .toLowerCase();
+      if (!answer) {
+        prompt.write?.("Cancelled.\n");
+        return undefined;
+      }
+      const indexes = parseWorkspaceSelection(answer, workspacePaths.length);
+      if (!indexes) {
+        prompt.write?.(
+          `Invalid selection. Choose numbers from 1 to ${workspacePaths.length}, ranges, or all.\n`,
+        );
+        continue;
+      }
+      if (
+        !(yield* confirm(
+          prompt,
+          `Remove ${indexes.length} selected workspace${indexes.length === 1 ? "" : "s"}?`,
+        ))
+      ) {
+        prompt.write?.("Cancelled.\n");
+        return undefined;
+      }
+      return { selectedIndexes: indexes.map((index) => index - 1) };
     }
-
-    if (!await confirm(prompt, `Remove ${indexes.length} selected workspace${indexes.length === 1 ? "" : "s"}?`)) {
-      prompt.write?.("Cancelled.\n");
-      return undefined;
-    }
-    return { selectedIndexes: indexes.map((index) => index - 1) };
-  }
-}
-
-async function runReadlinePrompt<T>(
+  },
+);
+const runReadlinePrompt = Effect.fnUntraced(function* <T>(
   stdin: TtyInput,
   stdout: WritableOutput,
-  run: (prompt: InteractivePrompt) => Promise<T>,
-): Promise<T | undefined> {
-  const rl = createInterface({ input: stdin, output: stdout as NodeJS.WriteStream });
-  rl.on("SIGINT", () => {
-    rl.close();
+  run: (prompt: InteractivePrompt) => Effect.Effect<T, InteractivePromptError>,
+) {
+  return yield* Effect.acquireUseRelease(
+    Effect.gen(function* () {
+      const closed = yield* Deferred.make<undefined>();
+      const rl = yield* Effect.try({
+        try: () => createInterface({ input: stdin, output: stdout }),
+        catch: promptError,
+      });
+      const onClose = () => {
+        Deferred.doneUnsafe(closed, Exit.succeed(undefined));
+      };
+      rl.on("SIGINT", onClose);
+      rl.on("close", onClose);
+      return { rl, closed, onClose };
+    }),
+    ({ rl, closed }) =>
+      run({
+        question: (question) =>
+          Effect.tryPromise({
+            try: (signal) => rl.question(question, { signal }),
+            catch: promptError,
+          }),
+        write: (text) => {
+          stdout.write(text);
+        },
+      }).pipe(
+        Effect.raceFirst(
+          Deferred.await(closed).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                stdout.write("\n");
+              }),
+            ),
+            Effect.as(undefined),
+          ),
+        ),
+      ),
+    ({ rl, onClose }) =>
+      Effect.sync(() => {
+        rl.off("SIGINT", onClose);
+        rl.off("close", onClose);
+        rl.close();
+      }),
+  );
+});
+export class InteractivePromptError extends Schema.TaggedError<InteractivePromptError>()(
+  "InteractivePromptError",
+  { message: Schema.String, cause: Schema.optional(Schema.Unknown) },
+) {}
+function promptError(cause: unknown): InteractivePromptError {
+  return new InteractivePromptError({
+    message: cause instanceof Error ? cause.message : String(cause),
+    cause,
   });
-
-  try {
-    return await run({
-      question: (question) => rl.question(question),
-      write: (text) => stdout.write(text),
-    });
-  } catch (error) {
-    if (isCleanReadlineExit(error)) {
-      stdout.write("\n");
-      return undefined;
-    }
-    throw error;
-  } finally {
-    rl.close();
-  }
 }
 
-function parseWorkspaceSelection(input: string, maximum: number): number[] | undefined {
-  if (input === "all") return Array.from({ length: maximum }, (_, index) => index + 1);
+function parseWorkspaceSelection(
+  input: string,
+  maximum: number,
+): number[] | undefined {
+  if (input === "all")
+    return Array.from({ length: maximum }, (_, index) => index + 1);
   const selected = new Set<number>();
   for (const part of input.split(",")) {
     const token = part.trim();
@@ -173,31 +229,34 @@ function parseWorkspaceSelection(input: string, maximum: number): number[] | und
     if (index < 1 || index > maximum) return undefined;
     selected.add(index);
   }
-  return selected.size > 0 ? [...selected].toSorted((left, right) => left - right) : undefined;
+  return selected.size > 0
+    ? [...selected].toSorted((left, right) => left - right)
+    : undefined;
 }
-
-async function promptRequiredIssue(prompt: InteractivePrompt): Promise<string> {
+const promptRequiredIssue = Effect.fn("promptRequiredIssue")(function* (
+  prompt: InteractivePrompt,
+) {
   for (;;) {
-    const issue = (await prompt.question("Issue: ")).trim();
+    const issue = (yield* prompt.question("Issue: ")).trim();
     if (issue) return issue;
     prompt.write?.("Issue is required.\n");
   }
-}
-
-async function promptRequiredPrNumber(prompt: InteractivePrompt): Promise<string> {
+});
+const promptRequiredPrNumber = Effect.fn("promptRequiredPrNumber")(function* (
+  prompt: InteractivePrompt,
+) {
   for (;;) {
-    const prNumber = (await prompt.question("PR number: ")).trim();
+    const prNumber = (yield* prompt.question("PR number: ")).trim();
     if (prNumber) return prNumber;
     prompt.write?.("PR number is required.\n");
   }
-}
-
-async function confirm(prompt: InteractivePrompt, message: string): Promise<boolean> {
-  const answer = (await prompt.question(`${message} [y/N] `)).trim().toLowerCase();
+});
+const confirm = Effect.fn("confirm")(function* (
+  prompt: InteractivePrompt,
+  message: string,
+) {
+  const answer = (yield* prompt.question(`${message} [y/N] `))
+    .trim()
+    .toLowerCase();
   return answer === "y" || answer === "yes";
-}
-
-function isCleanReadlineExit(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return error.name === "AbortError" || error.message.toLowerCase().includes("readline was closed");
-}
+});

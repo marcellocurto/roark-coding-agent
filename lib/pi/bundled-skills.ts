@@ -13,18 +13,31 @@ export const bundledSkillNames = [
 
 export type BundledSkillName = (typeof bundledSkillNames)[number];
 
-export const bundledSkillsRoot = fileURLToPath(new URL("../../skills", import.meta.url));
+export const bundledSkillsRoot = fileURLToPath(
+  new URL("../../skills", import.meta.url),
+);
 
 export function bundledSkillPaths(): string[] {
   return bundledSkillNames.map((name) => path.join(bundledSkillsRoot, name));
 }
 
-export function agentSkillPaths(additionalSkillPaths: readonly string[] = []): string[] {
-  return [...new Set([...bundledSkillPaths(), ...additionalSkillPaths.map((skillPath) => path.resolve(skillPath))])];
+export function agentSkillPaths(
+  additionalSkillPaths: readonly string[] = [],
+): string[] {
+  return [
+    ...new Set([
+      ...bundledSkillPaths(),
+      ...additionalSkillPaths.map((skillPath) => path.resolve(skillPath)),
+    ]),
+  ];
 }
 
 export function assertBundledSkillsPresent(): void {
-  const missing = bundledSkillPaths().filter((skillPath) => !existsSync(path.join(skillPath, "SKILL.md")));
+  const missing = bundledSkillPaths().filter(
+    (skillPath) => !existsSync(path.join(skillPath, "SKILL.md")),
+  );
   if (missing.length === 0) return;
-  throw new Error(`Roark package is missing bundled skill(s): ${missing.join(", ")}`);
+  throw new Error(
+    `Roark package is missing bundled skill(s): ${missing.join(", ")}`,
+  );
 }

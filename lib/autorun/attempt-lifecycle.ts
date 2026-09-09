@@ -1,32 +1,67 @@
-import { artifactRelativePath, readArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
-import { ArtifactValidationError } from "../workflow/artifact-validation.ts";
-import type { AgentRunner } from "../workflow/agent-runner.ts";
-import { codeRefinementPhase, fixPhase, readinessPhase, runFullWorkflow, reviewPhase, type WorkflowRunResult } from "../workflow/phases.ts";
+import type { WorkspaceFailure } from "./workspace.ts";
+import {
+  createFileRunObserver,
+  RunObservation,
+} from "../observability/observer.ts";
+
+import { AttemptStore } from "./attempts.ts";
+import { Cause, DateTime, Effect, Exit } from "effect";
+import { Presentation } from "../runtime/services.ts";
+import {
+  artifactRelativePath,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
+import { ArtifactContractError } from "../structured-output/contract.ts";
+
+import { type WorkflowRunResult } from "../workflow/phases.ts";
+import {
+  codeRefinementPhase,
+  fixPhase,
+  readinessPhase,
+  runFullWorkflow,
+  reviewPhase,
+} from "../workflow/phases.ts";
 import type { GitHubIssueSnapshot } from "../github/issue.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
-import { hasBlockedReview, needsFix, needsRestart } from "../workflow/verdicts.ts";
+import {
+  hasBlockedReview,
+  needsFix,
+  needsRestart,
+} from "../workflow/verdicts.ts";
 import { finalizeAttemptObservability } from "./observability.ts";
 import {
   attemptMetadataRelativePath,
   formatAttemptMetadata,
-  summarizeAttempt,
-  updateAttemptIndex,
-  writeAttemptMetadata,
   type AttemptMetadata,
   type AttemptOutcome,
-  type Clock,
-  defaultClock,
 } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
-import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { publishPlanningLedgerComments, publishReviewLedgerComments } from "./ledger-comments.ts";
+import { formatFailureComment } from "./failure.ts";
+import { markIssueFailed } from "./failure.ts";
+import {
+  publishPlanningLedgerComments,
+  publishReviewLedgerComments,
+} from "./ledger-comments.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
-import { formatContinueCommand, formatPublicContinueCommand, shouldRecoverWithYes } from "./recovery.ts";
+import {
+  formatContinueCommand,
+  formatPublicContinueCommand,
+  shouldRecoverWithYes,
+} from "./recovery.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { presenter } from "../presentation/presenter.ts";
+
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 
+type AutorunRequirements =
+  | Effect.Services<ReturnType<typeof completeAutorunWorkflow>>
+  | Effect.Services<ReturnType<typeof runFullWorkflow>>
+  | AttemptStore;
+type AutorunFailure =
+  | Effect.Error<ReturnType<typeof completeAutorunWorkflow>>
+  | Effect.Error<ReturnType<typeof runFullWorkflow>>
+  | WorkspaceFailure;
 export interface RunAutorunAttemptLifecycleInput {
   issueDir: string;
   workflowContext: WorkflowContext;
@@ -34,14 +69,31 @@ export interface RunAutorunAttemptLifecycleInput {
   gateOptions: AutorunGateOptions;
   attemptMetadata: AttemptMetadata;
   issue?: AutorunIssueCandidate | undefined;
-  loadIssue?: (() => Promise<AutorunIssueCandidate>) | undefined;
-  beforeWorkflow?: ((attemptMetadata: AttemptMetadata) => void | Promise<void>) | undefined;
-  beforeRun?: ((attemptMetadata: AttemptMetadata) => Promise<void>) | undefined;
-  afterRun?: ((attemptMetadata: AttemptMetadata) => Promise<void>) | undefined;
-  runner?: AgentRunner | undefined  ;
+  loadIssue?:
+    | (() => Effect.Effect<
+        AutorunIssueCandidate,
+        AutorunFailure,
+        AutorunRequirements
+      >)
+    | undefined;
+  beforeWorkflow?:
+    | ((
+        metadata: AttemptMetadata,
+      ) => Effect.Effect<void, AutorunFailure, AutorunRequirements>)
+    | undefined;
+  beforeRun?:
+    | ((
+        metadata: AttemptMetadata,
+      ) => Effect.Effect<void, AutorunFailure, AutorunRequirements>)
+    | undefined;
+  afterRun?:
+    | ((
+        metadata: AttemptMetadata,
+      ) => Effect.Effect<void, AutorunFailure, AutorunRequirements>)
+    | undefined;
   logPrefix?: string | undefined;
   inProgressOutcomeDetail?: string | null | undefined;
-  initialVerificationRepairPass?: number | undefined  ;
+  initialVerificationRepairPass?: number | undefined;
   issueSnapshot?: GitHubIssueSnapshot | undefined;
 }
 
@@ -52,23 +104,33 @@ export interface AutorunAttemptResult {
 }
 
 export interface RunAutorunAttemptLifecycleInjected {
-  clock?: Clock | undefined;
   runFullWorkflow?: typeof runFullWorkflow | undefined;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
   publishReviewLedgerComments?: typeof publishReviewLedgerComments | undefined;
-  publishPlanningLedgerComments?: typeof publishPlanningLedgerComments | undefined;
+  publishPlanningLedgerComments?:
+    | typeof publishPlanningLedgerComments
+    | undefined;
   markIssueFailed?: typeof markIssueFailed | undefined;
-  finalizeAttemptObservability?: typeof finalizeAttemptObservability | undefined;
+  finalizeAttemptObservability?:
+    | typeof finalizeAttemptObservability
+    | undefined;
 }
 
-export async function runAutorunAttemptLifecycle(
+export const runAutorunAttemptLifecycle = Effect.fn(
+  "runAutorunAttemptLifecycle",
+)(function* (
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected = {},
-): Promise<AutorunAttemptResult> {
-  const clock = injected.clock ?? defaultClock;
+) {
+  const observer =
+    input.workflowContext.observer ??
+    (yield* createFileRunObserver(input.workflowContext));
+  input = { ...input, workflowContext: { ...input.workflowContext, observer } };
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
-  const completeWorkflow = injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
-  const finalizeObservability = injected.finalizeAttemptObservability ?? finalizeAttemptObservability;
+  const completeWorkflow =
+    injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
+  const finalizeObservability =
+    injected.finalizeAttemptObservability ?? finalizeAttemptObservability;
 
   let attemptMetadata = formatAttemptMetadata({
     ...input.attemptMetadata,
@@ -78,141 +140,210 @@ export async function runAutorunAttemptLifecycle(
     outcome: "in-progress",
     outcomeDetail: input.inProgressOutcomeDetail ?? null,
   });
-  await persistAttempt(input.issueDir, attemptMetadata);
 
   let outcome: AttemptOutcome = "in-progress";
   let outcomeDetail: string | null = null;
 
-  try {
-    await input.beforeWorkflow?.(attemptMetadata);
-    await persistAttempt(input.issueDir, attemptMetadata);
+  const presentation = yield* Presentation;
+  const attempts = yield* AttemptStore;
+  const work = attempts.persist(input.issueDir, attemptMetadata).pipe(
+    Effect.uninterruptible,
+    Effect.andThen(
+      Effect.gen(function* () {
+        yield* input.beforeWorkflow?.(attemptMetadata) ?? Effect.void;
+        yield* attempts.persist(input.issueDir, attemptMetadata);
 
-    await input.beforeRun?.(attemptMetadata);
-    await persistAttempt(input.issueDir, attemptMetadata);
+        yield* input.beforeRun?.(attemptMetadata) ?? Effect.void;
+        yield* attempts.persist(input.issueDir, attemptMetadata);
 
-    const workflowResult = input.initialVerificationRepairPass === undefined
-      ? await runWorkflow(input.workflowContext, input.runner, { issueSnapshot: input.issueSnapshot })
-      : await runVerificationRepairWorkflow(input.workflowContext, input.initialVerificationRepairPass, input.runner);
-    const issue = await resolveIssue(input);
-    const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
-    let completionOutcome = await completeWorkflow({
-      workflowResult,
-      options: input.gateOptions,
-      issue,
-      branchPlan: input.branchPlan,
-      workflowContext: input.workflowContext,
-      attemptMetadata,
-      attemptMetadataPath,
-      recoveryCommand: publicRecoveryCommand(input, false),
-    });
+        const workflowResult =
+          input.initialVerificationRepairPass === undefined
+            ? yield* runWorkflow(input.workflowContext, {
+                issueSnapshot: input.issueSnapshot,
+              })
+            : yield* runVerificationRepairWorkflow(
+                input.workflowContext,
+                input.initialVerificationRepairPass,
+              );
+        const issue = yield* resolveIssue(input);
+        const attemptMetadataPath =
+          attemptMetadataRelativePath(attemptMetadata);
+        let completionOutcome = yield* completeWorkflow(
+          {
+            workflowResult,
+            options: input.gateOptions,
+            issue,
+            branchPlan: input.branchPlan,
+            workflowContext: input.workflowContext,
+            attemptMetadata,
+            attemptMetadataPath,
+            recoveryCommand: publicRecoveryCommand(input, false),
+          },
+          undefined,
+        );
 
-    while (completionOutcome.outcome === "verification-needs-fix") {
-      const repairResult = await runVerificationRepairWorkflow(input.workflowContext, completionOutcome.pass, input.runner);
-      completionOutcome = await completeWorkflow({
-        workflowResult: repairResult,
-        options: input.gateOptions,
-        issue,
-        branchPlan: input.branchPlan,
-        workflowContext: input.workflowContext,
-        attemptMetadata,
-        attemptMetadataPath,
-        recoveryCommand: publicRecoveryCommand(input, false),
-      });
-    }
+        while (completionOutcome.outcome === "verification-needs-fix") {
+          const repairResult = yield* runVerificationRepairWorkflow(
+            input.workflowContext,
+            completionOutcome.pass,
+          );
+          completionOutcome = yield* completeWorkflow(
+            {
+              workflowResult: repairResult,
+              options: input.gateOptions,
+              issue,
+              branchPlan: input.branchPlan,
+              workflowContext: input.workflowContext,
+              attemptMetadata,
+              attemptMetadataPath,
+              recoveryCommand: publicRecoveryCommand(input, false),
+            },
+            undefined,
+          );
+        }
 
-    const terminalOutcome = completionOutcome;
-    outcome = terminalOutcome.outcome;
-    outcomeDetail = terminalOutcome.outcomeDetail;
-  } catch (error) {
-    outcome = isOutputContractError(error) ? "failed-output-contract" : "errored";
-    outcomeDetail = formatError(error);
-    await markWorkflowError(input, injected, attemptMetadata, error);
-    throw error;
-  } finally {
-    try {
-      await input.afterRun?.(attemptMetadata);
-    } catch (error) {
-      presenter().warning(`afterRun hook failed: ${formatError(error)}`);
-    }
-    const endedAt = clock.now();
-    attemptMetadata = formatAttemptMetadata({
-      ...attemptMetadata,
-      endedAt,
-      outcome,
-      outcomeDetail,
-    });
-    await persistAttempt(input.issueDir, attemptMetadata);
-    await finalizeObservability({
-      context: input.workflowContext,
-      outcome,
-      outcomeDetail,
-      endedAt,
-    });
-  }
+        const terminalOutcome = completionOutcome;
+        outcome = terminalOutcome.outcome;
+        outcomeDetail = terminalOutcome.outcomeDetail;
+        return {
+          issueNumber: input.attemptMetadata.issueNumber,
+          outcome,
+          outcomeDetail,
+        };
+      }),
+    ),
+  );
+  return yield* work.pipe(
+    Effect.provideService(RunObservation, observer),
+    Effect.onExit((exit) =>
+      Effect.gen(function* () {
+        if (Exit.isFailure(exit) && outcome === "in-progress") {
+          const error = Cause.squash(exit.cause);
+          outcome = isOutputContractError(error)
+            ? "failed-output-contract"
+            : "errored";
+          outcomeDetail = Cause.hasInterruptsOnly(exit.cause)
+            ? "Interrupted."
+            : formatError(error);
+        }
+        const reportFailure =
+          Exit.isFailure(exit) && !Cause.hasInterruptsOnly(exit.cause)
+            ? markWorkflowError(
+                input,
+                injected,
+                attemptMetadata,
+                Cause.squash(exit.cause),
+              )
+            : Effect.void;
+        const finalize = Effect.gen(function* () {
+          yield* Effect.suspend(
+            () => input.afterRun?.(attemptMetadata) ?? Effect.void,
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.sync(() => {
+                presentation.warning(
+                  `afterRun hook failed: ${formatError(Cause.squash(cause))}`,
+                );
+              }),
+            ),
+          );
+          const endedAt = DateTime.toDateUtc(yield* DateTime.now);
+          attemptMetadata = formatAttemptMetadata({
+            ...attemptMetadata,
+            endedAt,
+            outcome,
+            outcomeDetail,
+          });
+          yield* attempts.persist(input.issueDir, attemptMetadata).pipe(
+            Effect.ensuring(
+              finalizeObservability({
+                context: input.workflowContext,
+                outcome,
+                outcomeDetail,
+                endedAt,
+              }).pipe(Effect.orDie),
+            ),
+          );
+        });
+        yield* reportFailure.pipe(Effect.ensuring(finalize.pipe(Effect.orDie)));
+      }),
+    ),
+  );
+});
 
-  return { issueNumber: input.attemptMetadata.issueNumber, outcome, outcomeDetail };
-}
-
-async function runVerificationRepairWorkflow(
-  context: WorkflowContext,
-  initialPass: number,
-  runner?: AgentRunner  ,
-): Promise<WorkflowRunResult> {
+const runVerificationRepairWorkflow = Effect.fn(
+  "runVerificationRepairWorkflow",
+)(function* (context: WorkflowContext, initialPass: number) {
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
-    presenter().line(`Verification repair pass ${pass}`);
-    await fixPhase(context, pass, runner);
-    await codeRefinementPhase(context, pass, runner);
-    const reviews = await reviewPhase(context, pass, runner);
-    if (hasBlockedReview(reviews.reviewA, reviews.reviewB) || needsRestart(reviews.reviewA, reviews.reviewB)) break;
-    if (!needsFix(reviews.reviewA, reviews.reviewB) || pass >= context.maxFixPasses) break;
-    presenter().line(`Review requested more fixes; continuing to fix pass ${pass + 1}`);
+    (yield* Presentation).line(`Verification repair pass ${pass}`);
+    yield* fixPhase(context, pass);
+    yield* codeRefinementPhase(context, pass);
+    const reviews = yield* reviewPhase(context, pass);
+    if (
+      hasBlockedReview(reviews.reviewA, reviews.reviewB) ||
+      needsRestart(reviews.reviewA, reviews.reviewB)
+    )
+      break;
+    if (
+      !needsFix(reviews.reviewA, reviews.reviewB) ||
+      pass >= context.maxFixPasses
+    )
+      break;
+    (yield* Presentation).line(
+      `Review requested more fixes; continuing to fix pass ${pass + 1}`,
+    );
   }
-  await readinessPhase(context);
-  return { status: "completed" };
-}
+  yield* readinessPhase(context);
+  return { status: "completed" } satisfies WorkflowRunResult;
+});
 
-async function persistAttempt(issueDir: string, attemptMetadata: AttemptMetadata): Promise<void> {
-  await writeAttemptMetadata(issueDir, attemptMetadata);
-  await updateAttemptIndex(issueDir, summarizeAttempt(attemptMetadata));
-}
-
-async function markWorkflowError(
+const markWorkflowError = Effect.fn("markWorkflowError")(function* (
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected,
   attemptMetadata: AttemptMetadata,
   error: unknown,
-): Promise<void> {
-  const issue = await resolveIssue(input);
+) {
+  const issue = yield* resolveIssue(input);
   const phase = errorPhase(error);
   const attemptMetadataPath = attemptMetadataRelativePath(attemptMetadata);
   const command = recoveryCommand(input, shouldRecoverWithYes(error));
   const prefix = input.logPrefix ?? "Auto";
-  const publishPlanning = injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
-  const publishLedger = injected.publishReviewLedgerComments ?? publishReviewLedgerComments;
+  const publishPlanning =
+    injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
+  const publishLedger =
+    injected.publishReviewLedgerComments ?? publishReviewLedgerComments;
   const markFailed = injected.markIssueFailed ?? markIssueFailed;
 
-  presenter().line(`${prefix} workflow error on #${issue.number}: ${formatError(error)}`);
-  presenter().artifact(attemptMetadataPath);
-  presenter().recovery(command);
+  (yield* Presentation).line(
+    `${prefix} workflow error on #${issue.number}: ${formatError(error)}`,
+  );
+  (yield* Presentation).artifact(attemptMetadataPath);
+  (yield* Presentation).recovery(command);
 
-  await publishPlanning({
-    cwd: input.gateOptions.cwd,
-    repo: input.gateOptions.repo,
-    issue,
-    workflowContext: input.workflowContext,
-    attemptMetadata,
-  });
+  yield* publishPlanning(
+    {
+      cwd: input.gateOptions.cwd,
+      repo: input.gateOptions.repo,
+      issue,
+      workflowContext: input.workflowContext,
+      attemptMetadata,
+    },
+    undefined,
+  );
 
-  await publishLedger({
-    cwd: input.gateOptions.cwd,
-    repo: input.gateOptions.repo,
-    issue,
-    workflowContext: input.workflowContext,
-    attemptMetadata,
-  });
+  yield* publishLedger(
+    {
+      cwd: input.gateOptions.cwd,
+      repo: input.gateOptions.repo,
+      issue,
+      workflowContext: input.workflowContext,
+      attemptMetadata,
+    },
+    undefined,
+  );
 
-  const errorArtifact = await readErrorArtifact(input.workflowContext, error);
-  if (errorArtifact) presenter().artifact(errorArtifact.path);
+  const errorArtifact = yield* readErrorArtifact(input.workflowContext, error);
+  if (errorArtifact) (yield* Presentation).artifact(errorArtifact.path);
 
   const comment = formatFailureComment({
     issueNumber: issue.number,
@@ -226,7 +357,7 @@ async function markWorkflowError(
     recoveryCommand: publicRecoveryCommand(input, shouldRecoverWithYes(error)),
   });
 
-  await markFailed({
+  yield* markFailed({
     cwd: input.gateOptions.cwd,
     repo: input.gateOptions.repo,
     issueNumber: issue.number,
@@ -239,42 +370,49 @@ async function markWorkflowError(
       knownPresent: [input.gateOptions.inProgressLabel],
     }),
   });
-}
+});
 
-async function resolveIssue(input: RunAutorunAttemptLifecycleInput): Promise<AutorunIssueCandidate> {
+const resolveIssue = Effect.fn("resolveIssue")(function* (
+  input: RunAutorunAttemptLifecycleInput,
+) {
   if (input.issue) return input.issue;
   if (input.loadIssue) {
-    try {
-      return await input.loadIssue();
-    } catch {
-      // Preserve the original workflow/completion error; issue details are best-effort in failure handling.
-    }
+    const issue = yield* input
+      .loadIssue()
+      .pipe(Effect.catch(() => Effect.succeed(undefined)));
+    if (issue) return issue;
   }
   return {
     number: input.attemptMetadata.issueNumber,
     title: `Fix issue #${input.attemptMetadata.issueNumber}`,
   };
-}
+});
 
-async function readErrorArtifact(
+const readErrorArtifact = Effect.fn("readErrorArtifact")(function* (
   context: WorkflowContext,
   error: unknown,
-): Promise<{ path: string; content: string } | undefined> {
-  const artifact = error instanceof AgentTaskRunError || error instanceof ArtifactValidationError
-    ? error.artifact
-    : undefined;
+) {
+  const artifact =
+    error instanceof AgentTaskRunError ? error.artifact : undefined;
   if (artifact === undefined) return undefined;
-  try {
+  return yield* Effect.gen(function* () {
     return {
       path: artifactRelativePath(context, artifact),
-      content: await readArtifact(context, artifact),
+      content: yield* readArtifact(context, artifact),
     };
-  } catch {
-    return undefined;
-  }
-}
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});
 
-function recoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): string {
+function recoveryCommand(
+  input: RunAutorunAttemptLifecycleInput,
+  yes: boolean,
+): string {
   return formatContinueCommand({
     issueNumber: input.attemptMetadata.issueNumber,
     cwd: input.gateOptions.cwd,
@@ -284,7 +422,10 @@ function recoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): 
   });
 }
 
-function publicRecoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: boolean): string {
+function publicRecoveryCommand(
+  input: RunAutorunAttemptLifecycleInput,
+  yes: boolean,
+): string {
   return formatPublicContinueCommand({
     issueNumber: input.attemptMetadata.issueNumber,
     repo: input.gateOptions.repo,
@@ -294,13 +435,15 @@ function publicRecoveryCommand(input: RunAutorunAttemptLifecycleInput, yes: bool
 }
 
 function isOutputContractError(error: unknown): boolean {
-  return error instanceof ArtifactValidationError ||
-    (error instanceof AgentTaskRunError && error.phase === "output-contract");
+  return (
+    error instanceof ArtifactContractError ||
+    (error instanceof AgentTaskRunError && error.phase === "output-contract")
+  );
 }
 
 function errorPhase(error: unknown): string {
   if (error instanceof AgentTaskRunError) return error.phase;
-  if (error instanceof ArtifactValidationError) return "output-contract";
+  if (error instanceof ArtifactContractError) return "output-contract";
   return "workflow-error";
 }
 

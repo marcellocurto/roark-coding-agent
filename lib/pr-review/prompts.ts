@@ -1,6 +1,9 @@
 import type { PrReviewContext } from "./artifacts.ts";
 import type { PrReviewComparison } from "../autorun/workspace.ts";
-import { escapePromptXmlAttribute, escapePromptXmlText } from "../prompts/xml.ts";
+import {
+  escapePromptXmlAttribute,
+  escapePromptXmlText,
+} from "../prompts/xml.ts";
 import type { ReviewLensDefinition } from "../review/contract.ts";
 
 export function prReviewPrompt(input: {

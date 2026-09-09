@@ -1,45 +1,73 @@
+import { DateTime } from "effect";
+import { Workspace } from "./workspace-service.ts";
+import { Presentation } from "../runtime/services.ts";
+import { Effect } from "effect";
 import path from "node:path";
-import { presenter } from "../presentation/presenter.ts";
-import { artifactExists, artifactRelativePath, fixLogRef, inferNextFixPass, readArtifact, verificationBeforeFixRef, type WorkflowContext } from "../workflow/artifacts.ts";
-import { createIssuesFromCurationPlan, type IssueCreationResults } from "../issue-curation/create-issues.ts";
+import {
+  artifactRelativePath,
+  fixLogRef,
+  verificationBeforeFixRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
+import { artifactExists, inferNextFixPass } from "../workflow/artifacts.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
+import { type IssueCreationResults } from "../issue-curation/create-issues.ts";
+import { createIssuesFromCurationPlan } from "../issue-curation/create-issues.ts";
 import { issueCurationPhase } from "../workflow/issue-curation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
-import { formatFailureComment, markIssueFailed } from "./failure.ts";
-import { publishAutorunResult, updatePrBody as updatePublishedPrBody, type AutorunPublishOptions, type FormatPrBodyFollowUpIssue } from "./publish.ts";
+import { formatFailureComment } from "./failure.ts";
+import { markIssueFailed } from "./failure.ts";
+import {
+  type AutorunPublishOptions,
+  type FormatPrBodyFollowUpIssue,
+} from "./publish.ts";
+import {
+  publishAutorunResult,
+  updatePrBody as updatePublishedPrBody,
+} from "./publish.ts";
 import { decidePublish, type PublishGateDecision } from "./publish-gate.ts";
 import { parseReadinessResultJson } from "../workflow/readiness.ts";
 import {
   classifyVerificationFailure,
-  runVerification,
   verificationFailureReason,
-  writeVerificationArtifact,
-  writeVerificationBeforeFixArtifact,
   type VerificationResult,
 } from "./verification.ts";
+import {
+  runVerification,
+  writeVerificationArtifact,
+  writeVerificationBeforeFixArtifact,
+} from "./verification.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
-import { formatPrCreatedComment, formatReadinessLedgerComment, publishIssueLedgerComment } from "./ledger-comments.ts";
+import {
+  formatPrCreatedComment,
+  formatReadinessLedgerComment,
+} from "./ledger-comments.ts";
+import { publishIssueLedgerComment } from "./ledger-comments.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { refreshCopyToWorktree, runLifecycleHook, type LifecycleHooksConfig, type WorkspaceConfig } from "./workspace.ts";
+import {
+  type LifecycleHooksConfig,
+  type WorkspaceConfig,
+} from "./workspace.ts";
+import { type runLifecycleHook } from "./workspace.ts";
+import { type refreshCopyToWorktree } from "./workspace.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 import { runPrReview } from "../pr-review/workflow.ts";
-import type { ReviewPrCliOptions } from "../cli/args.ts";
-
 export type AutorunGateOptions = AutorunPublishOptions & {
   verifyCommand: string;
-  hooks?: LifecycleHooksConfig | undefined  ;
-  workspace?: WorkspaceConfig | undefined  ;
+  hooks?: LifecycleHooksConfig | undefined;
+  workspace?: WorkspaceConfig | undefined;
 };
-
 export type PublishGateOutcome =
-  | { outcome: "published" | "failed-readiness" | "failed-verification"; outcomeDetail: string | null }
-  | { outcome: "verification-needs-fix"; outcomeDetail: string; pass: number };
-
-type AutomaticPrReviewRunner = (options: ReviewPrCliOptions) => Promise<{
-  outcome: "completed" | "blocked";
-  context: { reviewDirRelative: string };
-}>;
-
+  | {
+      outcome: "published" | "failed-readiness" | "failed-verification";
+      outcomeDetail: string | null;
+    }
+  | {
+      outcome: "verification-needs-fix";
+      outcomeDetail: string;
+      pass: number;
+    };
 export interface RunPublishGateInjected {
   refreshCopyToWorktree?: typeof refreshCopyToWorktree | undefined;
   runLifecycleHook?: typeof runLifecycleHook | undefined;
@@ -47,54 +75,96 @@ export interface RunPublishGateInjected {
   writeVerificationArtifact?: typeof writeVerificationArtifact | undefined;
   handleNonPublish?: typeof handleNonPublish | undefined;
   publishAutorunResult?: typeof publishAutorunResult | undefined;
-  postPrIssueCreation?: ((input: { workflowContext: WorkflowContext; prUrl: string }) => Promise<IssueCreationResults | undefined>) | undefined;
+  postPrIssueCreation?:
+    | ((
+        input: Parameters<typeof createReviewerIssuesAfterPr>[0],
+      ) => Effect.Effect<
+        IssueCreationResults | undefined,
+        Effect.Error<ReturnType<typeof createReviewerIssuesAfterPr>>,
+        Effect.Services<ReturnType<typeof createReviewerIssuesAfterPr>>
+      >)
+    | undefined;
   publishIssueLedgerComment?: typeof publishIssueLedgerComment | undefined;
   updatePrBody?: typeof updatePublishedPrBody | undefined;
-  runPrReview?: AutomaticPrReviewRunner | undefined;
+  runPrReview?:
+    | ((
+        options: Parameters<typeof runPrReview>[0],
+      ) => Effect.Effect<
+        Pick<AwaitedPrReview, "outcome" | "context">,
+        Effect.Error<ReturnType<typeof runPrReview>>,
+        Effect.Services<ReturnType<typeof runPrReview>>
+      >)
+    | undefined;
 }
-
-export async function runPublishGate(input: {
-  options: AutorunGateOptions;
-  issue: AutorunIssueCandidate;
-  branchPlan: AutorunBranchPlan;
-  workflowContext: WorkflowContext;
-  attemptMetadata: AttemptMetadata;
-  attemptMetadataPath: string;
-  recoveryCommand?: string | undefined  ;
-}, injected: RunPublishGateInjected = {}): Promise<PublishGateOutcome> {
-  const { options, issue, branchPlan, workflowContext, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
-  const refreshWorkspace = injected.refreshCopyToWorktree ?? refreshCopyToWorktree;
-  const runHook = injected.runLifecycleHook ?? runLifecycleHook;
+interface AwaitedPrReview {
+  outcome: "completed" | "blocked";
+  context: {
+    reviewDirRelative: string;
+  };
+}
+export const runPublishGate = Effect.fn("runPublishGate")(function* (
+  input: {
+    options: AutorunGateOptions;
+    issue: AutorunIssueCandidate;
+    branchPlan: AutorunBranchPlan;
+    workflowContext: WorkflowContext;
+    attemptMetadata: AttemptMetadata;
+    attemptMetadataPath: string;
+    recoveryCommand?: string | undefined;
+  },
+  injected: RunPublishGateInjected = {},
+) {
+  const {
+    options,
+    issue,
+    branchPlan,
+    workflowContext,
+    attemptMetadata,
+    attemptMetadataPath,
+    recoveryCommand,
+  } = input;
+  const workspaces = yield* Workspace;
+  const refreshWorkspace =
+    injected.refreshCopyToWorktree ?? workspaces.refreshCopy;
+  const runHook = injected.runLifecycleHook ?? workspaces.runHook;
   const verify = injected.runVerification ?? runVerification;
-  const writeVerification = injected.writeVerificationArtifact ?? writeVerificationArtifact;
+  const writeVerification =
+    injected.writeVerificationArtifact ?? writeVerificationArtifact;
   const nonPublish = injected.handleNonPublish ?? handleNonPublish;
   const publishResult = injected.publishAutorunResult ?? publishAutorunResult;
-  const postPrIssueCreation = injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
-  const publishLedger = injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
+  const postPrIssueCreation =
+    injected.postPrIssueCreation ?? createReviewerIssuesAfterPr;
+  const publishLedger =
+    injected.publishIssueLedgerComment ?? publishIssueLedgerComment;
   const editPrBody = injected.updatePrBody ?? updatePublishedPrBody;
   const reviewPr = injected.runPrReview ?? runPrReview;
-
-  const readinessResult = await readReadinessResult(workflowContext);
+  const readinessResult = yield* readReadinessResult(workflowContext);
   const readinessStatus = readinessResult?.decision.status;
-  const readinessMarkdown = await readReadinessMarkdown(workflowContext);
-
+  const readinessMarkdown = yield* readReadinessMarkdown(workflowContext);
   let verification: VerificationResult | undefined;
   if (readinessStatus === "ready-for-pr") {
-    await refreshWorkspace({ controlCwd: options.cwd, worktreePath: workflowContext.agentCwd, copyToWorktree: options.workspace?.copyToWorktree });
-    await runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
-    verification = await verify({
+    yield* refreshWorkspace({
+      controlCwd: options.cwd,
+      worktreePath: workflowContext.agentCwd,
+      copyToWorktree: options.workspace?.copyToWorktree,
+    });
+    yield* runHook("beforeVerify", options.hooks, workflowContext.agentCwd);
+    verification = yield* verify({
       command: options.verifyCommand,
       cwd: workflowContext.agentCwd,
-      display: { target: `#${workflowContext.issueNumber}`, repository: workflowContext.repo },
+      display: {
+        target: `#${workflowContext.issueNumber}`,
+        repository: workflowContext.repo,
+      },
     });
-    await writeVerification(workflowContext, verification);
-    presenter().artifact(artifactRelativePath(workflowContext, "verification"));
+    yield* writeVerification(workflowContext, verification);
+    (yield* Presentation).artifact(
+      artifactRelativePath(workflowContext, "verification"),
+    );
   }
-
   let decision = decidePublish({ readinessStatus, verification });
-
   if (decision.publish) {
-    const publishedPr = await publishResult({
+    const publishedPr = yield* publishResult({
       options,
       issue,
       branchPlan,
@@ -103,7 +173,7 @@ export async function runPublishGate(input: {
       attemptMetadata,
       attemptMetadataPath,
     });
-    await publishLedger({
+    yield* publishLedger({
       cwd: options.cwd,
       repo: options.repo,
       issueNumber: issue.number,
@@ -115,7 +185,7 @@ export async function runPublishGate(input: {
         artifactContent: readinessMarkdown ?? "",
       }),
     });
-    await publishLedger({
+    yield* publishLedger({
       cwd: options.cwd,
       repo: options.repo,
       issueNumber: issue.number,
@@ -128,13 +198,23 @@ export async function runPublishGate(input: {
       }),
     });
     let issueCreationResults: IssueCreationResults | undefined;
-    try {
-      issueCreationResults = await postPrIssueCreation({ workflowContext, prUrl: publishedPr.url }) ?? undefined;
-    } catch (error) {
-      presenter().warning(`reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    try {
-      await editPrBody({
+    yield* Effect.gen(function* () {
+      issueCreationResults =
+        (yield* postPrIssueCreation({
+          workflowContext,
+          prUrl: publishedPr.url,
+        })) ?? undefined;
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `reviewer-generated issue creation failed after PR publication: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      yield* editPrBody({
         cwd: options.cwd,
         repo: options.repo,
         pr: publishedPr.url,
@@ -144,11 +224,17 @@ export async function runPublishGate(input: {
         attemptMetadata,
         followUpIssues: issueCreationResultsToFollowUps(issueCreationResults),
       });
-    } catch (error) {
-      presenter().warning(`failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    try {
-      const review = await reviewPr({
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `failed to update PR body with final Roark ledger details: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const review = yield* reviewPr({
         command: "review-pr",
         prNumber: publishedPr.number,
         cwd: options.cwd,
@@ -162,27 +248,44 @@ export async function runPublishGate(input: {
         workspace: options.workspace,
         hooks: options.hooks,
       });
-      presenter().artifact(review.context.reviewDirRelative);
+      (yield* Presentation).artifact(review.context.reviewDirRelative);
       if (review.outcome === "blocked") {
-        presenter().warning(`automatic PR review for #${publishedPr.number} was blocked because the PR changed during review; review artifacts were preserved`);
+        (yield* Presentation).warning(
+          `automatic PR review for #${publishedPr.number} was blocked because the PR changed during review; review artifacts were preserved`,
+        );
       }
-    } catch (error) {
-      presenter().warning(`automatic PR review failed after PR #${publishedPr.number} was published: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    return { outcome: "published", outcomeDetail: null };
+    }).pipe(
+      Effect.catch(
+        Effect.fnUntraced(function* (error) {
+          (yield* Presentation).warning(
+            `automatic PR review failed after PR #${publishedPr.number} was published: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }),
+      ),
+    );
+    return {
+      outcome: "published" as const,
+      outcomeDetail: null,
+    } satisfies PublishGateOutcome;
   }
-
   if (decision.phase === "verification" && verification) {
     const classification = classifyVerificationFailure(verification);
-    const repair = await planVerificationRepair(workflowContext, verification);
+    const repair = yield* planVerificationRepair(workflowContext, verification);
     if (repair) {
-      presenter().line(`Verification failed; scheduling fix pass ${repair.pass} before terminal failure`);
-      presenter().artifact(artifactRelativePath(workflowContext, verificationBeforeFixRef(repair.pass)));
+      (yield* Presentation).line(
+        `Verification failed; scheduling fix pass ${repair.pass} before terminal failure`,
+      );
+      (yield* Presentation).artifact(
+        artifactRelativePath(
+          workflowContext,
+          verificationBeforeFixRef(repair.pass),
+        ),
+      );
       return {
-        outcome: "verification-needs-fix",
+        outcome: "verification-needs-fix" as const,
         outcomeDetail: decision.reason,
         pass: repair.pass,
-      };
+      } satisfies PublishGateOutcome;
     }
     decision = {
       ...decision,
@@ -190,11 +293,12 @@ export async function runPublishGate(input: {
         ? `Verification failed after ${workflowContext.maxFixPasses} fix passes: ${verificationFailureReason(verification)}`
         : verificationFailureReason(verification),
     };
-    presenter().line(`ACTION user action required: ${classification.recoveryGuidance ?? decision.reason}`);
+    (yield* Presentation).line(
+      `ACTION user action required: ${classification.recoveryGuidance ?? decision.reason}`,
+    );
   }
-
   if (decision.phase === "verification") {
-    await publishLedger({
+    yield* publishLedger({
       cwd: options.cwd,
       repo: options.repo,
       issueNumber: issue.number,
@@ -208,32 +312,47 @@ export async function runPublishGate(input: {
       }),
     });
   }
-
-  await nonPublish({ options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand });
+  yield* nonPublish({
+    options,
+    issue,
+    workflowContext,
+    decision,
+    attemptMetadata,
+    attemptMetadataPath,
+    recoveryCommand,
+  });
   return {
-    outcome: decision.phase === "verification" ? "failed-verification" : "failed-readiness",
+    outcome:
+      decision.phase === "verification"
+        ? "failed-verification"
+        : "failed-readiness",
     outcomeDetail: decision.reason,
-  };
-}
-
-export async function createReviewerIssuesAfterPr(input: {
-  workflowContext: WorkflowContext;
-  prUrl: string;
-}): Promise<IssueCreationResults> {
-  await issueCurationPhase(input.workflowContext, undefined, { prUrl: input.prUrl });
-  const result = await createIssuesFromCurationPlan({
+  } satisfies PublishGateOutcome;
+});
+export const createReviewerIssuesAfterPr = Effect.fn(
+  "createReviewerIssuesAfterPr",
+)(function* (input: { workflowContext: WorkflowContext; prUrl: string }) {
+  yield* issueCurationPhase(input.workflowContext, {
+    prUrl: input.prUrl,
+  });
+  const result = yield* createIssuesFromCurationPlan({
     context: input.workflowContext,
     approved: true,
     approvalReason: "Roark opened the autorun pull request successfully",
   });
   if (result.failed.length > 0) {
-    presenter().warning(`reviewer-generated issue creation reported ${result.failed.length} failure(s)`);
-    presenter().artifact(artifactRelativePath(input.workflowContext, "issueCreationResults"));
+    (yield* Presentation).warning(
+      `reviewer-generated issue creation reported ${result.failed.length} failure(s)`,
+    );
+    (yield* Presentation).artifact(
+      artifactRelativePath(input.workflowContext, "issueCreationResults"),
+    );
   }
   return result;
-}
-
-function issueCreationResultsToFollowUps(result: IssueCreationResults | undefined): FormatPrBodyFollowUpIssue[] | undefined {
+});
+function issueCreationResultsToFollowUps(
+  result: IssueCreationResults | undefined,
+): FormatPrBodyFollowUpIssue[] | undefined {
   if (!result || result.created.length === 0) return undefined;
   return result.created.map((created) => ({
     title: created.title,
@@ -241,107 +360,164 @@ function issueCreationResultsToFollowUps(result: IssueCreationResults | undefine
     number: created.number,
   }));
 }
-
-export async function planVerificationRepair(
-  context: WorkflowContext,
-  verification: VerificationResult,
-): Promise<{ pass: number } | undefined> {
-  if (!classifyVerificationFailure(verification).repairable) return undefined;
-  const pass = inferNextVerificationRepairPass(context);
-  if (pass > context.maxFixPasses) return undefined;
-  await writeVerificationBeforeFixArtifact(context, pass, verification);
-  return { pass };
-}
-
-function inferNextVerificationRepairPass(context: WorkflowContext): number {
-  try {
-    return inferNextFixPass(context);
-  } catch {
-    for (let pass = 1; ; pass++) {
-      if (!artifactExists(context, fixLogRef(pass))) return pass;
-    }
-  }
-}
-
-export async function handleNonPublish(input: {
-  options: AutorunGateOptions;
-  issue: AutorunIssueCandidate;
-  workflowContext: WorkflowContext;
-  decision: Extract<PublishGateDecision, { publish: false }>;
-  attemptMetadata: AttemptMetadata;
-  attemptMetadataPath: string;
-  recoveryCommand?: string | undefined  ;
-}): Promise<void> {
-  const { options, issue, workflowContext, decision, attemptMetadata, attemptMetadataPath, recoveryCommand } = input;
-  const artifactPath = path.join(workflowContext.runDirRelative, decision.artifactPath);
-  const artifactContent = await readDecisionArtifact(workflowContext, decision.phase);
-
-  presenter().line(`Not publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`);
-  presenter().artifact(artifactPath);
-  presenter().artifact(attemptMetadataPath);
-  if (recoveryCommand) presenter().recovery(recoveryCommand);
-
-  const comment = decision.phase === "readiness"
-    ? formatReadinessLedgerComment({
+export const planVerificationRepair = Effect.fn("planVerificationRepair")(
+  function* (context: WorkflowContext, verification: VerificationResult) {
+    if (!classifyVerificationFailure(verification).repairable) return undefined;
+    const pass = yield* inferNextVerificationRepairPass(context);
+    if (pass > context.maxFixPasses) return undefined;
+    yield* writeVerificationBeforeFixArtifact(context, pass, verification);
+    return { pass };
+  },
+);
+const inferNextVerificationRepairPass = Effect.fn(
+  "inferNextVerificationRepairPass",
+)(function* (context: WorkflowContext) {
+  return yield* Effect.gen(function* () {
+    return yield* inferNextFixPass(context);
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        for (let pass = 1; ; pass++) {
+          if (!(yield* artifactExists(context, fixLogRef(pass)))) return pass;
+        }
+      }),
+    ),
+  );
+});
+export const handleNonPublish = Effect.fn("handleNonPublish")(
+  function* (input: {
+    options: AutorunGateOptions;
+    issue: AutorunIssueCandidate;
+    workflowContext: WorkflowContext;
+    decision: Extract<
+      PublishGateDecision,
+      {
+        publish: false;
+      }
+    >;
+    attemptMetadata: AttemptMetadata;
+    attemptMetadataPath: string;
+    recoveryCommand?: string | undefined;
+  }) {
+    const {
+      options,
+      issue,
+      workflowContext,
+      decision,
+      attemptMetadata,
+      attemptMetadataPath,
+      recoveryCommand,
+    } = input;
+    const artifactPath = path.join(
+      workflowContext.runDirRelative,
+      decision.artifactPath,
+    );
+    const artifactContent = yield* readDecisionArtifact(
+      workflowContext,
+      decision.phase,
+    );
+    (yield* Presentation).line(
+      `Not publishing #${issue.number}: ${decision.phase} — ${decision.reason}.`,
+    );
+    (yield* Presentation).artifact(artifactPath);
+    (yield* Presentation).artifact(attemptMetadataPath);
+    if (recoveryCommand) (yield* Presentation).recovery(recoveryCommand);
+    const comment =
+      decision.phase === "readiness"
+        ? formatReadinessLedgerComment({
+            issueNumber: issue.number,
+            attempt: attemptMetadata.attempt,
+            artifactContent: artifactContent ?? "",
+            recoveryCommand,
+          })
+        : formatFailureComment({
+            issueNumber: issue.number,
+            issueUrl: issue.url,
+            phase: decision.phase,
+            reason: decision.reason,
+            branchName: attemptMetadata.branch,
+            worktreePath: attemptMetadata.worktreePath,
+            workspacePath: attemptMetadata.workspace?.path,
+            artifactContent,
+            recoveryCommand,
+          });
+    const marker = buildRoarkMarker({
       issueNumber: issue.number,
       attempt: attemptMetadata.attempt,
-      artifactContent: artifactContent ?? "",
-      recoveryCommand,
-    })
-    : formatFailureComment({
-      issueNumber: issue.number,
-      issueUrl: issue.url,
       phase: decision.phase,
-      reason: decision.reason,
-      branchName: attemptMetadata.branch,
-      worktreePath: attemptMetadata.worktreePath,
-      workspacePath: attemptMetadata.workspace?.path,
-      artifactContent,
-      recoveryCommand,
     });
-
-  const marker = buildRoarkMarker({ issueNumber: issue.number, attempt: attemptMetadata.attempt, phase: decision.phase });
-  const ref = await markIssueFailed({
-    cwd: options.cwd,
-    repo: options.repo,
-    issueNumber: issue.number,
-    label: options.failureLabel,
-    comment,
-    removeLabels: labelsToRemoveForAutorunTransition({
-      issueLabels: issue.labels,
-      workflow: options,
-      nextLabel: options.failureLabel,
-      knownPresent: [options.inProgressLabel],
-    }),
-    marker,
-    existingCommentId: attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
-  });
-  if (ref) recordAttemptIssueComment(attemptMetadata, decision.phase, ref);
-}
-
-async function readReadinessResult(context: WorkflowContext) {
-  try {
-    return parseReadinessResultJson(await readArtifact(context, "readiness"));
-  } catch {
-    return undefined;
-  }
-}
-
-async function readReadinessMarkdown(context: WorkflowContext): Promise<string | undefined> {
-  try {
-    return await readArtifact(context, "readinessMarkdown");
-  } catch {
-    return undefined;
-  }
-}
-
-async function readDecisionArtifact(
+    const ref = yield* markIssueFailed({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: issue.number,
+      label: options.failureLabel,
+      comment,
+      removeLabels: labelsToRemoveForAutorunTransition({
+        issueLabels: issue.labels,
+        workflow: options,
+        nextLabel: options.failureLabel,
+        knownPresent: [options.inProgressLabel],
+      }),
+      marker,
+      existingCommentId:
+        attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
+    });
+    if (ref)
+      recordAttemptIssueComment(
+        attemptMetadata,
+        decision.phase,
+        ref,
+        DateTime.formatIso(yield* DateTime.now),
+      );
+  },
+);
+const readReadinessResult = Effect.fn("readReadinessResult")(function* (
   context: WorkflowContext,
-  phase: Extract<PublishGateDecision, { publish: false }>["phase"],
-): Promise<string | undefined> {
-  try {
-    return await readArtifact(context, phase === "verification" ? "verification" : "readinessMarkdown");
-  } catch {
-    return undefined;
-  }
-}
+) {
+  return yield* Effect.gen(function* () {
+    return yield* parseReadinessResultJson(
+      yield* readArtifact(context, "readiness"),
+    );
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});
+const readReadinessMarkdown = Effect.fn("readReadinessMarkdown")(function* (
+  context: WorkflowContext,
+) {
+  return yield* Effect.gen(function* () {
+    return yield* readArtifact(context, "readinessMarkdown");
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});
+const readDecisionArtifact = Effect.fn("readDecisionArtifact")(function* (
+  context: WorkflowContext,
+  phase: Extract<
+    PublishGateDecision,
+    {
+      publish: false;
+    }
+  >["phase"],
+) {
+  return yield* Effect.gen(function* () {
+    return yield* readArtifact(
+      context,
+      phase === "verification" ? "verification" : "readinessMarkdown",
+    );
+  }).pipe(
+    Effect.catch(
+      Effect.fnUntraced(function* () {
+        return undefined;
+      }),
+    ),
+  );
+});

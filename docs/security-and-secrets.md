@@ -7,14 +7,14 @@ lastUpdated: 2026-07-25T07:13:47Z
 
 ## Risks
 
-| Boundary | Risk | Rule |
-| --- | --- | --- |
-| GitHub issue and PR text | Prompt injection or misleading instructions | Treat as untrusted user input. |
-| Lifecycle hooks | Arbitrary local shell execution | Review hooks before scheduled or shared-host runs. |
-| Verification command | Arbitrary local shell execution | Keep it deterministic and non-interactive. |
-| Ignored local files | Secret leakage into workspaces or artifacts | Copy only ignored paths and keep them ignored. |
-| Run artifacts | May contain command output or sensitive paths | Do not publish artifacts blindly. |
-| GitHub token | Repository mutation authority | Use least privilege that still supports Roark workflows. |
+| Boundary                 | Risk                                          | Rule                                                     |
+| ------------------------ | --------------------------------------------- | -------------------------------------------------------- |
+| GitHub issue and PR text | Prompt injection or misleading instructions   | Treat as untrusted user input.                           |
+| Lifecycle hooks          | Arbitrary local shell execution               | Review hooks before scheduled or shared-host runs.       |
+| Verification command     | Arbitrary local shell execution               | Keep it deterministic and non-interactive.               |
+| Ignored local files      | Secret leakage into workspaces or artifacts   | Copy only ignored paths and keep them ignored.           |
+| Run artifacts            | May contain command output or sensitive paths | Do not publish artifacts blindly.                        |
+| GitHub token             | Repository mutation authority                 | Use least privilege that still supports Roark workflows. |
 
 ## Keep secrets out of Roark config
 

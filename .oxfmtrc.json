@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 80,
+  "singleQuote": false,
+  "semi": true,
+  "sortImports": false,
+  "ignorePatterns": [
+    "node_modules/",
+    ".roark/",
+    "out/",
+    "dist/",
+    "coverage/",
+    "repos/",
+    "skills/"
+  ]
+}

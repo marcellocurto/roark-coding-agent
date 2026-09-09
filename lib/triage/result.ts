@@ -1,70 +1,48 @@
-import { Type, type Static } from "typebox";
-import { Value } from "typebox/value";
+import { trimmedText, trimmedScalar } from "../structured-output/fields.ts";
+import { artifactContract } from "../structured-output/contract.ts";
+import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
-
-const nonEmptyString = (description: string) => Type.String({ minLength: 1, description });
-
 const triageClaimVerification = {
   confirmed: "confirmed",
   notReproduced: "not-reproduced",
   insufficientDetail: "insufficient-detail",
   notApplicable: "not-applicable",
 } as const;
-
-export const triageClaimVerificationValues = Object.values(triageClaimVerification);
-
-export const triageResultSchema = Type.Object({
-  verdict: Type.Union([
-    Type.Literal("proceed"),
-    Type.Literal("blocked"),
-    Type.Literal("reject"),
-    Type.Literal("needs-human-decision"),
+export const triageClaimVerificationValues = Object.values(
+  triageClaimVerification,
+);
+const triageResultSchemaShape = Schema.Struct({
+  verdict: Schema.Union([
+    Schema.Literal("proceed"),
+    Schema.Literal("blocked"),
+    Schema.Literal("reject"),
+    Schema.Literal("needs-human-decision"),
   ]),
-  reasoning: nonEmptyString("Concise reasoning for the triage verdict."),
-  claimVerification: Type.Enum(triageClaimVerification),
-  evidence: Type.Array(nonEmptyString("Concrete repository or issue evidence supporting the verdict."), { minItems: 1 }),
-  establishedFacts: Type.Array(nonEmptyString("Fact established by the issue or repository inspection.")),
-  blockingQuestions: Type.Array(nonEmptyString("Specific question that must be answered before proceeding.")),
-  recommendedNextStep: nonEmptyString("The smallest concrete next step after triage."),
-}, { additionalProperties: false });
-
-export type TriageResult = Static<typeof triageResultSchema>;
+  reasoning: trimmedScalar("Concise reasoning for the triage verdict."),
+  claimVerification: Schema.Enum(triageClaimVerification),
+  evidence: Schema.mutable(
+    Schema.Array(
+      trimmedText(
+        "Concrete repository or issue evidence supporting the verdict.",
+      ),
+    ),
+  ).check(Schema.isMinLength(1)),
+  establishedFacts: Schema.mutable(
+    Schema.Array(
+      trimmedText("Fact established by the issue or repository inspection."),
+    ),
+  ),
+  blockingQuestions: Schema.mutable(
+    Schema.Array(
+      trimmedText("Specific question that must be answered before proceeding."),
+    ),
+  ),
+  recommendedNextStep: trimmedScalar(
+    "The smallest concrete next step after triage.",
+  ),
+});
+export type TriageResult = (typeof triageResultSchemaShape)["Type"];
 export type TriageVerdict = TriageResult["verdict"];
-
-export class TriageOutputContractError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "TriageOutputContractError";
-  }
-}
-
-export function validateTriageResult(value: unknown): TriageResult {
-  if (!Value.Check(triageResultSchema, value)) {
-    const first = Value.Errors(triageResultSchema, value)[0];
-    const location = first?.instancePath ?? first?.schemaPath ?? "triage result";
-    throw new TriageOutputContractError(`Triage result does not satisfy the structured contract at ${location}.`);
-  }
-  const result: TriageResult = {
-    ...value,
-    reasoning: value.reasoning.trim(),
-    evidence: trimItems(value.evidence, "evidence"),
-    establishedFacts: trimItems(value.establishedFacts, "establishedFacts"),
-    blockingQuestions: trimItems(value.blockingQuestions, "blockingQuestions"),
-    recommendedNextStep: value.recommendedNextStep.trim(),
-  };
-  if (result.verdict === "needs-human-decision" && result.blockingQuestions.length === 0) {
-    throw new TriageOutputContractError("A needs-human-decision triage result requires at least one blocking question.");
-  }
-  if (result.verdict === "proceed" && result.blockingQuestions.length > 0) {
-    throw new TriageOutputContractError("A proceed triage result cannot contain blocking questions.");
-  }
-  return result;
-}
-
-export function parseTriageResultJson(content: string): TriageResult {
-  return validateTriageResult(parseJson(content, "Triage"));
-}
-
 export function formatTriageMarkdown(result: TriageResult): string {
   return [
     "# Triage",
@@ -92,33 +70,32 @@ export function formatTriageMarkdown(result: TriageResult): string {
     "",
   ].join("\n");
 }
-
-export const triageArtifactDefinition: StructuredArtifactDefinition<TriageResult> = {
-  toolName: "submit_triage",
-  label: "Triage",
-  noun: "triage result",
-  parameters: triageResultSchema,
-  validate: validateTriageResult,
-  formatMarkdown: formatTriageMarkdown,
-  createError: (message) => new TriageOutputContractError(message),
-};
-
-function parseJson(content: string, label: string): unknown {
-  try {
-    return JSON.parse(content);
-  } catch (error) {
-    throw new TriageOutputContractError(`${label} artifact is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-function trimItems(values: string[], field: string): string[] {
-  return values.map((value, index) => {
-    const trimmed = value.trim();
-    if (!trimmed) throw new TriageOutputContractError(`Triage ${field}[${index}] must not be blank.`);
-    return trimmed;
-  });
-}
-
+const contract = artifactContract(
+  "Triage",
+  triageResultSchemaShape.check(
+    Schema.makeFilter((result) => {
+      if (
+        result.verdict === "needs-human-decision" &&
+        result.blockingQuestions.length === 0
+      )
+        return "A needs-human-decision triage result requires at least one blocking question.";
+      if (result.verdict === "proceed" && result.blockingQuestions.length > 0)
+        return "A proceed triage result cannot contain blocking questions.";
+    }),
+  ),
+);
+export const validateTriageResult = contract.decode;
+export const parseTriageResultJson = contract.parse;
+export const triageResultSchema = Schema.toEncoded(triageResultSchemaShape);
+export const triageArtifactDefinition: StructuredArtifactDefinition<TriageResult> =
+  {
+    toolName: "submit_triage",
+    label: "Triage",
+    noun: "triage result",
+    parameters: triageResultSchema,
+    validate: validateTriageResult,
+    formatMarkdown: formatTriageMarkdown,
+  };
 function renderList(values: readonly string[]): string[] {
   return values.length === 0 ? ["None."] : values.map((value) => `- ${value}`);
 }

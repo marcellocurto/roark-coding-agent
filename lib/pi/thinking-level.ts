@@ -1,4 +1,10 @@
-import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
+  type Api,
+  type Model,
+  type ModelThinkingLevel,
+} from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "../cli/args.ts";
 
 export interface ThinkingLevelResolution {
@@ -8,7 +14,10 @@ export interface ThinkingLevelResolution {
   clamped: boolean;
 }
 
-export function resolveThinkingLevel(model: Model<Api>, requested: ThinkingLevel): ThinkingLevelResolution {
+export function resolveThinkingLevel(
+  model: Model<Api>,
+  requested: ThinkingLevel,
+): ThinkingLevelResolution {
   const effective = clampThinkingLevel(model, requested);
   return {
     requested,

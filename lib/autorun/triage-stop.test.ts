@@ -11,11 +11,19 @@ describe("triage stop handling", () => {
     expect(mapTriageVerdictToLabel("blocked")).toBe("blocked");
     expect(mapTriageVerdictToLabel("needs-human-decision")).toBe("needs-human");
     expect(mapTriageVerdictToLabel("reject")).toBe("triage-rejected");
-    expect(mapTriageVerdictToLabel("unexpected-terminal-verdict")).toBe("needs-human");
+    expect(mapTriageVerdictToLabel("unexpected-terminal-verdict")).toBe(
+      "needs-human",
+    );
   });
 
   test("builds gh argv for labels", () => {
-    expect(buildTriageStopAddLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "blocked" })).toEqual([
+    expect(
+      buildTriageStopAddLabelArgv({
+        repo: "owner/repo",
+        issueNumber: 12,
+        label: "blocked",
+      }),
+    ).toEqual([
       "gh",
       "issue",
       "edit",
@@ -25,7 +33,13 @@ describe("triage stop handling", () => {
       "--repo",
       "owner/repo",
     ]);
-    expect(buildTriageStopRemoveLabelArgv({ repo: "owner/repo", issueNumber: 12, label: "agent-in-progress" })).toEqual([
+    expect(
+      buildTriageStopRemoveLabelArgv({
+        repo: "owner/repo",
+        issueNumber: 12,
+        label: "agent-in-progress",
+      }),
+    ).toEqual([
       "gh",
       "issue",
       "edit",
@@ -45,6 +59,8 @@ describe("triage stop handling", () => {
       triageArtifactContent: `# Triage\n\nTOKEN=secret\n/Users/alice/private\n${evidence}`,
     });
 
-    expect(comment).toBe(`# Triage\n\nTOKEN=[redacted]\n[local path redacted]\n${evidence}\n`);
+    expect(comment).toBe(
+      `# Triage\n\nTOKEN=[redacted]\n[local path redacted]\n${evidence}\n`,
+    );
   });
 });

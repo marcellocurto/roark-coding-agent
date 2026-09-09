@@ -1,70 +1,75 @@
-import { ensureGitHubLabels, type EnsureGitHubLabelsResult, type RequiredGitHubLabel } from "../github/labels.ts";
-
+import { GitHub } from "../github/service.ts";
+import { Effect } from "effect";
+import { type RequiredGitHubLabel } from "../github/labels.ts";
 export interface AutorunLabelContractInput {
   readyLabel?: string | undefined;
   inProgressLabel: string;
   failureLabel: string;
   successLabel: string;
 }
-
 export type EnsureAutorunLabelContractOptions = AutorunLabelContractInput & {
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   dryRun?: boolean | undefined;
 };
-
 export const autorunBlockedLabel = "blocked";
 export const autorunNeedsHumanLabel = "needs-human";
 export const autorunNeedsTriageLabel = "needs-triage";
 export const autorunTriageRejectedLabel = "triage-rejected";
 export const autorunWontFixLabel = "wont-fix";
-
 export interface AutorunWorkflowLabelInput {
   readyLabel?: string | undefined;
   inProgressLabel: string;
   failureLabel: string;
   successLabel: string;
 }
-
-export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): RequiredGitHubLabel[] {
+export function buildRequiredAutorunLabels(
+  input: AutorunLabelContractInput,
+): RequiredGitHubLabel[] {
   return uniqueLabels([
     input.readyLabel
       ? {
-        role: "ready",
-        name: input.readyLabel,
-        color: "0E8A16",
-        description: "Agent-ready ticket with clear scope, blockers, and acceptance criteria.",
-      }
+          role: "ready",
+          name: input.readyLabel,
+          color: "0E8A16",
+          description:
+            "Agent-ready ticket with clear scope, blockers, and acceptance criteria.",
+        }
       : undefined,
     {
       role: "in-progress",
       name: input.inProgressLabel,
       color: "5319E7",
-      description: "Agent lifecycle label. Applied when an agent claims an issue and is actively working it.",
+      description:
+        "Agent lifecycle label. Applied when an agent claims an issue and is actively working it.",
     },
     {
       role: "failure",
       name: input.failureLabel,
       color: "B60205",
-      description: "Agent lifecycle label. Applied when readiness, execution, or verification fails.",
+      description:
+        "Agent lifecycle label. Applied when readiness, execution, or verification fails.",
     },
     {
       role: "success",
       name: input.successLabel,
       color: "1D76DB",
-      description: "Agent lifecycle label. Applied after an agent opens a pull request.",
+      description:
+        "Agent lifecycle label. Applied after an agent opens a pull request.",
     },
     {
       role: "triage-blocked",
       name: autorunBlockedLabel,
       color: "D93F0B",
-      description: "Status label for issues blocked by dependencies or external conditions.",
+      description:
+        "Status label for issues blocked by dependencies or external conditions.",
     },
     {
       role: "triage-needs-human",
       name: autorunNeedsHumanLabel,
       color: "FBCA04",
-      description: "Status label for issues requiring human review, decision, or clarification.",
+      description:
+        "Status label for issues requiring human review, decision, or clarification.",
     },
     {
       role: "triage-rejected",
@@ -74,8 +79,9 @@ export function buildRequiredAutorunLabels(input: AutorunLabelContractInput): Re
     },
   ]);
 }
-
-export function autorunWorkflowLabels(input: AutorunWorkflowLabelInput): string[] {
+export function autorunWorkflowLabels(
+  input: AutorunWorkflowLabelInput,
+): string[] {
   return uniqueLabelNames([
     input.readyLabel ?? "",
     autorunNeedsTriageLabel,
@@ -88,29 +94,38 @@ export function autorunWorkflowLabels(input: AutorunWorkflowLabelInput): string[
     autorunWontFixLabel,
   ]);
 }
-
 export function labelsToRemoveForAutorunTransition(input: {
-  issueLabels?: readonly { name: string }[] | undefined;
+  issueLabels?:
+    | readonly {
+        name: string;
+      }[]
+    | undefined;
   workflow: AutorunWorkflowLabelInput;
   nextLabel: string;
   knownPresent?: readonly string[] | undefined;
 }): string[] {
-  const workflowLabels = new Set(autorunWorkflowLabels(input.workflow).map(normalizeLabel));
+  const workflowLabels = new Set(
+    autorunWorkflowLabels(input.workflow).map(normalizeLabel),
+  );
   return uniqueLabelNames([
-    ...(input.issueLabels ?? []).map((label) => label.name).filter((label) => workflowLabels.has(normalizeLabel(label))),
+    ...(input.issueLabels ?? [])
+      .map((label) => label.name)
+      .filter((label) => workflowLabels.has(normalizeLabel(label))),
     ...(input.knownPresent ?? []),
-  ]).filter((label) => normalizeLabel(label) !== normalizeLabel(input.nextLabel));
+  ]).filter(
+    (label) => normalizeLabel(label) !== normalizeLabel(input.nextLabel),
+  );
 }
-
-export async function ensureAutorunLabelContract(options: EnsureAutorunLabelContractOptions): Promise<EnsureGitHubLabelsResult> {
-  return ensureGitHubLabels({
+export const ensureAutorunLabelContract = Effect.fn(
+  "ensureAutorunLabelContract",
+)(function* (options: EnsureAutorunLabelContractOptions) {
+  return yield* (yield* GitHub).ensureGitHubLabels({
     cwd: options.cwd,
     repo: options.repo,
     dryRun: options.dryRun,
     labels: buildRequiredAutorunLabels(options),
   });
-}
-
+});
 export function mergeLifecycleSkipLabels(input: {
   skipLabels: readonly string[];
   inProgressLabel: string;
@@ -129,8 +144,9 @@ export function mergeLifecycleSkipLabels(input: {
     autorunWontFixLabel,
   ]);
 }
-
-function uniqueLabels(labels: (RequiredGitHubLabel | undefined)[]): RequiredGitHubLabel[] {
+function uniqueLabels(
+  labels: (RequiredGitHubLabel | undefined)[],
+): RequiredGitHubLabel[] {
   const seen = new Set<string>();
   const result: RequiredGitHubLabel[] = [];
   for (const label of labels) {
@@ -144,7 +160,6 @@ function uniqueLabels(labels: (RequiredGitHubLabel | undefined)[]): RequiredGitH
   }
   return result;
 }
-
 function uniqueLabelNames(labels: readonly string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -158,7 +173,6 @@ function uniqueLabelNames(labels: readonly string[]): string[] {
   }
   return result;
 }
-
 function normalizeLabel(label: string): string {
   return label.trim().toLowerCase();
 }

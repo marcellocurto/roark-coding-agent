@@ -2,7 +2,7 @@ export interface AutorunIssueCandidate {
   number: number;
   title: string;
   body?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   createdAt?: string | undefined;
   labels?: { name: string }[] | undefined;
 }
@@ -43,7 +43,10 @@ export function rankEligibleIssues(
     .toSorted(compareOldestIssueFirst);
 }
 
-export function isEligibleIssue(issue: AutorunIssueCandidate, options: IssueSelectionOptions): boolean {
+export function isEligibleIssue(
+  issue: AutorunIssueCandidate,
+  options: IssueSelectionOptions,
+): boolean {
   const labels = normalizedLabelSet(issue);
   if (!labels.has(normalizeLabel(options.readyLabel))) return false;
   return findMatchingSkipLabel(issue, options.skipLabels) === undefined;
@@ -54,10 +57,15 @@ export function findMatchingSkipLabel(
   skipLabels: readonly string[],
 ): string | undefined {
   const normalizedSkipLabels = new Set(skipLabels.map(normalizeLabel));
-  return issue.labels?.find((label) => normalizedSkipLabels.has(normalizeLabel(label.name)))?.name;
+  return issue.labels?.find((label) =>
+    normalizedSkipLabels.has(normalizeLabel(label.name)),
+  )?.name;
 }
 
-function compareOldestIssueFirst(left: AutorunIssueCandidate, right: AutorunIssueCandidate): number {
+function compareOldestIssueFirst(
+  left: AutorunIssueCandidate,
+  right: AutorunIssueCandidate,
+): number {
   const leftTime = parseCreatedAt(left.createdAt);
   const rightTime = parseCreatedAt(right.createdAt);
   if (leftTime !== rightTime) return leftTime - rightTime;
@@ -71,7 +79,9 @@ function parseCreatedAt(value: string | undefined): number {
 }
 
 function normalizedLabelSet(issue: AutorunIssueCandidate): Set<string> {
-  return new Set((issue.labels ?? []).map((label) => normalizeLabel(label.name)));
+  return new Set(
+    (issue.labels ?? []).map((label) => normalizeLabel(label.name)),
+  );
 }
 
 function normalizeLabel(label: string): string {

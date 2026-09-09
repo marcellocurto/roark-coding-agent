@@ -1,6 +1,6 @@
 {
   "name": "roark-coding-agent",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A CLI for running coding agents against GitHub issues and pull requests.",
   "homepage": "https://agent.roark.at",
   "license": "MIT",
@@ -8,14 +8,6 @@
     "type": "git",
     "url": "git+https://github.com/marcellocurto/roark-coding-agent.git"
   },
-  "engines": {
-    "bun": ">=1.4.2"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "module": "roark.ts",
-  "type": "module",
   "bin": {
     "roark": "./roark.ts"
   },
@@ -29,6 +21,11 @@
     "CHANGELOG.md",
     "tsconfig.json"
   ],
+  "type": "module",
+  "module": "roark.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "start": "bun run roark.ts",
     "agent": "bun run roark.ts",
@@ -36,25 +33,35 @@
     "do": "bun run roark.ts do",
     "auto": "bun run roark.ts auto --repo marcellocurto/roark-coding-agent",
     "test": "bun test",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint . --cache --cache-strategy content --cache-location .eslintcache",
-    "lint:full": "eslint .",
-    "check": "bun run typecheck && bun run lint && bun test",
+    "lint": "bun run lint:setup && oxlint --disable-nested-config .",
+    "lint:full": "bun run lint",
+    "check": "bun run format:check && bun run typecheck && bun run lint && bun test",
     "release:check": "bun run check && bun run release:check-package",
     "release:check-package": "bun run scripts/check-package.ts",
     "version:patch": "bun run release:check && bun pm version patch",
     "version:minor": "bun run release:check && bun pm version minor",
-    "version:major": "bun run release:check && bun pm version major"
-  },
-  "devDependencies": {
-    "@types/bun": "latest",
-    "eslint": "^10.3.0",
-    "typescript-eslint": "^8.59.2",
-    "typescript": "^6.0.3"
+    "version:major": "bun run release:check && bun pm version major",
+    "lint:setup": "effect-tsgo patch --no-typescript --oxlint"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.80.7",
-    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
     "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "@effect/tsgo": "0.43.0",
+    "@types/bun": "latest",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.82.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "bun": ">=1.4.2"
   }
 }

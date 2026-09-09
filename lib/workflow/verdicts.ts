@@ -55,24 +55,46 @@ export function needsRestart(...reviews: ReviewResult[]): boolean {
   return reviews.some((review) => review.restartRecommendation !== undefined);
 }
 
-export function decideReadiness(input: ReadinessDecisionInput): ReadinessDecision {
+export function decideReadiness(
+  input: ReadinessDecisionInput,
+): ReadinessDecision {
   const triageVerdict = input.triage?.verdict ?? "missing";
-  const reviewAVerdict = input.reviewA ? reviewDisposition(input.reviewA) : "missing";
-  const reviewBVerdict = input.reviewB ? reviewDisposition(input.reviewB) : "missing";
+  const reviewAVerdict = input.reviewA
+    ? reviewDisposition(input.reviewA)
+    : "missing";
+  const reviewBVerdict = input.reviewB
+    ? reviewDisposition(input.reviewB)
+    : "missing";
   const planReady = input.plan?.readyForImplementation ?? false;
   const allFindings = [
-    ...(input.reviewA ? normalizeReviewFindings(input.reviewA, "review-a") : []),
-    ...(input.reviewB ? normalizeReviewFindings(input.reviewB, "review-b") : []),
+    ...(input.reviewA
+      ? normalizeReviewFindings(input.reviewA, "review-a")
+      : []),
+    ...(input.reviewB
+      ? normalizeReviewFindings(input.reviewB, "review-b")
+      : []),
   ];
   const allBlockers = [
-    ...(input.reviewA ? normalizeReviewBlockers(input.reviewA, "review-a") : []),
-    ...(input.reviewB ? normalizeReviewBlockers(input.reviewB, "review-b") : []),
+    ...(input.reviewA
+      ? normalizeReviewBlockers(input.reviewA, "review-a")
+      : []),
+    ...(input.reviewB
+      ? normalizeReviewBlockers(input.reviewB, "review-b")
+      : []),
   ];
-  const currentIssueBlockingFindings = findingsByClassification(allFindings, "must-fix-current");
-  const externalBlockers = findingsByClassification(allBlockers, "external-blocker");
+  const currentIssueBlockingFindings = findingsByClassification(
+    allFindings,
+    "must-fix-current",
+  );
+  const externalBlockers = findingsByClassification(
+    allBlockers,
+    "external-blocker",
+  );
   const followUpFindings = findingsByClassification(allFindings, "follow-up");
   const suggestions = findingsByClassification(allFindings, "suggestion");
-  const restartRequired = [input.reviewA, input.reviewB].some((review) => review?.restartRecommendation !== undefined);
+  const restartRequired = [input.reviewA, input.reviewB].some(
+    (review) => review?.restartRecommendation !== undefined,
+  );
   const fixesWereNeeded = currentIssueBlockingFindings.length > 0;
   const blockedByReview = externalBlockers.length > 0;
   const readyFromLatestReviews =

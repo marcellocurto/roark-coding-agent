@@ -1,7 +1,11 @@
+import { toolContext } from "./tool-context.ts";
 import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
 import type { TriageResult, TriageVerdict } from "../triage/result.ts";
 import type { AgentRunRequest } from "../workflow/agent-runner.ts";
-import type { ReadinessResult, ReadinessStatus } from "../workflow/readiness.ts";
+import type {
+  ReadinessResult,
+  ReadinessStatus,
+} from "../workflow/readiness.ts";
 
 export function triageResult(
   verdict: TriageVerdict = "proceed",
@@ -9,12 +13,21 @@ export function triageResult(
 ): TriageResult {
   return {
     verdict,
-    reasoning: verdict === "proceed" ? "Repository evidence supports proceeding." : "Repository evidence supports stopping.",
+    reasoning:
+      verdict === "proceed"
+        ? "Repository evidence supports proceeding."
+        : "Repository evidence supports stopping.",
     claimVerification: "confirmed",
     evidence: ["lib/example.ts:1 supports the triage decision."],
     establishedFacts: ["The relevant workflow exists in this repository."],
-    blockingQuestions: verdict === "needs-human-decision" ? ["A maintainer decision is required."] : [],
-    recommendedNextStep: verdict === "proceed" ? "Prepare an implementation plan." : "Resolve the triage outcome.",
+    blockingQuestions:
+      verdict === "needs-human-decision"
+        ? ["A maintainer decision is required."]
+        : [],
+    recommendedNextStep:
+      verdict === "proceed"
+        ? "Prepare an implementation plan."
+        : "Resolve the triage outcome.",
     ...overrides,
   };
 }
@@ -28,7 +41,9 @@ export function implementationPlanResult(
     workClassification: "backend",
     goal: "Satisfy the issue with the smallest complete change.",
     nonGoals: ["Do not broaden scope."],
-    currentCodeFindings: ["The current behavior is missing the requested contract."],
+    currentCodeFindings: [
+      "The current behavior is missing the requested contract.",
+    ],
     simplificationsFromDraft: [],
     proposedChanges: ["Implement the requested contract."],
     filesLikelyToChange: ["lib/example.ts — implement the behavior."],
@@ -41,11 +56,17 @@ export function implementationPlanResult(
   };
 }
 
-export async function submitTriage(request: AgentRunRequest, result: TriageResult): Promise<string> {
+export async function submitTriage(
+  request: AgentRunRequest,
+  result: TriageResult,
+): Promise<string> {
   return submit(request, "submit_triage", result);
 }
 
-export async function submitImplementationPlan(request: AgentRunRequest, result: ImplementationPlanResult): Promise<string> {
+export async function submitImplementationPlan(
+  request: AgentRunRequest,
+  result: ImplementationPlanResult,
+): Promise<string> {
   return submit(request, "submit_implementation_plan", result);
 }
 
@@ -73,9 +94,21 @@ export function readinessResult(status: ReadinessStatus): ReadinessResult {
   };
 }
 
-async function submit(request: AgentRunRequest, toolName: string, result: unknown): Promise<string> {
-  const tool = request.customTools?.find((candidate) => candidate.name === toolName);
+async function submit(
+  request: AgentRunRequest,
+  toolName: string,
+  result: unknown,
+): Promise<string> {
+  const tool = request.customTools?.find(
+    (candidate) => candidate.name === toolName,
+  );
   if (!tool) throw new Error(`Request did not expose ${toolName}.`);
-  await tool.execute(`test-${toolName}`, result, undefined, undefined, {} as never);
+  await tool.execute(
+    `test-${toolName}`,
+    result,
+    undefined,
+    undefined,
+    toolContext,
+  );
   return "";
 }

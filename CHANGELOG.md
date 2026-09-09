@@ -4,21 +4,26 @@ All notable changes to Roark are tracked here.
 
 This project uses [Semantic Versioning](https://semver.org/). While Roark is pre-1.0, incompatible CLI/config changes may ship in minor releases.
 
-## Unreleased
+## [0.3.0] - Unreleased
 
 ### Changed
 
-- Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
-- Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
-- `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
-- PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.
-- `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.
-- `revise-pr` now assigns every planned feedback item a stable source-derived identity and requires execution and fix passes to provide exactly one final disposition for every identity. Summary comments render that single linked list with objective outcome, review, verification, changed-file, and commit metadata; internal plans, logs, reviews, feedback snapshots, and local artifact paths stay local.
-- Public GitHub comments, pull request bodies, and generated issues no longer expose machine-local `.roark` run or artifact paths. PR bodies also omit the redundant Roark automation details block. Internal paths and run metadata remain available in local artifacts, status output, observability, prompts, and terminal recovery guidance.
+- Unified native workflow timestamps under Effect Clock/DateTime and replaced workflow-test dependency adapters with typed service composition, preserving scoped cleanup.
 
-### Removed
+- Moved structured work-artifact normalization into shared field codecs, removing revision execution’s synthetic change-report dependency while preserving routing, validation, and stored formats.
 
-- Removed the derived `pr-narrative.md` artifact and its generation lifecycle.
+- Migrated persisted curation-plan and publication-history decoding to Effect Schema, preserving legacy plans, per-entry skips, and already-created identities when optional metadata is damaged.
+
+- Migrated GitHub response decoding to native Effect Schema contracts for issues, dependencies, PR feedback, paginated comments, and publishing duplicate searches. Malformed responses retain typed schema causes and cannot silently stand in for empty feedback.
+
+- Migrated structured artifact contracts to Effect Schema, preserving normalization and workflow routing while keeping malformed output recoverable and propagating validator and formatter defects.
+
+- Completed Effect-native CLI dispatch, interactive prompt lifetimes, and status loading; removed the internal Promise execution bridge and migrated workflow test fixtures to native Effects.
+- Migrated all default agent phases to GPT-6 Astra through Pi 0.85.1. Default thinking now varies by phase, fast uses low except for medium Reviews A and B, and deep uses high execution with xhigh planning/reviews. Publishing uses low in every profile; explicit model and thinking overrides remain available.
+- Established the Effect v4 application runtime and Bun platform services, with scoped process execution and Effect-native verification timeouts. Interrupting migrated subprocess work now waits for process-group cleanup, including descendants whose shell has already exited.
+- Moved existing autorun, continuation, publishing, and PR review workflows to native Effect composition, with scoped workspace locks, interruption-safe artifact writes, and recovery markers for interrupted workspace initialization.
+- Migrated existing standalone PR revision to native Effect services and scoped cleanup. Failed pushes no longer record publication, and acknowledged pushes persist publication before accepting cancellation.
+- Removed forwarding-only Promise adapter modules, moved test-only integration setup out of production code, and made CLI configuration and initialization Effect-native.
 
 ## [0.2.0] - 2026-07-14
 
@@ -31,6 +36,13 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Added MIT package licensing, public npm publication metadata, a Bun 1.4.2 minimum, and an installed-tarball smoke check to release verification.
+- Autorun and continuation now automatically run the pinned, read-only PR review workflow after opening and finalizing a pull request. Post-publication review failures preserve the published attempt and review artifacts for explicit retry.
+- `review-pr` now uses the same configured verification command, managed-workspace copies, and lifecycle hooks as `revise-pr`, so agent-authored PR reviews always persist validation evidence unless verification itself cannot run.
+- PR authoring now reads canonical workflow artifacts plus Git-derived changed files and authoritative verification directly. `pr-draft.json` remains the accepted publishing source for deterministic PR creation and updates.
+- `review-pr` now posts each reviewer's Markdown directly as its own new PR comment. It no longer requires structured PR-review submissions, synthesizes an aggregate summary, duplicates full reviews inside details blocks, or updates a marked summary comment.
+- `revise-pr` now assigns every planned feedback item a stable source-derived identity and requires execution and fix passes to provide exactly one final disposition for every identity. Summary comments render that single linked list with objective outcome, review, verification, changed-file, and commit metadata; internal plans, logs, reviews, feedback snapshots, and local artifact paths stay local.
+- Public GitHub comments, pull request bodies, and generated issues no longer expose machine-local `.roark` run or artifact paths. PR bodies also omit the redundant Roark automation details block. Internal paths and run metadata remain available in local artifacts, status output, observability, prompts, and terminal recovery guidance.
 - Review outcomes and finding identifiers are now derived from typed findings instead of parsed from agent-authored Markdown, so arbitrary reviewer formatting cannot hide required fixes.
 - Issue-workflow readiness, curation, publishing, and ledger comments now use only validated numbered review cycles; unnumbered review files are ignored.
 - Triage, draft/final implementation plans, implementation/refinement/fix reports, and readiness now persist canonical JSON. Workflow routing, PR narrative construction, local-mode reporting, and the publish gate consume validated JSON; Markdown companions are deterministic presentation only.
@@ -43,6 +55,7 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Removed
 
+- Removed the derived `pr-narrative.md` artifact and its generation lifecycle.
 - Removed the pre-1.0 `roark workspace remove` command in favor of the simpler `roark remove` interface.
 
 ## [0.0.2] - 2026-07-11

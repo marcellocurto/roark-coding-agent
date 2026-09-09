@@ -1,4 +1,6 @@
-import { artifactContract, formatArtifactRef, type ArtifactRef } from "./artifact-catalog.ts";
+import { Effect } from "effect";
+import type { ArtifactContractError } from "../structured-output/contract.ts";
+import { artifactContract, type ArtifactRef } from "./artifact-catalog.ts";
 import { parseReviewResultJson } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
@@ -8,66 +10,71 @@ export type ArtifactValidationResult =
   | { ok: true }
   | { ok: false; reason: string };
 
-export class ArtifactValidationError extends Error {
-  readonly artifact: ArtifactRef;
-  readonly reason: string;
+export const validateAgentArtifact = Effect.fn("validateAgentArtifact")(
+  function* (
+    artifact: ArtifactRef,
+    content: string,
+  ): Effect.fn.Return<ArtifactValidationResult> {
+    const trimmed = content.trim();
+    if (!trimmed) return invalid("artifact is empty");
 
-  constructor(artifact: ArtifactRef, reason: string) {
-    super(`${formatArtifactRef(artifact)} failed output contract: ${reason}`);
-    this.name = "ArtifactValidationError";
-    this.artifact = artifact;
-    this.reason = reason;
-  }
-}
+    if (isReviewArtifact(artifact))
+      return yield* validateStructured(
+        parseReviewResultJson(trimmed, { allowRestart: true }),
+      );
+    if (artifact === "triage")
+      return yield* validateStructured(parseTriageResultJson(trimmed));
+    if (
+      artifact === "implementationPlanDraft" ||
+      artifact === "implementationPlan"
+    )
+      return yield* validateStructured(
+        parseImplementationPlanResultJson(trimmed),
+      );
+    if (isChangeReportArtifact(artifact))
+      return yield* validateStructured(parseChangeReportJson(trimmed));
 
-export function validateAgentArtifact(artifact: ArtifactRef, content: string): ArtifactValidationResult {
-  const trimmed = content.trim();
-  if (!trimmed) return invalid("artifact is empty");
+    const priorError = parseDiagnosticArtifactError(trimmed);
+    if (priorError) return invalid(priorError);
 
-  if (isReviewArtifact(artifact)) {
-    try {
-      parseReviewResultJson(trimmed, { allowRestart: true });
-      return ok();
-    } catch (error) {
-      return invalid(error instanceof Error ? error.message : String(error));
+    const contract = artifactContract(artifact);
+    if (!contract) return ok();
+
+    if (
+      contract.requiredHeading &&
+      !requiredHeadingRegex(contract.requiredHeading).test(content)
+    ) {
+      return invalid(`missing # ${contract.requiredHeading} heading`);
     }
-  }
 
-  if (artifact === "triage") return validateStructured(() => parseTriageResultJson(trimmed));
-  if (artifact === "implementationPlanDraft" || artifact === "implementationPlan") {
-    return validateStructured(() => parseImplementationPlanResultJson(trimmed));
-  }
-  if (isChangeReportArtifact(artifact)) return validateStructured(() => parseChangeReportJson(trimmed));
-
-  const priorError = parseDiagnosticArtifactError(trimmed);
-  if (priorError) return invalid(priorError);
-
-  const contract = artifactContract(artifact);
-  if (!contract) return ok();
-
-  if (contract.requiredHeading && !requiredHeadingRegex(contract.requiredHeading).test(content)) {
-    return invalid(`missing # ${contract.requiredHeading} heading`);
-  }
-
-  return ok();
-}
-
-function validateStructured(parse: () => unknown): ArtifactValidationResult {
-  try {
-    parse();
     return ok();
-  } catch (error) {
-    return invalid(error instanceof Error ? error.message : String(error));
-  }
+  },
+);
+
+function validateStructured(
+  parse: Effect.Effect<unknown, ArtifactContractError>,
+) {
+  return parse.pipe(
+    Effect.match({
+      onSuccess: ok,
+      onFailure: (error) => invalid(error.message),
+    }),
+  );
 }
 
 function isReviewArtifact(artifact: ArtifactRef): boolean {
-  return typeof artifact !== "string" && (artifact.name === "reviewA" || artifact.name === "reviewB");
+  return (
+    typeof artifact !== "string" &&
+    (artifact.name === "reviewA" || artifact.name === "reviewB")
+  );
 }
 
 function isChangeReportArtifact(artifact: ArtifactRef): boolean {
-  return artifact === "implementationLog"
-    || (typeof artifact !== "string" && (artifact.name === "fixLog" || artifact.name === "refinementLog"));
+  return (
+    artifact === "implementationLog" ||
+    (typeof artifact !== "string" &&
+      (artifact.name === "fixLog" || artifact.name === "refinementLog"))
+  );
 }
 
 function requiredHeadingRegex(heading: string): RegExp {
@@ -80,13 +87,17 @@ function escapeRegExp(value: string): string {
 }
 
 function parseDiagnosticArtifactError(markdown: string): string | undefined {
-  const heading = (/^#\s+(.+ Error)\s*$/im.exec(markdown))?.[1]?.trim();
+  const heading = /^#\s+(.+ Error)\s*$/im.exec(markdown)?.[1]?.trim();
   if (!heading) return undefined;
 
-  const phase = (/##\s*Phase\s*\n+([^\n]+)/i.exec(markdown))?.[1]?.trim();
-  const error = (/##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i.exec(markdown))?.[1]?.trim();
+  const phase = /##\s*Phase\s*\n+([^\n]+)/i.exec(markdown)?.[1]?.trim();
+  const error = /##\s*Error\s*\n+`{4,}(?:text)?\s*\n([\s\S]*?)\n`{4,}/i
+    .exec(markdown)?.[1]
+    ?.trim();
   const summary = [phase, error].filter(Boolean).join(": ");
-  return summary ? `previous ${heading} diagnostic: ${summary}` : `previous ${heading} diagnostic`;
+  return summary
+    ? `previous ${heading} diagnostic: ${summary}`
+    : `previous ${heading} diagnostic`;
 }
 
 function ok(): ArtifactValidationResult {

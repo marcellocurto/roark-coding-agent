@@ -1,10 +1,12 @@
 import { sanitizePublicMarkdown } from "../autorun/public-output.ts";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
-import { formatPrDraftMarkdown, prDraftSchema, validatePrDraft, type PrDraft, type PrDraftRenderingContext } from "./result.ts";
-
-export class PrDraftSubmissionError extends Error {
-  override readonly name = "PrDraftSubmissionError";
-}
+import {
+  formatPrDraftMarkdown,
+  prDraftSchema,
+  validatePrDraft,
+  type PrDraft,
+  type PrDraftRenderingContext,
+} from "./result.ts";
 
 export function prDraftArtifactDefinition(input: {
   renderingContext: PrDraftRenderingContext;
@@ -16,9 +18,12 @@ export function prDraftArtifactDefinition(input: {
     noun: "PR draft",
     parameters: prDraftSchema,
     validate: validatePrDraft,
-    formatMarkdown: (draft) => sanitizePublicMarkdown(formatPrDraftMarkdown(draft, input.renderingContext), {
-      localRoots: input.localRoots,
-    }),
-    createError: (message) => new PrDraftSubmissionError(message),
+    formatMarkdown: (draft) =>
+      sanitizePublicMarkdown(
+        formatPrDraftMarkdown(draft, input.renderingContext),
+        {
+          localRoots: input.localRoots,
+        },
+      ),
   };
 }

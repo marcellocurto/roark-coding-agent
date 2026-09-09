@@ -7,19 +7,19 @@ lastUpdated: 2026-08-19T07:58:25Z
 
 ## Choose a command
 
-| Goal | Command |
-| --- | --- |
-| Scaffold repository config | `roark init` |
-| Run one issue locally | `roark do 123 --repo owner/repo` |
-| Preview eligible autorun issues | `roark auto --repo owner/repo --dry-run` |
-| Claim and run eligible issues | `roark auto --repo owner/repo --limit 1` |
-| Target one issue through autorun | `roark auto 123 --repo owner/repo` |
-| Continue a failed attempt | `roark continue 123 --repo owner/repo` |
-| Review an existing PR without changing it | `roark review-pr 456 --repo owner/repo` |
-| Address existing PR feedback | `roark revise-pr 456 --repo owner/repo` |
-| Inspect run status | `roark status 123 --repo owner/repo` |
-| Manage workspaces | `roark workspace list` |
-| Create follow-up issues from findings | `roark create-issues 123 --repo owner/repo --yes` |
+| Goal                                      | Command                                           |
+| ----------------------------------------- | ------------------------------------------------- |
+| Scaffold repository config                | `roark init`                                      |
+| Run one issue locally                     | `roark do 123 --repo owner/repo`                  |
+| Preview eligible autorun issues           | `roark auto --repo owner/repo --dry-run`          |
+| Claim and run eligible issues             | `roark auto --repo owner/repo --limit 1`          |
+| Target one issue through autorun          | `roark auto 123 --repo owner/repo`                |
+| Continue a failed attempt                 | `roark continue 123 --repo owner/repo`            |
+| Review an existing PR without changing it | `roark review-pr 456 --repo owner/repo`           |
+| Address existing PR feedback              | `roark revise-pr 456 --repo owner/repo`           |
+| Inspect run status                        | `roark status 123 --repo owner/repo`              |
+| Manage workspaces                         | `roark workspace list`                            |
+| Create follow-up issues from findings     | `roark create-issues 123 --repo owner/repo --yes` |
 
 ## Run one issue locally
 
@@ -158,18 +158,18 @@ In an interactive terminal, Roark updates the window title with the current phas
 
 ## Common options
 
-| Option | Use |
-| --- | --- |
-| `--repo owner/repo` | Select GitHub repository |
-| `--cwd path` | Use a specific control checkout |
-| `--out path` | Use a custom runs directory |
-| `--verify "cmd"` | Override verification command |
-| `--model provider/id` | Override Pi model |
-| `--thinking level` | Override thinking level |
-| `--attempt n` | Select an attempt |
-| `--force` | Regenerate phase artifacts |
-| `--yes` | Approve supported prompts or mutations |
-| `--verbose` | Show completed agent responses and detailed tool statistics |
-| `--no-title` | Disable interactive terminal-title updates |
+| Option                | Use                                                         |
+| --------------------- | ----------------------------------------------------------- |
+| `--repo owner/repo`   | Select GitHub repository                                    |
+| `--cwd path`          | Use a specific control checkout                             |
+| `--out path`          | Use a custom runs directory                                 |
+| `--verify "cmd"`      | Override verification command                               |
+| `--model provider/id` | Override Pi model                                           |
+| `--thinking level`    | Override thinking level                                     |
+| `--attempt n`         | Select an attempt                                           |
+| `--force`             | Regenerate phase artifacts                                  |
+| `--yes`               | Approve supported prompts or mutations                      |
+| `--verbose`           | Show completed agent responses and detailed tool statistics |
+| `--no-title`          | Disable interactive terminal-title updates                  |
 
 See [CLI reference](cli-reference.md) for the full command and option reference.

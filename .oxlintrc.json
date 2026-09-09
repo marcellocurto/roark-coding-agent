@@ -1,0 +1,269 @@
+{
+  "$schema": "./node_modules/@effect/tsgo/oxlint-schema.json",
+  "plugins": ["typescript", "effecttsgo"],
+  "categories": {
+    "correctness": "off"
+  },
+  "options": {
+    "typeAware": true
+  },
+  "env": {
+    "builtin": true
+  },
+  "ignorePatterns": ["node_modules", ".roark", "coverage", "dist", "repos/**"],
+  "rules": {
+    "no-array-constructor": "error",
+    "no-unused-expressions": "error",
+    "no-unused-vars": "error",
+    "no-useless-constructor": "error",
+    "no-empty-function": "error",
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["**/*-promise.ts", "**/github/promise.ts"],
+            "message": "Call native operations directly and place runtime conversion at an imperative boundary; do not add forwarding adapter modules."
+          }
+        ]
+      }
+    ],
+    "typescript/await-thenable": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "minimumDescriptionLength": 10
+      }
+    ],
+    "typescript/no-array-delete": "error",
+    "typescript/no-base-to-string": "error",
+    "typescript/no-duplicate-enum-values": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-floating-promises": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-implied-eval": "error",
+    "typescript/no-misused-new": "error",
+    "typescript/no-misused-promises": [
+      "error",
+      {
+        "checksVoidReturn": {
+          "arguments": false,
+          "attributes": false
+        }
+      }
+    ],
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "typescript/no-redundant-type-constituents": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-this-alias": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-declaration-merging": "error",
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "typescript/no-unsafe-unary-minus": "error",
+    "typescript/no-wrapper-object-types": "error",
+    "typescript/only-throw-error": "error",
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-namespace-keyword": "error",
+    "typescript/prefer-promise-reject-errors": "error",
+    "typescript/require-await": "error",
+    "typescript/restrict-plus-operands": [
+      "error",
+      {
+        "allowAny": false,
+        "allowBoolean": false,
+        "allowNullish": false,
+        "allowNumberAndString": false,
+        "allowRegExp": false
+      }
+    ],
+    "typescript/restrict-template-expressions": [
+      "error",
+      {
+        "allowBoolean": false,
+        "allowNever": false,
+        "allowNullish": false,
+        "allowNumber": true,
+        "allowRegExp": false
+      }
+    ],
+    "typescript/triple-slash-reference": "error",
+    "typescript/unbound-method": "error",
+    "typescript/no-confusing-void-expression": "error",
+    "typescript/no-deprecated": "warn",
+    "typescript/no-dynamic-delete": "error",
+    "typescript/no-extraneous-class": "error",
+    "typescript/no-invalid-void-type": "error",
+    "typescript/no-meaningless-void-operator": "error",
+    "typescript/no-misused-spread": "error",
+    "typescript/no-mixed-enums": "error",
+    "typescript/no-non-null-asserted-nullish-coalescing": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/no-unnecessary-template-expression": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    "typescript/no-unnecessary-type-conversion": "error",
+    "typescript/no-unnecessary-type-parameters": "error",
+    "typescript/no-useless-default-assignment": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "typescript/prefer-reduce-type-parameter": "error",
+    "typescript/prefer-return-this-type": "error",
+    "typescript/related-getter-setter-pairs": "error",
+    "typescript/return-await": ["error", "error-handling-correctness-only"],
+    "typescript/unified-signatures": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "typescript/adjacent-overload-signatures": "error",
+    "typescript/array-type": "error",
+    "typescript/ban-tslint-comment": "error",
+    "typescript/class-literal-property-style": "error",
+    "typescript/consistent-generic-constructors": "error",
+    "typescript/consistent-indexed-object-style": "error",
+    "typescript/consistent-type-assertions": "error",
+    "typescript/consistent-type-definitions": "error",
+    "typescript/dot-notation": "error",
+    "typescript/no-confusing-non-null-assertion": "error",
+    "typescript/no-inferrable-types": "error",
+    "typescript/non-nullable-type-assertion-style": "error",
+    "typescript/prefer-find": "error",
+    "typescript/prefer-for-of": "error",
+    "typescript/prefer-function-type": "error",
+    "typescript/prefer-includes": "error",
+    "typescript/prefer-nullish-coalescing": [
+      "error",
+      {
+        "ignoreConditionalTests": false,
+        "ignoreMixedLogicalExpressions": false
+      }
+    ],
+    "typescript/prefer-optional-chain": "error",
+    "typescript/prefer-regexp-exec": "error",
+    "typescript/prefer-string-starts-ends-with": "error",
+    "typescript/consistent-type-imports": [
+      "error",
+      {
+        "fixStyle": "inline-type-imports",
+        "prefer": "type-imports"
+      }
+    ],
+    "typescript/consistent-type-exports": "error",
+    "typescript/strict-boolean-expressions": [
+      "error",
+      {
+        "allowNullableBoolean": false,
+        "allowNullableNumber": false,
+        "allowNullableObject": true,
+        "allowNullableString": true,
+        "allowNumber": false,
+        "allowString": true
+      }
+    ],
+    "typescript/switch-exhaustiveness-check": "error",
+    "effecttsgo/floating-effect": "error",
+    "effecttsgo/missing-star-in-yield-effect-gen": "error",
+    "effecttsgo/return-effect-in-gen": "error",
+    "effecttsgo/lazy-promise-in-effect-sync": "error",
+    "effecttsgo/missing-effect-context": "error",
+    "effecttsgo/missing-layer-context": "error",
+    "effecttsgo/unsafe-effect-type-assertion": "error",
+    "typescript/no-unsafe-type-assertion": "error"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
+      "rules": {
+        "constructor-super": "off",
+        "getter-return": "off",
+        "no-class-assign": "off",
+        "no-const-assign": "off",
+        "no-dupe-class-members": "off",
+        "no-dupe-keys": "off",
+        "no-func-assign": "off",
+        "no-import-assign": "off",
+        "no-new-native-nonconstructor": "off",
+        "no-obj-calls": "off",
+        "no-redeclare": "off",
+        "no-setter-return": "off",
+        "no-this-before-super": "off",
+        "no-undef": "off",
+        "no-unreachable": "off",
+        "no-unsafe-negation": "off",
+        "no-var": "error",
+        "no-with": "off",
+        "prefer-const": "error",
+        "prefer-rest-params": "error",
+        "prefer-spread": "error"
+      }
+    },
+    {
+      "files": ["roark.ts", "lib/**/*.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/*-promise.ts",
+                  "**/github/promise.ts",
+                  "**/testing/**"
+                ],
+                "message": "Production code must not depend on forwarding adapters or test fixtures."
+              }
+            ]
+          }
+        ]
+      },
+      "excludeFiles": ["lib/**/*.test.ts", "lib/testing/**"]
+    },
+    {
+      "files": [
+        "lib/workflow/{phases,tasks,git,readiness,progression,issue-curation}.ts",
+        "lib/prompts/workflow-prompts.ts",
+        "lib/presentation/phase.ts",
+        "lib/cli/{hydrate,init,interactive,local-mode}.ts",
+        "lib/structured-output/{runner,contract,fields,additional-sections}.ts",
+        "lib/{triage,implementation-plan,change-report}/result.ts",
+        "lib/review/{result,artifact}.ts",
+        "lib/{pr-publishing,issue-publishing}/{result,artifact}.ts",
+        "lib/pr-revision/{plan,execution}.ts",
+        "lib/observability/{observer,events,status,summary}.ts",
+        "lib/issue-curation/{create-issues,labels,persistence}.ts",
+        "lib/issue-publishing/{github,service}.ts",
+        "lib/autorun/{discovery,continue,continue-plan,copy-path,observability,attempt-lifecycle,completion,publish-flow,publish,branch,labels,failure,triage-stop,ledger-comments,lock,verification,workspace,workspace-service}.ts",
+        "lib/pr-review/{workflow,artifacts}.ts",
+        "lib/pr-revision/{workflow,artifacts,branch,comments}.ts",
+        "lib/github/{labels,pr-publishing,service,errors,issue,pr,comments}.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "**/*-promise.ts",
+                  "**/promise-boundary.ts",
+                  "**/runtime/application.ts",
+                  "**/github/promise.ts",
+                  "**/testing/**"
+                ],
+                "message": "Workflow internals compose native Effects; Promise adapters belong at entry points."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

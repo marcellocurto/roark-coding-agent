@@ -1,12 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { formatTerminalTitle, normalizeTerminalText, sanitizeTerminalLine, setTerminalTitle, type TerminalStream } from "./terminal.ts";
+import {
+  formatTerminalTitle,
+  normalizeTerminalText,
+  sanitizeTerminalLine,
+  setTerminalTitle,
+  type TerminalStream,
+} from "./terminal.ts";
 
 function stream(isTTY: boolean, columns = 80) {
   let output = "";
   const value: TerminalStream = {
     isTTY,
     columns,
-    write(chunk) { output += chunk; },
+    write(chunk) {
+      output += chunk;
+    },
   };
   return { stream: value, output: () => output };
 }
@@ -14,30 +22,54 @@ function stream(isTTY: boolean, columns = 80) {
 describe("terminal title safety", () => {
   test("suppresses control sequences for redirected output and opt-out", () => {
     const redirected = stream(false);
-    expect(setTerminalTitle(redirected.stream, { target: "#140", phase: "Triage" })).toBe(false);
+    expect(
+      setTerminalTitle(redirected.stream, { target: "#140", phase: "Triage" }),
+    ).toBe(false);
     expect(redirected.output()).toBe("");
 
     const optedOut = stream(true);
-    expect(setTerminalTitle(optedOut.stream, { target: "#140", phase: "Triage" }, { enabled: false })).toBe(false);
+    expect(
+      setTerminalTitle(
+        optedOut.stream,
+        { target: "#140", phase: "Triage" },
+        { enabled: false },
+      ),
+    ).toBe(false);
     expect(optedOut.output()).toBe("");
 
     const ciTty = stream(true);
-    expect(setTerminalTitle(ciTty.stream, { target: "#140", phase: "Triage" }, { env: { CI: "true", TERM: "xterm" } })).toBe(false);
+    expect(
+      setTerminalTitle(
+        ciTty.stream,
+        { target: "#140", phase: "Triage" },
+        { env: { CI: "true", TERM: "xterm" } },
+      ),
+    ).toBe(false);
     expect(ciTty.output()).toBe("");
 
     const dumbTty = stream(true);
-    expect(setTerminalTitle(dumbTty.stream, { target: "#140", phase: "Triage" }, { env: { TERM: "dumb" } })).toBe(false);
+    expect(
+      setTerminalTitle(
+        dumbTty.stream,
+        { target: "#140", phase: "Triage" },
+        { env: { TERM: "dumb" } },
+      ),
+    ).toBe(false);
     expect(dumbTty.output()).toBe("");
   });
 
   test("removes hostile controls and bounds target-first titles", () => {
     const output = stream(true);
-    setTerminalTitle(output.stream, {
-      target: "#140\u001b]0;owned\u0007\nnext",
-      phase: `Implementation ${"x".repeat(100)}`,
-      pass: 2,
-      repository: "owner/repository-that-is-low-priority",
-    }, { env: { TERM: "xterm" } });
+    setTerminalTitle(
+      output.stream,
+      {
+        target: "#140\u001b]0;owned\u0007\nnext",
+        phase: `Implementation ${"x".repeat(100)}`,
+        pass: 2,
+        repository: "owner/repository-that-is-low-priority",
+      },
+      { env: { TERM: "xterm" } },
+    );
 
     const emitted = output.output();
     expect(emitted.startsWith("\u001b]0;#140")).toBe(true);
@@ -64,9 +96,16 @@ describe("terminal title safety", () => {
   });
 
   test("keeps target, phase, and pass ahead of repository", () => {
-    const title = formatTerminalTitle({ target: "PR #42", phase: "Revision review", pass: 3, repository: "owner/repo" });
+    const title = formatTerminalTitle({
+      target: "PR #42",
+      phase: "Revision review",
+      pass: 3,
+      repository: "owner/repo",
+    });
     expect(title).toBe("PR #42 · Revision review · p3 · repo");
     expect(normalizeTerminalText("a\rb\nc\u001bd")).toBe("a b c d");
-    expect(sanitizeTerminalLine("two  spaces\nand indentation")).toBe("two  spaces and indentation");
+    expect(sanitizeTerminalLine("two  spaces\nand indentation")).toBe(
+      "two  spaces and indentation",
+    );
   });
 });

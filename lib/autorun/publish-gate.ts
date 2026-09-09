@@ -8,7 +8,12 @@ export interface PublishGateInput {
 
 export type PublishGateDecision =
   | { publish: true }
-  | { publish: false; phase: "readiness" | "verification"; reason: string; artifactPath: string };
+  | {
+      publish: false;
+      phase: "readiness" | "verification";
+      reason: string;
+      artifactPath: string;
+    };
 
 export function decidePublish(input: PublishGateInput): PublishGateDecision {
   if (input.readinessStatus !== "ready-for-pr") {

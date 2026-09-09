@@ -1,20 +1,21 @@
+import { Cause, Deferred, Effect, Exit, Schema, Semaphore } from "effect";
+import { AgentExecution } from "../runtime/services.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import type { TSchema } from "typebox";
-import type { AgentRunRequest, AgentRunner } from "../workflow/agent-runner.ts";
+import { ArtifactContractError } from "./contract.ts";
+import type { AgentRunRequest } from "../workflow/agent-runner.ts";
 
 export interface StructuredArtifactDefinition<T> {
   toolName: string;
   label: string;
   noun: string;
-  parameters: TSchema;
-  validate: (value: unknown) => T;
+  parameters: Schema.Constraint;
+  validate: (value: unknown) => Effect.Effect<T, ArtifactContractError>;
   formatMarkdown: (value: T) => string;
-  createError: (message: string) => Error;
 }
 
-export interface StructuredArtifactWriters {
-  writeJson: (content: string) => Promise<void>;
-  writeMarkdown: (content: string) => Promise<void>;
+export interface StructuredArtifactWriters<E = never, R = never> {
+  writeJson: (content: string) => Effect.Effect<void, E, R>;
+  writeMarkdown: (content: string) => Effect.Effect<void, E, R>;
 }
 
 export interface StructuredArtifactResult<T> {
@@ -22,52 +23,83 @@ export interface StructuredArtifactResult<T> {
   markdown: string;
 }
 
-export async function runStructuredArtifact<T>(
-  request: AgentRunRequest,
-  runner: AgentRunner,
-  definition: StructuredArtifactDefinition<T>,
-  writers: StructuredArtifactWriters,
-): Promise<StructuredArtifactResult<T>> {
-  let submitted: T | undefined;
-  const submit = defineTool({
-    name: definition.toolName,
-    label: `Submit ${definition.label}`,
-    description: `Submit the final structured ${definition.noun}. This is the only valid way to complete this phase.`,
-    promptSnippet: `Submit the final schema-validated ${definition.noun}`,
-    promptGuidelines: [
-      `Use ${definition.toolName} as the final action for this phase.`,
-      `Do not return the ${definition.noun} as Markdown or prose after calling ${definition.toolName}.`,
-    ],
-    parameters: definition.parameters,
-    execute(_toolCallId, params) {
-      if (submitted !== undefined) {
-        throw definition.createError(`The ${definition.noun} has already been submitted.`);
-      }
-      try {
-        submitted = definition.validate(params);
-      } catch (error) {
-        throw definition.createError(error instanceof Error ? error.message : String(error));
-      }
-      return Promise.resolve({
-        content: [{ type: "text" as const, text: `Structured ${definition.noun} submitted.` }],
-        details: submitted,
-        terminate: true,
-      });
-    },
-  });
+export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
+  function* <T, E, R>(
+    request: AgentRunRequest,
+    definition: StructuredArtifactDefinition<T>,
+    writers: StructuredArtifactWriters<E, R>,
+  ) {
+    const agent = yield* AgentExecution;
+    let submitted: T | undefined;
+    const defect = yield* Deferred.make<never, ArtifactContractError>();
+    const submission = yield* Semaphore.make(1);
+    const document = Schema.toJsonSchemaDocument(definition.parameters);
+    const submit = defineTool({
+      name: definition.toolName,
+      label: `Submit ${definition.label}`,
+      description: `Submit the final structured ${definition.noun}. This is the only valid way to complete this phase.`,
+      promptSnippet: `Submit the final schema-validated ${definition.noun}`,
+      promptGuidelines: [
+        `Use ${definition.toolName} as the final action for this phase.`,
+        `Do not return the ${definition.noun} as Markdown or prose after calling ${definition.toolName}.`,
+      ],
+      parameters: { ...document.schema, $defs: document.definitions },
+      async execute(_toolCallId, params, signal) {
+        const exit = await Effect.runPromiseExit(
+          submission.withPermit(
+            Effect.gen(function* () {
+              if (submitted !== undefined) {
+                return yield* Effect.fail(
+                  new ArtifactContractError({
+                    artifact: definition.noun,
+                    message: `The ${definition.noun} has already been submitted.`,
+                  }),
+                );
+              }
+              const value = yield* definition.validate(params);
+              submitted = value;
+              return value;
+            }),
+          ),
+          { signal },
+        );
+        if (Exit.isFailure(exit)) {
+          if (Cause.hasDies(exit.cause) || Cause.hasInterrupts(exit.cause)) {
+            Deferred.doneUnsafe(defect, Exit.failCause(exit.cause));
+          }
+          throw Cause.squash(exit.cause);
+        }
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Structured ${definition.noun} submitted.`,
+            },
+          ],
+          details: exit.value,
+          terminate: true,
+        };
+      },
+    });
 
-  await runner({
-    ...request,
-    customTools: [...(request.customTools ?? []), submit],
-  });
-  if (submitted === undefined) {
-    throw definition.createError(
-      `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
-    );
-  }
-  const markdown = definition.formatMarkdown(submitted);
-  const json = JSON.stringify(submitted, null, 2);
-  await writers.writeMarkdown(markdown);
-  await writers.writeJson(json);
-  return { value: submitted, markdown };
-}
+    yield* agent
+      .run({
+        ...request,
+        customTools: [...(request.customTools ?? []), submit],
+      })
+      .pipe(Effect.raceFirst(Deferred.await(defect)));
+    if (submitted === undefined) {
+      return yield* Effect.fail(
+        new ArtifactContractError({
+          artifact: definition.noun,
+          message: `Agent completed without calling ${definition.toolName}; no ${definition.noun} was accepted.`,
+        }),
+      );
+    }
+    const markdown = definition.formatMarkdown(submitted);
+    const json = JSON.stringify(submitted, null, 2);
+    yield* writers.writeMarkdown(markdown);
+    yield* writers.writeJson(json);
+    return { value: submitted, markdown };
+  },
+);

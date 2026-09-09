@@ -1,26 +1,38 @@
+import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
+import {
+  writeArtifact,
+  writeJsonArtifact,
+  refinementLogRef,
+  reviewARef,
+  reviewBRef,
+  type WorkflowContext,
+} from "../workflow/artifacts.ts";
+import { rejects as assertRejects } from "node:assert/strict";
+import { provideTestAgent } from "../testing/agents.ts";
+import { Effect } from "effect";
+import { runApplicationPromise } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { ContinueCliOptions } from "../cli/args.ts";
-import { refinementLogRef, reviewARef, reviewBRef, writeArtifact, writeJsonArtifact, type WorkflowContext } from "../workflow/artifacts.ts";
+import { type ContinueCliOptions } from "../cli/args.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import { formatAttemptMetadata, readAttemptMetadata, writeAttemptMetadata } from "./attempts.ts";
 import { autorunWorktreePath } from "./branch.ts";
-import { runAutoContinue, createContinueWorkflowOptions } from "./continue.ts";
-import { noopAsync } from "../utils/async.ts";
+import { createContinueWorkflowOptions, runAutoContinue } from "./continue.ts";
 import { reviewFinding, reviewResult } from "../testing/reviews.ts";
-import { implementationPlanResult, triageResult } from "../testing/workflow-results.ts";
+import {
+  implementationPlanResult,
+  triageResult,
+} from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
-
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
-
 afterEach(async () => {
   process.env["PATH"] = originalPath;
-  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  );
 });
-
 const continueOptions = {
   command: "continue",
   issue: "123",
@@ -40,34 +52,41 @@ const continueOptions = {
   inProgressLabel: "busy",
   remote: "origin",
 } satisfies ContinueCliOptions;
-
 describe("runAutoContinue", () => {
   test("already-published attempts return before label preflight or branch work", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-published-"));
     tempDirs.push(cwd);
     await installFailingGh(cwd);
-    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
-      attempt: 2,
-      issueNumber: 24,
-      branch: "roark/issue-24",
-      baseBranch: "main",
-      worktreePath: path.join(cwd, ".roark/worktrees/issue-24"),
-      runArtifactPath: ".roark/runs/issue/24/attempts/2",
-      startedAt: "2026-05-07T00:00:00.000Z",
-      endedAt: "2026-05-07T00:10:00.000Z",
-      outcome: "published",
-    }));
-
-    await runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 });
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, ".roark/worktrees/issue-24"),
+            runArtifactPath: ".roark/runs/issue/24/attempts/2",
+            startedAt: "2026-05-07T00:00:00.000Z",
+            endedAt: "2026-05-07T00:10:00.000Z",
+            outcome: "published",
+          }),
+        ),
+      ),
+    );
+    await runApplicationPromise(
+      runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }),
+    );
   });
-
   test("reuses workspace metadata and runs beforeRun in the attempt lifecycle", async () => {
-        await noopAsync();
+    await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-workspace-"));
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-managed-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "roark-continue-managed-"),
+    );
     tempDirs.push(cwd, workspacePath);
     await installFakeGh(cwd);
-
     const workflowContext: WorkflowContext = {
       controlCwd: cwd,
       agentCwd: workspacePath,
@@ -83,72 +102,134 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
-    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
-      attempt: 2,
-      issueNumber: 24,
-      branch: "roark/issue-24",
-      baseBranch: "main",
-      worktreePath: path.join(cwd, "legacy-worktree"),
-      workspace: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
-      runArtifactPath: workflowContext.runDirRelative,
-      startedAt: "2026-05-07T00:00:00.000Z",
-    }));
-
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
+      ),
+    );
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, "legacy-worktree"),
+            workspace: {
+              path: workspacePath,
+              strategy: "clone",
+              cloneRemote: "upstream",
+              createdNow: false,
+            },
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
+    );
     const calls: string[] = [];
-    expect(runAutoContinue({
-      ...continueOptions,
-      issue: "24",
-      cwd,
-      attempt: 2,
-      hooks: { timeoutMs: 1000, beforeRun: "printf before > before-run.txt" },
-    }, {
-      ensureAutorunLabelContract: async () => (await noopAsync(), ({ existing: [], missing: [], created: [] })),
-      prepareCloneWorkspace: async (input) => {
-        await noopAsync();
-        calls.push(`prepare:${input.workspacePath ?? ""}`);
-        expect(input.mode).toBe("continue");
-        expect(input.workspacePath).toBe(workspacePath);
-        return {
-          path: workspacePath,
-          metadata: { path: workspacePath, strategy: "clone", cloneRemote: "upstream", createdNow: false },
-        };
-      },
-      fetchGitHubIssue: async () => (await noopAsync(), {
-        issue: { number: 24, title: "Issue 24", labels: [{ name: "failed" }, { name: "ready-for-agent" }] },
-        issueNumber: "24",
-        repo: "owner/repo",
-        fetchedAt: "now",
-        relationships: { fetchedAt: "now", nativeDependenciesAvailable: true, blockedBy: [], blocking: [], bodyDeclaredBlockers: [] },
-      }),
-      transitionGitHubIssueLabels: async (input) => {
-        await noopAsync();
-        calls.push("transition");
-        expect(input.nextLabel).toBe("busy");
-        expect(input.removeLabels).toEqual(["failed", "ready-for-agent"]);
-      },
-      runner: async () => {
-        await noopAsync();
-        calls.push("runner");
-        throw new Error("triage failed");
-      },
-    })).rejects.toThrow("Triage failed: triage failed");
-
+    await assertRejects(
+      runApplicationPromise(
+        runAutoContinue(
+          {
+            ...continueOptions,
+            issue: "24",
+            cwd,
+            attempt: 2,
+            hooks: {
+              timeoutMs: 1000,
+              beforeRun: "printf before > before-run.txt",
+            },
+          },
+          {
+            ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void, { existing: [], missing: [], created: [] }
+              );
+            }),
+            prepareCloneWorkspace: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              calls.push(`prepare:${input.workspacePath ?? ""}`);
+              expect(input.mode).toBe("continue");
+              expect(input.workspacePath).toBe(workspacePath);
+              return {
+                path: workspacePath,
+                metadata: {
+                  path: workspacePath,
+                  strategy: "clone" as const,
+                  cloneRemote: "upstream",
+                  createdNow: false,
+                },
+              };
+            }),
+            fetchGitHubIssue: Effect.fnUntraced(function* () {
+              return (
+                yield* Effect.void,
+                {
+                  issue: {
+                    number: 24,
+                    title: "Issue 24",
+                    labels: [{ name: "failed" }, { name: "ready-for-agent" }],
+                  },
+                  issueNumber: "24",
+                  repo: "owner/repo",
+                  fetchedAt: "now",
+                  relationships: {
+                    fetchedAt: "now",
+                    nativeDependenciesAvailable: true,
+                    blockedBy: [],
+                    blocking: [],
+                    bodyDeclaredBlockers: [],
+                  },
+                }
+              );
+            }),
+            transitionGitHubIssueLabels: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              calls.push("transition");
+              expect(input.nextLabel).toBe("busy");
+              expect(input.removeLabels).toEqual(["failed", "ready-for-agent"]);
+              return undefined;
+            }),
+          },
+        ).pipe(
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              calls.push("runner");
+              return yield* Effect.fail(new Error("triage failed"));
+            }),
+          ),
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("triage failed"),
+    );
     expect(calls).toEqual([`prepare:${workspacePath}`, "transition", "runner"]);
-    expect(await Bun.file(path.join(workspacePath, "before-run.txt")).text()).toBe("before");
-    const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
+    expect(
+      await Bun.file(path.join(workspacePath, "before-run.txt")).text(),
+    ).toBe("before");
+    const metadata = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+      ),
+    );
     expect(metadata.worktreePath).toBe(workspacePath);
     expect(metadata.workspace?.path).toBe(workspacePath);
     expect(metadata.outcome).toBe("errored");
   });
-
   test("records Review A/B issue comments when a later workflow phase fails", async () => {
-        await noopAsync();
-    const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-error-ledger-"));
+    await Promise.resolve();
+    const cwd = await mkdtemp(
+      path.join(tmpdir(), "roark-continue-error-ledger-"),
+    );
     tempDirs.push(cwd);
     await initGitRepo(cwd, "roark/issue-24");
     await installFakeGh(cwd);
-
     const workflowContext: WorkflowContext = {
       controlCwd: cwd,
       agentCwd: cwd,
@@ -164,47 +245,131 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
-    await writeJsonArtifact(workflowContext, "metadata", {
-      issue: { number: 24, title: "Ledger comments", url: "https://github.com/owner/repo/issues/24", labels: [] },
-    });
-    await writeJsonArtifact(workflowContext, "triage", triageResult());
-    await writeJsonArtifact(workflowContext, "implementationPlanDraft", implementationPlanResult());
-    await writeJsonArtifact(workflowContext, "implementationPlan", implementationPlanResult());
-    await writeArtifact(workflowContext, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-    await writeArtifact(workflowContext, "implementationLog", JSON.stringify(changeReport()));
-    await writeArtifact(workflowContext, refinementLogRef(0), JSON.stringify(changeReport({ summary: "Refined." })));
-    await writeArtifact(workflowContext, reviewARef(0), JSON.stringify(reviewResult([
-      reviewFinding("must-fix-current", "Fix failed after reviews"),
-    ])));
-    await writeArtifact(workflowContext, reviewBRef(0), JSON.stringify(reviewResult()));
-    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
-      attempt: 2,
-      issueNumber: 24,
-      branch: "roark/issue-24",
-      baseBranch: "main",
-      worktreePath: path.join(cwd, "deleted-worktree"),
-      runArtifactPath: workflowContext.runDirRelative,
-      startedAt: "2026-05-07T00:00:00.000Z",
-    }));
-
-    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
-      runner: async () => {
-        await noopAsync();
-        throw new Error("fix failed after reviews");
-      },
-    })).rejects.toThrow("Fix pass 1 failed");
-
-    const metadata = await readAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), 2);
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "metadata", {
+        issue: {
+          number: 24,
+          title: "Ledger comments",
+          url: "https://github.com/owner/repo/issues/24",
+          labels: [],
+        },
+      }),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(workflowContext, "triage", triageResult()),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        workflowContext,
+        "implementationPlanDraft",
+        implementationPlanResult(),
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        workflowContext,
+        "implementationPlan",
+        implementationPlanResult(),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "preImplementationBaseline",
+        JSON.stringify({
+          head: "abc",
+          capturedAt: "now",
+          excludes: [".roark"],
+        }),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "implementationLog",
+        JSON.stringify(changeReport()),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        refinementLogRef(0),
+        JSON.stringify(changeReport({ summary: "Refined." })),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewARef(0),
+        JSON.stringify(
+          reviewResult([
+            reviewFinding("must-fix-current", "Fix failed after reviews"),
+          ]),
+        ),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        reviewBRef(0),
+        JSON.stringify(reviewResult()),
+      ),
+    );
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: path.join(cwd, "deleted-worktree"),
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
+    );
+    await assertRejects(
+      runApplicationPromise(
+        runAutoContinue(
+          { ...continueOptions, issue: "24", cwd, attempt: 2 },
+          {},
+        ).pipe(
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(new Error("fix failed after reviews"));
+            }),
+          ),
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("Fix pass 1 failed"),
+    );
+    const metadata = await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+      ),
+    );
     expect(metadata.outcome).toBe("errored");
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
     expect(metadata.githubComments?.issue?.["review-a-0"]?.id).toBe(4242);
     expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
   });
-
   test("serializes concurrent continues for the same issue across attempts", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-"));
-    const workspacePath = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-workspace-"));
+    const workspacePath = await mkdtemp(
+      path.join(tmpdir(), "roark-continue-lock-workspace-"),
+    );
     tempDirs.push(cwd, workspacePath);
     await installFakeGh(cwd);
     const workflowContext: WorkflowContext = {
@@ -222,57 +387,112 @@ describe("runAutoContinue", () => {
       maxFixPasses: 1,
       thinkingConfig: getWorkflowThinkingConfig(),
     };
-    await writeArtifact(workflowContext, "issue", "# Issue\n\n<github_issue_relationships />\n");
-    await writeAttemptMetadata(path.join(cwd, ".roark/runs/issue/24"), formatAttemptMetadata({
-      attempt: 2,
-      issueNumber: 24,
-      branch: "roark/issue-24",
-      baseBranch: "main",
-      worktreePath: workspacePath,
-      workspace: { path: workspacePath, strategy: "clone", cloneRemote: "origin", createdNow: false },
-      runArtifactPath: workflowContext.runDirRelative,
-      startedAt: "2026-05-07T00:00:00.000Z",
-    }));
-
+    await runApplicationPromise(
+      writeArtifact(
+        workflowContext,
+        "issue",
+        "# Issue\n\n<github_issue_relationships />\n",
+      ),
+    );
+    await runApplicationPromise(
+      Effect.flatMap(AttemptStore, (store) =>
+        store.write(
+          path.join(cwd, ".roark/runs/issue/24"),
+          formatAttemptMetadata({
+            attempt: 2,
+            issueNumber: 24,
+            branch: "roark/issue-24",
+            baseBranch: "main",
+            worktreePath: workspacePath,
+            workspace: {
+              path: workspacePath,
+              strategy: "clone",
+              cloneRemote: "origin",
+              createdNow: false,
+            },
+            runArtifactPath: workflowContext.runDirRelative,
+            startedAt: "2026-05-07T00:00:00.000Z",
+          }),
+        ),
+      ),
+    );
     let releaseFirst!: () => void;
     let enteredFirst!: () => void;
-    const firstEntered = new Promise<void>((resolve) => { enteredFirst = resolve; });
-    const release = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const firstEntered = new Promise<void>((resolve) => {
+      enteredFirst = resolve;
+    });
+    const release = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
     const injected = {
-      ensureAutorunLabelContract: async () => (await noopAsync(), ({ existing: [], missing: [], created: [] })),
-      prepareCloneWorkspace: async () => {
-        await noopAsync();
+      ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+        return (yield* Effect.void, { existing: [], missing: [], created: [] });
+      }),
+      prepareCloneWorkspace: Effect.fnUntraced(function* () {
+        yield* Effect.void;
         return {
           path: workspacePath,
-          metadata: { path: workspacePath, strategy: "clone" as const, cloneRemote: "origin", createdNow: false },
+          metadata: {
+            path: workspacePath,
+            strategy: "clone" as const,
+            cloneRemote: "origin",
+            createdNow: false,
+          },
         };
-      },
+      }),
     };
-
-    const first = runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 }, {
-      ...injected,
-      runner: async () => {
-        enteredFirst();
-        await release;
-        throw new Error("stop first continue");
-      },
-    });
-
+    const first = runApplicationPromise(
+      runAutoContinue(
+        { ...continueOptions, issue: "24", cwd, attempt: 2 },
+        {
+          ...injected,
+        },
+      ).pipe(
+        provideTestAgent(
+          Effect.fnUntraced(function* () {
+            enteredFirst();
+            yield* Effect.tryPromise({
+              try: () => release,
+              catch: (error) => error,
+            });
+            return yield* Effect.fail(new Error("stop first continue"));
+          }),
+        ),
+      ),
+    );
     await firstEntered;
-
-    expect(runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 3 }, {
-      ...injected,
-      runner: async () => {
-        await noopAsync();
-        throw new Error("second continue should not run lifecycle");
-      },
-    })).rejects.toThrow("roark continue issue #24 attempt 3 is already running");
-
+    await assertRejects(
+      runApplicationPromise(
+        runAutoContinue(
+          { ...continueOptions, issue: "24", cwd, attempt: 3 },
+          {
+            ...injected,
+          },
+        ).pipe(
+          provideTestAgent(
+            Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              return yield* Effect.fail(
+                new Error("second continue should not run lifecycle"),
+              );
+            }),
+          ),
+        ),
+      ),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.message.includes(
+          "roark continue issue #24 attempt 3 is already running",
+        ),
+    );
     releaseFirst();
-    expect(first).rejects.toThrow("stop first continue");
+    await assertRejects(
+      first,
+      (error: unknown) =>
+        error instanceof Error && error.message.includes("stop first continue"),
+    );
   });
 });
-
 describe("createContinueWorkflowOptions", () => {
   test("targets the existing attempt with issue workflow options", () => {
     const workflowOptions = createContinueWorkflowOptions(continueOptions, 2);
@@ -291,7 +511,6 @@ describe("createContinueWorkflowOptions", () => {
     });
   });
 });
-
 async function initGitRepo(cwd: string, branchName: string): Promise<void> {
   await run(cwd, ["git", "init", "-b", "main"]);
   await run(cwd, ["git", "config", "user.email", "roark@example.com"]);
@@ -301,22 +520,26 @@ async function initGitRepo(cwd: string, branchName: string): Promise<void> {
   await run(cwd, ["git", "commit", "-m", "initial"]);
   await run(cwd, ["git", "branch", branchName]);
 }
-
 async function installFailingGh(cwd: string): Promise<void> {
   const binDir = path.join(cwd, "bin");
   await mkdir(binDir, { recursive: true });
-  await writeFile(path.join(binDir, "gh"), `#!/usr/bin/env bash
+  await writeFile(
+    path.join(binDir, "gh"),
+    `#!/usr/bin/env bash
 echo "gh should not be called" >&2
 exit 99
-`, "utf8");
+`,
+    "utf8",
+  );
   await chmod(path.join(binDir, "gh"), 0o755);
   process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
-
 async function installFakeGh(cwd: string): Promise<void> {
   const binDir = path.join(cwd, "bin");
   await mkdir(binDir, { recursive: true });
-  await writeFile(path.join(binDir, "gh"), `#!/usr/bin/env bash
+  await writeFile(
+    path.join(binDir, "gh"),
+    `#!/usr/bin/env bash
 if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   printf '{"number":24,"title":"Issue 24","body":"","state":"OPEN","labels":[{"name":"failed"},{"name":"ready-for-agent"}],"assignees":[],"milestone":null,"url":"https://github.com/owner/repo/issues/24","comments":[]}\n'
   exit 0
@@ -330,11 +553,12 @@ if [ "$1" = "api" ]; then
   exit 0
 fi
 exit 0
-`, "utf8");
+`,
+    "utf8",
+  );
   await chmod(path.join(binDir, "gh"), 0o755);
   process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
-
 async function run(cwd: string, args: string[]): Promise<void> {
   const child = Bun.spawn(args, { cwd, stdout: "pipe", stderr: "pipe" });
   const [stdout, stderr, exitCode] = await Promise.all([
@@ -342,5 +566,8 @@ async function run(cwd: string, args: string[]): Promise<void> {
     new Response(child.stderr).text(),
     child.exited,
   ]);
-  if (exitCode !== 0) throw new Error(`${args.join(" ")} failed with ${exitCode}: ${stderr || stdout}`);
+  if (exitCode !== 0)
+    throw new Error(
+      `${args.join(" ")} failed with ${exitCode}: ${stderr || stdout}`,
+    );
 }

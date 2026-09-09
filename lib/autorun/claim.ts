@@ -5,13 +5,17 @@ export interface AutorunClaimPlan {
   branchName: string;
   inProgressLabel: string;
   removeLabels: string[];
-  assignee?: string | undefined  ;
+  assignee?: string | undefined;
   commentBody: string;
 }
 
 export function createClaimPlan(
   issue: AutorunIssueCandidate,
-  options: { inProgressLabel: string; removeLabels?: readonly string[] | undefined; assignee?: string  | undefined},
+  options: {
+    inProgressLabel: string;
+    removeLabels?: readonly string[] | undefined;
+    assignee?: string | undefined;
+  },
 ): AutorunClaimPlan {
   const branchName = plannedIssueBranchName(issue.number);
   return {
@@ -20,7 +24,11 @@ export function createClaimPlan(
     inProgressLabel: options.inProgressLabel,
     removeLabels: [...(options.removeLabels ?? [])],
     assignee: options.assignee,
-    commentBody: buildClaimComment({ issueNumber: issue.number, branchName, assignee: options.assignee }),
+    commentBody: buildClaimComment({
+      issueNumber: issue.number,
+      branchName,
+      assignee: options.assignee,
+    }),
   };
 }
 
@@ -28,7 +36,11 @@ export function plannedIssueBranchName(issueNumber: number): string {
   return `roark/issue-${issueNumber}`;
 }
 
-export function buildClaimComment(options: { issueNumber: number; branchName: string; assignee?: string  | undefined}): string {
+export function buildClaimComment(options: {
+  issueNumber: number;
+  branchName: string;
+  assignee?: string | undefined;
+}): string {
   const actor = options.assignee ? `@${options.assignee}` : "Roark";
   return `${actor} is attempting this issue in branch \`${options.branchName}\`.`;
 }

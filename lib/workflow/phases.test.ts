@@ -1,26 +1,48 @@
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
+import { runApplicationPromise } from "../runtime/application.ts";
+import {
+  writeArtifact,
+  writeJsonArtifact,
+  readArtifact,
+  artifactExists,
+  createWorkflowContext,
+  fixLogMarkdownRef,
+  fixLogRef,
+  refinementLogRef,
+  reviewAMarkdownRef,
+  reviewARef,
+  reviewBMarkdownRef,
+  reviewBRef,
+} from "./artifacts.ts";
+import * as nativePhases from "./phases.ts";
+import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runProcessOrThrow } from "../cli/process.ts";
-import type { AgentRunner } from "./agent-runner.ts";
-import { artifactExists, createWorkflowContext, fixLogMarkdownRef, fixLogRef, readArtifact, refinementLogRef, reviewAMarkdownRef, reviewARef, reviewBMarkdownRef, reviewBRef, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
-import { issueArtifactHasRelationshipSnapshot, reviewPhase, runFullWorkflow, runSinglePhase } from "./phases.ts";
-import { noopAsync } from "../utils/async.ts";
-import { reviewFinding, reviewResult, submitReview } from "../testing/reviews.ts";
+import { issueArtifactHasRelationshipSnapshot } from "./phases.ts";
+import {
+  reviewFinding,
+  reviewResult,
+  submitReview,
+} from "../testing/reviews.ts";
 import { parseReviewResultJson, type ReviewResult } from "../review/result.ts";
-import { implementationPlanResult, submitImplementationPlan, submitTriage, triageResult } from "../testing/workflow-results.ts";
+import {
+  implementationPlanResult,
+  submitImplementationPlan,
+  submitTriage,
+  triageResult,
+} from "../testing/workflow-results.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
 import { parseReadinessResultJson } from "./readiness.ts";
 import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
 import { parseChangeReportJson } from "../change-report/result.ts";
-
 const tempDirs: string[] = [];
-
 afterEach(async () => {
-  for (const dir of tempDirs.splice(0)) await rm(dir, { recursive: true, force: true });
+  for (const dir of tempDirs.splice(0))
+    await rm(dir, { recursive: true, force: true });
 });
-
 async function tempContext() {
   const dir = await mkdtemp(path.join(tmpdir(), "roark-phases-"));
   tempDirs.push(dir);
@@ -34,17 +56,20 @@ async function tempContext() {
     maxFixPasses: 1,
     attempt: 1,
   });
-  await writeArtifact(
-    context,
-    "issue",
-    "# GitHub Issue #12\n\n<github_issue_relationships source=\"gh\">\n  <blocking_status active_blockers=\"0\" total_blockers=\"0\" />\n</github_issue_relationships>\n",
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "issue",
+      '# GitHub Issue #12\n\n<github_issue_relationships source="gh">\n  <blocking_status active_blockers="0" total_blockers="0" />\n</github_issue_relationships>\n',
+    ),
   );
   return context;
 }
-
 describe("issueArtifactHasRelationshipSnapshot", () => {
   test("requires a machine-generated relationship snapshot before reusing issue artifacts", () => {
-    expect(issueArtifactHasRelationshipSnapshot("# GitHub Issue #12\n")).toBe(false);
+    expect(issueArtifactHasRelationshipSnapshot("# GitHub Issue #12\n")).toBe(
+      false,
+    );
     expect(
       issueArtifactHasRelationshipSnapshot(
         '<github_issue_relationships source="gh"><blocking_status active_blockers="0" /></github_issue_relationships>',
@@ -52,64 +77,104 @@ describe("issueArtifactHasRelationshipSnapshot", () => {
     ).toBe(true);
   });
 });
-
 describe("review pass selection", () => {
   test("reruns the first invalid review pair instead of advancing to a later pass", async () => {
     const context = await tempContext();
-    await writeJsonArtifact(context, "triage", proceedTriage());
-    await writeJsonArtifact(context, "implementationPlan", readyPlan());
+    await runApplicationPromise(
+      writeJsonArtifact(context, "triage", proceedTriage()),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "implementationPlan", readyPlan()),
+    );
     await seedBaselineAndImplementation(context);
-    await writeArtifact(context, refinementLogRef(0), refinementLog());
-    await writeArtifact(context, reviewARef(0), "not valid review JSON");
-    await writeArtifact(context, reviewBRef(0), JSON.stringify(approveReview()));
+    await runApplicationPromise(
+      writeArtifact(context, refinementLogRef(0), refinementLog()),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewARef(0), "not valid review JSON"),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewBRef(0), JSON.stringify(approveReview())),
+    );
     const phases: string[] = [];
-
-    await runSinglePhase(context, "review", async (request) => {
-      await noopAsync();
-      phases.push(request.display.phaseId);
-      return submitReview(request, approveReview());
-    });
-
+    await runApplicationPromise(
+      nativePhases.runSinglePhase(context, "review").pipe(
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
+            phases.push(request.display.phaseId);
+            return yield* Effect.tryPromise({
+              try: () => submitReview(request, approveReview()),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
+    );
     expect(phases).toEqual(["reviewA-0"]);
-    expect(JSON.parse(await readArtifact(context, reviewARef(0)))).toEqual(approveReview());
-    expect(artifactExists(context, reviewARef(1))).toBe(false);
-    expect(artifactExists(context, reviewBRef(1))).toBe(false);
+    expect(
+      JSON.parse(
+        await runApplicationPromise(readArtifact(context, reviewARef(0))),
+      ),
+    ).toEqual(approveReview());
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewARef(1))),
+    ).toBe(false);
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewBRef(1))),
+    ).toBe(false);
   });
-
   test("starts both reviewers together and retains Review B when Review A fails", async () => {
     const context = await tempContext();
-    await writeJsonArtifact(context, "triage", proceedTriage());
-    await writeJsonArtifact(context, "implementationPlan", readyPlan());
-    await seedBaselineAndImplementation(context);
-    await writeArtifact(context, refinementLogRef(0), refinementLog());
-    let rejectReviewA: (error: Error) => void = () => undefined;
-    const pendingReviewA = new Promise<string>((_resolve, reject) => {
-      rejectReviewA = reject;
-    });
-    const startedPhases = new Set<string>();
-
-    const run = reviewPhase(context, 0, (request) => {
-      startedPhases.add(request.display.phaseId);
-      if (request.display.phaseId === "reviewA-0") return pendingReviewA;
-      return submitReview(request, approveReview());
-    });
-    for (let turn = 0; turn < 50 && !startedPhases.has("reviewB-0"); turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const reviewBStartedBeforeReviewAFinished = startedPhases.has("reviewB-0");
-    rejectReviewA(new Error("review A unavailable"));
-    const error = await run.then(
-      () => undefined,
-      (reason: unknown) => reason,
+    await runApplicationPromise(
+      writeJsonArtifact(context, "triage", proceedTriage()),
     );
-
-    expect(reviewBStartedBeforeReviewAFinished).toBe(true);
-    expect(error instanceof Error ? error.message : String(error)).toContain("review A unavailable");
-    expect(artifactExists(context, reviewARef(0))).toBe(false);
-    expect(artifactExists(context, reviewBRef(0))).toBe(true);
+    await runApplicationPromise(
+      writeJsonArtifact(context, "implementationPlan", readyPlan()),
+    );
+    await seedBaselineAndImplementation(context);
+    await runApplicationPromise(
+      writeArtifact(context, refinementLogRef(0), refinementLog()),
+    );
+    await runApplicationPromise(
+      Effect.gen(function* () {
+        const pendingReviewA = yield* Deferred.make<string, Error>();
+        const reviewAStarted = yield* Deferred.make<undefined>();
+        const reviewBStarted = yield* Deferred.make<undefined>();
+        const run = yield* Effect.forkScoped(
+          nativePhases.reviewPhase(context, 0).pipe(
+            provideTestAgent(
+              Effect.fnUntraced(function* (request) {
+                if (request.display.phaseId === "reviewA-0") {
+                  yield* Deferred.succeed(reviewAStarted, undefined);
+                  return yield* Deferred.await(pendingReviewA);
+                }
+                yield* Deferred.succeed(reviewBStarted, undefined);
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, approveReview()),
+                  catch: (error) => error,
+                });
+              }),
+            ),
+          ),
+        );
+        yield* Deferred.await(reviewAStarted);
+        yield* Deferred.await(reviewBStarted);
+        yield* Deferred.fail(pendingReviewA, new Error("review A unavailable"));
+        const exit = yield* Fiber.await(run);
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit))
+          expect(Cause.pretty(exit.cause)).toContain("review A unavailable");
+      }).pipe(Effect.scoped, Effect.timeout("3 seconds")),
+    );
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewARef(0))),
+    ).toBe(false);
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewBRef(0))),
+    ).toBe(true);
   });
 });
-
 describe("runFullWorkflow", () => {
   test("force consumes a supplied pre-claim snapshot without fetching GitHub again", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "roark-supplied-snapshot-"));
@@ -142,125 +207,275 @@ describe("runFullWorkflow", () => {
         bodyDeclaredBlockers: [],
       },
     };
-    const runner: AgentRunner = async (request) => submitTriage(request, triageResult("blocked"));
-
-    const result = await runFullWorkflow(context, runner, { issueSnapshot });
-
-    expect(result).toEqual({ status: "triage-stopped", triageVerdict: "blocked" });
-    expect(await readArtifact(context, "issue")).toContain("Fresh pre-claim title");
-    expect(JSON.parse(await readArtifact(context, "metadata"))).toMatchObject({
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult("blocked")),
+        catch: (error) => error,
+      });
+    });
+    const result = await runApplicationPromise(
+      nativePhases
+        .runFullWorkflow(context, { issueSnapshot })
+        .pipe(provideTestAgent(runner)),
+    );
+    expect(result).toEqual({
+      status: "triage-stopped",
+      triageVerdict: "blocked",
+    });
+    expect(
+      await runApplicationPromise(readArtifact(context, "issue")),
+    ).toContain("Fresh pre-claim title");
+    expect(
+      JSON.parse(
+        await runApplicationPromise(readArtifact(context, "metadata")),
+      ),
+    ).toMatchObject({
       issueNumber: "12",
       fetchedAt: "2026-05-07T00:00:01.000Z",
       issue: { title: "Fresh pre-claim title" },
     });
   });
-
   test("returns triage-stopped and does not run later agents after blocked triage", async () => {
     const context = await tempContext();
     const prompts: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       prompts.push(request.prompt);
-      return submitTriage(request, triageResult("blocked"));
-    };
-
-    const result = await runFullWorkflow(context, runner);
-
-    expect(result).toEqual({ status: "triage-stopped", triageVerdict: "blocked" });
+      return yield* Effect.tryPromise({
+        try: () => submitTriage(request, triageResult("blocked")),
+        catch: (error) => error,
+      });
+    });
+    const result = await runApplicationPromise(
+      nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
+    );
+    expect(result).toEqual({
+      status: "triage-stopped",
+      triageVerdict: "blocked",
+    });
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('name="triage"');
-    expect(artifactExists(context, "readiness")).toBe(true);
-    expect(artifactExists(context, "implementationPlan")).toBe(false);
-    expect(artifactExists(context, "implementationLog")).toBe(false);
-    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.triageVerdict).toBe("blocked");
+    expect(
+      await runApplicationPromise(artifactExists(context, "readiness")),
+    ).toBe(true);
+    expect(
+      await runApplicationPromise(
+        artifactExists(context, "implementationPlan"),
+      ),
+    ).toBe(false);
+    expect(
+      await runApplicationPromise(artifactExists(context, "implementationLog")),
+    ).toBe(false);
+    expect(
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      ).decision.triageVerdict,
+    ).toBe("blocked");
   });
-
   test("returns planning-stopped and does not implement when plan is not ready", async () => {
     const context = await tempContext();
     const phases: string[] = [];
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       if (request.prompt.includes('name="triage"')) {
         phases.push("triage");
-        return submitTriage(request, proceedTriage());
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="implementation_plan_draft"')) {
         phases.push("plan-draft");
-        return submitImplementationPlan(request, readyPlanDraft());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="implementation_plan_refinement"')) {
         phases.push("plan");
-        return submitImplementationPlan(request, notReadyPlan());
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, notReadyPlan()),
+          catch: (error) => error,
+        });
       }
       phases.push("unexpected");
-      throw new Error("unexpected prompt");
-    };
-
-    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "planning-stopped" });
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
+    expect(
+      runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, {})
+          .pipe(provideTestAgent(runner)),
+      ),
+    ).resolves.toEqual({
+      status: "planning-stopped",
+    });
     expect(phases).toEqual(["triage", "plan-draft", "plan"]);
-    expect(artifactExists(context, "readiness")).toBe(true);
-    expect(artifactExists(context, "implementationLog")).toBe(false);
+    expect(
+      await runApplicationPromise(artifactExists(context, "readiness")),
+    ).toBe(true);
+    expect(
+      await runApplicationPromise(artifactExists(context, "implementationLog")),
+    ).toBe(false);
   });
-
   test("completed path returns completed", async () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
-      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
-      if (request.prompt.includes('name="review_a"') || request.prompt.includes('name="review_b"')) {
-        return submitReview(request, approveReview());
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="code_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
+      if (
+        request.prompt.includes('name="review_a"') ||
+        request.prompt.includes('name="review_b"')
+      ) {
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
-      throw new Error("unexpected prompt");
-    };
-
-    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
+    expect(
+      runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, {})
+          .pipe(provideTestAgent(runner)),
+      ),
+    ).resolves.toEqual({
+      status: "completed",
+    });
   });
-
   test("preserves novel plan and review sections without letting them change routing", async () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
     const plan = implementationPlanResult(true, {
-      additionalSections: [{
-        heading: "Repository-specific interaction",
-        items: ["The existing adapter is shared by a command not named in the issue."],
-      }],
+      additionalSections: [
+        {
+          heading: "Repository-specific interaction",
+          items: [
+            "The existing adapter is shared by a command not named in the issue.",
+          ],
+        },
+      ],
     });
     const review = reviewResult([], {
-      additionalSections: [{
-        heading: "Positive architectural signal",
-        items: ["The change reuses the established adapter seam without new indirection."],
-      }],
+      additionalSections: [
+        {
+          heading: "Positive architectural signal",
+          items: [
+            "The change reuses the established adapter seam without new indirection.",
+          ],
+        },
+      ],
     });
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, plan);
-      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
-      if (request.prompt.includes('name="review_a"')) return submitReview(request, review);
-      if (request.prompt.includes('name="review_b"')) return submitReview(request, approveReview());
-      throw new Error("unexpected prompt");
-    };
-
-    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
-    expect(parseImplementationPlanResultJson(await readArtifact(context, "implementationPlan")).additionalSections)
-      .toEqual(plan.additionalSections);
-    expect(await readArtifact(context, "implementationPlanMarkdown")).toContain("## Repository-specific interaction");
-    expect(parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true }).additionalSections)
-      .toEqual(review.additionalSections);
-    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("## Positive architectural signal");
-    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, plan),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="code_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="review_a"'))
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, review),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="review_b"'))
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
+    expect(
+      runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, {})
+          .pipe(provideTestAgent(runner)),
+      ),
+    ).resolves.toEqual({
+      status: "completed",
+    });
+    expect(
+      Effect.runSync(
+        parseImplementationPlanResultJson(
+          await runApplicationPromise(
+            readArtifact(context, "implementationPlan"),
+          ),
+        ),
+      ).additionalSections,
+    ).toEqual(plan.additionalSections);
+    expect(
+      await runApplicationPromise(
+        readArtifact(context, "implementationPlanMarkdown"),
+      ),
+    ).toContain("## Repository-specific interaction");
+    expect(
+      Effect.runSync(
+        parseReviewResultJson(
+          await runApplicationPromise(readArtifact(context, reviewARef(0))),
+          {
+            allowRestart: true,
+          },
+        ),
+      ).additionalSections,
+    ).toEqual(review.additionalSections);
+    expect(
+      await runApplicationPromise(readArtifact(context, reviewAMarkdownRef(0))),
+    ).toContain("## Positive architectural signal");
+    expect(
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      ).decision.status,
+    ).toBe("ready-for-pr");
   });
-
   test("persists both reviewers' required findings, fixes them, and becomes ready after approval", async () => {
     const context = await tempContext();
-    await runProcessOrThrow(["git", "init", "-b", "main"], { cwd: context.agentCwd });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main"], {
+        cwd: context.agentCwd,
+      }),
+    );
     await seedBaselineAndImplementation(context);
     const reviewAFindings = [
       reviewFinding("must-fix-current", "Reject malformed identifiers"),
@@ -281,63 +496,141 @@ describe("runFullWorkflow", () => {
     const passZeroReviewsMayFinish = new Promise<void>((resolve) => {
       releasePassZeroReviews = resolve;
     });
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       const phase = request.display.phaseId;
       phases.push(phase);
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
-      if (phase === "refinementLog-0") return submitChangeReport(request, changeReport({ summary: "Refined." }));
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
+      if (phase === "refinementLog-0")
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (phase === "reviewA-0") {
         passZeroReviewsStarted.add(phase);
-        announcePassZeroReviewStarted();
-        await passZeroReviewsMayFinish;
-        return submitReview(request, reviewResult(reviewAFindings));
+        if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
+        yield* Effect.tryPromise({
+          try: () => passZeroReviewsMayFinish,
+          catch: (error) => error,
+        });
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, reviewResult(reviewAFindings)),
+          catch: (error) => error,
+        });
       }
       if (phase === "reviewB-0") {
         passZeroReviewsStarted.add(phase);
-        announcePassZeroReviewStarted();
-        await passZeroReviewsMayFinish;
-        return submitReview(request, reviewResult(reviewBFindings));
+        if (passZeroReviewsStarted.size === 2) announcePassZeroReviewStarted();
+        yield* Effect.tryPromise({
+          try: () => passZeroReviewsMayFinish,
+          catch: (error) => error,
+        });
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, reviewResult(reviewBFindings)),
+          catch: (error) => error,
+        });
       }
       if (phase === "fixLog-1") {
         fixRequest = request.prompt;
-        const reviewA = parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true });
-        const reviewB = parseReviewResultJson(await readArtifact(context, reviewBRef(0)), { allowRestart: true });
-        fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(({ title }) => title);
-        return submitChangeReport(request, changeReport({
-          summary: "Fixed all required findings.",
-          addressedFindingIds: ["review-a:reject-malformed-identifiers", "review-a:seed-authorization-state", "review-b:isolate-the-integration-fixture"],
-        }));
+        const reviewA = yield* parseReviewResultJson(
+          yield* readArtifact(context, reviewARef(0)),
+          {
+            allowRestart: true,
+          },
+        );
+        const reviewB = yield* parseReviewResultJson(
+          yield* readArtifact(context, reviewBRef(0)),
+          {
+            allowRestart: true,
+          },
+        );
+        fixInputFindings = [...reviewA.findings, ...reviewB.findings].map(
+          ({ title }) => title,
+        );
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(
+              request,
+              changeReport({
+                summary: "Fixed all required findings.",
+                addressedFindingIds: [
+                  "review-a:reject-malformed-identifiers",
+                  "review-a:seed-authorization-state",
+                  "review-b:isolate-the-integration-fixture",
+                ],
+              }),
+            ),
+          catch: (error) => error,
+        });
       }
-      if (phase === "refinementLog-1") return submitChangeReport(request, changeReport({ summary: "Refined." }));
-      if (phase === "reviewA-1" || phase === "reviewB-1") return submitReview(request, approveReview());
-      throw new Error(`unexpected phase: ${phase}`);
-    };
-
-    const workflow = runFullWorkflow(context, runner);
-    await Promise.race([
-      passZeroReviewStarted,
-      workflow.then(() => {
-        throw new Error("workflow completed before pass-zero reviews started");
-      }),
+      if (phase === "refinementLog-1")
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
+      if (phase === "reviewA-1" || phase === "reviewB-1")
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
+      return yield* Effect.fail(new Error(`unexpected phase: ${phase}`));
+    });
+    const workflow = runApplicationPromise(
+      nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
+    );
+    const reviewsStartedTogether = await Promise.race([
+      passZeroReviewStarted.then(() => true),
+      Bun.sleep(1000).then(() => false),
     ]);
-    for (let turn = 0; turn < 50 && passZeroReviewsStarted.size < 2; turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const reviewsStartedTogether = passZeroReviewsStarted.size === 2;
     releasePassZeroReviews();
     const result = await workflow;
-    const persistedReviewA = parseReviewResultJson(await readArtifact(context, reviewARef(0)), { allowRestart: true });
-    const persistedReviewB = parseReviewResultJson(await readArtifact(context, reviewBRef(0)), { allowRestart: true });
-    const persistedFix = parseChangeReportJson(await readArtifact(context, fixLogRef(1)));
-
-    expect(persistedReviewA.findings.map(({ title }) => title)).toEqual(reviewAFindings.map(({ title }) => title));
-    expect(persistedReviewB.findings.map(({ title }) => title)).toEqual(reviewBFindings.map(({ title }) => title));
-    expect(await readArtifact(context, reviewAMarkdownRef(0))).toContain("seed-authorization-state: Seed authorization state");
-    expect(await readArtifact(context, reviewBMarkdownRef(0))).toContain("isolate-the-integration-fixture: Isolate the integration fixture");
+    const persistedReviewA = Effect.runSync(
+      parseReviewResultJson(
+        await runApplicationPromise(readArtifact(context, reviewARef(0))),
+        { allowRestart: true },
+      ),
+    );
+    const persistedReviewB = Effect.runSync(
+      parseReviewResultJson(
+        await runApplicationPromise(readArtifact(context, reviewBRef(0))),
+        { allowRestart: true },
+      ),
+    );
+    const persistedFix = Effect.runSync(
+      parseChangeReportJson(
+        await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+      ),
+    );
+    expect(persistedReviewA.findings.map(({ title }) => title)).toEqual(
+      reviewAFindings.map(({ title }) => title),
+    );
+    expect(persistedReviewB.findings.map(({ title }) => title)).toEqual(
+      reviewBFindings.map(({ title }) => title),
+    );
+    expect(
+      await runApplicationPromise(readArtifact(context, reviewAMarkdownRef(0))),
+    ).toContain("seed-authorization-state: Seed authorization state");
+    expect(
+      await runApplicationPromise(readArtifact(context, reviewBMarkdownRef(0))),
+    ).toContain(
+      "isolate-the-integration-fixture: Isolate the integration fixture",
+    );
     expect(reviewsStartedTogether).toBe(true);
     expect(fixRequest).toContain("review-a-0.json");
     expect(fixRequest).toContain("review-b-0.json");
@@ -346,144 +639,289 @@ describe("runFullWorkflow", () => {
       "Seed authorization state",
       "Isolate the integration fixture",
     ]);
-    expect(persistedFix.addressedFindingIds).toEqual(["review-a:reject-malformed-identifiers", "review-a:seed-authorization-state", "review-b:isolate-the-integration-fixture"]);
-    expect(await readArtifact(context, fixLogMarkdownRef(1))).toContain("- review-b:isolate-the-integration-fixture");
+    expect(persistedFix.addressedFindingIds).toEqual([
+      "review-a:reject-malformed-identifiers",
+      "review-a:seed-authorization-state",
+      "review-b:isolate-the-integration-fixture",
+    ]);
+    expect(
+      await runApplicationPromise(readArtifact(context, fixLogMarkdownRef(1))),
+    ).toContain("- review-b:isolate-the-integration-fixture");
     expect(phases).toContain("fixLog-1");
-    expect(artifactExists(context, reviewARef(1))).toBe(true);
-    expect(artifactExists(context, reviewBRef(1))).toBe(true);
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewARef(1))),
+    ).toBe(true);
+    expect(
+      await runApplicationPromise(artifactExists(context, reviewBRef(1))),
+    ).toBe(true);
     expect(result).toEqual({ status: "completed" });
-    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
+    expect(
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      ).decision.status,
+    ).toBe("ready-for-pr");
   });
-
   test("does not run fix for follow-up and suggestion-only ledgers", async () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
-      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="code_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
-        return submitReview(request, reviewResult([
-          finding("F1", "follow-up"),
-          finding("S1", "suggestion"),
-        ]));
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([
+                finding("F1", "follow-up"),
+                finding("S1", "suggestion"),
+              ]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
-      throw new Error("unexpected prompt");
-    };
-
-    expect(runFullWorkflow(context, runner)).resolves.toEqual({ status: "completed" });
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
+    expect(
+      runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, {})
+          .pipe(provideTestAgent(runner)),
+      ),
+    ).resolves.toEqual({
+      status: "completed",
+    });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
-    expect(parseReadinessResultJson(await readArtifact(context, "readiness")).decision.status).toBe("ready-for-pr");
+    expect(
+      Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      ).decision.status,
+    ).toBe("ready-for-pr");
   });
-
   test("external-blocker ledgers stop after review without running fix", async () => {
     const context = await tempContext();
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
-      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="code_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (request.prompt.includes('name="review_a"')) {
         phases.push("review-a");
-        return submitReview(request, reviewResult([finding("B1", "external-blocker")]));
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([finding("B1", "external-blocker")]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="review_b"')) {
         phases.push("review-b");
-        return submitReview(request, approveReview());
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       }
       if (request.prompt.includes('name="fix"')) phases.push("fix");
-      throw new Error("unexpected prompt");
-    };
-
-    const result = await runFullWorkflow(context, runner);
+      return yield* Effect.fail(new Error("unexpected prompt"));
+    });
+    const result = await runApplicationPromise(
+      nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
+    );
     expect(result).toEqual({ status: "review-blocked" });
     expect([...phases].sort()).toEqual(["review-a", "review-b"]);
-    expect(await readArtifact(context, "readinessMarkdown")).toContain("## External Blockers\n- review-a:blocker:b1");
+    expect(
+      await runApplicationPromise(readArtifact(context, "readinessMarkdown")),
+    ).toContain("## External Blockers\n- review-a:blocker:b1");
   });
-
   test("fixes local findings before stopping on an independent external blocker", async () => {
     const context = await tempContext();
-    await runProcessOrThrow(["git", "init", "-b", "main"], { cwd: context.agentCwd });
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main"], {
+        cwd: context.agentCwd,
+      }),
+    );
     await seedBaselineAndImplementation(context);
     const phases: string[] = [];
-
-    const runner: AgentRunner = async (request) => {
-      await noopAsync();
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      yield* Effect.void;
       const phase = request.display.phaseId;
-      if (request.prompt.includes('name="triage"')) return submitTriage(request, proceedTriage());
-      if (request.prompt.includes('name="implementation_plan_draft"')) return submitImplementationPlan(request, readyPlanDraft());
-      if (request.prompt.includes('name="implementation_plan_refinement"')) return submitImplementationPlan(request, readyPlan());
-      if (request.prompt.includes('name="code_refinement"')) return submitChangeReport(request, changeReport({ summary: "Refined." }));
+      if (request.prompt.includes('name="triage"'))
+        return yield* Effect.tryPromise({
+          try: () => submitTriage(request, proceedTriage()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_draft"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlanDraft()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="implementation_plan_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () => submitImplementationPlan(request, readyPlan()),
+          catch: (error) => error,
+        });
+      if (request.prompt.includes('name="code_refinement"'))
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(request, changeReport({ summary: "Refined." })),
+          catch: (error) => error,
+        });
       if (phase === "reviewA-0") {
         phases.push("review-a-0");
-        return submitReview(request, reviewResult([
-          finding("LOCAL-FIX", "must-fix-current"),
-          finding("ACCESS", "external-blocker"),
-        ]));
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([
+                finding("LOCAL-FIX", "must-fix-current"),
+                finding("ACCESS", "external-blocker"),
+              ]),
+            ),
+          catch: (error) => error,
+        });
       }
       if (phase === "reviewA-1") {
         phases.push("review-a-1");
-        return submitReview(request, reviewResult([finding("ACCESS", "external-blocker")]));
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitReview(
+              request,
+              reviewResult([finding("ACCESS", "external-blocker")]),
+            ),
+          catch: (error) => error,
+        });
       }
-      if (phase === "reviewB-0" || phase === "reviewB-1") return submitReview(request, approveReview());
+      if (phase === "reviewB-0" || phase === "reviewB-1")
+        return yield* Effect.tryPromise({
+          try: () => submitReview(request, approveReview()),
+          catch: (error) => error,
+        });
       if (phase === "fixLog-1") {
         phases.push("fix");
-        return submitChangeReport(request, changeReport({ addressedFindingIds: ["review-a:local-fix"] }));
+        return yield* Effect.tryPromise({
+          try: () =>
+            submitChangeReport(
+              request,
+              changeReport({ addressedFindingIds: ["review-a:local-fix"] }),
+            ),
+          catch: (error) => error,
+        });
       }
-      throw new Error(`unexpected phase: ${phase}`);
-    };
-
-    const result = await runFullWorkflow(context, runner);
+      return yield* Effect.fail(new Error(`unexpected phase: ${phase}`));
+    });
+    const result = await runApplicationPromise(
+      nativePhases.runFullWorkflow(context, {}).pipe(provideTestAgent(runner)),
+    );
     expect(result).toEqual({ status: "review-blocked" });
     expect(phases).toEqual(["review-a-0", "fix", "review-a-1"]);
-    expect(parseChangeReportJson(await readArtifact(context, fixLogRef(1))).addressedFindingIds)
-      .toEqual(["review-a:local-fix"]);
+    expect(
+      Effect.runSync(
+        parseChangeReportJson(
+          await runApplicationPromise(readArtifact(context, fixLogRef(1))),
+        ),
+      ).addressedFindingIds,
+    ).toEqual(["review-a:local-fix"]);
   });
 });
-
-async function seedBaselineAndImplementation(context: Awaited<ReturnType<typeof tempContext>>) {
-  await writeArtifact(context, "preImplementationBaseline", JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }));
-  await writeArtifact(context, "implementationLog", JSON.stringify(changeReport({ summary: "Done." })));
+async function seedBaselineAndImplementation(
+  context: Awaited<ReturnType<typeof tempContext>>,
+) {
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "preImplementationBaseline",
+      JSON.stringify({ head: "abc", capturedAt: "now", excludes: [".roark"] }),
+    ),
+  );
+  await runApplicationPromise(
+    writeArtifact(
+      context,
+      "implementationLog",
+      JSON.stringify(changeReport({ summary: "Done." })),
+    ),
+  );
 }
-
 function proceedTriage() {
   return triageResult();
 }
-
 function readyPlanDraft() {
   return implementationPlanResult();
 }
-
 function readyPlan() {
   return implementationPlanResult();
 }
-
 function notReadyPlan() {
   return implementationPlanResult(false);
 }
-
 function refinementLog(pass = 0): string {
   return JSON.stringify(changeReport({ summary: `Refined pass ${pass}.` }));
 }
-
 function approveReview(): ReviewResult {
   return reviewResult();
 }
-
-function finding(id: string, classification: "must-fix-current" | "external-blocker" | "follow-up" | "suggestion") {
+function finding(
+  id: string,
+  classification:
+    | "must-fix-current"
+    | "external-blocker"
+    | "follow-up"
+    | "suggestion",
+) {
   return reviewFinding(classification, id);
 }

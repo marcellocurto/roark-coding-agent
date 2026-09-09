@@ -1,70 +1,140 @@
+import { GitHubRequestError, GitHubResponseError } from "./errors.ts";
+import { DateTime, Effect, Schema } from "effect";
+import type { GitHubError, GitHubRequirements } from "./errors.ts";
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
-import { postIssueComment } from "./comments.ts";
-
+import { githubCommentAuthorSchema, postIssueComment } from "./comments.ts";
 export interface ParsedIssueRef {
   issueNumber: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
 }
-
+const issueLabelSchema = Schema.Struct({ name: Schema.String });
+const issueListItemSchema = Schema.Struct({
+  number: Schema.Number,
+  title: Schema.String,
+  body: Schema.optional(Schema.String),
+  url: Schema.optional(Schema.String),
+  createdAt: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.mutable(Schema.Array(issueLabelSchema))),
+});
+const issueSchema = Schema.Struct({
+  ...issueListItemSchema.fields,
+  state: Schema.optional(Schema.String),
+  assignees: Schema.optional(
+    Schema.mutable(Schema.Array(Schema.Struct({ login: Schema.String }))),
+  ),
+  milestone: Schema.optional(
+    Schema.NullOr(Schema.Struct({ title: Schema.String })),
+  ),
+  comments: Schema.optionalKey(
+    Schema.mutable(
+      Schema.Array(
+        Schema.Struct({
+          author: Schema.optional(Schema.NullOr(githubCommentAuthorSchema)),
+          body: Schema.optional(Schema.String),
+          createdAt: Schema.optional(Schema.String),
+        }),
+      ),
+    ),
+  ),
+});
+const parseIssueList = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.mutable(Schema.Array(issueListItemSchema))),
+);
+const decodeIssue = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(issueSchema),
+);
+const parseIssue = Effect.fnUntraced(function* (raw: string) {
+  const { comments, ...issue } = yield* decodeIssue(raw);
+  return {
+    ...issue,
+    ...(comments === undefined
+      ? {}
+      : {
+          comments: comments.map((comment) => ({
+            ...comment,
+            author:
+              comment.author?.login == null
+                ? undefined
+                : { login: comment.author.login },
+          })),
+        }),
+  };
+});
 export interface GitHubIssue {
   number: number;
   title: string;
   body?: string | undefined;
   state?: string | undefined;
-  labels?: { name: string }[] | undefined;
-  assignees?: { login: string }[] | undefined;
-  milestone?: { title: string } | null | undefined;
-  url?: string | undefined  ;
+  labels?:
+    | {
+        name: string;
+      }[]
+    | undefined;
+  assignees?:
+    | {
+        login: string;
+      }[]
+    | undefined;
+  milestone?:
+    | {
+        title: string;
+      }
+    | null
+    | undefined;
+  url?: string | undefined;
   comments?: {
-    author?: { login: string } | undefined;
+    author?:
+      | {
+          login: string;
+        }
+      | undefined;
     body?: string | undefined;
     createdAt?: string | undefined;
   }[];
 }
-
 export interface GitHubIssueListItem {
   number: number;
   title: string;
   body?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   createdAt?: string | undefined;
-  labels?: { name: string }[] | undefined;
+  labels?:
+    | {
+        name: string;
+      }[]
+    | undefined;
 }
-
 export interface GitHubIssueDependency {
   number: number;
   title: string;
-  url?: string | undefined  ;
+  url?: string | undefined;
   state: string;
   stateReason?: string | null | undefined;
   closedAt?: string | null | undefined;
 }
-
 export interface GitHubIssueDependenciesSummary {
   blockedBy: number;
   blocking: number;
   totalBlockedBy: number;
   totalBlocking: number;
 }
-
 export interface BodyDeclaredBlocker {
   raw: string;
   repo: string;
   number: number;
   verified: boolean;
   title?: string | undefined;
-  url?: string | undefined  ;
+  url?: string | undefined;
   state?: string | undefined;
   stateReason?: string | null | undefined;
   closed?: boolean | undefined;
   closedAt?: string | null | undefined;
   unavailableReason?: string | undefined;
 }
-
 export interface GitHubIssueRelationships {
   fetchedAt: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   nativeDependenciesAvailable: boolean;
   issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
   blockedBy: GitHubIssueDependency[];
@@ -72,7 +142,6 @@ export interface GitHubIssueRelationships {
   bodyDeclaredBlockers: BodyDeclaredBlocker[];
   unavailableReason?: string | undefined;
 }
-
 export interface GitHubIssueSnapshot {
   issue: GitHubIssue;
   issueNumber: string;
@@ -80,105 +149,166 @@ export interface GitHubIssueSnapshot {
   fetchedAt: string;
   relationships: GitHubIssueRelationships;
 }
-
 interface BodyBlockerRef {
   raw: string;
   repo: string;
   number: number;
 }
-
-export function parseIssueRef(input: string, explicitRepo?: string): ParsedIssueRef {
-  const urlMatch = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(input);
-  if (urlMatch?.[1] && urlMatch[2]) return { repo: explicitRepo ?? urlMatch[1], issueNumber: urlMatch[2] };
-
+export function parseIssueRef(
+  input: string,
+  explicitRepo?: string,
+): ParsedIssueRef {
+  const urlMatch =
+    /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)/i.exec(input);
+  if (urlMatch?.[1] && urlMatch[2])
+    return { repo: explicitRepo ?? urlMatch[1], issueNumber: urlMatch[2] };
   const shorthandMatch = /^([^/\s]+\/[^#\s]+)#(\d+)$/.exec(input);
   if (shorthandMatch?.[1] && shorthandMatch[2]) {
-    return { repo: explicitRepo ?? shorthandMatch[1], issueNumber: shorthandMatch[2] };
+    return {
+      repo: explicitRepo ?? shorthandMatch[1],
+      issueNumber: shorthandMatch[2],
+    };
   }
-
   const numberMatch = /^#?(\d+)$/.exec(input);
-  if (numberMatch?.[1]) return { repo: explicitRepo, issueNumber: numberMatch[1] };
-
-  throw new Error(`Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`);
+  if (numberMatch?.[1])
+    return { repo: explicitRepo, issueNumber: numberMatch[1] };
+  throw new Error(
+    `Could not parse issue '${input}'. Use a number, GitHub issue URL, or owner/repo#123.`,
+  );
 }
-
-export async function listOpenGitHubIssues(options: { cwd: string; repo?: string | undefined; limit: number }): Promise<GitHubIssueListItem[]> {
-  const args = [
-    "gh",
-    "issue",
-    "list",
-    "--state",
-    "open",
-    "--limit",
-    String(options.limit),
-    "--json",
-    "number,title,body,url,createdAt,labels",
-  ];
-  if (options.repo) args.push("--repo", options.repo);
-
-  const stdout = await runProcessOrThrow(args, { cwd: options.cwd, label: "gh issue list" });
-  return JSON.parse(stdout) as GitHubIssueListItem[];
-}
-
-export async function getCurrentGitHubLogin(options: { cwd: string }): Promise<string> {
-  return (await runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], { cwd: options.cwd, label: "gh api user" })).trim();
-}
-
-export async function claimGitHubIssue(options: { cwd: string; repo?: string | undefined; plan: AutorunClaimPlan; postComment?: boolean }): Promise<void> {
-  const issueNumber = String(options.plan.issueNumber);
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-
-  await transitionGitHubIssueLabels({
-    cwd: options.cwd,
-    repo: options.repo,
-    issueNumber: options.plan.issueNumber,
-    nextLabel: options.plan.inProgressLabel,
-    removeLabels: options.plan.removeLabels,
-  });
-
-  if (options.plan.assignee) {
-    await runProcessOrThrow(
-      ["gh", "issue", "edit", issueNumber, "--add-assignee", options.plan.assignee, ...repoArgs],
-      { cwd: options.cwd, label: "gh issue edit --add-assignee" },
+export const listOpenGitHubIssues = Effect.fn("GitHub.listOpenGitHubIssues")(
+  function* (options: {
+    cwd: string;
+    repo?: string | undefined;
+    limit: number;
+  }): Effect.fn.Return<GitHubIssueListItem[], GitHubError, GitHubRequirements> {
+    const args = [
+      "gh",
+      "issue",
+      "list",
+      "--state",
+      "open",
+      "--limit",
+      String(options.limit),
+      "--json",
+      "number,title,body,url,createdAt,labels",
+    ];
+    if (options.repo) args.push("--repo", options.repo);
+    const stdout = yield* runProcessOrThrow(args, {
+      cwd: options.cwd,
+      label: "gh issue list",
+    });
+    return yield* parseIssueList(stdout).pipe(
+      Effect.mapError((cause) => new GitHubResponseError({ cause })),
     );
-  }
-
-  if (options.postComment === false) return;
-
-  await postIssueComment({ cwd: options.cwd, repo: options.repo, issueNumber, body: options.plan.commentBody });
-}
-
-export async function transitionGitHubIssueLabels(options: {
+  },
+);
+export const getCurrentGitHubLogin = Effect.fn("GitHub.getCurrentGitHubLogin")(
+  function* (options: {
+    cwd: string;
+  }): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
+    return (yield* runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], {
+      cwd: options.cwd,
+      label: "gh api user",
+    })).trim();
+  },
+);
+export const claimGitHubIssue = Effect.fn("GitHub.claimGitHubIssue")(
+  function* (options: {
+    cwd: string;
+    repo?: string | undefined;
+    plan: AutorunClaimPlan;
+    postComment?: boolean;
+  }): Effect.fn.Return<void, GitHubError, GitHubRequirements> {
+    const issueNumber = String(options.plan.issueNumber);
+    const repoArgs = options.repo ? ["--repo", options.repo] : [];
+    yield* transitionGitHubIssueLabels({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber: options.plan.issueNumber,
+      nextLabel: options.plan.inProgressLabel,
+      removeLabels: options.plan.removeLabels,
+    });
+    if (options.plan.assignee) {
+      yield* runProcessOrThrow(
+        [
+          "gh",
+          "issue",
+          "edit",
+          issueNumber,
+          "--add-assignee",
+          options.plan.assignee,
+          ...repoArgs,
+        ],
+        { cwd: options.cwd, label: "gh issue edit --add-assignee" },
+      );
+    }
+    if (options.postComment === false) return;
+    yield* postIssueComment({
+      cwd: options.cwd,
+      repo: options.repo,
+      issueNumber,
+      body: options.plan.commentBody,
+    });
+  },
+);
+export const transitionGitHubIssueLabels = Effect.fn(
+  "GitHub.transitionGitHubIssueLabels",
+)(function* (options: {
   cwd: string;
   repo?: string | undefined;
   issueNumber: string | number;
   nextLabel: string;
   removeLabels: readonly string[];
-}): Promise<void> {
+}): Effect.fn.Return<void, GitHubError, GitHubRequirements> {
   const issueNumber = String(options.issueNumber);
   const repoArgs = options.repo ? ["--repo", options.repo] : [];
   const labelArgs = options.removeLabels
     .filter((candidate) => candidate !== options.nextLabel)
     .flatMap((label) => ["--remove-label", label]);
-  await runProcessOrThrow(
-    ["gh", "issue", "edit", issueNumber, "--add-label", options.nextLabel, ...labelArgs, ...repoArgs],
+  yield* runProcessOrThrow(
+    [
+      "gh",
+      "issue",
+      "edit",
+      issueNumber,
+      "--add-label",
+      options.nextLabel,
+      ...labelArgs,
+      ...repoArgs,
+    ],
     { cwd: options.cwd, label: "gh issue edit --transition-label" },
   );
-}
-
-export function buildIssueDependenciesSummaryArgv(repo: string, issueNumber: string | number): string[] {
+});
+export function buildIssueDependenciesSummaryArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
   return ["gh", "api", `repos/${repo}/issues/${issueNumber}`];
 }
-
-export function buildIssueBlockedByDependenciesArgv(repo: string, issueNumber: string | number): string[] {
-  return ["gh", "api", `repos/${repo}/issues/${issueNumber}/dependencies/blocked_by`];
+export function buildIssueBlockedByDependenciesArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
+  return [
+    "gh",
+    "api",
+    `repos/${repo}/issues/${issueNumber}/dependencies/blocked_by`,
+  ];
 }
-
-export function buildIssueBlockingDependenciesArgv(repo: string, issueNumber: string | number): string[] {
-  return ["gh", "api", `repos/${repo}/issues/${issueNumber}/dependencies/blocking`];
+export function buildIssueBlockingDependenciesArgv(
+  repo: string,
+  issueNumber: string | number,
+): string[] {
+  return [
+    "gh",
+    "api",
+    `repos/${repo}/issues/${issueNumber}/dependencies/blocking`,
+  ];
 }
-
-export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "number">): string[] {
+export function buildBodyBlockerViewArgv(
+  ref: Pick<BodyBlockerRef, "repo" | "number">,
+): string[] {
   return [
     "gh",
     "issue",
@@ -190,12 +320,20 @@ export function buildBodyBlockerViewArgv(ref: Pick<BodyBlockerRef, "repo" | "num
     "number,title,state,stateReason,closed,closedAt,url",
   ];
 }
-
-export async function fetchGitHubIssue(
+export const fetchGitHubIssue = Effect.fn("GitHub.fetchGitHubIssue")(function* (
   input: string,
-  options: { cwd: string; repo?: string | undefined },
-): Promise<GitHubIssueSnapshot> {
-  const parsed = parseIssueRef(input, options.repo);
+  options: {
+    cwd: string;
+    repo?: string | undefined;
+  },
+): Effect.fn.Return<GitHubIssueSnapshot, GitHubError, GitHubRequirements> {
+  const parsed = yield* Effect.try({
+    try: () => parseIssueRef(input, options.repo),
+    catch: (cause) =>
+      new GitHubRequestError({
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
+  });
   const args = [
     "gh",
     "issue",
@@ -205,61 +343,97 @@ export async function fetchGitHubIssue(
     "number,title,body,state,labels,assignees,milestone,url,comments",
   ];
   if (parsed.repo) args.push("--repo", parsed.repo);
-
-  const stdout = await runProcessOrThrow(args, { cwd: options.cwd, label: "gh issue view" });
-  const issue = JSON.parse(stdout) as GitHubIssue;
-  const repo = await resolveGitHubIssueRepo({ cwd: options.cwd, explicitRepo: parsed.repo, issueUrl: issue.url });
-  const relationships = await fetchGitHubIssueRelationships({
+  const stdout = yield* runProcessOrThrow(args, {
+    cwd: options.cwd,
+    label: "gh issue view",
+  });
+  const issue = yield* parseIssue(stdout).pipe(
+    Effect.mapError((cause) => new GitHubResponseError({ cause })),
+  );
+  const repo = yield* resolveGitHubIssueRepo({
+    cwd: options.cwd,
+    explicitRepo: parsed.repo,
+    issueUrl: issue.url,
+  });
+  const relationships = yield* fetchGitHubIssueRelationships({
     cwd: options.cwd,
     repo,
     issueNumber: parsed.issueNumber,
     body: issue.body ?? "",
   });
-
   return {
     issue,
     issueNumber: parsed.issueNumber,
     repo,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: DateTime.formatIso(yield* DateTime.now),
     relationships,
   };
-}
-
-export async function resolveGitHubIssueRepo(options: { cwd: string; explicitRepo?: string | undefined; issueUrl?: string  | undefined}): Promise<string | undefined> {
+});
+export const resolveGitHubIssueRepo = Effect.fn(
+  "GitHub.resolveGitHubIssueRepo",
+)(function* (options: {
+  cwd: string;
+  explicitRepo?: string | undefined;
+  issueUrl?: string | undefined;
+}): Effect.fn.Return<string | undefined, GitHubError, GitHubRequirements> {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;
-
-  try {
-    return (await runProcessOrThrow(
-      ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-      { cwd: options.cwd, label: "gh repo view" },
-    )).trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export async function fetchGitHubIssueRelationships(options: {
+  return yield* Effect.gen(function* () {
+    return (
+      (yield* runProcessOrThrow(
+        [
+          "gh",
+          "repo",
+          "view",
+          "--json",
+          "nameWithOwner",
+          "--jq",
+          ".nameWithOwner",
+        ],
+        { cwd: options.cwd, label: "gh repo view" },
+      )).trim() || undefined
+    );
+  }).pipe(
+    Effect.catch(() =>
+      Effect.sync(() => {
+        return undefined;
+      }),
+    ),
+  );
+});
+export const fetchGitHubIssueRelationships = Effect.fn(
+  "GitHub.fetchGitHubIssueRelationships",
+)(function* (options: {
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   issueNumber: string | number;
   body: string;
-}): Promise<GitHubIssueRelationships> {
-  const fetchedAt = new Date().toISOString();
+}): Effect.fn.Return<
+  GitHubIssueRelationships,
+  GitHubError,
+  GitHubRequirements
+> {
+  const fetchedAt = DateTime.formatIso(yield* DateTime.now);
   const native = options.repo
-    ? await fetchNativeRelationshipsBestEffort({ cwd: options.cwd, repo: options.repo, issueNumber: options.issueNumber })
+    ? yield* fetchNativeRelationshipsBestEffort({
+        cwd: options.cwd,
+        repo: options.repo,
+        issueNumber: options.issueNumber,
+      })
     : {
-      nativeDependenciesAvailable: false,
-      blockedBy: [] as GitHubIssueDependency[],
-      blocking: [] as GitHubIssueDependency[],
-      unavailableReason: "repository could not be resolved for dependency API requests",
-    };
-
+        nativeDependenciesAvailable: false,
+        blockedBy: [] as GitHubIssueDependency[],
+        blocking: [] as GitHubIssueDependency[],
+        unavailableReason:
+          "repository could not be resolved for dependency API requests",
+      };
   const bodyDeclaredBlockers = options.repo
-    ? await verifyBodyDeclaredBlockers({ cwd: options.cwd, refs: parseBodyDeclaredBlockerRefs(options.body, options.repo) })
+    ? yield* verifyBodyDeclaredBlockers({
+        cwd: options.cwd,
+        refs: parseBodyDeclaredBlockerRefs(options.body, options.repo),
+      })
     : [];
-
   return {
     fetchedAt,
     repo: options.repo,
@@ -270,172 +444,291 @@ export async function fetchGitHubIssueRelationships(options: {
     bodyDeclaredBlockers,
     unavailableReason: native.unavailableReason,
   };
-}
-
-export function parseBodyDeclaredBlockerRefs(body: string, currentRepo: string): BodyBlockerRef[] {
+});
+export function parseBodyDeclaredBlockerRefs(
+  body: string,
+  currentRepo: string,
+): BodyBlockerRef[] {
   const lines = body.split(/\r?\n/);
   const refs: BodyBlockerRef[] = [];
   let inFence = false;
   let inDependencySection = false;
-
   for (const line of lines) {
     if (/^\s*```/.test(line) || /^\s*~~~/.test(line)) {
       inFence = !inFence;
       continue;
     }
     if (inFence) continue;
-
     if (/^\s*#{2,3}\s*(?:Blocked by|Depends on)\s*$/i.test(line)) {
       inDependencySection = true;
       continue;
     }
-
     if (inDependencySection && /^\s*#{1,6}\s+/.test(line)) {
       inDependencySection = false;
     }
-
-    const inlineMatch = /^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i.exec(line);
-    if (inlineMatch?.[1]) refs.push(...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo));
-    else if (inDependencySection) refs.push(...extractExplicitIssueRefsFromStart(line.replace(/^\s*[-*]\s*/, ""), currentRepo));
+    const inlineMatch =
+      /^\s*(?:[-*]\s*)?(?:Blocked by|Depends on)\s*:?\s*(.+)$/i.exec(line);
+    if (inlineMatch?.[1])
+      refs.push(
+        ...extractExplicitIssueRefsFromStart(inlineMatch[1], currentRepo),
+      );
+    else if (inDependencySection)
+      refs.push(
+        ...extractExplicitIssueRefsFromStart(
+          line.replace(/^\s*[-*]\s*/, ""),
+          currentRepo,
+        ),
+      );
   }
-
   return dedupeBodyBlockerRefs(refs);
 }
-
-export function normalizeGitHubIssueDependency(value: unknown): GitHubIssueDependency | undefined {
-  if (!isRecord(value)) return undefined;
-  const number = numericField(value, "number");
-  if (number === undefined) return undefined;
+const dependencySchema = Schema.Struct({
+  number: Schema.Int,
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+  url: Schema.optional(Schema.NullOr(Schema.String)),
+  html_url: Schema.optional(Schema.NullOr(Schema.String)),
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  stateReason: Schema.optional(Schema.NullOr(Schema.String)),
+  state_reason: Schema.optional(Schema.NullOr(Schema.String)),
+  closedAt: Schema.optional(Schema.NullOr(Schema.String)),
+  closed_at: Schema.optional(Schema.NullOr(Schema.String)),
+});
+function normalizeGitHubIssueDependency(
+  value: typeof dependencySchema.Type,
+): GitHubIssueDependency {
   return {
-    number,
-    title: stringField(value, "title") ?? "",
-    url: stringField(value, "url") ?? stringField(value, "html_url"),
-    state: normalizeIssueState(stringField(value, "state")),
-    stateReason: nullableStringField(value, "stateReason") ?? nullableStringField(value, "state_reason"),
-    closedAt: nullableStringField(value, "closedAt") ?? nullableStringField(value, "closed_at"),
+    number: value.number,
+    title: value.title ?? "",
+    url: value.url ?? value.html_url ?? undefined,
+    state: value.state?.toUpperCase() ?? "unknown",
+    stateReason: value.stateReason ?? value.state_reason,
+    closedAt: value.closedAt ?? value.closed_at,
   };
 }
+const dependencyArraySchema = Schema.mutable(
+  Schema.Array(Schema.NullOr(dependencySchema)),
+);
+const dependencyListSchema = Schema.Union([
+  dependencyArraySchema,
+  Schema.Struct({ blocked_by: dependencyArraySchema }),
+  Schema.Struct({ blockedBy: dependencyArraySchema }),
+  Schema.Struct({ blocking: dependencyArraySchema }),
+  Schema.Struct({ nodes: dependencyArraySchema }),
+  Schema.Struct({ items: dependencyArraySchema }),
+]);
+const decodeDependencyList = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(dependencyListSchema),
+);
+export const parseGitHubIssueDependencies = Effect.fn(
+  "parseGitHubIssueDependencies",
+)(function* (raw: string) {
+  const value = yield* decodeDependencyList(raw).pipe(
+    Effect.mapError((cause) => new GitHubResponseError({ cause })),
+  );
+  const entries = Array.isArray(value)
+    ? value
+    : "blocked_by" in value
+      ? value.blocked_by
+      : "blockedBy" in value
+        ? value.blockedBy
+        : "blocking" in value
+          ? value.blocking
+          : "nodes" in value
+            ? value.nodes
+            : value.items;
+  return entries
+    .filter((entry) => entry !== null)
+    .map(normalizeGitHubIssueDependency);
+});
+const count = Schema.optional(
+  Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+);
+const dependenciesSummarySchema = Schema.Struct({
+  blockedBy: count,
+  blocked_by: count,
+  blocking: count,
+  totalBlockedBy: count,
+  total_blocked_by: count,
+  totalBlocking: count,
+  total_blocking: count,
+});
+const summaryPayloadSchema = Schema.Struct({
+  issue_dependencies_summary: Schema.optional(
+    Schema.NullOr(dependenciesSummarySchema),
+  ),
+  issueDependenciesSummary: Schema.optional(
+    Schema.NullOr(dependenciesSummarySchema),
+  ),
+});
+const decodeSummary = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(summaryPayloadSchema),
+);
+const bodyBlockerSchema = Schema.Struct({
+  ...dependencySchema.fields,
+  closed: Schema.optional(Schema.NullOr(Schema.Boolean)),
+});
+const decodeBodyBlocker = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(bodyBlockerSchema),
+);
 
-async function fetchNativeRelationshipsBestEffort(options: { cwd: string; repo: string; issueNumber: string | number }): Promise<{
-  nativeDependenciesAvailable: boolean;
-  issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
-  blockedBy: GitHubIssueDependency[];
-  blocking: GitHubIssueDependency[];
-  unavailableReason?: string | undefined;
-}> {
-  try {
-    const [issueRaw, blockedByRaw, blockingRaw] = await Promise.all([
-      runProcessOrThrow(buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependency summary" }),
-      runProcessOrThrow(buildIssueBlockedByDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocked_by" }),
-      runProcessOrThrow(buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber), { cwd: options.cwd, label: "gh api issue dependencies blocking" }),
-    ]);
-
-    const issuePayload = JSON.parse(issueRaw) as unknown;
-    const blockedBy = normalizeDependencyList(JSON.parse(blockedByRaw) as unknown);
-    const blocking = normalizeDependencyList(JSON.parse(blockingRaw) as unknown);
-    const issueDependenciesSummary = normalizeIssueDependenciesSummary(issuePayload, blockedBy, blocking);
-
-    return { nativeDependenciesAvailable: true, issueDependenciesSummary, blockedBy, blocking };
-  } catch (error) {
+const fetchNativeRelationshipsBestEffort = Effect.fn(
+  "GitHub.fetchNativeRelationshipsBestEffort",
+)(function* (options: {
+  cwd: string;
+  repo: string;
+  issueNumber: string | number;
+}): Effect.fn.Return<
+  {
+    nativeDependenciesAvailable: boolean;
+    issueDependenciesSummary?: GitHubIssueDependenciesSummary | undefined;
+    blockedBy: GitHubIssueDependency[];
+    blocking: GitHubIssueDependency[];
+    unavailableReason?: string | undefined;
+  },
+  GitHubError,
+  GitHubRequirements
+> {
+  return yield* Effect.gen(function* () {
+    const [issueRaw, blockedByRaw, blockingRaw] = yield* Effect.all(
+      [
+        runProcessOrThrow(
+          buildIssueDependenciesSummaryArgv(options.repo, options.issueNumber),
+          { cwd: options.cwd, label: "gh api issue dependency summary" },
+        ),
+        runProcessOrThrow(
+          buildIssueBlockedByDependenciesArgv(
+            options.repo,
+            options.issueNumber,
+          ),
+          { cwd: options.cwd, label: "gh api issue dependencies blocked_by" },
+        ),
+        runProcessOrThrow(
+          buildIssueBlockingDependenciesArgv(options.repo, options.issueNumber),
+          { cwd: options.cwd, label: "gh api issue dependencies blocking" },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const issuePayload = yield* decodeSummary(issueRaw).pipe(
+      Effect.mapError((cause) => new GitHubResponseError({ cause })),
+    );
+    const blockedBy = yield* parseGitHubIssueDependencies(blockedByRaw);
+    const blocking = yield* parseGitHubIssueDependencies(blockingRaw);
+    const issueDependenciesSummary = normalizeIssueDependenciesSummary(
+      issuePayload,
+      blockedBy,
+      blocking,
+    );
     return {
-      nativeDependenciesAvailable: false,
-      blockedBy: [],
-      blocking: [],
-      unavailableReason: formatError(error),
+      nativeDependenciesAvailable: true,
+      issueDependenciesSummary,
+      blockedBy,
+      blocking,
     };
-  }
-}
-
-async function verifyBodyDeclaredBlockers(options: { cwd: string; refs: BodyBlockerRef[] }): Promise<BodyDeclaredBlocker[]> {
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.sync(() => {
+        return {
+          nativeDependenciesAvailable: false,
+          blockedBy: [],
+          blocking: [],
+          unavailableReason: formatError(error),
+        };
+      }),
+    ),
+  );
+});
+const verifyBodyDeclaredBlockers = Effect.fn(
+  "GitHub.verifyBodyDeclaredBlockers",
+)(function* (options: {
+  cwd: string;
+  refs: BodyBlockerRef[];
+}): Effect.fn.Return<BodyDeclaredBlocker[], GitHubError, GitHubRequirements> {
   const results: BodyDeclaredBlocker[] = [];
   for (const ref of options.refs) {
-    try {
-      const raw = await runProcessOrThrow(buildBodyBlockerViewArgv(ref), { cwd: options.cwd, label: "gh issue view body-declared blocker" });
-      const parsed = JSON.parse(raw) as unknown;
+    yield* Effect.gen(function* () {
+      const raw = yield* runProcessOrThrow(buildBodyBlockerViewArgv(ref), {
+        cwd: options.cwd,
+        label: "gh issue view body-declared blocker",
+      });
+      const parsed = yield* decodeBodyBlocker(raw).pipe(
+        Effect.mapError((cause) => new GitHubResponseError({ cause })),
+      );
       const dependency = normalizeGitHubIssueDependency(parsed);
-      const closed = isRecord(parsed) ? booleanField(parsed, "closed") : undefined;
+      const closed = parsed.closed;
       results.push({
         raw: ref.raw,
         repo: ref.repo,
-        number: dependency?.number ?? ref.number,
+        number: dependency.number,
         verified: true,
-        title: dependency?.title,
-        url: dependency?.url,
-        state: dependency?.state,
-        stateReason: dependency?.stateReason,
-        closed: closed ?? dependency?.state === "CLOSED",
-        closedAt: dependency?.closedAt,
+        title: dependency.title,
+        url: dependency.url,
+        state: dependency.state,
+        stateReason: dependency.stateReason,
+        closed: closed ?? dependency.state === "CLOSED",
+        closedAt: dependency.closedAt,
       });
-    } catch (error) {
-      results.push({
-        raw: ref.raw,
-        repo: ref.repo,
-        number: ref.number,
-        verified: false,
-        unavailableReason: formatError(error),
-      });
-    }
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          results.push({
+            raw: ref.raw,
+            repo: ref.repo,
+            number: ref.number,
+            verified: false,
+            unavailableReason: formatError(error),
+          });
+        }),
+      ),
+    );
   }
   return results;
-}
-
-function normalizeDependencyList(value: unknown): GitHubIssueDependency[] {
-  const array = dependencyArray(value);
-  return array.map(normalizeGitHubIssueDependency).filter((item): item is GitHubIssueDependency => item !== undefined);
-}
-
-function dependencyArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (!isRecord(value)) return [];
-  for (const key of ["blocked_by", "blockedBy", "blocking", "nodes", "items"]) {
-    const candidate = value[key];
-    if (Array.isArray(candidate)) return candidate;
-  }
-  return [];
-}
-
+});
 function normalizeIssueDependenciesSummary(
-  issuePayload: unknown,
+  issuePayload: typeof summaryPayloadSchema.Type,
   blockedBy: GitHubIssueDependency[],
   blocking: GitHubIssueDependency[],
 ): GitHubIssueDependenciesSummary {
-  const summary = isRecord(issuePayload)
-    ? recordField(issuePayload, "issue_dependencies_summary") ?? recordField(issuePayload, "issueDependenciesSummary")
-    : undefined;
-
+  const summary =
+    issuePayload.issue_dependencies_summary ??
+    issuePayload.issueDependenciesSummary;
   return {
-    blockedBy: numericField(summary, "blockedBy") ?? numericField(summary, "blocked_by") ?? activeIssueCount(blockedBy),
-    blocking: numericField(summary, "blocking") ?? activeIssueCount(blocking),
-    totalBlockedBy: numericField(summary, "totalBlockedBy") ?? numericField(summary, "total_blocked_by") ?? blockedBy.length,
-    totalBlocking: numericField(summary, "totalBlocking") ?? numericField(summary, "total_blocking") ?? blocking.length,
+    blockedBy:
+      summary?.blockedBy ?? summary?.blocked_by ?? activeIssueCount(blockedBy),
+    blocking: summary?.blocking ?? activeIssueCount(blocking),
+    totalBlockedBy:
+      summary?.totalBlockedBy ?? summary?.total_blocked_by ?? blockedBy.length,
+    totalBlocking:
+      summary?.totalBlocking ?? summary?.total_blocking ?? blocking.length,
   };
 }
 
 function activeIssueCount(issues: GitHubIssueDependency[]): number {
   return issues.filter((issue) => issue.state !== "CLOSED").length;
 }
-
-function extractExplicitIssueRefsFromStart(text: string, currentRepo: string): BodyBlockerRef[] {
+function extractExplicitIssueRefsFromStart(
+  text: string,
+  currentRepo: string,
+): BodyBlockerRef[] {
   const refs: BodyBlockerRef[] = [];
   let remainder = text.trim();
-
   while (remainder.length > 0) {
-    const match = /^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i.exec(remainder);
+    const match =
+      /^(https?:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/issues\/(\d+)|([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)#(\d+)|#(\d+))/i.exec(
+        remainder,
+      );
     if (!match?.[1]) break;
-
     const repo = match[2] ?? match[4] ?? currentRepo;
     const number = Number(match[3] ?? match[5] ?? match[6]);
-    if (Number.isInteger(number) && number > 0) refs.push({ raw: match[1], repo, number });
-
+    if (Number.isInteger(number) && number > 0)
+      refs.push({ raw: match[1], repo, number });
     remainder = remainder.slice(match[1].length).trimStart();
     const separator = /^(?:[,;]|\band\b|&)\s*/i.exec(remainder);
     if (!separator?.[0]) break;
     remainder = remainder.slice(separator[0].length).trimStart();
   }
-
   return refs;
 }
-
 function dedupeBodyBlockerRefs(refs: BodyBlockerRef[]): BodyBlockerRef[] {
   const seen = new Set<string>();
   const result: BodyBlockerRef[] = [];
@@ -447,50 +740,11 @@ function dedupeBodyBlockerRefs(refs: BodyBlockerRef[]): BodyBlockerRef[] {
   }
   return result;
 }
-
 function repoFromIssueUrl(url?: string): string | undefined {
-  return url?.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i)?.[1];
+  return url?.match(
+    /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/issues\/\d+/i,
+  )?.[1];
 }
-
-function normalizeIssueState(value: string | undefined): string {
-  return value?.toUpperCase() ?? "unknown";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function recordField(value: unknown, key: string): Record<string, unknown> | undefined {
-  if (!isRecord(value)) return undefined;
-  const candidate = value[key];
-  return isRecord(candidate) ? candidate : undefined;
-}
-
-function stringField(value: unknown, key: string): string | undefined {
-  if (!isRecord(value)) return undefined;
-  const candidate = value[key];
-  return typeof candidate === "string" ? candidate : undefined;
-}
-
-function nullableStringField(value: unknown, key: string): string | null | undefined {
-  if (!isRecord(value) || !(key in value)) return undefined;
-  const candidate = value[key];
-  if (candidate === null) return null;
-  return typeof candidate === "string" ? candidate : undefined;
-}
-
-function numericField(value: unknown, key: string): number | undefined {
-  if (!isRecord(value)) return undefined;
-  const candidate = value[key];
-  return typeof candidate === "number" && Number.isFinite(candidate) ? candidate : undefined;
-}
-
-function booleanField(value: unknown, key: string): boolean | undefined {
-  if (!isRecord(value)) return undefined;
-  const candidate = value[key];
-  return typeof candidate === "boolean" ? candidate : undefined;
-}
-
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);

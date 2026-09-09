@@ -1,7 +1,7 @@
+import { Effect, Exit, Cause } from "effect";
 import { describe, expect, test } from "bun:test";
-import type { PullRequestMetadata } from "../github/pr.ts";
-import { buildPrCheckoutArgv, validatePrBranchSafety } from "./branch.ts";
-
+import { type PullRequestMetadata } from "../github/pr.ts";
+import { validatePrBranchSafety } from "./branch.ts";
 const basePr: PullRequestMetadata = {
   number: 12,
   title: "Draft work",
@@ -14,27 +14,30 @@ const basePr: PullRequestMetadata = {
   baseRepository: "owner/repo",
   headRepository: "owner/repo",
 };
-
 describe("PR revision branch safety", () => {
   test("accepts open same-repository non-base head branch", () => {
-    expect(() => { validatePrBranchSafety(basePr, "owner/repo"); }).not.toThrow();
+    expect(
+      Exit.isSuccess(
+        Effect.runSyncExit(validatePrBranchSafety(basePr, "owner/repo")),
+      ),
+    ).toBe(true);
   });
-
-  test("rejects unsafe PR states and branches", () => {
-    expect(() => { validatePrBranchSafety({ ...basePr, state: "CLOSED" }, "owner/repo"); }).toThrow("must be open");
-    expect(() => { validatePrBranchSafety({ ...basePr, headRefName: "main" }, "owner/repo"); }).toThrow("matches base branch");
-    expect(() => { validatePrBranchSafety({ ...basePr, baseRefName: "develop", headRefName: "main" }, "owner/repo"); }).toThrow("unsafe shared/base branch");
-    expect(() => { validatePrBranchSafety({ ...basePr, headRepository: "someone/fork" }, "owner/repo"); }).toThrow("Fork PR revision");
-  });
-
-  test("builds gh pr checkout argv", () => {
-    expect(buildPrCheckoutArgv({ prNumber: 12, repo: "owner/repo" })).toEqual([
-      "gh",
-      "pr",
-      "checkout",
-      "12",
-      "--repo",
-      "owner/repo",
-    ]);
+  test("rejects unsafe PR states and branches as expected failures", () => {
+    for (const [pr, message] of [
+      [{ ...basePr, state: "CLOSED" }, "must be open"],
+      [{ ...basePr, headRefName: "main" }, "matches base branch"],
+      [
+        { ...basePr, baseRefName: "develop", headRefName: "main" },
+        "unsafe shared/base branch",
+      ],
+      [{ ...basePr, headRepository: "someone/fork" }, "Fork PR revision"],
+    ] as const) {
+      const exit = Effect.runSyncExit(validatePrBranchSafety(pr, "owner/repo"));
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.hasDies(exit.cause)).toBe(false);
+        expect(Cause.pretty(exit.cause)).toContain(message);
+      }
+    }
   });
 });

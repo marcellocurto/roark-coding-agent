@@ -12,7 +12,8 @@ describe("autorun failure", () => {
       issueNumber: 8,
       phase: "verification",
       reason: "verification command exited 1",
-      artifactContent: "# Verification\n\n## Stdout (tail)\n```\nSECRET_OUTPUT\n```\n\n## Stderr (tail)\n```\nTOKEN=leaked\n```\n",
+      artifactContent:
+        "# Verification\n\n## Stdout (tail)\n```\nSECRET_OUTPUT\n```\n\n## Stderr (tail)\n```\nTOKEN=leaked\n```\n",
     });
 
     expect(comment).not.toContain(".roark/runs/");
@@ -29,7 +30,8 @@ describe("autorun failure", () => {
       branchName: "roark/issue-10",
       worktreePath: "/repo/.roark/worktrees/issue-10",
       artifactContent: `# PR Readiness\n\n## Status\nnot-ready\nlog: [/Users/alice/repo]\n${"x".repeat(70_000)}`,
-      recoveryCommand: "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
+      recoveryCommand:
+        "roark continue 10 --cwd /repo --repo owner/repo --attempt 2",
     });
     expect(comment).toContain(
       'Roark stopped on issue https://github.com/owner/repo/issues/10 at phase **readiness**: readiness status is "not-ready" at path:[local path redacted].',
@@ -41,11 +43,17 @@ describe("autorun failure", () => {
     expect(comment).toContain("## Status\nnot-ready");
     expect(comment).toContain("log: [[local path redacted]]");
     expect(comment).toContain("## Recovery");
-    expect(comment.indexOf("## Recovery")).toBeLessThan(comment.indexOf("# PR Readiness"));
+    expect(comment.indexOf("## Recovery")).toBeLessThan(
+      comment.indexOf("# PR Readiness"),
+    );
     expect(comment).not.toContain("--cwd");
-    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
+    expect(comment).toContain(
+      "roark continue 10 --repo owner/repo --attempt 2",
+    );
     expect(comment).toContain("details truncated");
-    expect(Array.from(comment).length).toBeLessThanOrEqual(githubIssueCommentMaxChars);
+    expect(Array.from(comment).length).toBeLessThanOrEqual(
+      githubIssueCommentMaxChars,
+    );
   });
 
   test("formatFailureComment removes shell-quoted cwd values from recovery commands", () => {
@@ -53,34 +61,51 @@ describe("autorun failure", () => {
       issueNumber: 10,
       phase: "readiness",
       reason: 'readiness status is "not-ready"',
-      recoveryCommand: "roark continue 10 --cwd '/Users/alice/it'\\''s/repo' --repo owner/repo --attempt 2",
+      recoveryCommand:
+        "roark continue 10 --cwd '/Users/alice/it'\\''s/repo' --repo owner/repo --attempt 2",
     });
 
     expect(comment).not.toContain("--cwd");
     expect(comment).not.toContain("alice");
     expect(comment).not.toContain("repo' --repo");
-    expect(comment).toContain("roark continue 10 --repo owner/repo --attempt 2");
+    expect(comment).toContain(
+      "roark continue 10 --repo owner/repo --attempt 2",
+    );
   });
 
   test("buildFailureLabelArgv composes a gh issue edit command", () => {
     expect(
-      buildFailureLabelArgv({ issueNumber: 8, label: "agent-failed", repo: "owner/repo" }),
-    ).toEqual(["gh", "issue", "edit", "8", "--add-label", "agent-failed", "--repo", "owner/repo"]);
-  });
-
-  test("buildFailureLabelArgv omits --repo when not provided", () => {
-    expect(buildFailureLabelArgv({ issueNumber: 8, label: "agent-failed" })).toEqual([
+      buildFailureLabelArgv({
+        issueNumber: 8,
+        label: "agent-failed",
+        repo: "owner/repo",
+      }),
+    ).toEqual([
       "gh",
       "issue",
       "edit",
       "8",
       "--add-label",
       "agent-failed",
+      "--repo",
+      "owner/repo",
     ]);
   });
 
+  test("buildFailureLabelArgv omits --repo when not provided", () => {
+    expect(
+      buildFailureLabelArgv({ issueNumber: 8, label: "agent-failed" }),
+    ).toEqual(["gh", "issue", "edit", "8", "--add-label", "agent-failed"]);
+  });
+
   test("buildRemoveLabelArgv composes a gh issue edit remove-label command", () => {
-    expect(buildRemoveLabelArgv({ issueNumber: 8, label: "agent-in-progress", repo: "owner/repo" })).toEqual([
+    expect(
+      buildRemoveLabelArgv({
+        issueNumber: 8,
+        label: "agent-in-progress",
+        repo: "owner/repo",
+      }),
+    ).toEqual([
       "gh",
       "issue",
       "edit",

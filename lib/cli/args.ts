@@ -1,13 +1,25 @@
 import { defaultAutorunFailureLabel } from "../autorun/failure.ts";
-import { defaultAutorunRemote, defaultAutorunSuccessLabel } from "../autorun/publish.ts";
+import {
+  defaultAutorunRemote,
+  defaultAutorunSuccessLabel,
+} from "../autorun/publish.ts";
 import {
   defaultAutorunInProgressLabel,
   defaultAutorunReadyLabel,
 } from "../autorun/selection.ts";
 import { defaultAutorunBaseBranch } from "../autorun/branch.ts";
-import type { LifecycleHooksConfig, RemoveCommandOptions, WorkspaceCommandOptions, WorkspaceConfig, WorkspaceRemoveTarget } from "../autorun/workspace.ts";
+import type {
+  LifecycleHooksConfig,
+  RemoveCommandOptions,
+  WorkspaceCommandOptions,
+  WorkspaceConfig,
+  WorkspaceRemoveTarget,
+} from "../autorun/workspace.ts";
 import type { ThinkingProfileName } from "../workflow/thinking.ts";
-import { singlePhaseCommands, type SinglePhaseCommand } from "../workflow/phase-vocabulary.ts";
+import {
+  singlePhaseCommands,
+  type SinglePhaseCommand,
+} from "../workflow/phase-vocabulary.ts";
 
 export type IssueWorkflowCommand = "do" | SinglePhaseCommand;
 
@@ -17,9 +29,26 @@ export type InitCommand = "init";
 export type WorkspaceCommand = "workspace";
 export type RemoveCommand = "remove";
 
-export type WorkflowCommand = IssueWorkflowCommand | "auto" | "review-pr" | "revise-pr" | ContinueCommand | StatusCommand | InitCommand | WorkspaceCommand | RemoveCommand;
+export type WorkflowCommand =
+  | IssueWorkflowCommand
+  | "auto"
+  | "review-pr"
+  | "revise-pr"
+  | ContinueCommand
+  | StatusCommand
+  | InitCommand
+  | WorkspaceCommand
+  | RemoveCommand;
 
-export const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const thinkingLevels = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 export type ThinkingLevel = (typeof thinkingLevels)[number];
 
 export interface RawPresentationCliOptions {
@@ -32,10 +61,10 @@ export interface IssueCliOptions {
   issue: string;
   cwd: string;
   outDir: string;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -47,12 +76,12 @@ export interface AutoCliOptions {
   command: "auto";
   issue?: string | undefined;
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   readyLabel: string;
   skipLabels: string[];
   limit: number;
   inProgressLabel: string;
-  assignee?: string | undefined  ;
+  assignee?: string | undefined;
   noAssign: boolean;
   dryRun: boolean;
   baseBranch: string;
@@ -60,14 +89,14 @@ export interface AutoCliOptions {
   failureLabel: string;
   successLabel: string;
   remote: string;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   maxFixPasses: number;
   force: boolean;
   yes: boolean;
-  workspace?: WorkspaceConfig | undefined  ;
-  hooks?: LifecycleHooksConfig | undefined  ;
+  workspace?: WorkspaceConfig | undefined;
+  hooks?: LifecycleHooksConfig | undefined;
 }
 
 export interface ContinueCliOptions {
@@ -75,10 +104,10 @@ export interface ContinueCliOptions {
   issue: string;
   cwd: string;
   outDir: string;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   force: boolean;
   yes: boolean;
   maxFixPasses: number;
@@ -89,8 +118,8 @@ export interface ContinueCliOptions {
   successLabel: string;
   inProgressLabel: string;
   remote: string;
-  workspace?: WorkspaceConfig | undefined  ;
-  hooks?: LifecycleHooksConfig | undefined  ;
+  workspace?: WorkspaceConfig | undefined;
+  hooks?: LifecycleHooksConfig | undefined;
 }
 
 export interface RevisePrCliOptions {
@@ -98,10 +127,10 @@ export interface RevisePrCliOptions {
   prNumber: number;
   cwd: string;
   outDir: string;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   verifyCommand: string;
   remote: string;
   maxFixPasses: number;
@@ -133,7 +162,7 @@ export interface StatusCliOptions {
   all: boolean;
   cwd: string;
   outDir: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   attempt?: number | undefined;
   maxFixPasses?: never;
   yes?: never;
@@ -142,23 +171,32 @@ export interface StatusCliOptions {
 export interface InitCliOptions {
   command: "init";
   cwd: string;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   force: boolean;
   maxFixPasses?: never;
   yes?: never;
 }
 
-export type CliOptions = IssueCliOptions | AutoCliOptions | ReviewPrCliOptions | RevisePrCliOptions | ContinueCliOptions | StatusCliOptions | InitCliOptions | WorkspaceCommandOptions | RemoveCommandOptions;
+export type CliOptions =
+  | IssueCliOptions
+  | AutoCliOptions
+  | ReviewPrCliOptions
+  | RevisePrCliOptions
+  | ContinueCliOptions
+  | StatusCliOptions
+  | InitCliOptions
+  | WorkspaceCommandOptions
+  | RemoveCommandOptions;
 
 export interface RawIssueCliOptions extends RawPresentationCliOptions {
   command: IssueWorkflowCommand;
   issue: string;
-  cwd?: string | undefined  ;
+  cwd?: string | undefined;
   outDir?: string | undefined;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   force?: true | undefined;
   yes?: true | undefined;
   maxFixPasses?: number | undefined;
@@ -169,13 +207,13 @@ export interface RawIssueCliOptions extends RawPresentationCliOptions {
 export interface RawAutoCliOptions extends RawPresentationCliOptions {
   command: "auto";
   issue?: string | undefined;
-  cwd?: string | undefined  ;
-  repo?: string | undefined  ;
+  cwd?: string | undefined;
+  repo?: string | undefined;
   readyLabel?: string | undefined;
   skipLabels?: string[] | undefined;
   limit?: number | undefined;
   inProgressLabel?: string | undefined;
-  assignee?: string | undefined  ;
+  assignee?: string | undefined;
   noAssign?: true | undefined;
   dryRun?: true | undefined;
   baseBranch?: string | undefined;
@@ -183,9 +221,9 @@ export interface RawAutoCliOptions extends RawPresentationCliOptions {
   failureLabel?: string | undefined;
   successLabel?: string | undefined;
   remote?: string | undefined;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   maxFixPasses?: number | undefined;
   force?: true | undefined;
   yes?: true | undefined;
@@ -194,12 +232,12 @@ export interface RawAutoCliOptions extends RawPresentationCliOptions {
 export interface RawContinueCliOptions extends RawPresentationCliOptions {
   command: "continue";
   issue: string;
-  cwd?: string | undefined  ;
+  cwd?: string | undefined;
   outDir?: string | undefined;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   force?: true | undefined;
   yes?: true | undefined;
   maxFixPasses?: number | undefined;
@@ -214,12 +252,12 @@ export interface RawContinueCliOptions extends RawPresentationCliOptions {
 export interface RawRevisePrCliOptions extends RawPresentationCliOptions {
   command: "revise-pr";
   prNumber: number;
-  cwd?: string | undefined  ;
+  cwd?: string | undefined;
   outDir?: string | undefined;
-  repo?: string | undefined  ;
-  model?: string | undefined  ;
-  thinkingLevel?: ThinkingLevel | undefined  ;
-  thinkingProfile?: ThinkingProfileName | undefined  ;
+  repo?: string | undefined;
+  model?: string | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
   verifyCommand?: string | undefined;
   remote?: string | undefined;
   maxFixPasses?: number | undefined;
@@ -245,22 +283,34 @@ export interface RawStatusCliOptions {
   command: "status";
   issue?: string | undefined;
   all?: true | undefined;
-  cwd?: string | undefined  ;
+  cwd?: string | undefined;
   outDir?: string | undefined;
-  repo?: string | undefined  ;
+  repo?: string | undefined;
   attempt?: number | undefined;
 }
 
 export interface RawInitCliOptions {
   command: "init";
-  cwd?: string | undefined  ;
-  repo?: string | undefined  ;
+  cwd?: string | undefined;
+  repo?: string | undefined;
   force?: true | undefined;
 }
 
 export type RawWorkspaceCliOptions =
-  | { command: "workspace"; action: "list"; cwd?: string | undefined; repo?: string  | undefined}
-  | { command: "workspace"; action: "prune"; olderThan: string; cwd?: string | undefined; repo?: string | undefined; force?: true | undefined };
+  | {
+      command: "workspace";
+      action: "list";
+      cwd?: string | undefined;
+      repo?: string | undefined;
+    }
+  | {
+      command: "workspace";
+      action: "prune";
+      olderThan: string;
+      cwd?: string | undefined;
+      repo?: string | undefined;
+      force?: true | undefined;
+    };
 
 export interface RawRemoveCliOptions {
   command: "remove";
@@ -286,15 +336,30 @@ const issueCommands = new Set<IssueWorkflowCommand>([
   ...singlePhaseCommands,
 ]);
 
-const longRunningCommands = new Set<WorkflowCommand>([...issueCommands, "auto", "review-pr", "revise-pr", "continue"]);
-const commands = new Set<WorkflowCommand>([...longRunningCommands, "status", "init", "remove", "workspace"]);
+const longRunningCommands = new Set<WorkflowCommand>([
+  ...issueCommands,
+  "auto",
+  "review-pr",
+  "revise-pr",
+  "continue",
+]);
+const commands = new Set<WorkflowCommand>([
+  ...longRunningCommands,
+  "status",
+  "init",
+  "remove",
+  "workspace",
+]);
 
 export function isWorkflowCommand(value: string): value is WorkflowCommand {
-  return commands.has(value as WorkflowCommand);
+  return [...commands].some((command) => command === value);
 }
 
 export function isLongRunningCommand(value: string | undefined): boolean {
-  return value !== undefined && longRunningCommands.has(value as WorkflowCommand);
+  return (
+    value !== undefined &&
+    [...longRunningCommands].some((command) => command === value)
+  );
 }
 
 export const defaultMaxFixPasses = 3;
@@ -375,7 +440,8 @@ Options:
 `;
 
 export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
-  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) return { help: true };
+  if (argv.length === 0 || argv.includes("--help") || argv.includes("-h"))
+    return { help: true };
 
   const [rawCommand, ...rest] = argv;
   if (!rawCommand || !isWorkflowCommand(rawCommand)) {
@@ -395,7 +461,8 @@ export function parseArgs(argv: string[]): RawCliOptions | { help: true } {
 
 function parseReviewPrArgs(args: string[]): RawReviewPrCliOptions {
   const [rawPrNumber, ...rest] = args;
-  if (rawPrNumber === undefined || rawPrNumber.startsWith("--")) throw new Error(`Missing PR number.\n\n${usage}`);
+  if (rawPrNumber === undefined || rawPrNumber.startsWith("--"))
+    throw new Error(`Missing PR number.\n\n${usage}`);
   const options: RawReviewPrCliOptions = {
     command: "review-pr",
     prNumber: parsePositiveInteger(rawPrNumber.replace(/^#/, ""), "PR number"),
@@ -404,15 +471,26 @@ function parseReviewPrArgs(args: string[]): RawReviewPrCliOptions {
     const arg = rest[index];
     if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
-    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
-    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
-    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--out")
+      options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model")
+      options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking")
+      options.thinkingLevel = parseThinkingLevel(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
-    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--verify")
+      options.verifyCommand = requiredValue(rest, ++index, arg);
     else if (arg === "--no-comment") options.comment = false;
     else if (applyPresentationFlag(options, arg)) continue;
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      throw new Error(
+        `Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
   }
   validateThinkingSelection(options);
   return options;
@@ -426,8 +504,12 @@ function parseInitArgs(args: string[]): RawInitCliOptions {
     if (arg === "--repo") options.repo = requiredValue(args, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(args, ++index, arg);
     else if (arg === "--force") options.force = true;
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      throw new Error(
+        `Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
   }
 
   return options;
@@ -449,17 +531,24 @@ function parseWorkspaceArgs(args: string[]): RawWorkspaceCliOptions {
     if (arg === "--cwd") cwd = requiredValue(rest, ++index, arg);
     else if (arg === "--repo") repo = requiredValue(rest, ++index, arg);
     else if (arg === "--force") force = true;
-    else if (arg === "--older-than") olderThan = requiredValue(rest, ++index, arg);
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg === "--older-than")
+      olderThan = requiredValue(rest, ++index, arg);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      throw new Error(
+        `Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
   }
 
   if (action === "list") {
-    if (force === true || olderThan !== undefined) throw new Error("workspace list only accepts --cwd and --repo.");
+    if (force === true || olderThan !== undefined)
+      throw new Error("workspace list only accepts --cwd and --repo.");
     return { command: "workspace", action, cwd, repo };
   }
 
-  if (olderThan === undefined) throw new Error("workspace prune requires --older-than <duration>.");
+  if (olderThan === undefined)
+    throw new Error("workspace prune requires --older-than <duration>.");
   return { command: "workspace", action, olderThan, cwd, repo, force };
 }
 
@@ -474,13 +563,26 @@ function parseRemoveArgs(args: string[]): RawRemoveCliOptions {
     if (arg === "--cwd") cwd = requiredValue(args, ++index, arg);
     else if (arg === "--repo") repo = requiredValue(args, ++index, arg);
     else if (arg === "--force") force = true;
-    else if (arg === "--pr") targets.push({ kind: "pr", number: parsePositiveInteger(requiredValue(args, ++index, arg), arg) });
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else targets.push({ kind: "issue", number: parsePositiveInteger(arg ?? "", "issue number") });
+    else if (arg === "--pr")
+      targets.push({
+        kind: "pr",
+        number: parsePositiveInteger(requiredValue(args, ++index, arg), arg),
+      });
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      targets.push({
+        kind: "issue",
+        number: parsePositiveInteger(arg ?? "", "issue number"),
+      });
   }
 
-  const uniqueTargets = targets.filter((target, index) =>
-    targets.findIndex((candidate) => candidate.kind === target.kind && candidate.number === target.number) === index
+  const uniqueTargets = targets.filter(
+    (target, index) =>
+      targets.findIndex(
+        (candidate) =>
+          candidate.kind === target.kind && candidate.number === target.number,
+      ) === index,
   );
   return { command: "remove", targets: uniqueTargets, cwd, repo, force };
 }
@@ -495,7 +597,8 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
     const arg = args[index];
     if (arg === "--repo") options.repo = requiredValue(args, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(args, ++index, arg);
-    else if (arg === "--label") options.readyLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--label")
+      options.readyLabel = requiredValue(args, ++index, arg);
     else if (arg === "--skip-label") {
       if (!skipLabelsProvided) {
         options.skipLabels = [];
@@ -507,26 +610,52 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
         options.skipLabels = [];
         skipLabelsProvided = true;
       }
-      options.skipLabels?.push(...parseCommaSeparatedLabels(requiredValue(args, ++index, arg)));
-    } else if (arg === "--limit") options.limit = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
-    else if (arg === "--in-progress-label") options.inProgressLabel = requiredValue(args, ++index, arg);
-    else if (arg === "--assignee") options.assignee = requiredValue(args, ++index, arg);
+      options.skipLabels?.push(
+        ...parseCommaSeparatedLabels(requiredValue(args, ++index, arg)),
+      );
+    } else if (arg === "--limit")
+      options.limit = parsePositiveInteger(
+        requiredValue(args, ++index, arg),
+        arg,
+      );
+    else if (arg === "--in-progress-label")
+      options.inProgressLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--assignee")
+      options.assignee = requiredValue(args, ++index, arg);
     else if (arg === "--no-assign") options.noAssign = true;
     else if (arg === "--dry-run") options.dryRun = true;
-    else if (arg === "--base-branch") options.baseBranch = requiredValue(args, ++index, arg);
-    else if (arg === "--verify") options.verifyCommand = requiredValue(args, ++index, arg);
-    else if (arg === "--failure-label") options.failureLabel = requiredValue(args, ++index, arg);
-    else if (arg === "--success-label") options.successLabel = requiredValue(args, ++index, arg);
-    else if (arg === "--remote") options.remote = requiredValue(args, ++index, arg);
-    else if (arg === "--model") options.model = requiredValue(args, ++index, arg);
-    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(args, ++index, arg), arg);
+    else if (arg === "--base-branch")
+      options.baseBranch = requiredValue(args, ++index, arg);
+    else if (arg === "--verify")
+      options.verifyCommand = requiredValue(args, ++index, arg);
+    else if (arg === "--failure-label")
+      options.failureLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--success-label")
+      options.successLabel = requiredValue(args, ++index, arg);
+    else if (arg === "--remote")
+      options.remote = requiredValue(args, ++index, arg);
+    else if (arg === "--model")
+      options.model = requiredValue(args, ++index, arg);
+    else if (arg === "--thinking")
+      options.thinkingLevel = parseThinkingLevel(
+        requiredValue(args, ++index, arg),
+        arg,
+      );
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
-    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+    else if (arg === "--max-fix-passes")
+      options.maxFixPasses = parsePositiveInteger(
+        requiredValue(args, ++index, arg),
+        arg,
+      );
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (applyPresentationFlag(options, arg)) continue;
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else if (issueArg !== undefined) throw new Error(`The auto command accepts at most one issue argument. Got '${issueArg}' and '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (issueArg !== undefined)
+      throw new Error(
+        `The auto command accepts at most one issue argument. Got '${issueArg}' and '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
     else issueArg = arg;
   }
 
@@ -542,29 +671,50 @@ function parseAutoArgs(args: string[]): RawAutoCliOptions {
 
 function parseRevisePrArgs(args: string[]): RawRevisePrCliOptions {
   const [rawPrNumber, ...rest] = args;
-  if (rawPrNumber === undefined) throw new Error(`Missing PR number.\n\n${usage}`);
-  if (rawPrNumber.startsWith("--")) throw new Error(`Missing PR number.\n\n${usage}`);
+  if (rawPrNumber === undefined)
+    throw new Error(`Missing PR number.\n\n${usage}`);
+  if (rawPrNumber.startsWith("--"))
+    throw new Error(`Missing PR number.\n\n${usage}`);
 
-  const prNumber = parsePositiveInteger(rawPrNumber.replace(/^#/, ""), "PR number");
+  const prNumber = parsePositiveInteger(
+    rawPrNumber.replace(/^#/, ""),
+    "PR number",
+  );
   const options: RawRevisePrCliOptions = { command: "revise-pr", prNumber };
 
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
     if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
-    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
-    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
-    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--out")
+      options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model")
+      options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking")
+      options.thinkingLevel = parseThinkingLevel(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
-    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
-    else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
-    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--verify")
+      options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--remote")
+      options.remote = requiredValue(rest, ++index, arg);
+    else if (arg === "--max-fix-passes")
+      options.maxFixPasses = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (arg === "--no-comment") options.comment = false;
     else if (applyPresentationFlag(options, arg)) continue;
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      throw new Error(
+        `Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
   }
 
   validateThinkingSelection(options);
@@ -580,16 +730,30 @@ function parseStatusArgs(args: string[]): RawStatusCliOptions {
     if (arg === "--all") options.all = true;
     else if (arg === "--repo") options.repo = requiredValue(args, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(args, ++index, arg);
-    else if (arg === "--out") options.outDir = requiredValue(args, ++index, arg);
-    else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else if (issueArg !== undefined) throw new Error(`The status command accepts at most one issue argument. Got '${issueArg}' and '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg === "--out")
+      options.outDir = requiredValue(args, ++index, arg);
+    else if (arg === "--attempt")
+      options.attempt = parsePositiveInteger(
+        requiredValue(args, ++index, arg),
+        arg,
+      );
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (issueArg !== undefined)
+      throw new Error(
+        `The status command accepts at most one issue argument. Got '${issueArg}' and '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
     else issueArg = arg;
   }
 
-  if (options.all === true && issueArg !== undefined) throw new Error("status --all cannot be combined with an issue argument.");
-  if (options.all === true && options.attempt !== undefined) throw new Error("status --all cannot be combined with --attempt.");
-  if (options.all !== true && issueArg === undefined) throw new Error(`Missing issue. Use status --all to summarize all known runs.\n\n${usage}`);
+  if (options.all === true && issueArg !== undefined)
+    throw new Error("status --all cannot be combined with an issue argument.");
+  if (options.all === true && options.attempt !== undefined)
+    throw new Error("status --all cannot be combined with --attempt.");
+  if (options.all !== true && issueArg === undefined)
+    throw new Error(
+      `Missing issue. Use status --all to summarize all known runs.\n\n${usage}`,
+    );
   options.issue = issueArg;
   return options;
 }
@@ -599,35 +763,64 @@ function parseContinueArgs(args: string[]): RawContinueCliOptions {
   if (rawIssue === undefined) throw new Error(`Missing issue.\n\n${usage}`);
   if (rawIssue.startsWith("--")) throw new Error(`Missing issue.\n\n${usage}`);
 
-  const options: RawContinueCliOptions = { command: "continue", issue: rawIssue };
+  const options: RawContinueCliOptions = {
+    command: "continue",
+    issue: rawIssue,
+  };
 
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
     if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
-    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
-    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
-    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--out")
+      options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model")
+      options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking")
+      options.thinkingLevel = parseThinkingLevel(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
-    else if (arg === "--max-fix-passes") options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
-    else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
-    else if (arg === "--verify") options.verifyCommand = requiredValue(rest, ++index, arg);
-    else if (arg === "--failure-label") options.failureLabel = requiredValue(rest, ++index, arg);
-    else if (arg === "--success-label") options.successLabel = requiredValue(rest, ++index, arg);
-    else if (arg === "--in-progress-label") options.inProgressLabel = requiredValue(rest, ++index, arg);
-    else if (arg === "--remote") options.remote = requiredValue(rest, ++index, arg);
+    else if (arg === "--max-fix-passes")
+      options.maxFixPasses = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
+    else if (arg === "--attempt")
+      options.attempt = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
+    else if (arg === "--verify")
+      options.verifyCommand = requiredValue(rest, ++index, arg);
+    else if (arg === "--failure-label")
+      options.failureLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--success-label")
+      options.successLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--in-progress-label")
+      options.inProgressLabel = requiredValue(rest, ++index, arg);
+    else if (arg === "--remote")
+      options.remote = requiredValue(rest, ++index, arg);
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (applyPresentationFlag(options, arg)) continue;
-    else if (arg?.startsWith("--") === true) throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
-    else throw new Error(`Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`);
+    else if (arg?.startsWith("--") === true)
+      throw new Error(`Unknown option '${formatCliArg(arg)}'.\n\n${usage}`);
+    else
+      throw new Error(
+        `Unexpected argument '${formatCliArg(arg)}'.\n\n${usage}`,
+      );
   }
 
   validateThinkingSelection(options);
   return options;
 }
 
-function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssueCliOptions {
+function parseIssueArgs(
+  command: IssueWorkflowCommand,
+  args: string[],
+): RawIssueCliOptions {
   const [rawIssue, ...rest] = args;
   if (rawIssue === undefined) throw new Error(`Missing issue.\n\n${usage}`);
   if (rawIssue.startsWith("--")) throw new Error(`Missing issue.\n\n${usage}`);
@@ -641,17 +834,33 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
     const arg = rest[index];
     if (arg === "--repo") options.repo = requiredValue(rest, ++index, arg);
     else if (arg === "--cwd") options.cwd = requiredValue(rest, ++index, arg);
-    else if (arg === "--out") options.outDir = requiredValue(rest, ++index, arg);
-    else if (arg === "--model") options.model = requiredValue(rest, ++index, arg);
-    else if (arg === "--thinking") options.thinkingLevel = parseThinkingLevel(requiredValue(rest, ++index, arg), arg);
+    else if (arg === "--out")
+      options.outDir = requiredValue(rest, ++index, arg);
+    else if (arg === "--model")
+      options.model = requiredValue(rest, ++index, arg);
+    else if (arg === "--thinking")
+      options.thinkingLevel = parseThinkingLevel(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (isThinkingProfileFlag(arg)) applyThinkingProfileFlag(options, arg);
     else if (arg === "--max-fix-passes") {
-      options.maxFixPasses = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+      options.maxFixPasses = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
       maxFixPassesProvided = true;
     } else if (arg === "--fix-pass") {
-      options.fixPass = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+      options.fixPass = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
       fixPassProvided = true;
-    } else if (arg === "--attempt") options.attempt = parsePositiveInteger(requiredValue(rest, ++index, arg), arg);
+    } else if (arg === "--attempt")
+      options.attempt = parsePositiveInteger(
+        requiredValue(rest, ++index, arg),
+        arg,
+      );
     else if (arg === "--force") options.force = true;
     else if (arg === "--yes") options.yes = true;
     else if (applyPresentationFlag(options, arg)) continue;
@@ -669,18 +878,26 @@ function parseIssueArgs(command: IssueWorkflowCommand, args: string[]): RawIssue
   return options;
 }
 
-function isThinkingProfileFlag(arg: string | undefined): arg is keyof typeof thinkingProfileFlags {
+function isThinkingProfileFlag(
+  arg: string | undefined,
+): arg is keyof typeof thinkingProfileFlags {
   return arg !== undefined && Object.hasOwn(thinkingProfileFlags, arg);
 }
 
-function applyPresentationFlag(options: RawPresentationCliOptions, arg: string | undefined): boolean {
+function applyPresentationFlag(
+  options: RawPresentationCliOptions,
+  arg: string | undefined,
+): boolean {
   if (arg === "--verbose") options.verbose = true;
   else if (arg === "--no-title") options.noTitle = true;
   else return false;
   return true;
 }
 
-function applyThinkingProfileFlag(options: { thinkingProfile?: ThinkingProfileName  | undefined}, flag: keyof typeof thinkingProfileFlags): void {
+function applyThinkingProfileFlag(
+  options: { thinkingProfile?: ThinkingProfileName | undefined },
+  flag: keyof typeof thinkingProfileFlags,
+): void {
   const profile = thinkingProfileFlags[flag];
   if (options.thinkingProfile && options.thinkingProfile !== profile) {
     throw new Error("--fast cannot be combined with --deep.");
@@ -688,7 +905,10 @@ function applyThinkingProfileFlag(options: { thinkingProfile?: ThinkingProfileNa
   options.thinkingProfile = profile;
 }
 
-function validateThinkingSelection(options: { thinkingLevel?: ThinkingLevel | undefined; thinkingProfile?: ThinkingProfileName  | undefined}): void {
+function validateThinkingSelection(options: {
+  thinkingLevel?: ThinkingLevel | undefined;
+  thinkingProfile?: ThinkingProfileName | undefined;
+}): void {
   if (options.thinkingLevel && options.thinkingProfile) {
     throw new Error("--thinking cannot be combined with --fast or --deep.");
   }
@@ -696,7 +916,8 @@ function validateThinkingSelection(options: { thinkingLevel?: ThinkingLevel | un
 
 function requiredValue(args: string[], index: number, flag: string): string {
   const value = args[index];
-  if (!value || value.startsWith("--")) throw new Error(`Missing value for ${flag}.`);
+  if (!value || value.startsWith("--"))
+    throw new Error(`Missing value for ${flag}.`);
   return value;
 }
 
@@ -706,13 +927,17 @@ function formatCliArg(arg: string | undefined): string {
 
 function parsePositiveInteger(value: string, flag: string): number {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`${flag} must be a positive integer.`);
+  if (!Number.isInteger(parsed) || parsed < 1)
+    throw new Error(`${flag} must be a positive integer.`);
   return parsed;
 }
 
 function parseThinkingLevel(value: string, flag: string): ThinkingLevel {
-  if ((thinkingLevels as readonly string[]).includes(value)) return value as ThinkingLevel;
-  throw new Error(`${flag} must be one of: ${thinkingLevels.join(", ")}. Got '${value}'.`);
+  const level = thinkingLevels.find((level) => level === value);
+  if (level !== undefined) return level;
+  throw new Error(
+    `${flag} must be one of: ${thinkingLevels.join(", ")}. Got '${value}'.`,
+  );
 }
 
 function parseCommaSeparatedLabels(value: string): string[] {
