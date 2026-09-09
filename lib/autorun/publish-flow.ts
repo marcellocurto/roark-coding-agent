@@ -1,3 +1,4 @@
+import { DateTime } from "effect";
 import { Workspace } from "./workspace-service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect } from "effect";
@@ -331,7 +332,7 @@ export const runPublishGate = Effect.fn("runPublishGate")(function* (
 export const createReviewerIssuesAfterPr = Effect.fn(
   "createReviewerIssuesAfterPr",
 )(function* (input: { workflowContext: WorkflowContext; prUrl: string }) {
-  yield* issueCurationPhase(input.workflowContext, undefined, {
+  yield* issueCurationPhase(input.workflowContext, {
     prUrl: input.prUrl,
   });
   const result = yield* createIssuesFromCurationPlan({
@@ -461,7 +462,13 @@ export const handleNonPublish = Effect.fn("handleNonPublish")(
       existingCommentId:
         attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
     });
-    if (ref) recordAttemptIssueComment(attemptMetadata, decision.phase, ref);
+    if (ref)
+      recordAttemptIssueComment(
+        attemptMetadata,
+        decision.phase,
+        ref,
+        DateTime.formatIso(yield* DateTime.now),
+      );
   },
 );
 const readReadinessResult = Effect.fn("readReadinessResult")(function* (

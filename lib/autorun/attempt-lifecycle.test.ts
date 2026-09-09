@@ -1,3 +1,4 @@
+import { fixedWallClock } from "../testing/clock.ts";
 import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
 import {
   readArtifact,
@@ -62,7 +63,6 @@ describe("runAutorunAttemptLifecycle", () => {
           },
         },
         {
-          clock: { now: () => new Date("2026-05-07T01:00:00.000Z") },
           runFullWorkflow: Effect.fnUntraced(function* () {
             yield* Effect.void;
             const duringWorkflow = yield* Effect.promise(() =>
@@ -98,7 +98,7 @@ describe("runAutorunAttemptLifecycle", () => {
             yield* Effect.void;
           }),
         },
-      ),
+      ).pipe(Effect.provide(fixedWallClock("2026-05-07T01:00:00.000Z"))),
     );
     const terminal = await runApplicationPromise(
       Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
@@ -131,7 +131,6 @@ describe("runAutorunAttemptLifecycle", () => {
           },
         },
         {
-          clock: { now: () => new Date("2026-05-07T01:30:00.000Z") },
           runFullWorkflow: Effect.fnUntraced(function* () {
             return (yield* Effect.void, { status: "completed" as const });
           }),
@@ -155,52 +154,54 @@ describe("runAutorunAttemptLifecycle", () => {
             yield* Effect.void;
           }),
         },
-      ).pipe(
-        provideTestAgent(
-          Effect.fnUntraced(function* (request) {
-            yield* Effect.void;
-            phases.push(request.display.phaseId);
-            expect(request.prompt).toContain("failed_verification");
-            if (request.display.phaseId === "fixLog-1") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({
-                      summary: "Addressed verification failure.",
-                    }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "refinementLog-1") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({ summary: "Refined." }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewA-1") {
-              return yield* Effect.tryPromise({
-                try: () => submitReview(request, reviewResult()),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewB-1") {
-              return yield* Effect.tryPromise({
-                try: () => submitReview(request, reviewResult()),
-                catch: (error) => error,
-              });
-            }
-            return yield* Effect.fail(
-              new Error(`unexpected phase ${request.display.phaseId}`),
-            );
-          }),
+      )
+        .pipe(Effect.provide(fixedWallClock("2026-05-07T01:30:00.000Z")))
+        .pipe(
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              yield* Effect.void;
+              phases.push(request.display.phaseId);
+              expect(request.prompt).toContain("failed_verification");
+              if (request.display.phaseId === "fixLog-1") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({
+                        summary: "Addressed verification failure.",
+                      }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "refinementLog-1") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({ summary: "Refined." }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewA-1") {
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, reviewResult()),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewB-1") {
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, reviewResult()),
+                  catch: (error) => error,
+                });
+              }
+              return yield* Effect.fail(
+                new Error(`unexpected phase ${request.display.phaseId}`),
+              );
+            }),
+          ),
         ),
-      ),
     );
     const summary = await runApplicationPromise(
       readRunSummary(path.join(fixture.workflowContext.runDir, "summary.json")),
@@ -242,7 +243,6 @@ describe("runAutorunAttemptLifecycle", () => {
           },
         },
         {
-          clock: { now: () => new Date("2026-05-07T01:45:00.000Z") },
           runFullWorkflow: Effect.fnUntraced(function* () {
             return (yield* Effect.void, { status: "completed" as const });
           }),
@@ -266,107 +266,109 @@ describe("runAutorunAttemptLifecycle", () => {
             yield* Effect.void;
           }),
         },
-      ).pipe(
-        provideTestAgent(
-          Effect.fnUntraced(function* (request) {
-            yield* Effect.void;
-            phases.push(request.display.phaseId);
-            if (request.display.phaseId === "fixLog-1") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({
-                      summary: "Partially addressed verification failure.",
-                      validation: [
-                        {
-                          command: "bun test",
-                          status: "failed",
-                          details: "Numbered review requested another fix.",
-                        },
-                      ],
-                      remainingConcerns: [
-                        "Numbered review requested another fix.",
-                      ],
-                    }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "refinementLog-1") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({ summary: "Refined." }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewA-1") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitReview(
-                    request,
-                    reviewResult([
-                      reviewFinding(
-                        "must-fix-current",
-                        "Numbered review requested another fix.",
-                      ),
-                    ]),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewB-1") {
-              return yield* Effect.tryPromise({
-                try: () => submitReview(request, reviewResult()),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "fixLog-2") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({
-                      summary: "Completed verification repair.",
-                      addressedFindingIds: [
-                        "review-a:numbered-review-requested-another-fix",
-                      ],
-                    }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "refinementLog-2") {
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitChangeReport(
-                    request,
-                    changeReport({ summary: "Refined." }),
-                  ),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewA-2") {
-              return yield* Effect.tryPromise({
-                try: () => submitReview(request, reviewResult()),
-                catch: (error) => error,
-              });
-            }
-            if (request.display.phaseId === "reviewB-2") {
-              return yield* Effect.tryPromise({
-                try: () => submitReview(request, reviewResult()),
-                catch: (error) => error,
-              });
-            }
-            return yield* Effect.fail(
-              new Error(`unexpected phase ${request.display.phaseId}`),
-            );
-          }),
+      )
+        .pipe(Effect.provide(fixedWallClock("2026-05-07T01:45:00.000Z")))
+        .pipe(
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              yield* Effect.void;
+              phases.push(request.display.phaseId);
+              if (request.display.phaseId === "fixLog-1") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({
+                        summary: "Partially addressed verification failure.",
+                        validation: [
+                          {
+                            command: "bun test",
+                            status: "failed",
+                            details: "Numbered review requested another fix.",
+                          },
+                        ],
+                        remainingConcerns: [
+                          "Numbered review requested another fix.",
+                        ],
+                      }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "refinementLog-1") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({ summary: "Refined." }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewA-1") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitReview(
+                      request,
+                      reviewResult([
+                        reviewFinding(
+                          "must-fix-current",
+                          "Numbered review requested another fix.",
+                        ),
+                      ]),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewB-1") {
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, reviewResult()),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "fixLog-2") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({
+                        summary: "Completed verification repair.",
+                        addressedFindingIds: [
+                          "review-a:numbered-review-requested-another-fix",
+                        ],
+                      }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "refinementLog-2") {
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitChangeReport(
+                      request,
+                      changeReport({ summary: "Refined." }),
+                    ),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewA-2") {
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, reviewResult()),
+                  catch: (error) => error,
+                });
+              }
+              if (request.display.phaseId === "reviewB-2") {
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, reviewResult()),
+                  catch: (error) => error,
+                });
+              }
+              return yield* Effect.fail(
+                new Error(`unexpected phase ${request.display.phaseId}`),
+              );
+            }),
+          ),
         ),
-      ),
     );
     expect(completions).toBe(2);
     expect(phases).toHaveLength(8);
@@ -424,7 +426,6 @@ describe("runAutorunAttemptLifecycle", () => {
             },
           },
           {
-            clock: { now: () => new Date("2026-05-07T02:00:00.000Z") },
             runFullWorkflow: Effect.fnUntraced(function* () {
               yield* Effect.void;
               return yield* Effect.fail(error);
@@ -442,7 +443,7 @@ describe("runAutorunAttemptLifecycle", () => {
               yield* Effect.void;
             }),
           },
-        ),
+        ).pipe(Effect.provide(fixedWallClock("2026-05-07T02:00:00.000Z"))),
       ),
       (error: unknown) =>
         error instanceof Error &&
@@ -496,7 +497,6 @@ describe("runAutorunAttemptLifecycle", () => {
             }),
           },
           {
-            clock: { now: () => new Date("2026-05-07T02:45:00.000Z") },
             runFullWorkflow: Effect.fnUntraced(function* () {
               yield* Effect.void;
               calls.push("workflow");
@@ -512,7 +512,7 @@ describe("runAutorunAttemptLifecycle", () => {
               yield* Effect.void;
             }),
           },
-        ),
+        ).pipe(Effect.provide(fixedWallClock("2026-05-07T02:45:00.000Z"))),
       ),
       (error: unknown) =>
         error instanceof Error && error.message.includes("setup failed"),
@@ -537,7 +537,6 @@ describe("runAutorunAttemptLifecycle", () => {
             issue: { number: 44, title: "Lifecycle" },
           },
           {
-            clock: { now: () => new Date("2026-05-07T03:00:00.000Z") },
             runFullWorkflow: Effect.fnUntraced(function* () {
               yield* Effect.void;
               return yield* Effect.fail(
@@ -556,7 +555,7 @@ describe("runAutorunAttemptLifecycle", () => {
               yield* Effect.void;
             }),
           },
-        ),
+        ).pipe(Effect.provide(fixedWallClock("2026-05-07T03:00:00.000Z"))),
       ),
       (error: unknown) =>
         error instanceof Error && error.message.includes("workflow exploded"),

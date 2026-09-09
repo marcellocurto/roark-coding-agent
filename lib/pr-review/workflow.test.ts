@@ -1,9 +1,6 @@
 import { Fiber, Exit, Cause } from "effect";
-import { Context, Scope } from "effect";
-import type { ApplicationServices } from "../runtime/application.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
 import {
-  type PreparedPrReviewWorkspace,
   WorkspaceCommandError,
   defaultWorkspaceConfig,
 } from "../autorun/workspace.ts";
@@ -15,147 +12,7 @@ import {
 import { GitHub } from "../github/service.ts";
 import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "../autorun/workspace-service.ts";
-import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
-type FixtureEffect<A> = Effect.Effect<
-  A,
-  unknown,
-  ApplicationServices | Scope.Scope
->;
-interface RunPrReviewDependencies {
-  fetchFeedback?:
-    | ((
-        input: Parameters<GitHub["Service"]["fetchPullRequestFeedback"]>[0],
-      ) => FixtureEffect<PullRequestFeedback>)
-    | undefined;
-  prepareWorkspace?:
-    | ((
-        input: Parameters<Workspace["Service"]["preparePrReview"]>[0],
-      ) => FixtureEffect<
-        PreparedPrReviewWorkspace & {
-          releaseLock: () => FixtureEffect<void>;
-        }
-      >)
-    | undefined;
-  runLifecycleHook?:
-    | ((
-        ...args: Parameters<Workspace["Service"]["runHook"]>
-      ) => FixtureEffect<void>)
-    | undefined;
-  agentRunner?: AgentRunner | undefined;
-  postComment?:
-    | ((
-        input: Parameters<GitHub["Service"]["postIssueComment"]>[0],
-      ) => FixtureEffect<
-        Effect.Success<ReturnType<GitHub["Service"]["postIssueComment"]>>
-      >)
-    | undefined;
-  assertWorkspace?:
-    | ((
-        input: Parameters<Workspace["Service"]["assertPinnedReview"]>[0],
-      ) => FixtureEffect<void>)
-    | undefined;
-}
-const reviewWithDependencies = Effect.fnUntraced(function* (
-  options: Parameters<typeof runPrReview>[0],
-  deps: RunPrReviewDependencies = {},
-) {
-  const services = Context.omit(Scope.Scope)(
-    yield* Effect.context<ApplicationServices>(),
-  );
-  const github = yield* GitHub;
-  const workspace = yield* Workspace;
-  const fetch = deps.fetchFeedback;
-  const prepare = deps.prepareWorkspace;
-  const hook = deps.runLifecycleHook;
-  const post = deps.postComment;
-  const assert = deps.assertWorkspace;
-  return yield* runPrReview(options).pipe(
-    Effect.provideService(GitHub, {
-      ...github,
-      ...(fetch
-        ? {
-            fetchPullRequestFeedback: (input: Parameters<typeof fetch>[0]) =>
-              fetch(input).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new GitHubRequestError({
-                      message:
-                        cause instanceof Error ? cause.message : String(cause),
-                    }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-      ...(post
-        ? {
-            postIssueComment: (input: Parameters<typeof post>[0]) =>
-              post(input).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new GitHubRequestError({
-                      message:
-                        cause instanceof Error ? cause.message : String(cause),
-                    }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-    }),
-    Effect.provideService(Workspace, {
-      ...workspace,
-      ...(prepare
-        ? {
-            preparePrReview: (input: Parameters<typeof prepare>[0]) =>
-              Effect.acquireRelease(
-                prepare(input).pipe(
-                  Effect.mapError(
-                    (cause) => new WorkspaceCommandError({ cause }),
-                  ),
-                  Effect.provide(services),
-                ),
-                (result) =>
-                  result
-                    .releaseLock()
-                    .pipe(
-                      Effect.provide(services),
-                      Effect.scoped,
-                      Effect.orDie,
-                    ),
-              ),
-          }
-        : {}),
-      ...(hook
-        ? {
-            runHook: (...args: Parameters<typeof hook>) =>
-              hook(...args).pipe(
-                Effect.mapError(
-                  (cause) => new WorkspaceCommandError({ cause }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-      ...(assert
-        ? {
-            assertPinnedReview: (input: Parameters<typeof assert>[0]) =>
-              assert(input).pipe(
-                Effect.mapError(
-                  (cause) => new WorkspaceCommandError({ cause }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-    }),
-    provideTestAgent(deps.agentRunner),
-  );
-});
+import { provideTestAgent } from "../testing/agents.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
@@ -168,7 +25,7 @@ import path from "node:path";
 import { type PullRequestFeedback } from "../github/pr.ts";
 import { type AgentRunRequest } from "../workflow/agent-runner.ts";
 import { type TerminalStream } from "../presentation/terminal.ts";
-describe("reviewWithDependencies", () => {
+describe("runPrReview", () => {
   test("sets the preparation title while workspace preparation is pending", async () => {
     let output = "";
     const stream: TerminalStream = {
@@ -190,29 +47,32 @@ describe("reviewWithDependencies", () => {
           rejectPreparation = reject;
         });
         const running = yield* Effect.forkScoped(
-          reviewWithDependencies(
-            {
-              command: "review-pr",
-              prNumber: 12,
-              cwd: "/tmp/control",
-              outDir: ".roark/runs",
-              repo: "owner/repo",
-              verifyCommand: "true",
-              comment: false,
-              workspace: defaultWorkspaceConfig,
-            },
-            {
-              fetchFeedback: Effect.fnUntraced(function* () {
+          runPrReview({
+            command: "review-pr",
+            prNumber: 12,
+            cwd: "/tmp/control",
+            outDir: ".roark/runs",
+            repo: "owner/repo",
+            verifyCommand: "true",
+            comment: false,
+            workspace: defaultWorkspaceConfig,
+          }).pipe(
+            Effect.updateService(GitHub, (service) => ({
+              ...service,
+              fetchPullRequestFeedback: Effect.fnUntraced(function* () {
                 return yield* Effect.sync(() => reviewFeedback());
               }),
-              prepareWorkspace: Effect.fnUntraced(function* () {
+            })),
+            Effect.updateService(Workspace, (service) => ({
+              ...service,
+              preparePrReview: Effect.fnUntraced(function* () {
                 preparationStarted?.();
                 return yield* Effect.tryPromise({
                   try: () => pendingPreparation,
-                  catch: (error) => error,
+                  catch: (error) => new WorkspaceCommandError({ cause: error }),
                 });
               }),
-            },
+            })),
           ),
         );
         yield* Effect.tryPromise({
@@ -241,23 +101,33 @@ describe("reviewWithDependencies", () => {
     const feedback = reviewFeedback();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* reviewWithDependencies(
-          {
-            command: "review-pr",
-            prNumber: 12,
-            cwd: control,
-            outDir: ".roark/runs",
-            repo: "owner/repo",
-            verifyCommand: "bun test",
-            comment: true,
-            workspace: defaultWorkspaceConfig,
-          },
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrReview({
+          command: "review-pr",
+          prNumber: 12,
+          cwd: control,
+          outDir: ".roark/runs",
+          repo: "owner/repo",
+          verifyCommand: "bun test",
+          comment: true,
+          workspace: defaultWorkspaceConfig,
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               yield* Effect.void;
               return feedback;
             }),
-            prepareWorkspace: Effect.fnUntraced(function* () {
+            postIssueComment: Effect.fnUntraced(function* (
+              input: Parameters<GitHub["Service"]["postIssueComment"]>[0],
+            ) {
+              yield* Effect.void;
+              publishedComments.push(input.body);
+              return { id: publishedComments.length, marker: "" };
+            }),
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrReview: Effect.fnUntraced(function* () {
               yield* Effect.void;
               return {
                 path: agent,
@@ -275,29 +145,24 @@ describe("reviewWithDependencies", () => {
                   diffStat: "lib/change.ts | 1 +",
                   inspectionCommand: `git diff merge123..${feedback.pr.headRefOid} --`,
                 },
-                releaseLock: Effect.fnUntraced(function* () {
-                  yield* Effect.void;
-                }),
               };
             }),
-            runLifecycleHook: Effect.fnUntraced(function* () {
+            runHook: Effect.fnUntraced(function* () {
               yield* Effect.void;
             }),
-            assertWorkspace: Effect.fnUntraced(function* () {
+            assertPinnedReview: Effect.fnUntraced(function* () {
               yield* Effect.void;
+              return undefined;
             }),
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               return request.display.phaseId.endsWith("a")
                 ? "## Review A: Spec and Correctness\n\n**Changes requested.**\n\nFix malformed IDs."
                 : "## Review B: Standards and Maintainability\n\n**Approved.**";
             }),
-            postComment: Effect.fnUntraced(function* (input) {
-              yield* Effect.void;
-              publishedComments.push(input.body);
-              return { id: publishedComments.length, marker: "" };
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -350,31 +215,36 @@ describe("reviewWithDependencies", () => {
     const lifecycleCalls: string[] = [];
     await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* reviewWithDependencies(
-          {
-            command: "review-pr",
-            prNumber: 12,
-            cwd: control,
-            outDir: ".roark/runs",
-            repo: "owner/repo",
-            verifyCommand: "bun test",
-            comment: false,
-            workspace: {
-              ...defaultWorkspaceConfig,
-              copyToWorktree: ["local.env"],
-            },
-            hooks: {
-              beforeRun: "bun install",
-              beforeVerify: "bun run setup-tests",
-              afterRun: "echo done",
-              timeoutMs: 1234,
-            },
+        return yield* runPrReview({
+          command: "review-pr",
+          prNumber: 12,
+          cwd: control,
+          outDir: ".roark/runs",
+          repo: "owner/repo",
+          verifyCommand: "bun test",
+          comment: false,
+          workspace: {
+            ...defaultWorkspaceConfig,
+            copyToWorktree: ["local.env"],
           },
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+          hooks: {
+            beforeRun: "bun install",
+            beforeVerify: "bun run setup-tests",
+            afterRun: "echo done",
+            timeoutMs: 1234,
+          },
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback);
             }),
-            prepareWorkspace: Effect.fnUntraced(function* (input) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrReview: Effect.fnUntraced(function* (
+              input: Parameters<Workspace["Service"]["preparePrReview"]>[0],
+            ) {
               yield* Effect.void;
               preparedCopyToWorktree = input.workspace.copyToWorktree;
               preparedRepositoryUrl = input.repositoryUrl;
@@ -395,24 +265,27 @@ describe("reviewWithDependencies", () => {
                   diffStat: "lib/change.ts | 1 +",
                   inspectionCommand: `git diff merge123..${feedback.pr.headRefOid} --`,
                 },
-                releaseLock: Effect.fnUntraced(function* () {
-                  yield* Effect.void;
-                }),
               };
             }),
-            runLifecycleHook: Effect.fnUntraced(function* (name, hooks) {
+            runHook: Effect.fnUntraced(function* (
+              name: Parameters<Workspace["Service"]["runHook"]>[0],
+              hooks: Parameters<Workspace["Service"]["runHook"]>[1],
+            ) {
               yield* Effect.void;
               lifecycleCalls.push(`${name}:${String(hooks?.timeoutMs)}`);
             }),
-            assertWorkspace: Effect.fnUntraced(function* () {
+            assertPinnedReview: Effect.fnUntraced(function* () {
               yield* Effect.void;
+              return undefined;
             }),
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               agentCalls.push(request);
               return approvedReview(request.display.phaseId);
             }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -526,22 +399,25 @@ describe("reviewWithDependencies", () => {
       },
     ];
     const result = await runApplicationPromise(
-      reviewWithDependencies(
-        {
-          command: "review-pr",
-          prNumber: 12,
-          cwd: control,
-          outDir: ".roark/runs",
-          repo: "owner/repo",
-          verifyCommand: "true",
-          comment: false,
-          workspace: defaultWorkspaceConfig,
-        },
-        {
-          fetchFeedback: Effect.fnUntraced(function* () {
+      runPrReview({
+        command: "review-pr",
+        prNumber: 12,
+        cwd: control,
+        outDir: ".roark/runs",
+        repo: "owner/repo",
+        verifyCommand: "true",
+        comment: false,
+        workspace: defaultWorkspaceConfig,
+      }).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
             return yield* Effect.sync(() => feedback);
           }),
-          prepareWorkspace: Effect.fnUntraced(function* () {
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrReview: Effect.fnUntraced(function* () {
             return {
               path: agent,
               metadata: {
@@ -558,23 +434,23 @@ describe("reviewWithDependencies", () => {
                 diffStat: "",
                 inspectionCommand: "git diff merge123..head123 --",
               },
-              releaseLock: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-              }),
             };
           }),
-          runLifecycleHook: Effect.fnUntraced(function* () {
+          runHook: Effect.fnUntraced(function* () {
             yield* Effect.void;
           }),
-          assertWorkspace: Effect.fnUntraced(function* () {
+          assertPinnedReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
+            return undefined;
           }),
-          agentRunner: Effect.fnUntraced(function* (request) {
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
             return yield* Effect.sync(() =>
               approvedReview(request.display.phaseId),
             );
           }),
-        },
+        ),
       ),
     );
     const reviewContext = await readFile(
@@ -607,22 +483,25 @@ describe("reviewWithDependencies", () => {
     const feedback = reviewFeedback();
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* reviewWithDependencies(
-          {
-            command: "review-pr",
-            prNumber: 12,
-            cwd: control,
-            outDir: ".roark/runs",
-            repo: "owner/repo",
-            verifyCommand: "bun test",
-            comment: false,
-            workspace: defaultWorkspaceConfig,
-          },
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrReview({
+          command: "review-pr",
+          prNumber: 12,
+          cwd: control,
+          outDir: ".roark/runs",
+          repo: "owner/repo",
+          verifyCommand: "bun test",
+          comment: false,
+          workspace: defaultWorkspaceConfig,
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback);
             }),
-            prepareWorkspace: Effect.fnUntraced(function* () {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrReview: Effect.fnUntraced(function* () {
               return {
                 path: agent,
                 metadata: {
@@ -639,23 +518,23 @@ describe("reviewWithDependencies", () => {
                   diffStat: "",
                   inspectionCommand: "git diff merge123..head123 --",
                 },
-                releaseLock: Effect.fnUntraced(function* () {
-                  yield* Effect.void;
-                }),
               };
             }),
-            runLifecycleHook: Effect.fnUntraced(function* () {
+            runHook: Effect.fnUntraced(function* () {
               yield* Effect.void;
             }),
-            assertWorkspace: Effect.fnUntraced(function* () {
+            assertPinnedReview: Effect.fnUntraced(function* () {
               yield* Effect.void;
+              return undefined;
             }),
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               return yield* Effect.sync(() =>
                 approvedReview(request.display.phaseId),
               );
             }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -698,19 +577,19 @@ describe("reviewWithDependencies", () => {
     let fetches = 0;
     let publications = 0;
     const result = await runApplicationPromise(
-      reviewWithDependencies(
-        {
-          command: "review-pr",
-          prNumber: 12,
-          cwd: control,
-          outDir: ".roark/runs",
-          repo: "owner/repo",
-          verifyCommand: "true",
-          comment: true,
-          workspace: defaultWorkspaceConfig,
-        },
-        {
-          fetchFeedback: Effect.fnUntraced(function* () {
+      runPrReview({
+        command: "review-pr",
+        prNumber: 12,
+        cwd: control,
+        outDir: ".roark/runs",
+        repo: "owner/repo",
+        verifyCommand: "true",
+        comment: true,
+        workspace: defaultWorkspaceConfig,
+      }).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
             yield* Effect.void;
             fetches++;
             return fetches === 1
@@ -724,7 +603,15 @@ describe("reviewWithDependencies", () => {
                   },
                 };
           }),
-          prepareWorkspace: Effect.fnUntraced(function* () {
+          postIssueComment: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            publications++;
+            return { id: publications, marker: "" };
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
             return {
               path: agent,
@@ -742,27 +629,22 @@ describe("reviewWithDependencies", () => {
                 diffStat: "",
                 inspectionCommand: "git diff merge123..head123 --",
               },
-              releaseLock: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-              }),
             };
           }),
-          runLifecycleHook: Effect.fnUntraced(function* () {
+          runHook: Effect.fnUntraced(function* () {
             yield* Effect.void;
           }),
-          assertWorkspace: Effect.fnUntraced(function* () {
+          assertPinnedReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
+            return undefined;
           }),
-          agentRunner: Effect.fnUntraced(function* () {
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* () {
             yield* Effect.void;
             return approvedReview("R1");
           }),
-          postComment: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            publications++;
-            return { id: publications, marker: "" };
-          }),
-        },
+        ),
       ),
     );
     expect(result.outcome).toBe("blocked");
@@ -796,23 +678,32 @@ describe("reviewWithDependencies", () => {
     await initAgentRepo(agent);
     const feedback = reviewFeedback();
     const run = runApplicationPromise(
-      reviewWithDependencies(
-        {
-          command: "review-pr",
-          prNumber: 12,
-          cwd: control,
-          outDir: ".roark/runs",
-          repo: "owner/repo",
-          verifyCommand: "true",
-          comment: true,
-          workspace: defaultWorkspaceConfig,
-        },
-        {
-          fetchFeedback: Effect.fnUntraced(function* () {
+      runPrReview({
+        command: "review-pr",
+        prNumber: 12,
+        cwd: control,
+        outDir: ".roark/runs",
+        repo: "owner/repo",
+        verifyCommand: "true",
+        comment: true,
+        workspace: defaultWorkspaceConfig,
+      }).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
             yield* Effect.void;
             return feedback;
           }),
-          prepareWorkspace: Effect.fnUntraced(function* () {
+          postIssueComment: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            return yield* Effect.fail(
+              new GitHubRequestError({ message: "GitHub unavailable" }),
+            );
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
             return {
               path: agent,
@@ -830,26 +721,22 @@ describe("reviewWithDependencies", () => {
                 diffStat: "",
                 inspectionCommand: "git diff merge123..head123 --",
               },
-              releaseLock: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-              }),
             };
           }),
-          runLifecycleHook: Effect.fnUntraced(function* () {
+          runHook: Effect.fnUntraced(function* () {
             yield* Effect.void;
           }),
-          assertWorkspace: Effect.fnUntraced(function* () {
+          assertPinnedReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
+            return undefined;
           }),
-          agentRunner: Effect.fnUntraced(function* () {
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* () {
             yield* Effect.void;
             return approvedReview("R1");
           }),
-          postComment: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            return yield* Effect.fail(new Error("GitHub unavailable"));
-          }),
-        },
+        ),
       ),
     );
     await assertRejects(
@@ -881,22 +768,31 @@ describe("reviewWithDependencies", () => {
     let secondReviewerFinished = false;
     let lockReleasedEarly = false;
     const run = runApplicationPromise(
-      reviewWithDependencies(
-        {
-          command: "review-pr",
-          prNumber: 12,
-          cwd: control,
-          outDir: ".roark/runs",
-          repo: "owner/repo",
-          verifyCommand: "true",
-          comment: false,
-          workspace: defaultWorkspaceConfig,
-        },
-        {
-          fetchFeedback: Effect.fnUntraced(function* () {
+      runPrReview({
+        command: "review-pr",
+        prNumber: 12,
+        cwd: control,
+        outDir: ".roark/runs",
+        repo: "owner/repo",
+        verifyCommand: "true",
+        comment: false,
+        workspace: defaultWorkspaceConfig,
+      }).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
             return yield* Effect.sync(() => feedback);
           }),
-          prepareWorkspace: Effect.fnUntraced(function* () {
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrReview: Effect.fnUntraced(function* () {
+            yield* Effect.addFinalizer(() =>
+              Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                lockReleasedEarly = !secondReviewerFinished;
+              })().pipe(Effect.orDie),
+            );
             return {
               path: agent,
               metadata: {
@@ -913,19 +809,18 @@ describe("reviewWithDependencies", () => {
                 diffStat: "",
                 inspectionCommand: "git diff merge123..head123 --",
               },
-              releaseLock: Effect.fnUntraced(function* () {
-                yield* Effect.void;
-                lockReleasedEarly = !secondReviewerFinished;
-              }),
             };
           }),
-          runLifecycleHook: Effect.fnUntraced(function* () {
+          runHook: Effect.fnUntraced(function* () {
             yield* Effect.void;
           }),
-          assertWorkspace: Effect.fnUntraced(function* () {
+          assertPinnedReview: Effect.fnUntraced(function* () {
             yield* Effect.void;
+            return undefined;
           }),
-          agentRunner: Effect.fnUntraced(function* (request) {
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
             if (request.display.phaseId === "pr-review-a")
               return yield* Effect.fail(new Error("review A unavailable"));
             yield* Effect.tryPromise({
@@ -935,7 +830,7 @@ describe("reviewWithDependencies", () => {
             secondReviewerFinished = true;
             return approvedReview("B1");
           }),
-        },
+        ),
       ),
     );
     await assertRejects(

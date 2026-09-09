@@ -8,6 +8,10 @@ This project uses [Semantic Versioning](https://semver.org/). While Roark is pre
 
 ### Changed
 
+- Unified native workflow timestamps under Effect Clock/DateTime and replaced workflow-test dependency adapters with typed service composition, preserving scoped cleanup.
+
+- Moved structured work-artifact normalization into shared field codecs, removing revision execution’s synthetic change-report dependency while preserving routing, validation, and stored formats.
+
 - Migrated persisted curation-plan and publication-history decoding to Effect Schema, preserving legacy plans, per-entry skips, and already-created identities when optional metadata is damaged.
 
 - Migrated GitHub response decoding to native Effect Schema contracts for issues, dependencies, PR feedback, paginated comments, and publishing duplicate searches. Malformed responses retain typed schema causes and cannot silently stand in for empty feedback.

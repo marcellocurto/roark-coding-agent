@@ -1,3 +1,4 @@
+import { fixedWallClock } from "../testing/clock.ts";
 import { Effect } from "effect";
 import { Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
@@ -29,7 +30,7 @@ import {
 import { triageResult } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
 const tempDirs: string[] = [];
-const fixedClock = { now: () => new Date("2026-05-06T12:00:00.000Z") };
+const fixedClock = fixedWallClock("2026-05-06T12:00:00.000Z");
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
@@ -67,7 +68,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan).toMatchObject({
       version: 2,
@@ -113,7 +116,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(1);
     const item = plan.issuesToCreate[0];
@@ -165,7 +170,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.sourceFindingIds).toEqual(["review-a:n1"]);
@@ -190,7 +197,9 @@ describe("buildIssueCurationPlan", () => {
       reviewWithLedger("None"),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toEqual([]);
     expect(plan.run.artifactPaths).not.toContain(
@@ -223,7 +232,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(1);
     const item = plan.issuesToCreate[0];
@@ -262,7 +273,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(1);
     expect(plan.issuesToCreate[0]?.classification).toBe("external-blocker");
@@ -291,7 +304,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate.map((item) => item.planItemId)).toEqual([
       "suggestion-1",
@@ -326,7 +341,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toEqual([]);
     expect(plan.rejectedCandidates).toHaveLength(1);
@@ -355,7 +372,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toEqual([]);
     expect(plan.rejectedCandidates[0]?.reason).toBe(
@@ -396,7 +415,9 @@ describe("buildIssueCurationPlan", () => {
       ),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(1);
     const item = plan.issuesToCreate[0];
@@ -449,7 +470,9 @@ describe("buildIssueCurationPlan", () => {
       ),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.issuesToCreate).toHaveLength(2);
     expect(plan.issuesToCreate.map((item) => item.sourceFindingIds)).toEqual([
@@ -493,7 +516,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     const item = plan.issuesToCreate[0];
     expect(plan.sourceIssue.title).toBe("Metadata issue title");
@@ -516,9 +541,11 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, reviewBRef(0), reviewWithLedger("None")),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {
-        prUrl: "https://github.com/owner/repo/pull/99",
-      }),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {
+          prUrl: "https://github.com/owner/repo/pull/99",
+        })
+        .pipe(Effect.provide(fixedClock)),
     );
     const item = plan.issuesToCreate[0];
     expect(plan.run.prUrl).toBe("https://github.com/owner/repo/pull/99");
@@ -546,7 +573,9 @@ describe("buildIssueCurationPlan", () => {
       writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport())),
     );
     const plan = await runApplicationPromise(
-      nativeIssueCuration.buildIssueCurationPlan(context, fixedClock, {}),
+      nativeIssueCuration
+        .buildIssueCurationPlan(context, {})
+        .pipe(Effect.provide(fixedClock)),
     );
     expect(plan.run.artifactPaths).toEqual([
       ".roark/runs/issue/42/attempts/2/issue.md",

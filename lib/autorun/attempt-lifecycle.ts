@@ -35,7 +35,6 @@ import {
   formatAttemptMetadata,
   type AttemptMetadata,
   type AttemptOutcome,
-  type Clock,
 } from "./attempts.ts";
 import type { AutorunBranchPlan } from "./branch.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
@@ -105,7 +104,6 @@ export interface AutorunAttemptResult {
 }
 
 export interface RunAutorunAttemptLifecycleInjected {
-  clock?: Clock | undefined;
   runFullWorkflow?: typeof runFullWorkflow | undefined;
   completeAutorunWorkflow?: typeof completeAutorunWorkflow | undefined;
   publishReviewLedgerComments?: typeof publishReviewLedgerComments | undefined;
@@ -128,7 +126,6 @@ export const runAutorunAttemptLifecycle = Effect.fn(
     input.workflowContext.observer ??
     (yield* createFileRunObserver(input.workflowContext));
   input = { ...input, workflowContext: { ...input.workflowContext, observer } };
-  const clock = injected.clock;
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
   const completeWorkflow =
     injected.completeAutorunWorkflow ?? completeAutorunWorkflow;
@@ -250,8 +247,7 @@ export const runAutorunAttemptLifecycle = Effect.fn(
               }),
             ),
           );
-          const endedAt =
-            clock?.now() ?? DateTime.toDateUtc(yield* DateTime.now);
+          const endedAt = DateTime.toDateUtc(yield* DateTime.now);
           attemptMetadata = formatAttemptMetadata({
             ...attemptMetadata,
             endedAt,

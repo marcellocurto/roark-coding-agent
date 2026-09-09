@@ -1,6 +1,6 @@
 import { createEventWriter, type EventWriter } from "./events.ts";
 import {
-  Clock,
+  DateTime,
   Context,
   Effect,
   type FileSystem,
@@ -173,7 +173,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     runStarted: Effect.fn("RunObserver.runStarted")(function* (
       input: Parameters<RunObserver["runStarted"]>[0] = {},
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       yield* writer.write({
         type: "run_started",
         timestamp,
@@ -198,7 +198,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     runCompleted: Effect.fn("RunObserver.runCompleted")(function* (
       input: Parameters<RunObserver["runCompleted"]>[0] = {},
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       const status = input.status ?? "completed";
       yield* writer.write({
         type: "run_completed",
@@ -215,7 +215,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     runFailed: Effect.fn("RunObserver.runFailed")(function* (
       error: Parameters<RunObserver["runFailed"]>[0],
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       const errorMessage = formatErrorMessage(error);
       yield* writer.write({
         type: "run_failed",
@@ -233,7 +233,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     phaseStarted: Effect.fn("RunObserver.phaseStarted")(function* (
       input: Parameters<RunObserver["phaseStarted"]>[0],
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       const artifactPath = observationArtifactPath(context, input);
       yield* writer.write({
         type: "phase_started",
@@ -268,7 +268,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     phaseCompleted: Effect.fn("RunObserver.phaseCompleted")(function* (
       input: Parameters<RunObserver["phaseCompleted"]>[0],
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       const artifactPath = observationArtifactPath(context, input);
       yield* writer.write({
         type: input.reused === true ? "phase_skipped" : "phase_completed",
@@ -307,7 +307,7 @@ function createRunObserver(context: WorkflowContext, writer: EventWriter) {
     phaseFailed: Effect.fn("RunObserver.phaseFailed")(function* (
       input: Parameters<RunObserver["phaseFailed"]>[0],
     ) {
-      const timestamp = new Date(yield* Clock.currentTimeMillis).toISOString();
+      const timestamp = DateTime.formatIso(yield* DateTime.now);
       const errorMessage = formatErrorMessage(input.error);
       const artifactPath = observationArtifactPath(context, input);
       yield* writer.write({

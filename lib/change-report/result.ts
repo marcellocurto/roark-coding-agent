@@ -1,113 +1,45 @@
-import { Effect, SchemaGetter, type SchemaIssue } from "effect";
+import {
+  trimmedText,
+  changedFilesSchema,
+  validationEntriesSchema,
+} from "../structured-output/fields.ts";
+import { Effect } from "effect";
 import {
   artifactContract,
-  invalidArtifact,
   type ArtifactContractError,
 } from "../structured-output/contract.ts";
-import path from "node:path";
 import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
-const nonEmptyString = (description: string) =>
-  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
-export const changedFileSchema = Schema.Struct({
-  path: nonEmptyString("Repository-relative path changed during this phase."),
-  description: nonEmptyString("What changed in this file and why."),
-});
-export const validationEntrySchema = Schema.Struct({
-  command: nonEmptyString("Exact validation command that ran or should run."),
-  status: Schema.Union([
-    Schema.Literal("passed"),
-    Schema.Literal("failed"),
-    Schema.Literal("not-run"),
-  ]),
-  details: nonEmptyString(
-    "Observed result or concrete reason the command was not run.",
-  ),
-});
 const changeReportSchemaShape = Schema.Struct({
-  summary: nonEmptyString("Concise account of the completed phase."),
-  changedFiles: Schema.mutable(Schema.Array(changedFileSchema)),
-  validation: Schema.mutable(Schema.Array(validationEntrySchema)).check(
-    Schema.isMinLength(1),
-  ),
+  summary: trimmedText("Concise account of the completed phase."),
+  changedFiles: changedFilesSchema,
+  validation: validationEntriesSchema,
   deviations: Schema.mutable(
     Schema.Array(
-      nonEmptyString(
+      trimmedText(
         "Deviation from the plan or material phase-specific decision.",
       ),
     ),
   ),
   addressedFindingIds: Schema.mutable(
     Schema.Array(
-      nonEmptyString(
-        "Workflow ID of a review finding addressed by this phase.",
-      ),
+      trimmedText("Workflow ID of a review finding addressed by this phase."),
     ),
   ),
   remainingConcerns: Schema.mutable(
     Schema.Array(
-      nonEmptyString("Concrete unresolved concern remaining after this phase."),
+      trimmedText("Concrete unresolved concern remaining after this phase."),
     ),
   ),
 });
 export type ChangeReport = (typeof changeReportSchemaShape)["Type"];
-export const normalizeChangeReport = Effect.fnUntraced(function* (
-  value: ChangeReport,
-): Effect.fn.Return<ChangeReport, SchemaIssue.Issue> {
-  const report: ChangeReport = {
-    summary: yield* requireTrimmed(value.summary, "summary"),
-    changedFiles: yield* Effect.forEach(
-      value.changedFiles,
-      Effect.fnUntraced(function* (file, index) {
-        return {
-          path: yield* validateRepositoryRelativePath(file.path.trim(), index),
-          description: yield* requireTrimmed(
-            file.description,
-            `changedFiles[${index}].description`,
-          ),
-        };
-      }),
-    ),
-    validation: yield* Effect.forEach(
-      value.validation,
-      Effect.fnUntraced(function* (entry, index) {
-        return {
-          command: yield* requireTrimmed(
-            entry.command,
-            `validation[${index}].command`,
-          ),
-          status: entry.status,
-          details: yield* requireTrimmed(
-            entry.details,
-            `validation[${index}].details`,
-          ),
-        };
-      }),
-    ),
-    deviations: yield* trimItems(value.deviations, "deviations"),
-    addressedFindingIds: yield* trimItems(
-      value.addressedFindingIds,
-      "addressedFindingIds",
-    ),
-    remainingConcerns: yield* trimItems(
-      value.remainingConcerns,
-      "remainingConcerns",
-    ),
-  };
-  yield* rejectDuplicates(
-    report.changedFiles.map((file) => file.path),
-    "changedFiles paths",
-  );
-  yield* rejectDuplicates(report.addressedFindingIds, "addressedFindingIds");
-  return report;
-});
 export const requireAddressedFindingIds = Effect.fnUntraced(function* (
   report: ChangeReport,
   expectedIds: readonly string[],
 ) {
   return yield* artifactContract(
     "Change report",
-    changeReportSchemaShape.check(
+    Schema.toType(changeReportSchemaShape).check(
       Schema.makeFilter((report) => {
         const expected = new Set(expectedIds);
         const actual = new Set(report.addressedFindingIds);
@@ -160,16 +92,20 @@ export function formatChangeReportMarkdown(
 }
 const contract = artifactContract(
   "Change report",
-  changeReportSchemaShape.pipe(
-    Schema.decode({
-      decode: SchemaGetter.transformOrFail(normalizeChangeReport),
-      encode: SchemaGetter.passthrough(),
+  changeReportSchemaShape.check(
+    Schema.makeFilter((report) => {
+      const ids = report.addressedFindingIds;
+      const duplicates = [
+        ...new Set(ids.filter((id, index) => ids.indexOf(id) !== index)),
+      ];
+      if (duplicates.length > 0)
+        return `Change report addressedFindingIds must not contain duplicates: ${duplicates.join(", ")}.`;
     }),
   ),
 );
 export const validateChangeReport = contract.decode;
 export const parseChangeReportJson = contract.parse;
-export const changeReportSchema = changeReportSchemaShape;
+export const changeReportSchema = Schema.toEncoded(changeReportSchemaShape);
 export function changeReportArtifactDefinition(input: {
   title: string;
   validate?:
@@ -190,60 +126,6 @@ export function changeReportArtifactDefinition(input: {
     formatMarkdown: (result) => formatChangeReportMarkdown(result, input.title),
   };
 }
-const validateRepositoryRelativePath = Effect.fnUntraced(function* (
-  value: string,
-  index: number,
-): Effect.fn.Return<string, SchemaIssue.Issue> {
-  if (!value)
-    return yield* invalidArtifact(
-      `Change report changedFiles[${index}].path must not be blank.`,
-    );
-  const normalized = value.replaceAll("\\", "/");
-  if (path.posix.isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
-    return yield* invalidArtifact(
-      `Change report changedFiles[${index}].path must be repository-relative.`,
-    );
-  }
-  if (normalized.split("/").includes("..")) {
-    return yield* invalidArtifact(
-      `Change report changedFiles[${index}].path must not escape the repository.`,
-    );
-  }
-  return normalized.replace(/^\.\//, "");
-});
-const requireTrimmed = Effect.fnUntraced(function* (
-  value: string,
-  field: string,
-): Effect.fn.Return<string, SchemaIssue.Issue> {
-  const trimmed = value.trim();
-  if (!trimmed)
-    return yield* invalidArtifact(`Change report ${field} must not be blank.`);
-  return trimmed;
-});
-const trimItems = Effect.fnUntraced(function* (
-  values: string[],
-  field: string,
-): Effect.fn.Return<string[], SchemaIssue.Issue> {
-  return yield* Effect.forEach(
-    values,
-    Effect.fnUntraced(function* (value, index) {
-      return yield* requireTrimmed(value, `${field}[${index}]`);
-    }),
-  );
-});
-const rejectDuplicates = Effect.fnUntraced(function* (
-  values: readonly string[],
-  field: string,
-): Effect.fn.Return<void, SchemaIssue.Issue> {
-  const duplicates = values.filter(
-    (value, index) => values.indexOf(value) !== index,
-  );
-  if (duplicates.length > 0) {
-    return yield* invalidArtifact(
-      `Change report ${field} must not contain duplicates: ${[...new Set(duplicates)].join(", ")}.`,
-    );
-  }
-});
 function renderChangedFiles(report: ChangeReport): string[] {
   return report.changedFiles.length === 0
     ? ["None."]

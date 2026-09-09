@@ -14,11 +14,7 @@ import {
 } from "../workflow/artifacts.ts";
 import { ensureRunDir, readArtifact } from "../workflow/artifacts.ts";
 
-import {
-  formatAttemptMetadata,
-  type AttemptMetadata,
-  type Clock,
-} from "./attempts.ts";
+import { formatAttemptMetadata, type AttemptMetadata } from "./attempts.ts";
 import { AttemptStore } from "./attempts.ts";
 import { autorunWorktreePath, type AutorunBranchPlan } from "./branch.ts";
 import { checkoutExistingIssueBranch } from "./branch.ts";
@@ -44,7 +40,6 @@ import { type prepareCloneWorkspace } from "./workspace.ts";
 export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
   options: ContinueCliOptions,
   injected: {
-    clock?: Clock | undefined;
     prepareCloneWorkspace?: typeof prepareCloneWorkspace | undefined;
     ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
     fetchGitHubIssue?: GitHub["Service"]["fetchGitHubIssue"] | undefined;
@@ -53,7 +48,6 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
       | undefined;
   } = {},
 ) {
-  const clock = injected.clock;
   const workspaces = yield* Workspace;
   const prepareWorkspace =
     injected.prepareCloneWorkspace ?? workspaces.prepareClone;
@@ -212,53 +206,50 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
             nextLabel: options.inProgressLabel,
           }),
         });
-        const result = yield* runAutorunAttemptLifecycle(
-          {
-            issueDir,
-            workflowContext,
-            branchPlan,
-            gateOptions: createGateOptions(
+        const result = yield* runAutorunAttemptLifecycle({
+          issueDir,
+          workflowContext,
+          branchPlan,
+          gateOptions: createGateOptions(
+            options,
+            workflowContext.controlCwd,
+            branchPlan.baseBranch,
+            parsed.repo,
+          ),
+          attemptMetadata,
+          loadIssue: () =>
+            loadIssueCandidate({
+              context: workflowContext,
               options,
-              workflowContext.controlCwd,
-              branchPlan.baseBranch,
-              parsed.repo,
+              issueNumber: attemptMetadata.issueNumber,
+            }),
+          logPrefix: "Continue",
+          inProgressOutcomeDetail: `continued at ${DateTime.formatIso(yield* DateTime.now)}`,
+          initialVerificationRepairPass,
+          beforeWorkflow: Effect.fnUntraced(function* () {
+            (yield* Presentation).line("Continuation plan:");
+            for (const line of formatContinuationPlan(continuationPlan))
+              (yield* Presentation).line(line);
+          }),
+          beforeRun: Effect.fnUntraced(function* () {
+            yield* workspaces.refreshCopy({
+              controlCwd: workflowContext.controlCwd,
+              worktreePath: workflowContext.agentCwd,
+              copyToWorktree: options.workspace?.copyToWorktree,
+            });
+            yield* workspaces.runHook(
+              "beforeRun",
+              options.hooks,
+              workflowContext.agentCwd,
+            );
+          }),
+          afterRun: () =>
+            workspaces.runHook(
+              "afterRun",
+              options.hooks,
+              workflowContext.agentCwd,
             ),
-            attemptMetadata,
-            loadIssue: () =>
-              loadIssueCandidate({
-                context: workflowContext,
-                options,
-                issueNumber: attemptMetadata.issueNumber,
-              }),
-            logPrefix: "Continue",
-            inProgressOutcomeDetail: `continued at ${clock?.now().toISOString() ?? DateTime.formatIso(yield* DateTime.now)}`,
-            initialVerificationRepairPass,
-            beforeWorkflow: Effect.fnUntraced(function* () {
-              (yield* Presentation).line("Continuation plan:");
-              for (const line of formatContinuationPlan(continuationPlan))
-                (yield* Presentation).line(line);
-            }),
-            beforeRun: Effect.fnUntraced(function* () {
-              yield* workspaces.refreshCopy({
-                controlCwd: workflowContext.controlCwd,
-                worktreePath: workflowContext.agentCwd,
-                copyToWorktree: options.workspace?.copyToWorktree,
-              });
-              yield* workspaces.runHook(
-                "beforeRun",
-                options.hooks,
-                workflowContext.agentCwd,
-              );
-            }),
-            afterRun: () =>
-              workspaces.runHook(
-                "afterRun",
-                options.hooks,
-                workflowContext.agentCwd,
-              ),
-          },
-          { clock },
-        );
+        });
         return result;
       }),
     ),

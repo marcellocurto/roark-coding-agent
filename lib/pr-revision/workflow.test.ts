@@ -1,6 +1,4 @@
 import { Fiber, Exit, Cause } from "effect";
-import { Context, Scope } from "effect";
-import type { ApplicationServices } from "../runtime/application.ts";
 import { Schema, Effect, PlatformError } from "effect";
 import { ProcessExecutionError } from "../cli/process.ts";
 import { runPrRevision } from "./workflow.ts";
@@ -9,136 +7,10 @@ import {
   applicationLayer,
 } from "../runtime/application.ts";
 import { GitHub } from "../github/service.ts";
-import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "../autorun/workspace-service.ts";
-import {
-  WorkspaceCommandError,
-  type PreparedPrRevisionWorkspace,
-} from "../autorun/workspace.ts";
-import { RevisionReporting, type RevisionSummaryInput } from "./comments.ts";
-import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
-type FixtureEffect<A> = Effect.Effect<
-  A,
-  unknown,
-  ApplicationServices | Scope.Scope
->;
-interface RunPrRevisionDependencies {
-  fetchFeedback?:
-    | ((
-        input: Parameters<GitHub["Service"]["fetchPullRequestFeedback"]>[0],
-      ) => FixtureEffect<PullRequestFeedback>)
-    | undefined;
-  prepareWorkspace?:
-    | ((
-        input: Parameters<Workspace["Service"]["preparePrRevision"]>[0],
-      ) => FixtureEffect<
-        PreparedPrRevisionWorkspace & {
-          releaseLock: () => FixtureEffect<void>;
-        }
-      >)
-    | undefined;
-  runLifecycleHook?:
-    | ((
-        ...args: Parameters<Workspace["Service"]["runHook"]>
-      ) => FixtureEffect<void>)
-    | undefined;
-  agentRunner?: AgentRunner | undefined;
-  postSummaryComment?:
-    | ((input: RevisionSummaryInput) => FixtureEffect<void>)
-    | undefined;
-}
-const runRevisionWithDependencies = Effect.fnUntraced(function* (
-  options: Parameters<typeof runPrRevision>[0],
-  deps: RunPrRevisionDependencies = {},
-) {
-  const services = Context.omit(Scope.Scope)(
-    yield* Effect.context<ApplicationServices>(),
-  );
-  const github = yield* GitHub;
-  const workspace = yield* Workspace;
-  const fetch = deps.fetchFeedback;
-  const prepare = deps.prepareWorkspace;
-  const hook = deps.runLifecycleHook;
-  const reporting = yield* RevisionReporting;
-  const summary = deps.postSummaryComment;
-  return yield* runPrRevision(options).pipe(
-    Effect.provideService(GitHub, {
-      ...github,
-      ...(fetch
-        ? {
-            fetchPullRequestFeedback: (input: Parameters<typeof fetch>[0]) =>
-              fetch(input).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new GitHubRequestError({
-                      message:
-                        cause instanceof Error ? cause.message : String(cause),
-                    }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-    }),
-    Effect.provideService(Workspace, {
-      ...workspace,
-      ...(prepare
-        ? {
-            preparePrRevision: (input: Parameters<typeof prepare>[0]) =>
-              Effect.acquireRelease(
-                prepare(input).pipe(
-                  Effect.mapError(
-                    (cause) => new WorkspaceCommandError({ cause }),
-                  ),
-                  Effect.provide(services),
-                ),
-                (result) =>
-                  result
-                    .releaseLock()
-                    .pipe(
-                      Effect.provide(services),
-                      Effect.scoped,
-                      Effect.orDie,
-                    ),
-              ),
-          }
-        : {}),
-      ...(hook
-        ? {
-            runHook: (...args: Parameters<typeof hook>) =>
-              hook(...args).pipe(
-                Effect.mapError(
-                  (cause) => new WorkspaceCommandError({ cause }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : {}),
-    }),
-    Effect.provideService(
-      RevisionReporting,
-      summary
-        ? {
-            postSummary: (input) =>
-              summary(input).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new GitHubRequestError({
-                      message:
-                        cause instanceof Error ? cause.message : String(cause),
-                    }),
-                ),
-                Effect.provide(services),
-                Effect.scoped,
-              ),
-          }
-        : reporting,
-    ),
-    provideTestAgent(deps.agentRunner),
-  );
-});
+import { WorkspaceCommandError } from "../autorun/workspace.ts";
+import { RevisionReporting } from "./comments.ts";
+import { provideTestAgent } from "../testing/agents.ts";
 import { Verification } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
@@ -188,7 +60,7 @@ async function isolatedWorkspace(
   setup?: (workspace: string) => Promise<void>,
 ): Promise<{
   workspace: string;
-  prepareWorkspace: NonNullable<RunPrRevisionDependencies["prepareWorkspace"]>;
+  prepareWorkspace: Workspace["Service"]["preparePrRevision"];
 }> {
   const workspace = await tempGitRepo();
   await setup?.(workspace);
@@ -204,9 +76,6 @@ async function isolatedWorkspace(
           cloneRemote: "origin",
           createdNow: false,
         },
-        releaseLock: Effect.fnUntraced(function* () {
-          return yield* Effect.void;
-        }),
       };
     }),
   };
@@ -286,7 +155,7 @@ function freshReviewComment(): string {
     "",
   ].join("\n");
 }
-describe("runRevisionWithDependencies", () => {
+describe("runPrRevision", () => {
   test("sets the preparation title while workspace preparation is pending", async () => {
     const cwd = process.cwd();
     let output = "";
@@ -309,18 +178,24 @@ describe("runRevisionWithDependencies", () => {
           rejectPreparation = reject;
         });
         const running = yield* Effect.forkScoped(
-          runRevisionWithDependencies(options(cwd, { yes: true }), {
-            fetchFeedback: Effect.fnUntraced(function* () {
-              return yield* Effect.sync(() => feedback());
-            }),
-            prepareWorkspace: Effect.fnUntraced(function* () {
-              preparationStarted?.();
-              return yield* Effect.tryPromise({
-                try: () => pendingPreparation,
-                catch: (error) => error,
-              });
-            }),
-          }),
+          runPrRevision(options(cwd, { yes: true })).pipe(
+            Effect.updateService(GitHub, (service) => ({
+              ...service,
+              fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+                return yield* Effect.sync(() => feedback());
+              }),
+            })),
+            Effect.updateService(Workspace, (service) => ({
+              ...service,
+              preparePrRevision: Effect.fnUntraced(function* () {
+                preparationStarted?.();
+                return yield* Effect.tryPromise({
+                  try: () => pendingPreparation,
+                  catch: (error) => new WorkspaceCommandError({ cause: error }),
+                });
+              }),
+            })),
+          ),
         );
         yield* Effect.tryPromise({
           try: () => started,
@@ -354,36 +229,44 @@ describe("runRevisionWithDependencies", () => {
       ],
     });
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(cwd), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          return yield* Effect.sync(() => feedback());
-        }),
-        prepareWorkspace: Effect.fnUntraced(function* () {
-          workspacePrepared = true;
-          return yield* Effect.succeed({
-            path: cwd,
-            metadata: {
+      runPrRevision(options(cwd)).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            return yield* Effect.sync(() => feedback());
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: Effect.fnUntraced(function* () {
+            workspacePrepared = true;
+            return yield* Effect.succeed({
               path: cwd,
-              strategy: "clone" as const,
-              cloneRemote: "origin",
-              createdNow: false,
-            },
-            releaseLock: Effect.fnUntraced(function* () {
-              return yield* Effect.void;
-            }),
-          });
-        }),
-        agentRunner: Effect.fnUntraced(function* (request) {
-          return yield* Effect.tryPromise({
-            try: () => submitRevisionPlan(request, plan),
-            catch: (error) => error,
-          });
-        }),
-        postSummaryComment: Effect.fnUntraced(function* () {
-          yield* Effect.void;
-          commentCalled = true;
-        }),
-      }),
+              metadata: {
+                path: cwd,
+                strategy: "clone" as const,
+                cloneRemote: "origin",
+                createdNow: false,
+              },
+            });
+          }),
+        })),
+        Effect.updateService(RevisionReporting, (service) => ({
+          ...service,
+          postSummary: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            commentCalled = true;
+          }),
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            return yield* Effect.tryPromise({
+              try: () => submitRevisionPlan(request, plan),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("no-action-needed");
     expect(workspacePrepared).toBe(true);
@@ -420,26 +303,37 @@ describe("runRevisionWithDependencies", () => {
     const { workspace, prepareWorkspace } = await isolatedWorkspace();
     let commentCalls = 0;
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(control), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          return yield* Effect.sync(() => feedback());
-        }),
-        prepareWorkspace,
-        agentRunner: Effect.fnUntraced(function* (request) {
-          return yield* Effect.tryPromise({
-            try: () =>
-              submitRevisionPlan(
-                request,
-                revisionPlanResult("no-action-needed"),
-              ),
-            catch: (error) => error,
-          });
-        }),
-        postSummaryComment: Effect.fnUntraced(function* () {
-          yield* Effect.void;
-          commentCalls++;
-        }),
-      }),
+      runPrRevision(options(control)).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            return yield* Effect.sync(() => feedback());
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: prepareWorkspace,
+        })),
+        Effect.updateService(RevisionReporting, (service) => ({
+          ...service,
+          postSummary: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            commentCalls++;
+          }),
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitRevisionPlan(
+                  request,
+                  revisionPlanResult("no-action-needed"),
+                ),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("no-action-needed");
     expect(result.context.agentCwd).toBe(workspace);
@@ -464,26 +358,37 @@ describe("runRevisionWithDependencies", () => {
     const { prepareWorkspace } = await isolatedWorkspace();
     let commentCalled = false;
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(control, { comment: false }), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          return yield* Effect.sync(() => feedback());
-        }),
-        prepareWorkspace,
-        agentRunner: Effect.fnUntraced(function* (request) {
-          return yield* Effect.tryPromise({
-            try: () =>
-              submitRevisionPlan(
-                request,
-                revisionPlanResult("no-action-needed"),
-              ),
-            catch: (error) => error,
-          });
-        }),
-        postSummaryComment: Effect.fnUntraced(function* () {
-          yield* Effect.void;
-          commentCalled = true;
-        }),
-      }),
+      runPrRevision(options(control, { comment: false })).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            return yield* Effect.sync(() => feedback());
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: prepareWorkspace,
+        })),
+        Effect.updateService(RevisionReporting, (service) => ({
+          ...service,
+          postSummary: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            commentCalled = true;
+          }),
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitRevisionPlan(
+                  request,
+                  revisionPlanResult("no-action-needed"),
+                ),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("no-action-needed");
     expect(commentCalled).toBe(false);
@@ -495,48 +400,60 @@ describe("runRevisionWithDependencies", () => {
     const reviewComment = freshReviewComment();
     let plannerSawFinding = false;
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(control, { comment: false }), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          yield* Effect.void;
-          const value = feedback();
-          const comment = { author: "roark-bot", body: reviewComment };
-          return { ...value, comments: [comment], plannerComments: [comment] };
-        }),
-        prepareWorkspace,
-        agentRunner: Effect.fnUntraced(function* (request) {
-          const artifact = yield* Effect.tryPromise({
-            try: () =>
-              readFile(
-                path.join(
-                  request.cwd,
-                  ".roark",
-                  "runs",
-                  "pr",
-                  "12",
-                  "revision-1",
-                  "pr-feedback.json",
+      runPrRevision(options(control, { comment: false })).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            const value = feedback();
+            const comment = { author: "roark-bot", body: reviewComment };
+            return {
+              ...value,
+              comments: [comment],
+              plannerComments: [comment],
+            };
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: prepareWorkspace,
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            const artifact = yield* Effect.tryPromise({
+              try: () =>
+                readFile(
+                  path.join(
+                    request.cwd,
+                    ".roark",
+                    "runs",
+                    "pr",
+                    "12",
+                    "revision-1",
+                    "pr-feedback.json",
+                  ),
+                  "utf8",
                 ),
-                "utf8",
-              ),
-            catch: (error) => error,
-          });
-          plannerSawFinding =
-            artifact.includes("Preserve the public response contract") &&
-            artifact.includes('"id": "comment:1"') &&
-            request.prompt.includes(
-              "pr-feedback.json as the canonical PR feedback artifact",
-            ) &&
-            !request.prompt.includes("- pr-feedback.md");
-          return yield* Effect.tryPromise({
-            try: () =>
-              submitRevisionPlan(
-                request,
-                revisionPlanResult("no-action-needed"),
-              ),
-            catch: (error) => error,
-          });
-        }),
-      }),
+              catch: (error) => error,
+            });
+            plannerSawFinding =
+              artifact.includes("Preserve the public response contract") &&
+              artifact.includes('"id": "comment:1"') &&
+              request.prompt.includes(
+                "pr-feedback.json as the canonical PR feedback artifact",
+              ) &&
+              !request.prompt.includes("- pr-feedback.md");
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitRevisionPlan(
+                  request,
+                  revisionPlanResult("no-action-needed"),
+                ),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("no-action-needed");
     expect(plannerSawFinding).toBe(true);
@@ -552,26 +469,37 @@ describe("runRevisionWithDependencies", () => {
     });
     let commentCalls = 0;
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(control), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          return yield* Effect.sync(() => feedback());
-        }),
-        prepareWorkspace,
-        agentRunner: Effect.fnUntraced(function* (request) {
-          return yield* Effect.tryPromise({
-            try: () =>
-              submitRevisionPlan(
-                request,
-                revisionPlanResult("no-action-needed"),
-              ),
-            catch: (error) => error,
-          });
-        }),
-        postSummaryComment: Effect.fnUntraced(function* () {
-          yield* Effect.void;
-          commentCalls++;
-        }),
-      }),
+      runPrRevision(options(control)).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            return yield* Effect.sync(() => feedback());
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: prepareWorkspace,
+        })),
+        Effect.updateService(RevisionReporting, (service) => ({
+          ...service,
+          postSummary: Effect.fnUntraced(function* () {
+            yield* Effect.void;
+            commentCalls++;
+          }),
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitRevisionPlan(
+                  request,
+                  revisionPlanResult("no-action-needed"),
+                ),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("no-action-needed");
     expect(result.context.revision).toBe(2);
@@ -588,39 +516,54 @@ describe("runRevisionWithDependencies", () => {
     let commentCalled = false;
     let dispositionDetails: string[] | undefined;
     const result = await runApplicationPromise(
-      runRevisionWithDependencies(options(control), {
-        fetchFeedback: Effect.fnUntraced(function* () {
-          return yield* Effect.sync(() => feedback());
-        }),
-        prepareWorkspace,
-        agentRunner: Effect.fnUntraced(function* (request) {
-          yield* Effect.void;
-          fileEditingToolCalls.push(request.fileEditingToolsEnabled);
-          return yield* Effect.tryPromise({
-            try: () =>
-              submitRevisionPlan(
-                request,
-                revisionPlanResult("needs-human", {
-                  feedbackItems: [
-                    {
-                      id: "pr:12",
-                      sourceIds: ["pr:12"],
-                      summary: "Feedback needs an explicit product decision.",
-                      classification: "needs-human",
-                      rationale: "Please decide.",
-                    },
-                  ],
-                }),
-              ),
-            catch: (error) => error,
-          });
-        }),
-        postSummaryComment: Effect.fnUntraced(function* (summary) {
-          yield* Effect.void;
-          commentCalled = true;
-          dispositionDetails = summary.dispositions.map((item) => item.details);
-        }),
-      }),
+      runPrRevision(options(control)).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+            return yield* Effect.sync(() => feedback());
+          }),
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          preparePrRevision: prepareWorkspace,
+        })),
+        Effect.updateService(RevisionReporting, (service) => ({
+          ...service,
+          postSummary: Effect.fnUntraced(function* (
+            summary: Parameters<RevisionReporting["Service"]["postSummary"]>[0],
+          ) {
+            yield* Effect.void;
+            commentCalled = true;
+            dispositionDetails = summary.dispositions.map(
+              (item) => item.details,
+            );
+          }),
+        })),
+        provideTestAgent(
+          Effect.fnUntraced(function* (request) {
+            yield* Effect.void;
+            fileEditingToolCalls.push(request.fileEditingToolsEnabled);
+            return yield* Effect.tryPromise({
+              try: () =>
+                submitRevisionPlan(
+                  request,
+                  revisionPlanResult("needs-human", {
+                    feedbackItems: [
+                      {
+                        id: "pr:12",
+                        sourceIds: ["pr:12"],
+                        summary: "Feedback needs an explicit product decision.",
+                        classification: "needs-human",
+                        rationale: "Please decide.",
+                      },
+                    ],
+                  }),
+                ),
+              catch: (error) => error,
+            });
+          }),
+        ),
+      ),
     );
     expect(result.outcome).toBe("needs-human");
     expect(fileEditingToolCalls).toEqual([false]);
@@ -634,14 +577,27 @@ describe("runRevisionWithDependencies", () => {
     const thinkingLevels: string[] = [];
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
+        return yield* runPrRevision(
           options(control, { thinkingLevel: "medium" }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        ).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            prepareWorkspace,
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               thinkingLevels.push(request.thinkingLevel);
               if (request.fileEditingToolsEnabled)
@@ -661,10 +617,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-            postSummaryComment: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -692,14 +645,26 @@ describe("runRevisionWithDependencies", () => {
     let writableCalls = 0;
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
-          options(control, { maxFixPasses: 3 }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrRevision(options(control, { maxFixPasses: 3 })).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            prepareWorkspace,
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              commentCalled = true;
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               calls++;
               if (request.fileEditingToolsEnabled) {
@@ -739,11 +704,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-            postSummaryComment: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              commentCalled = true;
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -783,14 +744,19 @@ describe("runRevisionWithDependencies", () => {
     let calls = 0;
     const running = Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
-          options(control, { comment: false }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrRevision(options(control, { comment: false })).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            prepareWorkspace,
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               calls++;
               if (request.fileEditingToolsEnabled) {
@@ -811,7 +777,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -849,14 +815,33 @@ describe("runRevisionWithDependencies", () => {
     const writableArtifacts: string[] = [];
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
-          options(control, { maxFixPasses: 3 }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrRevision(options(control, { maxFixPasses: 3 })).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            prepareWorkspace,
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* (
+              summary: Parameters<
+                RevisionReporting["Service"]["postSummary"]
+              >[0],
+            ) {
+              yield* Effect.void;
+              commentCalls++;
+              finalDispositions = summary.dispositions.map(
+                ({ feedbackId, details }) => ({ feedbackId, details }),
+              );
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               calls++;
               if (request.fileEditingToolsEnabled) {
@@ -897,14 +882,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-            postSummaryComment: Effect.fnUntraced(function* (summary) {
-              yield* Effect.void;
-              commentCalls++;
-              finalDispositions = summary.dispositions.map(
-                ({ feedbackId, details }) => ({ feedbackId, details }),
-              );
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -972,14 +950,26 @@ describe("runRevisionWithDependencies", () => {
     let commentCalls = 0;
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
-          options(control, { maxFixPasses: 1 }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        return yield* runPrRevision(options(control, { maxFixPasses: 1 })).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            prepareWorkspace,
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              commentCalls++;
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               yield* Effect.void;
               calls++;
               if (request.fileEditingToolsEnabled) {
@@ -1016,11 +1006,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-            postSummaryComment: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              commentCalls++;
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -1092,7 +1078,7 @@ describe("runRevisionWithDependencies", () => {
     let calls = 0;
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(
+        return yield* runPrRevision(
           options(control, {
             remote: "upstream",
             workspace: {
@@ -1108,11 +1094,21 @@ describe("runRevisionWithDependencies", () => {
                 "git config user.email roark@example.invalid && git config user.name 'Roark Test'",
             },
           }),
-          {
-            fetchFeedback: Effect.fnUntraced(function* () {
+        ).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
               return yield* Effect.sync(() => feedback());
             }),
-            agentRunner: Effect.fnUntraced(function* (request) {
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
               calls++;
               agentCwds.push(request.cwd);
               if (request.fileEditingToolsEnabled) {
@@ -1142,10 +1138,7 @@ describe("runRevisionWithDependencies", () => {
                 catch: (error) => error,
               });
             }),
-            postSummaryComment: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-            }),
-          },
+          ),
         );
       }).pipe(
         Effect.provideService(Verification, {
@@ -1212,41 +1205,52 @@ describe("runRevisionWithDependencies", () => {
     let commentCalls = 0;
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        return yield* runRevisionWithDependencies(options(control), {
-          fetchFeedback: Effect.fnUntraced(function* () {
-            return yield* Effect.sync(() => feedback());
-          }),
-          prepareWorkspace,
-          agentRunner: Effect.fnUntraced(function* (request) {
-            calls++;
-            if (request.fileEditingToolsEnabled) {
-              yield* Effect.tryPromise({
-                try: () =>
-                  Bun.write(path.join(request.cwd, "fixed.txt"), "fixed\n"),
-                catch: (error) => error,
-              });
+        return yield* runPrRevision(options(control)).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: Effect.fnUntraced(function* () {
+              return yield* Effect.sync(() => feedback());
+            }),
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.updateService(RevisionReporting, (service) => ({
+            ...service,
+            postSummary: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              commentCalls++;
+            }),
+          })),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              calls++;
+              if (request.fileEditingToolsEnabled) {
+                yield* Effect.tryPromise({
+                  try: () =>
+                    Bun.write(path.join(request.cwd, "fixed.txt"), "fixed\n"),
+                  catch: (error) => error,
+                });
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitRevisionExecution(request, revisionExecutionResult()),
+                  catch: (error) => error,
+                });
+              }
+              if (calls === 1)
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitRevisionPlan(request, revisionPlanResult("revise")),
+                  catch: (error) => error,
+                });
               return yield* Effect.tryPromise({
-                try: () =>
-                  submitRevisionExecution(request, revisionExecutionResult()),
+                try: () => submitReview(request, reviewResult()),
                 catch: (error) => error,
               });
-            }
-            if (calls === 1)
-              return yield* Effect.tryPromise({
-                try: () =>
-                  submitRevisionPlan(request, revisionPlanResult("revise")),
-                catch: (error) => error,
-              });
-            return yield* Effect.tryPromise({
-              try: () => submitReview(request, reviewResult()),
-              catch: (error) => error,
-            });
-          }),
-          postSummaryComment: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            commentCalls++;
-          }),
-        });
+            }),
+          ),
+        );
       }).pipe(
         Effect.provideService(Verification, {
           execute: ({ command }) =>

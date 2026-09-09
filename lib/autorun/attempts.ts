@@ -101,12 +101,6 @@ const parseAttemptMetadata = Schema.decodeUnknownSync(
   Schema.fromJsonString(attemptMetadataSchema),
 );
 
-export interface Clock {
-  now(): Date;
-}
-
-export const defaultClock: Clock = { now: () => new Date() };
-
 export interface FormatAttemptMetadataInput {
   attempt: number;
   issueNumber: number;
@@ -162,7 +156,7 @@ export function recordAttemptIssueComment(
   metadata: AttemptMetadata,
   phase: string,
   ref: { id: number; url?: string | undefined; marker: string },
-  updatedAt: Date | string = new Date(),
+  updatedAt: Date | string,
 ): AttemptMetadata {
   metadata.githubComments ??= {};
   metadata.githubComments.issue ??= {};

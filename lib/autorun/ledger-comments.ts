@@ -1,3 +1,4 @@
+import { DateTime } from "effect";
 import { GitHub } from "../github/service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect } from "effect";
@@ -157,7 +158,12 @@ export const publishIssueLedgerComment = Effect.fn("publishIssueLedgerComment")(
         existingCommentId:
           input.attemptMetadata.githubComments?.issue?.[input.phase]?.id,
       });
-      recordAttemptIssueComment(input.attemptMetadata, input.phase, ref);
+      recordAttemptIssueComment(
+        input.attemptMetadata,
+        input.phase,
+        ref,
+        DateTime.formatIso(yield* DateTime.now),
+      );
     }).pipe(
       Effect.catch(
         Effect.fnUntraced(function* (error) {
@@ -245,7 +251,6 @@ export const formatReviewLedgerComment = Effect.fn("formatReviewLedgerComment")(
     return [marker, "", content.trimEnd()].join("\n") + "\n";
   },
 );
-
 export function formatPrCreatedComment(input: {
   issueNumber: number;
   attempt: number;

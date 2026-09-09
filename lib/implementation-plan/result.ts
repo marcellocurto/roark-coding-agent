@@ -1,3 +1,4 @@
+import { trimmedText, trimmedScalar } from "../structured-output/fields.ts";
 import { Effect, SchemaGetter, type SchemaIssue } from "effect";
 import {
   artifactContract,
@@ -10,10 +11,8 @@ import {
   normalizeAdditionalSections,
   renderAdditionalSectionsMarkdown,
 } from "../structured-output/additional-sections.ts";
-const nonEmptyString = (description: string) =>
-  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
 const implementationPlanResultSchemaShape = Schema.Struct({
-  issue: nonEmptyString("Issue or requirement being planned."),
+  issue: trimmedScalar("Issue or requirement being planned."),
   workClassification: Schema.Union([
     Schema.Literal("frontend"),
     Schema.Literal("backend"),
@@ -22,41 +21,41 @@ const implementationPlanResultSchemaShape = Schema.Struct({
     Schema.Literal("test-only"),
     Schema.Literal("unknown"),
   ]),
-  goal: nonEmptyString("Concrete implementation goal."),
+  goal: trimmedScalar("Concrete implementation goal."),
   nonGoals: Schema.mutable(
-    Schema.Array(nonEmptyString("Explicitly excluded work.")),
+    Schema.Array(trimmedText("Explicitly excluded work.")),
   ),
   currentCodeFindings: Schema.mutable(
     Schema.Array(
-      nonEmptyString("Repository-grounded finding relevant to the plan."),
+      trimmedText("Repository-grounded finding relevant to the plan."),
     ),
   ),
   simplificationsFromDraft: Schema.mutable(
     Schema.Array(
-      nonEmptyString("Complexity removed or narrowed during refinement."),
+      trimmedText("Complexity removed or narrowed during refinement."),
     ),
   ),
   proposedChanges: Schema.mutable(
-    Schema.Array(nonEmptyString("Concrete proposed behavior or code change.")),
+    Schema.Array(trimmedText("Concrete proposed behavior or code change.")),
   ),
   filesLikelyToChange: Schema.mutable(
     Schema.Array(
-      nonEmptyString("Repository-relative file likely to change and why."),
+      trimmedText("Repository-relative file likely to change and why."),
     ),
   ),
   detailedSteps: Schema.mutable(
-    Schema.Array(nonEmptyString("Ordered implementation step.")),
+    Schema.Array(trimmedText("Ordered implementation step.")),
   ),
   testsAndValidation: Schema.mutable(
     Schema.Array(
-      nonEmptyString("Validation step and the regression it protects against."),
+      trimmedText("Validation step and the regression it protects against."),
     ),
   ),
   risks: Schema.mutable(
-    Schema.Array(nonEmptyString("Concrete implementation risk.")),
+    Schema.Array(trimmedText("Concrete implementation risk.")),
   ),
   rollbackPlan: Schema.mutable(
-    Schema.Array(nonEmptyString("Concrete rollback action.")),
+    Schema.Array(trimmedText("Concrete rollback action.")),
   ),
   readyForImplementation: Schema.Boolean,
   additionalSections: Schema.optional(additionalSectionsSchema),
@@ -76,29 +75,6 @@ const normalizeImplementationPlanResult = Effect.fnUntraced(function* (
   );
   const result: ImplementationPlanResult = {
     ...value,
-    issue: value.issue.trim(),
-    goal: value.goal.trim(),
-    nonGoals: yield* trimItems(value.nonGoals, "nonGoals"),
-    currentCodeFindings: yield* trimItems(
-      value.currentCodeFindings,
-      "currentCodeFindings",
-    ),
-    simplificationsFromDraft: yield* trimItems(
-      value.simplificationsFromDraft,
-      "simplificationsFromDraft",
-    ),
-    proposedChanges: yield* trimItems(value.proposedChanges, "proposedChanges"),
-    filesLikelyToChange: yield* trimItems(
-      value.filesLikelyToChange,
-      "filesLikelyToChange",
-    ),
-    detailedSteps: yield* trimItems(value.detailedSteps, "detailedSteps"),
-    testsAndValidation: yield* trimItems(
-      value.testsAndValidation,
-      "testsAndValidation",
-    ),
-    risks: yield* trimItems(value.risks, "risks"),
-    rollbackPlan: yield* trimItems(value.rollbackPlan, "rollbackPlan"),
     ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   if (result.readyForImplementation) {
@@ -192,23 +168,17 @@ const implementationPlanHeadings = [
 const contract = artifactContract(
   "Implementation plan",
   implementationPlanResultSchemaShape.pipe(
-    Schema.decodeTo(
-      Schema.Struct({
-        ...implementationPlanResultSchemaShape.fields,
-        issue: Schema.String,
-        goal: Schema.String,
-      }),
-      {
-        decode: SchemaGetter.transformOrFail(normalizeImplementationPlanResult),
-        encode: SchemaGetter.passthrough(),
-      },
-    ),
+    Schema.decode({
+      decode: SchemaGetter.transformOrFail(normalizeImplementationPlanResult),
+      encode: SchemaGetter.passthrough(),
+    }),
   ),
 );
 export const validateImplementationPlanResult = contract.decode;
 export const parseImplementationPlanResultJson = contract.parse;
-export const implementationPlanResultSchema =
-  implementationPlanResultSchemaShape;
+export const implementationPlanResultSchema = Schema.toEncoded(
+  implementationPlanResultSchemaShape,
+);
 export function implementationPlanArtifactDefinition(
   kind: ImplementationPlanKind,
 ): StructuredArtifactDefinition<ImplementationPlanResult> {
@@ -221,22 +191,6 @@ export function implementationPlanArtifactDefinition(
     formatMarkdown: (result) => formatImplementationPlanMarkdown(result, kind),
   };
 }
-const trimItems = Effect.fnUntraced(function* (
-  values: string[],
-  field: string,
-): Effect.fn.Return<string[], SchemaIssue.Issue> {
-  return yield* Effect.forEach(
-    values,
-    Effect.fnUntraced(function* (value, index) {
-      const trimmed = value.trim();
-      if (!trimmed)
-        return yield* invalidArtifact(
-          `Implementation plan ${field}[${index}] must not be blank.`,
-        );
-      return trimmed;
-    }),
-  );
-});
 function renderList(values: readonly string[]): string[] {
   return values.length === 0 ? ["None."] : values.map((value) => `- ${value}`);
 }

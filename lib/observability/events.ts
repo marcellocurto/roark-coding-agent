@@ -1,4 +1,4 @@
-import { Clock, Effect, FileSystem } from "effect";
+import { DateTime, Effect, FileSystem } from "effect";
 import path from "node:path";
 
 export interface ObservabilityEvent {
@@ -15,7 +15,6 @@ export interface EventWriter {
 }
 
 export interface EventWriterOptions {
-  now?: (() => Date) | undefined;
   warn?: ((message: string) => void) | undefined;
 }
 
@@ -42,16 +41,12 @@ export const createEventWriter = Effect.fn("createEventWriter")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const eventsPath = path.join(runDir, "events.jsonl");
-  const now = options.now;
   const warn = options.warn ?? defaultWarn;
   const write = Effect.fn("writeRunEvent")(
     function* (event: ObservabilityEvent) {
       yield* fs.makeDirectory(runDir, { recursive: true });
       const sanitized = sanitizeEvent({
-        timestamp: (now
-          ? now()
-          : new Date(yield* Clock.currentTimeMillis)
-        ).toISOString(),
+        timestamp: DateTime.formatIso(yield* DateTime.now),
         ...event,
       });
       yield* fs.writeFileString(eventsPath, `${JSON.stringify(sanitized)}\n`, {

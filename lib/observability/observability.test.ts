@@ -1,4 +1,5 @@
-import { Schema } from "effect";
+import { fixedWallClock } from "../testing/clock.ts";
+import { Effect, Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -40,21 +41,17 @@ describe("observability event writing", () => {
   test("appends sanitized JSONL events", async () => {
     const cwd = await tempDir();
     const runDir = path.join(cwd, ".roark/runs/issue/42");
-    const writer = await runApplicationPromise(
-      createEventWriter(runDir, {
-        now: () => new Date("2026-01-01T00:00:00.000Z"),
-      }),
-    );
     await runApplicationPromise(
-      writer.write({
-        type: "tool_started",
-        toolName: "bash",
-        args: { command: "secret" },
-        result: "hidden",
-      }),
-    );
-    await runApplicationPromise(
-      writer.write({ type: "phase_completed", phase: "triage" }),
+      Effect.gen(function* () {
+        const writer = yield* createEventWriter(runDir);
+        yield* writer.write({
+          type: "tool_started",
+          toolName: "bash",
+          args: { command: "secret" },
+          result: "hidden",
+        });
+        yield* writer.write({ type: "phase_completed", phase: "triage" });
+      }).pipe(Effect.provide(fixedWallClock("2026-01-01T00:00:00.000Z"))),
     );
     const lines = (await readFile(path.join(runDir, "events.jsonl"), "utf8"))
       .trim()

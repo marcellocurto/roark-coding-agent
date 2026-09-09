@@ -1,5 +1,5 @@
 import { Presentation } from "../runtime/services.ts";
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import { runProcessOrThrow } from "../cli/process.ts";
 
 export interface PreImplementationBaseline {
@@ -86,7 +86,7 @@ export const capturePreImplementationBaseline = Effect.fn(
   })).trim();
   return {
     head,
-    capturedAt: new Date().toISOString(),
+    capturedAt: DateTime.formatIso(yield* DateTime.now),
     excludes: [".roark"] as const,
   };
 });

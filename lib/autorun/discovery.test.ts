@@ -1,3 +1,4 @@
+import { fixedWallClock } from "../testing/clock.ts";
 import type { ApplicationServices } from "../runtime/application.ts";
 import type { Scope } from "effect";
 import * as nativePhases from "../workflow/phases.ts";
@@ -586,7 +587,6 @@ describe("runAutoDiscovery", () => {
         },
         {
           ...noOpLabelContract,
-          clock: { now: () => new Date("2026-05-07T00:00:00.000Z") },
           fetchGitHubIssue: Effect.fnUntraced(function* () {
             yield* Effect.void;
             fetchCount += 1;
@@ -658,7 +658,7 @@ describe("runAutoDiscovery", () => {
             return { outcome: "published" as const, outcomeDetail: null };
           }),
         },
-      ),
+      ).pipe(Effect.provide(fixedWallClock("2026-05-07T00:00:00.000Z"))),
     );
     expect(calls).toEqual([
       "preflight",

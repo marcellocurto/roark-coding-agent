@@ -1,14 +1,14 @@
+import {
+  trimmedText,
+  changedFilesSchema,
+  validationEntriesSchema,
+} from "../structured-output/fields.ts";
 import { Effect, SchemaGetter, type SchemaIssue } from "effect";
 import {
   artifactContract,
   invalidArtifact,
 } from "../structured-output/contract.ts";
 import { Schema } from "effect";
-import {
-  changedFileSchema,
-  validationEntrySchema,
-  normalizeChangeReport,
-} from "../change-report/result.ts";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
 import {
   additionalSectionsSchema,
@@ -19,8 +19,6 @@ import type {
   RevisionFeedbackClassification,
   RevisionPlanResult,
 } from "./plan.ts";
-const nonEmptyString = (description: string) =>
-  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
 const feedbackDispositionStatusSchema = Schema.Union([
   Schema.Literal("addressed"),
   Schema.Literal("already-addressed"),
@@ -29,24 +27,22 @@ const feedbackDispositionStatusSchema = Schema.Union([
   Schema.Literal("skipped"),
 ]);
 const revisionExecutionResultSchemaShape = Schema.Struct({
-  summary: nonEmptyString("Concise account of the completed revision work."),
+  summary: trimmedText("Concise account of the completed revision work."),
   feedbackDispositions: Schema.mutable(
     Schema.Array(
       Schema.Struct({
-        feedbackId: nonEmptyString(
+        feedbackId: trimmedText(
           "Stable id of the corresponding revision-plan feedback item.",
         ),
         status: feedbackDispositionStatusSchema,
-        details: nonEmptyString(
+        details: trimmedText(
           "Concrete resolution or reason for the final disposition.",
         ),
       }),
     ),
   ),
-  changedFiles: Schema.mutable(Schema.Array(changedFileSchema)),
-  validation: Schema.mutable(Schema.Array(validationEntrySchema)).check(
-    Schema.isMinLength(1),
-  ),
+  changedFiles: changedFilesSchema,
+  validation: validationEntriesSchema,
   additionalSections: Schema.optional(additionalSectionsSchema),
 });
 export type RevisionExecutionResult =
@@ -65,14 +61,6 @@ const normalizeRevisionExecutionResult = Effect.fnUntraced(function* (
   value: RevisionExecutionResult,
   plan?: RevisionPlanResult,
 ): Effect.fn.Return<RevisionExecutionResult, SchemaIssue.Issue> {
-  const common = yield* normalizeChangeReport({
-    summary: value.summary,
-    changedFiles: value.changedFiles,
-    validation: value.validation,
-    deviations: [],
-    addressedFindingIds: [],
-    remainingConcerns: [],
-  });
   const additionalSections = yield* normalizeAdditionalSections(
     value.additionalSections,
     {
@@ -86,25 +74,7 @@ const normalizeRevisionExecutionResult = Effect.fnUntraced(function* (
     },
   );
   const result = {
-    summary: common.summary,
-    feedbackDispositions: yield* Effect.forEach(
-      value.feedbackDispositions,
-      Effect.fnUntraced(function* (entry, index) {
-        return {
-          feedbackId: yield* requireTrimmed(
-            entry.feedbackId,
-            `feedbackDispositions[${index}].feedbackId`,
-          ),
-          status: entry.status,
-          details: yield* requireTrimmed(
-            entry.details,
-            `feedbackDispositions[${index}].details`,
-          ),
-        };
-      }),
-    ),
-    changedFiles: common.changedFiles,
-    validation: common.validation,
+    ...value,
     ...(additionalSections === undefined ? {} : { additionalSections }),
   } satisfies RevisionExecutionResult;
   yield* assertUniqueDispositionIds(result);
@@ -162,7 +132,9 @@ export const parseRevisionExecutionResultJson = Effect.fnUntraced(function* (
 ) {
   return yield* contract(undefined).parse(content);
 });
-export const revisionExecutionResultSchema = revisionExecutionResultSchemaShape;
+export const revisionExecutionResultSchema = Schema.toEncoded(
+  revisionExecutionResultSchemaShape,
+);
 export function revisionExecutionArtifactDefinition(
   title: string,
   plan: RevisionPlanResult,
@@ -196,17 +168,6 @@ export function revisionFeedbackDispositions(
     };
   });
 }
-const requireTrimmed = Effect.fnUntraced(function* (
-  value: string,
-  field: string,
-): Effect.fn.Return<string, SchemaIssue.Issue> {
-  const trimmed = value.trim();
-  if (!trimmed)
-    return yield* invalidArtifact(
-      `Revision execution ${field} must not be blank.`,
-    );
-  return trimmed;
-});
 const assertUniqueDispositionIds = Effect.fnUntraced(function* (
   result: RevisionExecutionResult,
 ): Effect.fn.Return<void, SchemaIssue.Issue> {

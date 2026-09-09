@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
   writeArtifact,
@@ -136,41 +136,36 @@ describe("review pass selection", () => {
     await runApplicationPromise(
       writeArtifact(context, refinementLogRef(0), refinementLog()),
     );
-    let rejectReviewA: (error: Error) => void = () => undefined;
-    const pendingReviewA = new Promise<string>((_resolve, reject) => {
-      rejectReviewA = reject;
-    });
-    const startedPhases = new Set<string>();
-    const run = runApplicationPromise(
-      nativePhases.reviewPhase(context, 0).pipe(
-        provideTestAgent(
-          Effect.fnUntraced(function* (request) {
-            startedPhases.add(request.display.phaseId);
-            if (request.display.phaseId === "reviewA-0")
-              return yield* Effect.tryPromise({
-                try: () => pendingReviewA,
-                catch: (error) => error,
-              });
-            return yield* Effect.tryPromise({
-              try: () => submitReview(request, approveReview()),
-              catch: (error) => error,
-            });
-          }),
-        ),
-      ),
-    );
-    for (let turn = 0; turn < 50 && !startedPhases.has("reviewB-0"); turn++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    const reviewBStartedBeforeReviewAFinished = startedPhases.has("reviewB-0");
-    rejectReviewA(new Error("review A unavailable"));
-    const error = await run.then(
-      () => undefined,
-      (reason: unknown) => reason,
-    );
-    expect(reviewBStartedBeforeReviewAFinished).toBe(true);
-    expect(error instanceof Error ? error.message : String(error)).toContain(
-      "review A unavailable",
+    await runApplicationPromise(
+      Effect.gen(function* () {
+        const pendingReviewA = yield* Deferred.make<string, Error>();
+        const reviewAStarted = yield* Deferred.make<undefined>();
+        const reviewBStarted = yield* Deferred.make<undefined>();
+        const run = yield* Effect.forkScoped(
+          nativePhases.reviewPhase(context, 0).pipe(
+            provideTestAgent(
+              Effect.fnUntraced(function* (request) {
+                if (request.display.phaseId === "reviewA-0") {
+                  yield* Deferred.succeed(reviewAStarted, undefined);
+                  return yield* Deferred.await(pendingReviewA);
+                }
+                yield* Deferred.succeed(reviewBStarted, undefined);
+                return yield* Effect.tryPromise({
+                  try: () => submitReview(request, approveReview()),
+                  catch: (error) => error,
+                });
+              }),
+            ),
+          ),
+        );
+        yield* Deferred.await(reviewAStarted);
+        yield* Deferred.await(reviewBStarted);
+        yield* Deferred.fail(pendingReviewA, new Error("review A unavailable"));
+        const exit = yield* Fiber.await(run);
+        expect(Exit.isFailure(exit)).toBe(true);
+        if (Exit.isFailure(exit))
+          expect(Cause.pretty(exit.cause)).toContain("review A unavailable");
+      }).pipe(Effect.scoped, Effect.timeout("3 seconds")),
     );
     expect(
       await runApplicationPromise(artifactExists(context, reviewARef(0))),

@@ -1,3 +1,4 @@
+import { trimmedText } from "../structured-output/fields.ts";
 import { Effect, SchemaGetter, type SchemaIssue } from "effect";
 import {
   artifactContract,
@@ -17,8 +18,6 @@ export type RevisionFeedbackClassification =
   | "needs-human"
   | "non-blocking"
   | "invalid-stale";
-const nonEmptyString = (description: string) =>
-  Schema.String.check(Schema.isMinLength(1)).annotate({ description });
 const feedbackClassificationSchema = Schema.Union([
   Schema.Literal("must-fix-current"),
   Schema.Literal("already-addressed"),
@@ -35,17 +34,22 @@ const revisionPlanResultSchemaShape = Schema.Struct({
   feedbackItems: Schema.mutable(
     Schema.Array(
       Schema.Struct({
-        id: nonEmptyString(
+        id: trimmedText(
           "Stable feedback identity derived from its source identity.",
         ),
         sourceIds: Schema.mutable(
-          Schema.Array(
-            nonEmptyString("Source identity from pr-feedback.json."),
+          Schema.Array(trimmedText("Source identity from pr-feedback.json.")),
+        ).check(
+          Schema.isMinLength(1),
+          Schema.makeFilter(
+            (ids) =>
+              new Set(ids).size === ids.length ||
+              "sourceIds must not contain duplicates.",
           ),
-        ).check(Schema.isMinLength(1)),
-        summary: nonEmptyString("Concise statement of the feedback item."),
+        ),
+        summary: trimmedText("Concise statement of the feedback item."),
         classification: feedbackClassificationSchema,
-        rationale: nonEmptyString(
+        rationale: trimmedText(
           "Reason for the classification, including any required human decision.",
         ),
       }),
@@ -67,27 +71,6 @@ const normalizeRevisionPlanResult = Effect.fnUntraced(function* (
   );
   const result: RevisionPlanResult = {
     ...value,
-    feedbackItems: yield* Effect.forEach(
-      value.feedbackItems,
-      Effect.fnUntraced(function* (item, index) {
-        return {
-          id: yield* requireTrimmed(item.id, `feedbackItems[${index}].id`),
-          sourceIds: yield* uniqueTrimmed(
-            item.sourceIds,
-            `feedbackItems[${index}].sourceIds`,
-          ),
-          summary: yield* requireTrimmed(
-            item.summary,
-            `feedbackItems[${index}].summary`,
-          ),
-          classification: item.classification,
-          rationale: yield* requireTrimmed(
-            item.rationale,
-            `feedbackItems[${index}].rationale`,
-          ),
-        };
-      }),
-    ),
     ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   yield* assertUniqueFeedbackIds(result);
@@ -139,7 +122,9 @@ export const validateRevisionPlanResult = Effect.fnUntraced(function* (
 ) {
   return yield* contract(validSourceIds).decode(value);
 });
-export const revisionPlanResultSchema = revisionPlanResultSchemaShape;
+export const revisionPlanResultSchema = Schema.toEncoded(
+  revisionPlanResultSchemaShape,
+);
 export function revisionPlanArtifactDefinition(
   validSourceIds: ReadonlySet<string>,
 ): StructuredArtifactDefinition<RevisionPlanResult> {
@@ -152,31 +137,6 @@ export function revisionPlanArtifactDefinition(
     formatMarkdown: formatRevisionPlanMarkdown,
   };
 }
-const requireTrimmed = Effect.fnUntraced(function* (
-  value: string,
-  field: string,
-): Effect.fn.Return<string, SchemaIssue.Issue> {
-  const trimmed = value.trim();
-  if (!trimmed)
-    return yield* invalidArtifact(`Revision plan ${field} must not be blank.`);
-  return trimmed;
-});
-const uniqueTrimmed = Effect.fnUntraced(function* (
-  values: readonly string[],
-  field: string,
-): Effect.fn.Return<string[], SchemaIssue.Issue> {
-  const trimmed = yield* Effect.forEach(
-    values,
-    Effect.fnUntraced(function* (value, index) {
-      return yield* requireTrimmed(value, `${field}[${index}]`);
-    }),
-  );
-  if (new Set(trimmed).size !== trimmed.length)
-    return yield* invalidArtifact(
-      `Revision plan ${field} must not contain duplicates.`,
-    );
-  return trimmed;
-});
 const assertUniqueFeedbackIds = Effect.fnUntraced(function* (
   result: RevisionPlanResult,
 ): Effect.fn.Return<void, SchemaIssue.Issue> {

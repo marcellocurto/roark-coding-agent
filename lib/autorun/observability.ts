@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import { createEventWriter } from "../observability/events.ts";
 import { updateRunSummary, type RunStatus } from "../observability/summary.ts";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
@@ -15,7 +15,10 @@ export const finalizeAttemptObservability = Effect.fn(
   "finalizeAttemptObservability",
 )(function* (input: FinalizeAttemptObservabilityInput) {
   const { context, outcome, outcomeDetail } = input;
-  const timestamp = toIsoString(input.endedAt ?? new Date());
+  const timestamp =
+    input.endedAt === undefined
+      ? DateTime.formatIso(yield* DateTime.now)
+      : toIsoString(input.endedAt);
   const status = runStatusForAttemptOutcome(outcome);
   const writer = yield* createEventWriter(context.runDir);
 

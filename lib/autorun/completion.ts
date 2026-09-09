@@ -1,3 +1,4 @@
+import { DateTime } from "effect";
 import { Effect } from "effect";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
 import { readArtifact } from "../workflow/artifacts.ts";
@@ -84,7 +85,12 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
           input.attemptMetadata.githubComments?.issue?.[phase]?.id,
       });
       if (ref !== undefined)
-        recordAttemptIssueComment(input.attemptMetadata, phase, ref);
+        recordAttemptIssueComment(
+          input.attemptMetadata,
+          phase,
+          ref,
+          DateTime.formatIso(yield* DateTime.now),
+        );
       return {
         outcome: "triage-stopped" as const,
         outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,

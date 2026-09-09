@@ -1,4 +1,4 @@
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Schema } from "effect";
 import path from "node:path";
 import {
   reviewerIssueClassificationLabels,
@@ -95,16 +95,11 @@ export interface DuplicateGroup {
   reviewerSources: ReviewFindingSource[];
   reason: string;
 }
-export interface Clock {
-  now(): Date;
-}
 export interface IssueCurationOptions {
   prUrl?: string | undefined;
 }
-export const issueCurationDefaultClock: Clock = { now: () => new Date() };
 export const issueCurationPhase = Effect.fn("issueCurationPhase")(function* (
   context: WorkflowContext,
-  clock: Clock = issueCurationDefaultClock,
   options: IssueCurationOptions = {},
 ) {
   const display: AgentDisplayContext = {
@@ -119,7 +114,7 @@ export const issueCurationPhase = Effect.fn("issueCurationPhase")(function* (
   return yield* runPresentedPhase(
     display,
     Effect.fnUntraced(function* () {
-      const plan = yield* buildIssueCurationPlan(context, clock, options);
+      const plan = yield* buildIssueCurationPlan(context, options);
       yield* writeJsonArtifact(context, "issueCurationPlan", plan);
       return plan;
     }),
@@ -131,11 +126,7 @@ export const issueCurationPhase = Effect.fn("issueCurationPhase")(function* (
   );
 });
 export const buildIssueCurationPlan = Effect.fn("buildIssueCurationPlan")(
-  function* (
-    context: WorkflowContext,
-    clock: Clock = issueCurationDefaultClock,
-    options: IssueCurationOptions = {},
-  ) {
+  function* (context: WorkflowContext, options: IssueCurationOptions = {}) {
     const warnings: string[] = [];
     const sourceIssue = yield* loadSourceIssueContext(context, warnings);
     const artifactPaths = yield* collectAvailableArtifactPaths(context);
@@ -217,7 +208,7 @@ export const buildIssueCurationPlan = Effect.fn("buildIssueCurationPlan")(
       run: {
         runDirRelative: toPosix(context.runDirRelative),
         ...(context.attempt !== undefined ? { attempt: context.attempt } : {}),
-        generatedAt: clock.now().toISOString(),
+        generatedAt: DateTime.formatIso(yield* DateTime.now),
         artifactPaths,
         ...(options.prUrl ? { prUrl: options.prUrl } : {}),
       },

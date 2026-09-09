@@ -15,11 +15,7 @@ import {
 import { ensureRunDir } from "../workflow/artifacts.ts";
 import { assertCleanAutorunGit } from "../workflow/git.ts";
 import { type runFullWorkflow } from "../workflow/phases.ts";
-import {
-  formatAttemptMetadata,
-  type AttemptMetadata,
-  type Clock,
-} from "./attempts.ts";
+import { formatAttemptMetadata, type AttemptMetadata } from "./attempts.ts";
 import { AttemptStore } from "./attempts.ts";
 import { createBranchPlan, AutorunBranchError } from "./branch.ts";
 import { createClaimPlan } from "./claim.ts";
@@ -42,7 +38,6 @@ import { defaultLifecycleHooks, defaultWorkspaceConfig } from "./workspace.ts";
 import { type prepareCloneWorkspace } from "./workspace.ts";
 const discoveryFetchLimit = 100;
 export interface AutoRunInjected {
-  clock?: Clock | undefined;
   listOpenGitHubIssues?: GitHub["Service"]["listOpenGitHubIssues"] | undefined;
   fetchGitHubIssue?: GitHub["Service"]["fetchGitHubIssue"] | undefined;
   fetchGitHubIssueRelationships?:
@@ -330,7 +325,6 @@ const runManagedIssueAttempts = Effect.fn("runManagedIssueAttempts")(function* (
   );
   if (assignee) (yield* Presentation).line(`Assignee: ${assignee}`);
   else (yield* Presentation).line("Assignee: none");
-  const clock = injected.clock;
   for (const issue of issues) {
     const result = yield* withAutorunIssueLock(
       {
@@ -344,7 +338,6 @@ const runManagedIssueAttempts = Effect.fn("runManagedIssueAttempts")(function* (
             issue,
             options,
             assignee,
-            clock,
             injected,
             claimOptions,
           );
@@ -359,7 +352,6 @@ const runManagedIssueAttempt = Effect.fn("runManagedIssueAttempt")(function* (
   issue: AutorunIssueCandidate,
   options: AutoCliOptions,
   assignee: string | undefined,
-  clock: Clock | undefined,
   injected: AutoRunInjected,
   claimOptions: {
     requireReadyLabel: boolean;
@@ -474,7 +466,7 @@ const runManagedIssueAttempt = Effect.fn("runManagedIssueAttempt")(function* (
     worktreePath: workflowContext.agentCwd,
     workspace: preparedWorkspace.metadata,
     runArtifactPath: workflowContext.runDirRelative,
-    startedAt: clock?.now() ?? DateTime.toDateUtc(yield* DateTime.now),
+    startedAt: DateTime.toDateUtc(yield* DateTime.now),
   });
   return yield* runAutorunAttemptLifecycle(
     {
@@ -519,7 +511,6 @@ const runManagedIssueAttempt = Effect.fn("runManagedIssueAttempt")(function* (
         workspaces.runHook("afterRun", options.hooks, preparedWorkspace.path),
     },
     {
-      clock,
       runFullWorkflow: injected.runFullWorkflow,
       completeAutorunWorkflow: injected.completeAutorunWorkflow,
     },

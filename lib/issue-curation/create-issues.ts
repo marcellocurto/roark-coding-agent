@@ -10,7 +10,7 @@ import {
 } from "./persistence.ts";
 import { IssuePublishing } from "../issue-publishing/service.ts";
 import { Presentation } from "../runtime/services.ts";
-import { Effect } from "effect";
+import { DateTime, Effect } from "effect";
 import {
   issuePublishingPrompt,
   issuePublishingSystemPrompt,
@@ -89,15 +89,9 @@ export interface IssueCreationResults {
 }
 export interface CreateIssuesOptions {
   context: WorkflowContext;
-  clock?:
-    | {
-        now(): Date;
-      }
-    | undefined;
   approved?: boolean | undefined;
   approvalReason?: string | undefined;
 }
-const issueCreationDefaultClock = { now: () => new Date() };
 export const createIssuesPhase = Effect.fn("createIssuesPhase")(function* (
   context: WorkflowContext,
 ) {
@@ -114,7 +108,7 @@ export const createIssuesPhase = Effect.fn("createIssuesPhase")(function* (
 export const createIssuesFromCurationPlan = Effect.fn(
   "createIssuesFromCurationPlan",
 )(function* (options: CreateIssuesOptions) {
-  const { context, clock = issueCreationDefaultClock } = options;
+  const { context } = options;
   const publishing = yield* IssuePublishing;
   const approved = options.approved ?? context.yes;
   const approvalReason =
@@ -156,7 +150,7 @@ export const createIssuesFromCurationPlan = Effect.fn(
       plan,
       sourcePlanPath,
       resultPath,
-      generatedAt: clock.now().toISOString(),
+      generatedAt: DateTime.formatIso(yield* DateTime.now),
       dryRun: true,
       approved: false,
       existingCreated,
@@ -181,7 +175,7 @@ export const createIssuesFromCurationPlan = Effect.fn(
         plan,
         sourcePlanPath,
         resultPath,
-        generatedAt: clock.now().toISOString(),
+        generatedAt: DateTime.formatIso(yield* DateTime.now),
         dryRun: false,
         approved: true,
         existingCreated,
@@ -232,7 +226,7 @@ export const createIssuesFromCurationPlan = Effect.fn(
       plan,
       sourcePlanPath,
       resultPath,
-      generatedAt: clock.now().toISOString(),
+      generatedAt: DateTime.formatIso(yield* DateTime.now),
       dryRun: false,
       approved: true,
       existingCreated,

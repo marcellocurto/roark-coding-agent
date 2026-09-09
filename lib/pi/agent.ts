@@ -1,5 +1,6 @@
 import {
   type Cause,
+  Clock,
   Deferred,
   Effect,
   Exit,
@@ -117,6 +118,7 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
   const skillPaths = agentSkillPaths(options.skillPaths);
   const modelSpec = requestedModelSpec(options.model);
   const presentation = yield* Presentation;
+  const clock = yield* Clock.Clock;
   if (presentation.verbose) presentation.line(`model: ${modelSpec}`);
   const modelRuntime = yield* Effect.tryPromise({
     try: () => ModelRuntime.create(),
@@ -202,7 +204,7 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
         const output = new AgentOutputCollector(
           options.display,
           presentation,
-          Date.now,
+          () => clock.currentTimeMillisUnsafe(),
           [options.cwd],
         );
         const emit = (work: () => Effect.Effect<void> | undefined) => {
@@ -233,7 +235,7 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
             });
           }
           if (event.type === "tool_execution_start") {
-            const startedAt = Date.now();
+            const startedAt = clock.currentTimeMillisUnsafe();
             output.event({
               type: "tool_start",
               toolCallId: event.toolCallId,
@@ -250,7 +252,7 @@ export const runPiAgent = Effect.fn("runPiAgent")(function* (
             );
           }
           if (event.type === "tool_execution_end") {
-            const endedAt = Date.now();
+            const endedAt = clock.currentTimeMillisUnsafe();
             const completed = output.event({
               type: "tool_end",
               toolCallId: event.toolCallId,
