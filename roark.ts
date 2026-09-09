@@ -182,7 +182,10 @@ export const presentAutorunOutcome = Effect.fn("presentAutorunOutcome")(
     const status =
       result.outcome === "published"
         ? "SUCCESS"
-        : result.outcome === "triage-stopped"
+        : result.outcome === "continuation-stopped" ||
+            result.outcome === "triage-stopped" ||
+            result.outcome === "planning-stopped" ||
+            result.outcome === "execution-stopped"
           ? "STOPPED"
           : "FAILED";
     presentation.outcome(
@@ -195,8 +198,10 @@ export const presentAutorunOutcome = Effect.fn("presentAutorunOutcome")(
 export function workflowOutcomeStatus(
   status:
     | "completed"
+    | "continuation-stopped"
     | "triage-stopped"
     | "planning-stopped"
+    | "execution-stopped"
     | "review-blocked",
 ): "SUCCESS" | "BLOCKED" | "STOPPED" {
   if (status === "completed") return "SUCCESS";

@@ -13,8 +13,8 @@ export interface StructuredArtifactDefinition<T> {
   formatMarkdown: (value: T) => string;
 }
 
-export interface StructuredArtifactWriters<E = never, R = never> {
-  writeJson: (content: string) => Effect.Effect<void, E, R>;
+export interface StructuredArtifactWriters<T, E = never, R = never> {
+  writeJson: (content: string, value: T) => Effect.Effect<void, E, R>;
   writeMarkdown: (content: string) => Effect.Effect<void, E, R>;
 }
 
@@ -27,7 +27,7 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
   function* <T, E, R>(
     request: AgentRunRequest,
     definition: StructuredArtifactDefinition<T>,
-    writers: StructuredArtifactWriters<E, R>,
+    writers: StructuredArtifactWriters<T, E, R>,
   ) {
     const agent = yield* AgentExecution;
     let submitted: T | undefined;
@@ -99,7 +99,7 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
     const markdown = definition.formatMarkdown(submitted);
     const json = JSON.stringify(submitted, null, 2);
     yield* writers.writeMarkdown(markdown);
-    yield* writers.writeJson(json);
+    yield* writers.writeJson(json, submitted);
     return { value: submitted, markdown };
   },
 );

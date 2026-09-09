@@ -2,6 +2,20 @@ import { describe, expect, test } from "bun:test";
 import { parseArgs } from "./args.ts";
 
 describe("parseArgs", () => {
+  test("issue continuation defaults to resuming and has an explicit restart option", () => {
+    expect(parseArgs(["continue", "123"])).toEqual({
+      command: "continue",
+      issue: "123",
+    });
+    expect(parseArgs(["continue", "123", "--restart"])).toEqual({
+      command: "continue",
+      issue: "123",
+      restart: true,
+    });
+    expect(() => parseArgs(["continue", "123", "--force"])).toThrow(
+      "Use continue to resume",
+    );
+  });
   test("parses init command options", () => {
     const parsed = parseArgs([
       "init",

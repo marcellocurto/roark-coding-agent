@@ -12,7 +12,10 @@ import type { AttemptWorkspaceMetadata } from "./workspace.ts";
 export type AttemptOutcome =
   | "in-progress"
   | "published"
+  | "continuation-stopped"
   | "triage-stopped"
+  | "planning-stopped"
+  | "execution-stopped"
   | "failed-readiness"
   | "failed-verification"
   | "failed-output-contract"
@@ -56,7 +59,10 @@ const attemptSummarySchema = Schema.Struct({
   outcome: Schema.Literals([
     "in-progress",
     "published",
+    "continuation-stopped",
     "triage-stopped",
+    "planning-stopped",
+    "execution-stopped",
     "failed-readiness",
     "failed-verification",
     "failed-output-contract",

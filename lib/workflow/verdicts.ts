@@ -14,6 +14,8 @@ import type { TriageResult, TriageVerdict } from "../triage/result.ts";
 import type { ImplementationPlanResult } from "../implementation-plan/result.ts";
 
 export interface ReadinessDecisionInput {
+  pendingWork?: boolean;
+  executionBlocked?: boolean;
   triage?: TriageResult | undefined;
   plan?: ImplementationPlanResult | undefined;
   reviewA?: ReviewResult | undefined;
@@ -21,6 +23,8 @@ export interface ReadinessDecisionInput {
 }
 
 export interface ReadinessDecision {
+  pendingWork: boolean;
+  executionBlocked: boolean;
   status: "ready-for-pr" | "not-ready";
   triageVerdict: TriageVerdict | "missing";
   reviewAVerdict: ReviewDisposition | "missing";
@@ -98,12 +102,16 @@ export function decideReadiness(
   const fixesWereNeeded = currentIssueBlockingFindings.length > 0;
   const blockedByReview = externalBlockers.length > 0;
   const readyFromLatestReviews =
+    input.pendingWork !== true &&
+    input.executionBlocked !== true &&
     triageVerdict === "proceed" &&
     planReady &&
     reviewAVerdict === "approve" &&
     reviewBVerdict === "approve";
 
   return {
+    pendingWork: input.pendingWork ?? false,
+    executionBlocked: input.executionBlocked ?? false,
     status: readyFromLatestReviews ? "ready-for-pr" : "not-ready",
     triageVerdict,
     reviewAVerdict,

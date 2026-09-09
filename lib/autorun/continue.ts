@@ -18,11 +18,6 @@ import { formatAttemptMetadata, type AttemptMetadata } from "./attempts.ts";
 import { AttemptStore } from "./attempts.ts";
 import { autorunWorktreePath, type AutorunBranchPlan } from "./branch.ts";
 import { checkoutExistingIssueBranch } from "./branch.ts";
-import {
-  formatContinuationPlan,
-  type ContinuePlanStep,
-} from "./continue-plan.ts";
-import { planContinuation } from "./continue-plan.ts";
 import type { AutorunGateOptions } from "./publish-flow.ts";
 import { formatContinueCommand } from "./recovery.ts";
 import { type AutorunAttemptResult } from "./attempt-lifecycle.ts";
@@ -91,18 +86,18 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
           attempt,
         );
         yield* assertAttemptMatchesIssue(attemptMetadata, parsed.issueNumber);
-        if (attemptMetadata.outcome === "published" && !options.force) {
+        if (attemptMetadata.outcome === "published") {
           (yield* Presentation).line(
-            `Attempt ${attempt} is already published. Pass --force to rerun gates anyway.`,
+            `Attempt ${attempt} already opened a PR. Issue continuation is finished.`,
           );
           return attemptResult(attemptMetadata);
         }
-        if (attemptMetadata.outcome === "triage-stopped" && !options.force) {
-          (yield* Presentation).line(
-            `Attempt ${attempt} already stopped after triage. Pass --force to rerun the workflow.`,
-          );
-          return attemptResult(attemptMetadata);
-        }
+        const fetchIssue =
+          injected.fetchGitHubIssue ?? (yield* GitHub).fetchGitHubIssue;
+        const fetched = yield* fetchIssue(options.issue, {
+          cwd,
+          repo: parsed.repo ?? options.repo,
+        });
         yield* ensureLabels({
           cwd,
           repo: parsed.repo ?? options.repo,
@@ -174,23 +169,7 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
           workspace: preparedWorkspace?.metadata ?? attemptMetadata.workspace,
           runArtifactPath: workflowContext.runDirRelative,
         });
-        const continuationPlan = yield* planContinuation(workflowContext, {
-          attemptOutcome: attemptMetadata.outcome,
-        });
-        const initialVerificationRepairPass =
-          verificationRepairPassFromPlan(continuationPlan);
-        if (isTerminalContinuationNoop(continuationPlan) && !options.force) {
-          (yield* Presentation).line("Continuation plan:");
-          for (const line of formatContinuationPlan(continuationPlan))
-            (yield* Presentation).line(line);
-          return attemptResult(attemptMetadata);
-        }
-        const fetchIssue =
-          injected.fetchGitHubIssue ?? (yield* GitHub).fetchGitHubIssue;
-        const fetched = yield* fetchIssue(options.issue, {
-          cwd,
-          repo: parsed.repo ?? options.repo,
-        });
+        workflowContext = { ...workflowContext, continuing: !options.restart };
         const currentIssue = toIssueCandidate(fetched.issue);
         const transitionLabels =
           injected.transitionGitHubIssueLabels ??
@@ -209,6 +188,7 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
         const result = yield* runAutorunAttemptLifecycle({
           issueDir,
           workflowContext,
+          issueSnapshot: fetched,
           branchPlan,
           gateOptions: createGateOptions(
             options,
@@ -225,12 +205,10 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
             }),
           logPrefix: "Continue",
           inProgressOutcomeDetail: `continued at ${DateTime.formatIso(yield* DateTime.now)}`,
-          initialVerificationRepairPass,
-          beforeWorkflow: Effect.fnUntraced(function* () {
-            (yield* Presentation).line("Continuation plan:");
-            for (const line of formatContinuationPlan(continuationPlan))
-              (yield* Presentation).line(line);
-          }),
+          continuation: {
+            restart: options.restart,
+            priorOutcome: attemptMetadata.outcome,
+          },
           beforeRun: Effect.fnUntraced(function* () {
             yield* workspaces.refreshCopy({
               controlCwd: workflowContext.controlCwd,
@@ -275,7 +253,7 @@ export function createContinueWorkflowOptions(
     model: options.model,
     thinkingLevel: options.thinkingLevel,
     thinkingProfile: options.thinkingProfile,
-    force: options.force,
+    force: false,
     yes: options.yes,
     maxFixPasses: options.maxFixPasses,
     attempt,
@@ -359,23 +337,6 @@ function toIssueCandidate(issue: GitHubIssue): AutorunIssueCandidate {
     url: issue.url,
     labels: issue.labels,
   };
-}
-function verificationRepairPassFromPlan(
-  steps: readonly ContinuePlanStep[],
-): number | undefined {
-  const first = steps[0];
-  if (first?.type !== "run" || first.phase !== "fix") return undefined;
-  return first.reason.includes("verification failed") ? first.pass : undefined;
-}
-function isTerminalContinuationNoop(
-  steps: readonly ContinuePlanStep[],
-): boolean {
-  const first = steps[0];
-  return (
-    steps.length === 1 &&
-    first?.type === "noop" &&
-    first.reason.includes("maximum fix passes reached")
-  );
 }
 const assertAttemptMatchesIssue = Effect.fnUntraced(function* (
   metadata: AttemptMetadata,

@@ -1,9 +1,11 @@
+import { changeReport } from "../testing/change-reports.ts";
 import { Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
   writeJsonArtifact,
   writeArtifact,
   createWorkflowContext,
+  refinementLogRef,
   reviewARef,
   reviewBRef,
 } from "./artifacts.ts";
@@ -101,6 +103,33 @@ describe("buildReadinessMarkdown", () => {
       maxFixPasses: 1,
       attempt: 1,
     });
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "issue",
+        "# Issue\n<github_issue_relationships />",
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "implementationPlanDraft",
+        implementationPlanResult(),
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "preImplementationBaseline", { head: "abc" }),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "implementationLog", changeReport()),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        refinementLogRef(0),
+        JSON.stringify(changeReport()),
+      ),
+    );
     await runApplicationPromise(
       writeJsonArtifact(context, "triage", triageResult()),
     );

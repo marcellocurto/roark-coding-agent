@@ -131,7 +131,7 @@ function formatIssueComments(issue: GitHubIssue): string {
       (
         comment,
         index,
-      ) => `<comment index="${index + 1}" author="${escapePromptXmlAttribute(comment.author?.login ?? "unknown")}" created_at="${escapePromptXmlAttribute(comment.createdAt ?? "unknown time")}">
+      ) => `<comment index="${index + 1}" id="${escapePromptXmlAttribute(comment.id ?? String(index + 1))}" url="${escapePromptXmlAttribute(comment.url ?? "")}" author="${escapePromptXmlAttribute(comment.author?.login ?? "unknown")}" author_association="${escapePromptXmlAttribute(comment.authorAssociation ?? "unknown")}" created_at="${escapePromptXmlAttribute(comment.createdAt ?? "unknown time")}" updated_at="${escapePromptXmlAttribute(comment.updatedAt ?? comment.createdAt ?? "unknown time")}">
 ${escapePromptXmlText(comment.body ?? "")}
 </comment>`,
     )

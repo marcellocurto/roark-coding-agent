@@ -12,6 +12,8 @@ export function triageResult(
   overrides: Partial<TriageResult> = {},
 ): TriageResult {
   return {
+    planAction: "draft",
+    planSource: null,
     verdict,
     reasoning:
       verdict === "proceed"
@@ -37,6 +39,14 @@ export function implementationPlanResult(
   overrides: Partial<ImplementationPlanResult> = {},
 ): ImplementationPlanResult {
   return {
+    source: "Roark draft based on the issue body.",
+    adaptations: [],
+    assumptions: [],
+    blockingQuestions: readyForImplementation
+      ? []
+      : ["Which behavior should the maintainer authorize?"],
+    externalBlockers: [],
+    resolvedQuestions: [],
     issue: "Implement the requested issue.",
     workClassification: "backend",
     goal: "Satisfy the issue with the smallest complete change.",

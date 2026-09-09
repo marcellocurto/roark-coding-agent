@@ -3,7 +3,8 @@ import { DateTime, Effect, Schema } from "effect";
 import type { GitHubError, GitHubRequirements } from "./errors.ts";
 import type { AutorunClaimPlan } from "../autorun/claim.ts";
 import { runProcessOrThrow } from "../cli/process.ts";
-import { githubCommentAuthorSchema, postIssueComment } from "./comments.ts";
+import { postIssueComment } from "./comments.ts";
+import { fetchIssueComments } from "./issue-comments.ts";
 export interface ParsedIssueRef {
   issueNumber: string;
   repo?: string | undefined;
@@ -26,41 +27,13 @@ const issueSchema = Schema.Struct({
   milestone: Schema.optional(
     Schema.NullOr(Schema.Struct({ title: Schema.String })),
   ),
-  comments: Schema.optionalKey(
-    Schema.mutable(
-      Schema.Array(
-        Schema.Struct({
-          author: Schema.optional(Schema.NullOr(githubCommentAuthorSchema)),
-          body: Schema.optional(Schema.String),
-          createdAt: Schema.optional(Schema.String),
-        }),
-      ),
-    ),
-  ),
 });
 const parseIssueList = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.mutable(Schema.Array(issueListItemSchema))),
 );
-const decodeIssue = Schema.decodeUnknownEffect(
+const parseIssue = Schema.decodeUnknownEffect(
   Schema.fromJsonString(issueSchema),
 );
-const parseIssue = Effect.fnUntraced(function* (raw: string) {
-  const { comments, ...issue } = yield* decodeIssue(raw);
-  return {
-    ...issue,
-    ...(comments === undefined
-      ? {}
-      : {
-          comments: comments.map((comment) => ({
-            ...comment,
-            author:
-              comment.author?.login == null
-                ? undefined
-                : { login: comment.author.login },
-          })),
-        }),
-  };
-});
 export interface GitHubIssue {
   number: number;
   title: string;
@@ -84,6 +57,10 @@ export interface GitHubIssue {
     | undefined;
   url?: string | undefined;
   comments?: {
+    id?: string | undefined;
+    url?: string | undefined;
+    updatedAt?: string | undefined;
+    authorAssociation?: string | undefined;
     author?:
       | {
           login: string;
@@ -340,7 +317,7 @@ export const fetchGitHubIssue = Effect.fn("GitHub.fetchGitHubIssue")(function* (
     "view",
     parsed.issueNumber,
     "--json",
-    "number,title,body,state,labels,assignees,milestone,url,comments",
+    "number,title,body,state,labels,assignees,milestone,url",
   ];
   if (parsed.repo) args.push("--repo", parsed.repo);
   const stdout = yield* runProcessOrThrow(args, {
@@ -361,8 +338,13 @@ export const fetchGitHubIssue = Effect.fn("GitHub.fetchGitHubIssue")(function* (
     issueNumber: parsed.issueNumber,
     body: issue.body ?? "",
   });
+  const comments = yield* fetchIssueComments({
+    cwd: options.cwd,
+    repo: repo ?? "{owner}/{repo}",
+    issueNumber: parsed.issueNumber,
+  });
   return {
-    issue,
+    issue: { ...issue, comments },
     issueNumber: parsed.issueNumber,
     repo,
     fetchedAt: DateTime.formatIso(yield* DateTime.now),

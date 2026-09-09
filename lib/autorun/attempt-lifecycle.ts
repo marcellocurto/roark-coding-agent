@@ -13,6 +13,8 @@ import {
 } from "../workflow/artifacts.ts";
 import { readArtifact } from "../workflow/artifacts.ts";
 import { ArtifactContractError } from "../structured-output/contract.ts";
+import { changeReportStopsExecution } from "../change-report/result.ts";
+import { fixLogRef, refinementLogRef } from "../workflow/artifacts.ts";
 
 import { type WorkflowRunResult } from "../workflow/phases.ts";
 import {
@@ -23,6 +25,8 @@ import {
   reviewPhase,
 } from "../workflow/phases.ts";
 import type { GitHubIssueSnapshot } from "../github/issue.ts";
+import type { IssueContinuationOptions } from "../issue-continuation/workflow.ts";
+import { recordWorkflowPosition } from "../issue-continuation/checkpoint.ts";
 import { AgentTaskRunError } from "../workflow/tasks.ts";
 import {
   hasBlockedReview,
@@ -93,8 +97,8 @@ export interface RunAutorunAttemptLifecycleInput {
     | undefined;
   logPrefix?: string | undefined;
   inProgressOutcomeDetail?: string | null | undefined;
-  initialVerificationRepairPass?: number | undefined;
   issueSnapshot?: GitHubIssueSnapshot | undefined;
+  continuation?: IssueContinuationOptions;
 }
 
 export interface AutorunAttemptResult {
@@ -156,15 +160,10 @@ export const runAutorunAttemptLifecycle = Effect.fn(
         yield* input.beforeRun?.(attemptMetadata) ?? Effect.void;
         yield* attempts.persist(input.issueDir, attemptMetadata);
 
-        const workflowResult =
-          input.initialVerificationRepairPass === undefined
-            ? yield* runWorkflow(input.workflowContext, {
-                issueSnapshot: input.issueSnapshot,
-              })
-            : yield* runVerificationRepairWorkflow(
-                input.workflowContext,
-                input.initialVerificationRepairPass,
-              );
+        const workflowResult = yield* runWorkflow(input.workflowContext, {
+          issueSnapshot: input.issueSnapshot,
+          continuation: input.continuation,
+        });
         const issue = yield* resolveIssue(input);
         const attemptMetadataPath =
           attemptMetadataRelativePath(attemptMetadata);
@@ -275,9 +274,24 @@ const runVerificationRepairWorkflow = Effect.fn(
   "runVerificationRepairWorkflow",
 )(function* (context: WorkflowContext, initialPass: number) {
   for (let pass = initialPass; pass <= context.maxFixPasses; pass++) {
+    yield* recordWorkflowPosition(context, pass);
     (yield* Presentation).line(`Verification repair pass ${pass}`);
-    yield* fixPhase(context, pass);
-    yield* codeRefinementPhase(context, pass);
+    const fix = yield* fixPhase(context, pass);
+    if (changeReportStopsExecution(fix)) {
+      yield* readinessPhase(context);
+      return {
+        status: "execution-stopped",
+        artifact: fixLogRef(pass),
+      } satisfies WorkflowRunResult;
+    }
+    const refinement = yield* codeRefinementPhase(context, pass);
+    if (changeReportStopsExecution(refinement)) {
+      yield* readinessPhase(context);
+      return {
+        status: "execution-stopped",
+        artifact: refinementLogRef(pass),
+      } satisfies WorkflowRunResult;
+    }
     const reviews = yield* reviewPhase(context, pass);
     if (
       hasBlockedReview(reviews.reviewA, reviews.reviewB) ||

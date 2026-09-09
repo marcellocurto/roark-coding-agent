@@ -2,17 +2,73 @@ import { trimmedText, trimmedScalar } from "../structured-output/fields.ts";
 import { Effect, SchemaGetter, type SchemaIssue } from "effect";
 import {
   artifactContract,
+  ArtifactContractError,
   invalidArtifact,
 } from "../structured-output/contract.ts";
 import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
+import type { TriageResult } from "../triage/result.ts";
 import {
   additionalSectionsSchema,
   normalizeAdditionalSections,
   renderAdditionalSectionsMarkdown,
 } from "../structured-output/additional-sections.ts";
 const implementationPlanResultSchemaShape = Schema.Struct({
-  issue: trimmedScalar("Issue or requirement being planned."),
+  source: trimmedText(
+    "Where the plan came from: an issue section, comment, or Roark draft. Keep its required decisions and detailed steps.",
+  ),
+  adaptations: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        change: trimmedText(
+          "What changed from the original plan. Leave out wording-only edits.",
+        ),
+        evidence: trimmedText(
+          "What in the issue or code made this change necessary.",
+        ),
+      }),
+    ),
+  ),
+  assumptions: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        assumption: trimmedText(
+          "A small assumption you are allowed to make. Any changes based on it must be easy to undo.",
+        ),
+        evidence: trimmedText(
+          "What in the issue or code supports this assumption.",
+        ),
+      }),
+    ),
+  ),
+  blockingQuestions: Schema.mutable(
+    Schema.Array(
+      trimmedText(
+        "A question that needs information from the reporter or a decision from someone allowed to make it. List it here, even if it also appears in risks or another section.",
+      ),
+    ),
+  ),
+  externalBlockers: Schema.mutable(
+    Schema.Array(
+      trimmedText(
+        "Something outside this work that must be resolved first. Explain how you checked it and what needs to happen next.",
+      ),
+    ),
+  ),
+  resolvedQuestions: Schema.mutable(
+    Schema.Array(
+      Schema.Struct({
+        question: trimmedText("An earlier question, using its exact wording."),
+        resolution: trimmedText(
+          "The answer found in the code or given by someone allowed to decide.",
+        ),
+        evidence: trimmedText(
+          "Where in the code or issue the answer was confirmed. A guess does not count as an answer.",
+        ),
+      }),
+    ),
+  ),
+  issue: trimmedScalar("The issue or requested change this plan covers."),
   workClassification: Schema.Union([
     Schema.Literal("frontend"),
     Schema.Literal("backend"),
@@ -21,41 +77,43 @@ const implementationPlanResultSchemaShape = Schema.Struct({
     Schema.Literal("test-only"),
     Schema.Literal("unknown"),
   ]),
-  goal: trimmedScalar("Concrete implementation goal."),
+  goal: trimmedScalar("What the finished change should do."),
   nonGoals: Schema.mutable(
-    Schema.Array(trimmedText("Explicitly excluded work.")),
+    Schema.Array(trimmedText("Work this plan does not include.")),
   ),
   currentCodeFindings: Schema.mutable(
     Schema.Array(
-      trimmedText("Repository-grounded finding relevant to the plan."),
+      trimmedText("Something found in the code that affects this plan."),
     ),
   ),
   simplificationsFromDraft: Schema.mutable(
-    Schema.Array(
-      trimmedText("Complexity removed or narrowed during refinement."),
-    ),
+    Schema.Array(trimmedText("What was made simpler when checking the draft.")),
   ),
   proposedChanges: Schema.mutable(
-    Schema.Array(trimmedText("Concrete proposed behavior or code change.")),
+    Schema.Array(trimmedText("A planned change to the behavior or code.")),
   ),
   filesLikelyToChange: Schema.mutable(
     Schema.Array(
-      trimmedText("Repository-relative file likely to change and why."),
+      trimmedText(
+        "A file likely to change and why. Use a path relative to the repository root.",
+      ),
     ),
   ),
   detailedSteps: Schema.mutable(
-    Schema.Array(trimmedText("Ordered implementation step.")),
-  ),
-  testsAndValidation: Schema.mutable(
     Schema.Array(
-      trimmedText("Validation step and the regression it protects against."),
+      trimmedText(
+        "A step to follow. List the steps in the order they should happen.",
+      ),
     ),
   ),
+  testsAndValidation: Schema.mutable(
+    Schema.Array(trimmedText("A check to run and the problem it would catch.")),
+  ),
   risks: Schema.mutable(
-    Schema.Array(trimmedText("Concrete implementation risk.")),
+    Schema.Array(trimmedText("A specific problem this change could cause.")),
   ),
   rollbackPlan: Schema.mutable(
-    Schema.Array(trimmedText("Concrete rollback action.")),
+    Schema.Array(trimmedText("A step to undo the change if needed.")),
   ),
   readyForImplementation: Schema.Boolean,
   additionalSections: Schema.optional(additionalSectionsSchema),
@@ -63,6 +121,19 @@ const implementationPlanResultSchemaShape = Schema.Struct({
 export type ImplementationPlanResult =
   (typeof implementationPlanResultSchemaShape)["Type"];
 export type ImplementationPlanKind = "draft" | "final";
+export const requireImplementationPlanSource = Effect.fn(
+  "requireImplementationPlanSource",
+)(function* (plan: ImplementationPlanResult, triage: TriageResult) {
+  if (triage.planAction !== "draft" && plan.source !== triage.planSource)
+    return yield* Effect.fail(
+      new ArtifactContractError({
+        artifact: "Implementation plan",
+        message:
+          "The plan source does not match the source selected during triage. Run continue to check the latest discussion before using the saved code or reviews.",
+      }),
+    );
+  return plan;
+});
 const normalizeImplementationPlanResult = Effect.fnUntraced(function* (
   value: ImplementationPlanResult,
 ): Effect.fn.Return<ImplementationPlanResult, SchemaIssue.Issue> {
@@ -78,6 +149,13 @@ const normalizeImplementationPlanResult = Effect.fnUntraced(function* (
     ...(additionalSections === undefined ? {} : { additionalSections }),
   };
   if (result.readyForImplementation) {
+    if (
+      result.blockingQuestions.length > 0 ||
+      result.externalBlockers.length > 0
+    )
+      return yield* invalidArtifact(
+        "A ready plan cannot contain blocking questions or external blockers.",
+      );
     const missing = [
       result.proposedChanges.length === 0 ? "proposedChanges" : undefined,
       result.filesLikelyToChange.length === 0
@@ -88,10 +166,18 @@ const normalizeImplementationPlanResult = Effect.fnUntraced(function* (
     ].filter((field): field is string => field !== undefined);
     if (missing.length > 0) {
       return yield* invalidArtifact(
-        `An implementation-ready plan requires non-empty ${missing.join(", ")}.`,
+        `Before marking the plan ready, fill in ${missing.join(", ")}.`,
       );
     }
   }
+  if (
+    !result.readyForImplementation &&
+    result.blockingQuestions.length === 0 &&
+    result.externalBlockers.length === 0
+  )
+    return yield* invalidArtifact(
+      "If the plan is not ready, list the questions or blockers that need to be resolved.",
+    );
   return result;
 });
 export function formatImplementationPlanMarkdown(
@@ -103,6 +189,37 @@ export function formatImplementationPlanMarkdown(
     "",
     "## Issue",
     result.issue,
+    "",
+    "## Source",
+    result.source,
+    "",
+    "## Adaptations",
+    ...renderList(
+      result.adaptations.map(
+        (item) => `${item.change} Evidence: ${item.evidence}`,
+      ),
+    ),
+    "",
+    "## Assumptions",
+    ...renderList(
+      result.assumptions.map(
+        (item) => `${item.assumption} Evidence: ${item.evidence}`,
+      ),
+    ),
+    "",
+    "## Blocking Questions",
+    ...renderList(result.blockingQuestions),
+    "",
+    "## External Blockers",
+    ...renderList(result.externalBlockers),
+    "",
+    "## Resolved Questions",
+    ...renderList(
+      result.resolvedQuestions.map(
+        (item) =>
+          `${item.question} Answer: ${item.resolution} Evidence: ${item.evidence}`,
+      ),
+    ),
     "",
     "## Work Classification",
     result.workClassification,
@@ -151,6 +268,12 @@ export function formatImplementationPlanMarkdown(
   return lines.join("\n");
 }
 const implementationPlanHeadings = [
+  "Source",
+  "Adaptations",
+  "Assumptions",
+  "Blocking Questions",
+  "External Blockers",
+  "Resolved Questions",
   "Issue",
   "Work Classification",
   "Goal",

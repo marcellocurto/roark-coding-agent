@@ -1,3 +1,4 @@
+import { rejects as assertRejects } from "node:assert/strict";
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
@@ -38,7 +39,330 @@ import { parseImplementationPlanResultJson } from "../implementation-plan/result
 import { parseReadinessResultJson } from "./readiness.ts";
 import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
 import { parseChangeReportJson } from "../change-report/result.ts";
+import { readExecutionStop, recordExecutionStop } from "./execution-stop.ts";
+import { planWorkflowProgression } from "./progression.ts";
 const tempDirs: string[] = [];
+describe("plan adoption and decision gates", () => {
+  test("forced reassessment retains a stop through failure and clears it only after replacement implementation succeeds", async () => {
+    const context = { ...(await tempContext()), force: true };
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "-b", "main"], {
+        cwd: context.agentCwd,
+      }),
+    );
+    await runApplicationPromise(
+      runProcessOrThrow(
+        [
+          "git",
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@example.com",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "baseline",
+        ],
+        { cwd: context.agentCwd },
+      ),
+    );
+    await seedBaselineAndImplementation(context);
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        refinementLogRef(0),
+        JSON.stringify(changeReport()),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult())),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult())),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        fixLogRef(1),
+        JSON.stringify(
+          changeReport({
+            blockingQuestions: ["Which retention policy applies?"],
+          }),
+        ),
+      ),
+    );
+    await runApplicationPromise(recordExecutionStop(context, fixLogRef(1)));
+    const issueSnapshot = {
+      issue: {
+        number: 12,
+        title: "Migration",
+        body: "Approved plan: retain existing data.",
+        comments: [
+          {
+            author: { login: "maintainer" },
+            createdAt: "2026-09-09T00:00:00Z",
+            body: "Retain existing data; no deletion is authorized.",
+          },
+        ],
+      },
+      issueNumber: "12",
+      repo: "owner/repo",
+      fetchedAt: "2026-09-09T00:00:01Z",
+      relationships: {
+        fetchedAt: "2026-09-09T00:00:01Z",
+        nativeDependenciesAvailable: true,
+        blockedBy: [],
+        blocking: [],
+        bodyDeclaredBlockers: [],
+      },
+    };
+    let failImplementation = true;
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      const phase = request.display.phaseId;
+      if (phase === "triage") {
+        expect(yield* readArtifact(context, "issue")).toContain(
+          "no deletion is authorized",
+        );
+        expect(yield* readExecutionStop(context)).toEqual(fixLogRef(1));
+        return yield* Effect.tryPromise(() =>
+          submitTriage(
+            request,
+            triageResult("proceed", {
+              planAction: "adopt",
+              planSource: "Issue body",
+            }),
+          ),
+        );
+      }
+      if (phase === "implementationPlan")
+        return yield* Effect.tryPromise(() =>
+          submitImplementationPlan(
+            request,
+            implementationPlanResult(true, { source: "Issue body" }),
+          ),
+        );
+      if (phase === "implementationLog") {
+        expect(yield* readExecutionStop(context)).toEqual(fixLogRef(1));
+        if (failImplementation)
+          return yield* Effect.fail(new Error("implementation interrupted"));
+        return yield* Effect.tryPromise(() =>
+          submitChangeReport(request, changeReport()),
+        );
+      }
+      if (phase === "refinementLog-0")
+        return yield* Effect.tryPromise(() =>
+          submitChangeReport(request, changeReport()),
+        );
+      if (phase === "reviewA-0" || phase === "reviewB-0")
+        return yield* Effect.tryPromise(() =>
+          submitReview(request, reviewResult()),
+        );
+      return yield* Effect.fail(new Error(`Unexpected phase ${phase}`));
+    });
+    await assertRejects(
+      runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, { issueSnapshot })
+          .pipe(provideTestAgent(runner)),
+      ),
+      /implementation interrupted/,
+    );
+    expect(
+      (
+        await runApplicationPromise(
+          planWorkflowProgression({ ...context, force: false }),
+        )
+      ).terminalStatus,
+    ).toEqual({ status: "execution-stopped", artifact: fixLogRef(1) });
+    failImplementation = false;
+    expect(
+      await runApplicationPromise(
+        nativePhases
+          .runFullWorkflow(context, { issueSnapshot })
+          .pipe(provideTestAgent(runner)),
+      ),
+    ).toEqual({ status: "completed" });
+    expect(
+      await runApplicationPromise(readExecutionStop(context)),
+    ).toBeUndefined();
+  });
+  test.each(["adopt", "adapt"] as const)(
+    "%s reaches implementation without a drafting agent",
+    async (planAction) => {
+      const context = await tempContext();
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "init", "-b", "main"], {
+          cwd: context.agentCwd,
+        }),
+      );
+      await runApplicationPromise(
+        writeJsonArtifact(context, "preImplementationBaseline", {
+          head: "abc",
+          capturedAt: "now",
+          excludes: [".roark"],
+        }),
+      );
+      const source = "Issue body: Approved migration plan";
+      const plan = implementationPlanResult(true, {
+        source,
+        detailedSteps: [
+          "Add a nullable column.",
+          "Backfill without deleting source data.",
+          "Switch reads after backfill.",
+        ],
+        adaptations:
+          planAction === "adapt"
+            ? [
+                {
+                  change: "Use the renamed storage module.",
+                  evidence:
+                    "Current migration entry point imports lib/storage.ts.",
+                },
+              ]
+            : [],
+      });
+      const phases: string[] = [];
+      const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+        phases.push(request.display.phaseId);
+        if (
+          request.customTools?.some((tool) => tool.name === "submit_triage") ===
+          true
+        )
+          return yield* Effect.tryPromise(() =>
+            submitTriage(
+              request,
+              triageResult("proceed", { planAction, planSource: source }),
+            ),
+          );
+        if (
+          request.customTools?.some(
+            (tool) => tool.name === "submit_implementation_plan",
+          ) === true
+        ) {
+          expect(request.prompt).not.toContain(
+            'artifact kind="implementation_plan_draft"',
+          );
+          return yield* Effect.tryPromise(() =>
+            submitImplementationPlan(request, plan),
+          );
+        }
+        if (request.display.phaseId === "implementationLog") {
+          expect(
+            yield* parseImplementationPlanResultJson(
+              yield* readArtifact(context, "implementationPlan"),
+            ),
+          ).toEqual(plan);
+          return yield* Effect.tryPromise(() =>
+            submitChangeReport(
+              request,
+              changeReport({
+                blockingQuestions: ["May existing sessions be invalidated?"],
+              }),
+            ),
+          );
+        }
+        return yield* Effect.fail(
+          new Error(`Unexpected phase after stop: ${request.display.phaseId}`),
+        );
+      });
+      const result = await runApplicationPromise(
+        nativePhases.runFullWorkflow(context).pipe(provideTestAgent(runner)),
+      );
+      expect(phases).toEqual([
+        "triage",
+        "implementationPlan",
+        "implementationLog",
+      ]);
+      expect(result).toEqual({
+        status: "execution-stopped",
+        artifact: "implementationLog",
+      });
+      expect(
+        await runApplicationPromise(
+          artifactExists(context, "implementationPlanDraft"),
+        ),
+      ).toBe(false);
+      const readiness = Effect.runSync(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      );
+      expect(readiness.decision.executionBlocked).toBe(true);
+      expect(readiness.decision.status).toBe("not-ready");
+    },
+  );
+  test("a material question discovered in drafting stops before plan acceptance", async () => {
+    const context = await tempContext();
+    const phases: string[] = [];
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      phases.push(request.display.phaseId);
+      if (request.display.phaseId === "triage")
+        return yield* Effect.tryPromise(() =>
+          submitTriage(request, triageResult()),
+        );
+      if (request.display.phaseId === "implementationPlanDraft")
+        return yield* Effect.tryPromise(() =>
+          submitImplementationPlan(request, implementationPlanResult(false)),
+        );
+      return yield* Effect.fail(
+        new Error("A later agent must not resolve a missing human decision."),
+      );
+    });
+    const result = await runApplicationPromise(
+      nativePhases.runFullWorkflow(context).pipe(provideTestAgent(runner)),
+    );
+    expect(result).toEqual({
+      status: "planning-stopped",
+      planningArtifact: "implementationPlanDraft",
+    });
+    expect(phases).toEqual(["triage", "implementationPlanDraft"]);
+  });
+  test.each(["triage", "draft", "plan"] as const)(
+    "standalone implementation cannot bypass a stopped %s",
+    async (stage) => {
+      const context = await tempContext();
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "init", "-b", "main"], {
+          cwd: context.agentCwd,
+        }),
+      );
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          "triage",
+          triageResult(stage === "triage" ? "needs-human-decision" : "proceed"),
+        ),
+      );
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          "implementationPlanDraft",
+          implementationPlanResult(stage !== "draft"),
+        ),
+      );
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          "implementationPlan",
+          implementationPlanResult(stage !== "plan"),
+        ),
+      );
+      let calls = 0;
+      const runner: AgentRunner = Effect.fnUntraced(function* () {
+        calls++;
+        return yield* Effect.fail(new Error("Implementation must not run."));
+      });
+      await assertRejects(
+        runApplicationPromise(
+          nativePhases
+            .runSinglePhase(context, "implement")
+            .pipe(provideTestAgent(runner)),
+        ),
+      );
+      expect(calls).toBe(0);
+    },
+  );
+});
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });

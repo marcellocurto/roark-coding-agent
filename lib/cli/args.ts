@@ -108,7 +108,7 @@ export interface ContinueCliOptions {
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   thinkingProfile?: ThinkingProfileName | undefined;
-  force: boolean;
+  restart: boolean;
   yes: boolean;
   maxFixPasses: number;
   attempt?: number | undefined;
@@ -238,7 +238,7 @@ export interface RawContinueCliOptions extends RawPresentationCliOptions {
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
   thinkingProfile?: ThinkingProfileName | undefined;
-  force?: true | undefined;
+  restart?: true | undefined;
   yes?: true | undefined;
   maxFixPasses?: number | undefined;
   attempt?: number | undefined;
@@ -376,7 +376,8 @@ Commands:
   auto [issue]          Work on the next ready issue, or a specific issue, in a managed workspace and publish after all gates pass.
   review-pr <number>     Review an existing PR without changing code and post actionable feedback.
   revise-pr <number>     Address required PR review feedback and push verified fixes when needed.
-  continue <issue>       Resume a stopped issue workflow and publish after all gates pass.
+  continue <issue>       Read the latest issue and comments, then resume saved work.
+                        Add --restart to start over using the current issue and comments.
   status [issue]         View workflow status and recovery information; use --all for every known issue run.
   remove [issue ...] [--pr <n>] [--force]
                         Select and remove managed workspaces. With no targets, opens an interactive multi-select.
@@ -387,7 +388,7 @@ Commands:
   fetch <issue>          Fetch the GitHub issue into .roark/runs/issue/<number>/.
   triage <issue>         Run only the triage agent.
   plan-draft <issue>     Run only the draft planning agent.
-  plan <issue>           Refine the draft plan into the final implementation plan.
+  plan <issue>           Validate/adopt an issue plan or accept a Roark draft.
   capture-baseline <issue>
                         Capture the pre-implementation baseline.
   implement <issue>      Run only the implementation agent.
@@ -431,7 +432,8 @@ Options:
                           Label applied to the issue when a PR is opened. Defaults to ${defaultAutorunSuccessLabel}.
   --remote <name>        Git remote to push the issue/PR branch to. Defaults to ${defaultAutorunRemote}.
   --no-comment           review-pr/revise-pr: do not post PR comment output.
-  --force                Re-run phases, or remove managed workspaces that have uncommitted changes.
+  --restart              continue only: back up saved work, restore the starting commit, and start over with the current issue and comments.
+  --force                Re-run standalone phases, or remove dirty managed workspaces. Not supported by continue.
   --yes                  Continue past dirty git preflight for implementation/fix/revise-pr; approve create-issues mutations.
   --verbose              Long-running commands: show completed agent responses and detailed tool statistics.
   --no-title             Long-running commands: do not manage the interactive terminal title.
@@ -802,7 +804,11 @@ function parseContinueArgs(args: string[]): RawContinueCliOptions {
       options.inProgressLabel = requiredValue(rest, ++index, arg);
     else if (arg === "--remote")
       options.remote = requiredValue(rest, ++index, arg);
-    else if (arg === "--force") options.force = true;
+    else if (arg === "--restart") options.restart = true;
+    else if (arg === "--force")
+      throw new Error(
+        "--force is not supported for continue. Use continue to resume, or continue --restart to start over.",
+      );
     else if (arg === "--yes") options.yes = true;
     else if (applyPresentationFlag(options, arg)) continue;
     else if (arg?.startsWith("--") === true)

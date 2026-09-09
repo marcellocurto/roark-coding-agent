@@ -11,28 +11,51 @@ import {
 import { Schema } from "effect";
 import type { StructuredArtifactDefinition } from "../structured-output/runner.ts";
 const changeReportSchemaShape = Schema.Struct({
-  summary: trimmedText("Concise account of the completed phase."),
+  blockingQuestions: Schema.mutable(
+    Schema.Array(
+      trimmedText(
+        "A question that stopped this step because someone needs to answer it. Leave the list empty if no answer is needed.",
+      ),
+    ),
+  ),
+  externalBlockers: Schema.mutable(
+    Schema.Array(
+      trimmedText(
+        "Something outside this work that stopped this step. Explain how you checked it and what needs to happen next.",
+      ),
+    ),
+  ),
+  summary: trimmedText(
+    "What was done in this step, including any unfinished work.",
+  ),
   changedFiles: changedFilesSchema,
   validation: validationEntriesSchema,
   deviations: Schema.mutable(
     Schema.Array(
       trimmedText(
-        "Deviation from the plan or material phase-specific decision.",
+        "What changed from the plan, or an important decision made during this step.",
       ),
     ),
   ),
   addressedFindingIds: Schema.mutable(
     Schema.Array(
-      trimmedText("Workflow ID of a review finding addressed by this phase."),
+      trimmedText(
+        "The workflow ID of a review finding handled during this step.",
+      ),
     ),
   ),
   remainingConcerns: Schema.mutable(
     Schema.Array(
-      trimmedText("Concrete unresolved concern remaining after this phase."),
+      trimmedText("A specific problem or risk that remains after this step."),
     ),
   ),
 });
 export type ChangeReport = (typeof changeReportSchemaShape)["Type"];
+export function changeReportStopsExecution(report: ChangeReport): boolean {
+  return (
+    report.blockingQuestions.length > 0 || report.externalBlockers.length > 0
+  );
+}
 export const requireAddressedFindingIds = Effect.fnUntraced(function* (
   report: ChangeReport,
   expectedIds: readonly string[],
@@ -46,7 +69,10 @@ export const requireAddressedFindingIds = Effect.fnUntraced(function* (
         const unknown = report.addressedFindingIds.filter(
           (id) => !expected.has(id),
         );
-        const missing = expectedIds.filter((id) => !actual.has(id));
+        const stopped = changeReportStopsExecution(report);
+        const missing = stopped
+          ? []
+          : expectedIds.filter((id) => !actual.has(id));
         if (unknown.length > 0 || missing.length > 0) {
           const details = [
             unknown.length > 0
@@ -56,7 +82,7 @@ export const requireAddressedFindingIds = Effect.fnUntraced(function* (
               ? `missing required IDs: ${missing.join(", ")}`
               : undefined,
           ].filter((item): item is string => item !== undefined);
-          return `Fix report addressedFindingIds do not match the required review findings (${details.join("; ")}).`;
+          return `The fix report lists incorrect or missing review finding IDs in addressedFindingIds (${details.join("; ")}).`;
         }
       }),
     ),
@@ -71,6 +97,12 @@ export function formatChangeReportMarkdown(
     "",
     "## Summary",
     report.summary,
+    "",
+    "## Blocking Questions",
+    ...renderList(report.blockingQuestions),
+    "",
+    "## External Blockers",
+    ...renderList(report.externalBlockers),
     "",
     "## Changed Files",
     ...renderChangedFiles(report),
@@ -99,7 +131,7 @@ const contract = artifactContract(
         ...new Set(ids.filter((id, index) => ids.indexOf(id) !== index)),
       ];
       if (duplicates.length > 0)
-        return `Change report addressedFindingIds must not contain duplicates: ${duplicates.join(", ")}.`;
+        return `List each review finding ID only once in addressedFindingIds. Repeated IDs: ${duplicates.join(", ")}.`;
     }),
   ),
 );

@@ -7,6 +7,7 @@ case "$1 $2" in
       *) response=issue ;;
     esac
     ;;
+  "api repos/owner/repo/issues/12/comments") response=comments ;;
   "api repos/owner/repo/issues/12") response=summary ;;
   "api repos/owner/repo/issues/12/dependencies/blocked_by") response=blocked-by ;;
   "api repos/owner/repo/issues/12/dependencies/blocking") response=blocking ;;

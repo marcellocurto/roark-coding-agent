@@ -1,3 +1,7 @@
+import {
+  parseContinuationResult,
+  formatContinuationReview,
+} from "../issue-continuation/result.ts";
 import { DateTime } from "effect";
 import { Effect } from "effect";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
@@ -16,13 +20,28 @@ import {
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
-import { mapTriageVerdictToLabel } from "./triage-stop.ts";
-import { markIssueTriageStopped } from "./triage-stop.ts";
+import {
+  mapStopVerdictToLabel,
+  markIssueWorkflowStopped,
+} from "./workflow-stop.ts";
+import {
+  formatImplementationPlanMarkdown,
+  parseImplementationPlanResultJson,
+} from "../implementation-plan/result.ts";
+import {
+  formatChangeReportMarkdown,
+  parseChangeReportJson,
+} from "../change-report/result.ts";
+import type { TriageVerdict } from "../triage/result.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 export type AutorunCompletionOutcome =
   | PublishGateOutcome
   | {
-      outcome: "triage-stopped";
+      outcome:
+        | "triage-stopped"
+        | "planning-stopped"
+        | "execution-stopped"
+        | "continuation-stopped";
       outcomeDetail: string | null;
     };
 export interface CompleteAutorunWorkflowInput {
@@ -37,7 +56,7 @@ export interface CompleteAutorunWorkflowInput {
 }
 export interface CompleteAutorunWorkflowInjected {
   publishGate?: typeof runPublishGate | undefined;
-  markTriageStopped?: typeof markIssueTriageStopped | undefined;
+  markWorkflowStopped?: typeof markIssueWorkflowStopped | undefined;
   publishPlanningLedgerComments?:
     | typeof publishPlanningLedgerComments
     | undefined;
@@ -48,33 +67,36 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
     injected: CompleteAutorunWorkflowInjected = {},
   ) {
     const publishGate = injected.publishGate ?? runPublishGate;
-    const markTriageStopped =
-      injected.markTriageStopped ?? markIssueTriageStopped;
+    const markWorkflowStopped =
+      injected.markWorkflowStopped ?? markIssueWorkflowStopped;
     const publishPlanning =
       injected.publishPlanningLedgerComments ?? publishPlanningLedgerComments;
-    if (input.workflowResult.status === "triage-stopped") {
-      const phase = "triage";
+    const result = input.workflowResult;
+    if (
+      result.status === "continuation-stopped" ||
+      result.status === "triage-stopped" ||
+      result.status === "planning-stopped" ||
+      result.status === "execution-stopped"
+    ) {
+      const stop = yield* workflowStopDetails(input.workflowContext, result);
+      const { phase, verdict, artifactContent } = stop;
       const marker = buildRoarkMarker({
         issueNumber: input.issue.number,
         attempt: input.attemptMetadata.attempt,
         phase,
       });
-      const ref = yield* markTriageStopped({
+      const ref = yield* markWorkflowStopped({
         cwd: input.options.cwd,
         repo: input.options.repo,
         issueNumber: input.issue.number,
         issueUrl: input.issue.url,
-        triageVerdict: input.workflowResult.triageVerdict,
-        triageArtifactContent: yield* readArtifactIfExists(
-          input.workflowContext,
-          "triageMarkdown",
-        ),
+        verdict,
+        artifactContent,
+        recoveryCommand: input.recoveryCommand,
         removeLabels: labelsToRemoveForAutorunTransition({
           issueLabels: input.issue.labels,
           workflow: input.options,
-          nextLabel: mapTriageVerdictToLabel(
-            input.workflowResult.triageVerdict,
-          ),
+          nextLabel: mapStopVerdictToLabel(verdict),
           knownPresent: [
             input.options.inProgressLabel,
             input.options.failureLabel,
@@ -92,8 +114,8 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
           DateTime.formatIso(yield* DateTime.now),
         );
       return {
-        outcome: "triage-stopped" as const,
-        outcomeDetail: `triage verdict is "${input.workflowResult.triageVerdict}"`,
+        outcome: result.status,
+        outcomeDetail: `${phase} verdict is "${verdict}"`,
       } satisfies AutorunCompletionOutcome;
     }
     yield* publishPlanning(
@@ -144,3 +166,73 @@ const readArtifactIfExists = Effect.fn("readArtifactIfExists")(function* (
     ),
   );
 });
+
+const workflowStopDetails = Effect.fn("workflowStopDetails")(function* (
+  context: WorkflowContext,
+  result: Extract<
+    WorkflowRunResult,
+    {
+      status:
+        | "triage-stopped"
+        | "planning-stopped"
+        | "execution-stopped"
+        | "continuation-stopped";
+    }
+  >,
+) {
+  if (result.status === "continuation-stopped") {
+    const review = yield* parseContinuationResult(
+      yield* readArtifact(context, "continuationReview"),
+    );
+    return {
+      phase: "continuation",
+      verdict:
+        review.blockingQuestions.length > 0 ||
+        review.resolutions.some((item) => item.status === "unresolved")
+          ? ("needs-human-decision" as const)
+          : ("blocked" as const),
+      artifactContent: formatContinuationReview(review),
+    };
+  }
+  if (result.status === "triage-stopped")
+    return {
+      phase: "triage",
+      verdict: result.triageVerdict,
+      artifactContent: yield* readArtifactIfExists(context, "triageMarkdown"),
+    };
+  if (result.status === "planning-stopped") {
+    const artifact = result.planningArtifact ?? "implementationPlan";
+    const plan = yield* parseImplementationPlanResultJson(
+      yield* readArtifact(context, artifact),
+    );
+    return {
+      phase:
+        artifact === "implementationPlanDraft"
+          ? "implementation-plan-draft"
+          : "implementation-plan",
+      verdict: stopVerdict(plan),
+      artifactContent: formatImplementationPlanMarkdown(
+        plan,
+        artifact === "implementationPlanDraft" ? "draft" : "final",
+      ),
+    };
+  }
+  const report = yield* parseChangeReportJson(
+    yield* readArtifact(context, result.artifact),
+  );
+  return {
+    phase:
+      typeof result.artifact === "string"
+        ? "implementation"
+        : `${result.artifact.name}-${result.artifact.pass}`,
+    verdict: stopVerdict(report),
+    artifactContent: formatChangeReportMarkdown(report, "Execution Stopped"),
+  };
+});
+function stopVerdict(result: {
+  blockingQuestions: readonly string[];
+}): Exclude<TriageVerdict, "proceed" | "reject"> {
+  return result.blockingQuestions.length > 0
+    ? "needs-human-decision"
+    : "blocked";
+}

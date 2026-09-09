@@ -2,82 +2,47 @@ import { GitHub } from "../github/service.ts";
 import { Presentation } from "../runtime/services.ts";
 import { Effect } from "effect";
 import { truncateGitHubIssueComment } from "../github/comments.ts";
-import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { readArtifact } from "../workflow/artifacts.ts";
-import { parseTriageResultJson } from "../triage/result.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
-export type TriageStoppedVerdict = string;
-export interface FormatTriageStoppedCommentInput {
+export type WorkflowStoppedVerdict =
+  | "blocked"
+  | "needs-human-decision"
+  | "reject";
+export interface FormatWorkflowStoppedCommentInput {
   issueNumber: number;
   issueUrl?: string | undefined;
-  triageVerdict: TriageStoppedVerdict;
-  triageArtifactContent?: string | undefined;
+  verdict: WorkflowStoppedVerdict;
+  artifactContent?: string | undefined;
+  recoveryCommand?: string | undefined;
 }
-export type MarkIssueTriageStoppedOptions = FormatTriageStoppedCommentInput & {
-  cwd: string;
-  repo?: string | undefined;
-  removeLabels?: string[] | undefined;
-  marker?: string | undefined;
-  existingCommentId?: number | undefined;
-};
-export const readTriageStoppedVerdict = Effect.fn("readTriageStoppedVerdict")(
-  function* (context: WorkflowContext) {
-    return (yield* parseTriageResultJson(
-      yield* readArtifact(context, "triage"),
-    )).verdict;
-  },
-);
-export function mapTriageVerdictToLabel(
-  verdict: TriageStoppedVerdict,
+export type MarkIssueWorkflowStoppedOptions =
+  FormatWorkflowStoppedCommentInput & {
+    cwd: string;
+    repo?: string | undefined;
+    removeLabels?: string[] | undefined;
+    marker?: string | undefined;
+    existingCommentId?: number | undefined;
+  };
+export function mapStopVerdictToLabel(
+  verdict: WorkflowStoppedVerdict,
 ): "blocked" | "needs-human" | "triage-rejected" {
   if (verdict === "blocked") return "blocked";
   if (verdict === "reject") return "triage-rejected";
   return "needs-human";
 }
-export function formatTriageStoppedComment(
-  input: FormatTriageStoppedCommentInput,
+export function formatWorkflowStoppedComment(
+  input: FormatWorkflowStoppedCommentInput,
 ): string {
-  if (!input.triageArtifactContent?.trim()) return "";
+  if (!input.artifactContent?.trim()) return "";
   return truncateGitHubIssueComment(
-    `${sanitizePublicMarkdown(input.triageArtifactContent).trimEnd()}\n`,
+    sanitizePublicMarkdown(
+      `${input.artifactContent.trimEnd()}\n${input.recoveryCommand ? `\nAdd the missing information or decision to the issue, then run \`${input.recoveryCommand}\` to read the updated discussion and continue the saved work.\n` : ""}`,
+    ),
   );
 }
-export function buildTriageStopAddLabelArgv(options: {
-  repo?: string | undefined;
-  issueNumber: number;
-  label: string;
-}): string[] {
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return [
-    "gh",
-    "issue",
-    "edit",
-    String(options.issueNumber),
-    "--add-label",
-    options.label,
-    ...repoArgs,
-  ];
-}
-export function buildTriageStopRemoveLabelArgv(options: {
-  repo?: string | undefined;
-  issueNumber: number;
-  label: string;
-}): string[] {
-  const repoArgs = options.repo ? ["--repo", options.repo] : [];
-  return [
-    "gh",
-    "issue",
-    "edit",
-    String(options.issueNumber),
-    "--remove-label",
-    options.label,
-    ...repoArgs,
-  ];
-}
-export const markIssueTriageStopped = Effect.fn("markIssueTriageStopped")(
-  function* (options: MarkIssueTriageStoppedOptions) {
-    const label = mapTriageVerdictToLabel(options.triageVerdict);
-    const comment = formatTriageStoppedComment(options);
+export const markIssueWorkflowStopped = Effect.fn("markIssueWorkflowStopped")(
+  function* (options: MarkIssueWorkflowStoppedOptions) {
+    const label = mapStopVerdictToLabel(options.verdict);
+    const comment = formatWorkflowStoppedComment(options);
     yield* Effect.gen(function* () {
       yield* (yield* GitHub).addIssueLabel({
         cwd: options.cwd,
@@ -89,7 +54,7 @@ export const markIssueTriageStopped = Effect.fn("markIssueTriageStopped")(
       Effect.catch(
         Effect.fnUntraced(function* (error) {
           (yield* Presentation).warning(
-            `failed to apply triage-stop label '${label}': ${error.message}`,
+            `failed to apply workflow-stop label '${label}': ${error.message}`,
           );
         }),
       ),
@@ -135,7 +100,7 @@ export const markIssueTriageStopped = Effect.fn("markIssueTriageStopped")(
       Effect.catch(
         Effect.fnUntraced(function* (error) {
           (yield* Presentation).warning(
-            `failed to post triage-stop comment: ${error.message}`,
+            `failed to post workflow-stop comment: ${error.message}`,
           );
         }),
       ),

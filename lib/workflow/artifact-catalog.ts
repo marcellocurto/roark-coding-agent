@@ -1,6 +1,11 @@
 export type StaticArtifactName =
   | "issue"
   | "triage"
+  | "executionStop"
+  | "continuationState"
+  | "continuationInput"
+  | "continuationReview"
+  | "continuationReviewMarkdown"
   | "triageMarkdown"
   | "implementationPlanDraft"
   | "implementationPlanDraftMarkdown"
@@ -66,8 +71,33 @@ export interface ArtifactContract {
 }
 
 export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
+  {
+    name: "continuationState",
+    filename: "continuation-state.json",
+    displayName: "Continuation checkpoint",
+  },
+  {
+    name: "continuationInput",
+    filename: "continuation-input.json",
+    displayName: "Current issue feedback",
+  },
+  {
+    name: "continuationReview",
+    filename: "continuation-review.json",
+    displayName: "Continuation review",
+  },
+  {
+    name: "continuationReviewMarkdown",
+    filename: "continuation-review.md",
+    displayName: "Continuation review",
+  },
   { name: "issue", filename: "issue.md", displayName: "Issue" },
   { name: "triage", filename: "triage.json", displayName: "Triage" },
+  {
+    name: "executionStop",
+    filename: "execution-stop.json",
+    displayName: "Active Execution Stop",
+  },
   {
     name: "triageMarkdown",
     filename: "triage.md",
@@ -278,7 +308,7 @@ const numberedContracts: Record<
   }),
 };
 
-export function fixLogRef(pass: number): ArtifactRef {
+export function fixLogRef(pass: number): { name: "fixLog"; pass: number } {
   return { name: "fixLog", pass };
 }
 
@@ -298,7 +328,10 @@ export function implementationRestartLogRef(pass: number): ArtifactRef {
   return { name: "implementationRestartLog", pass };
 }
 
-export function refinementLogRef(pass: number): ArtifactRef {
+export function refinementLogRef(pass: number): {
+  name: "refinementLog";
+  pass: number;
+} {
   return { name: "refinementLog", pass };
 }
 
