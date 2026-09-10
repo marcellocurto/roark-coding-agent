@@ -1,3 +1,6 @@
+import { GitHub } from "../github/service.ts";
+import { publishIssueLedgerComment } from "./ledger-comments.ts";
+import type { AttemptMetadata } from "./attempts.ts";
 import { Schema, Effect, PlatformError } from "effect";
 import {
   readArtifact,
@@ -858,3 +861,67 @@ function failedVerification(
 function structuredReview(findings: ReviewFinding[] = []): string {
   return JSON.stringify(reviewResult(findings));
 }
+
+test("terminal readiness and PR publication replace the same attempt status", async () => {
+  const context = await tempContext(0);
+  const metadata: AttemptMetadata = attemptMetadata(context);
+  const remote = new Map<number, string>();
+  await runApplicationPromise(
+    Effect.gen(function* () {
+      const github = yield* GitHub;
+      const input = {
+        options: publishGateOptions(context),
+        issue: { number: 1, title: "Issue" },
+        branchPlan: {
+          issueNumber: 1,
+          branchName: "roark/issue-1",
+          baseBranch: "main",
+        },
+        workflowContext: context,
+        attemptMetadata: metadata,
+        attemptMetadataPath: "attempt.json",
+        recoveryCommand: "roark continue 1",
+      };
+      const run = () =>
+        runPublishGate(
+          input,
+          successfulPublicationDependencies({ publishIssueLedgerComment }),
+        ).pipe(
+          Effect.provideService(GitHub, {
+            ...github,
+            addIssueLabel: () => Effect.void,
+            removeIssueLabel: () => Effect.void,
+            postOrUpdateIssueCommentByMarker: (options) =>
+              Effect.sync(() => {
+                const id = options.existingCommentId ?? remote.size + 401;
+                remote.set(id, options.body);
+                expect(options.marker).toContain("phase=attempt-status");
+                return { id, marker: options.marker };
+              }),
+          }),
+        );
+      expect((yield* run()).outcome).toBe("failed-readiness");
+      expect(remote.get(401)).toContain("readiness");
+      expect(remote.get(401)).toContain("roark continue 1");
+      yield* writeJsonArtifact(
+        context,
+        "readiness",
+        readinessResult("ready-for-pr"),
+      );
+      yield* writeArtifact(
+        context,
+        "readinessMarkdown",
+        "## Ready\n\nTOKEN=secret",
+      );
+      expect((yield* run()).outcome).toBe("published");
+      expect(remote.size).toBe(1);
+      expect(remote.get(401)).toContain(
+        "https://github.com/owner/repo/pull/10",
+      );
+      expect(remote.get(401)).toContain("TOKEN=[redacted]");
+      expect(Object.keys(metadata.githubComments?.issue ?? {})).toEqual([
+        "attempt-status",
+      ]);
+    }),
+  );
+});

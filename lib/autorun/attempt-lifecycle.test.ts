@@ -1,3 +1,4 @@
+import { GitHub } from "../github/service.ts";
 import { fixedWallClock } from "../testing/clock.ts";
 import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
 import {
@@ -49,6 +50,62 @@ afterEach(async () => {
   );
 });
 describe("runAutorunAttemptLifecycle", () => {
+  test("reuses and persists one status across repeated workflow exceptions", async () => {
+    const fixture = await createFixture();
+    const remote = new Map<number, string>();
+    for (let retry = 0; retry < 2; retry++) {
+      if (retry > 0)
+        fixture.attemptMetadata = await runApplicationPromise(
+          Effect.flatMap(AttemptStore, (store) =>
+            store.read(fixture.issueDir, 1),
+          ),
+        );
+      await assertRejects(
+        runApplicationPromise(
+          Effect.gen(function* () {
+            const github = yield* GitHub;
+            yield* runAutorunAttemptLifecycle(fixture, {
+              runFullWorkflow: () =>
+                Effect.fail(
+                  new AgentTaskRunError({
+                    artifact: "implementationLog",
+                    label: "Implementation",
+                    phase: "agent-error",
+                    originalError: new Error("provider overloaded"),
+                  }),
+                ),
+            }).pipe(
+              Effect.provideService(GitHub, {
+                ...github,
+                addIssueLabel: () => Effect.void,
+                removeIssueLabel: () => Effect.void,
+                postIssueComment: () =>
+                  Effect.die("must use marked publishing"),
+                postOrUpdateIssueCommentByMarker: (input) =>
+                  Effect.sync(() => {
+                    expect(input.marker).toContain("phase=attempt-status");
+                    expect(input.existingCommentId).toBe(
+                      retry === 0 ? undefined : 301,
+                    );
+                    remote.set(input.existingCommentId ?? 301, input.body);
+                    return { id: 301, marker: input.marker };
+                  }),
+              }),
+            );
+          }),
+        ),
+      );
+      const saved = await runApplicationPromise(
+        Effect.flatMap(AttemptStore, (store) =>
+          store.read(fixture.issueDir, 1),
+        ),
+      );
+      expect(saved.githubComments?.issue?.["attempt-status"]?.id).toBe(301);
+    }
+    expect(remote.size).toBe(1);
+    expect(remote.get(301)).toContain("provider overloaded");
+    expect(remote.get(301)).toContain("roark continue 44");
+  });
   test("marks attempts in-progress before workflow and records terminal completion outcomes", async () => {
     await Promise.resolve();
     const fixture = await createFixture();
