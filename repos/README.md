@@ -19,8 +19,14 @@ examples under `effect/ai-docs/`. Consult the source and tests under
 needed; the entire repository does not need to be loaded into an agent's context.
 
 This follows [Effect's source-vendoring guidance](https://effect.website/blog/the-one-weird-git-trick-that-makes-coding-agents-more-effect-ive).
-The reference is pinned to the versions of `effect` and `@effect/platform-bun`
-in Roark's `package.json`, rather than the moving upstream `main` branch.
+The reference is pinned to the versions of `effect`, `@effect/platform-bun`, and
+`@effect/platform-node-shared` in Roark's `package.json`, rather than the moving
+upstream `main` branch. Keep all three dependency pins aligned. The explicit
+`platform-node-shared` dependency keeps fresh npm installations on the compatible
+release: `platform-bun` declares a caret range that can otherwise select a newer
+release candidate requiring Effect APIs absent from the pinned version. The Bun
+lockfile only protects checkout installs; `bun run release:check-package` verifies
+the published dependency resolution through a fresh installation.
 
 ## Updating Effect
 
