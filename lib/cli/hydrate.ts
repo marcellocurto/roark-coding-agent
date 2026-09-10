@@ -177,7 +177,7 @@ export const hydrateCliOptions = Effect.fn("hydrateCliOptions")(function* (
       model: raw.model,
       thinkingLevel: raw.thinkingLevel,
       thinkingProfile: raw.thinkingProfile,
-      force: raw.force ?? false,
+      restart: raw.restart ?? false,
       yes: raw.yes ?? false,
       maxFixPasses:
         raw.maxFixPasses ?? config.maxFixPasses ?? defaultMaxFixPasses,

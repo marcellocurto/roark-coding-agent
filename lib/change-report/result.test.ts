@@ -8,6 +8,25 @@ import {
 } from "./result.ts";
 import { changeReport } from "../testing/change-reports.ts";
 describe("change reports", () => {
+  test("a stopped partial fix reports only findings actually addressed", () => {
+    const report = changeReport({
+      blockingQuestions: ["Which compatibility policy applies?"],
+      addressedFindingIds: ["review-a:one"],
+    });
+    expect(
+      Effect.runSync(
+        requireAddressedFindingIds(report, ["review-a:one", "review-a:two"]),
+      ),
+    ).toEqual(report);
+    expect(() =>
+      Effect.runSync(
+        requireAddressedFindingIds(
+          { ...report, addressedFindingIds: ["invented"] },
+          ["review-a:one"],
+        ),
+      ),
+    ).toThrow("unknown IDs");
+  });
   test("rejects paths that escape the repository", () => {
     const report = changeReport({
       changedFiles: [{ path: "../outside.ts", description: "Invalid path." }],

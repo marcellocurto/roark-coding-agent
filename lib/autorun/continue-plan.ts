@@ -61,7 +61,7 @@ const planFailedVerificationContinuation = Effect.fn(
       {
         type: "noop",
         reason:
-          "verification failed and maximum fix passes reached; human action required or pass --force to rerun gates",
+          "verification failed and maximum fix passes reached; human action required or use continue --restart to start over",
       },
     ];
   }
@@ -130,18 +130,3 @@ const readFailedVerificationArtifact = Effect.fn(
     ),
   );
 });
-export function formatContinuationPlan(
-  steps: readonly ContinuePlanStep[],
-): string[] {
-  return steps.map((step) => {
-    if (step.type === "run") {
-      const suffix = step.pass === undefined ? "" : ` pass ${step.pass}`;
-      return `- run ${step.phase}${suffix}: ${step.reason}`;
-    }
-    if (step.type === "write-readiness")
-      return `- write readiness: ${step.reason}`;
-    if (step.type === "publish-gate")
-      return `- run publish gate: ${step.reason}`;
-    return `- no-op: ${step.reason}`;
-  });
-}

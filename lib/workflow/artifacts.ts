@@ -57,6 +57,7 @@ export interface WorkflowContext {
   thinkingProfile?: ThinkingProfileName | undefined;
   thinkingConfig: WorkflowThinkingConfig;
   force: boolean;
+  continuing?: boolean;
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number | undefined;

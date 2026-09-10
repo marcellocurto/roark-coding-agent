@@ -50,7 +50,13 @@ export const finalizeAttemptObservability = Effect.fn(
 export function runStatusForAttemptOutcome(outcome: AttemptOutcome): RunStatus {
   if (outcome === "in-progress") return "running";
   if (outcome === "published") return "completed";
-  if (outcome === "triage-stopped") return "stopped";
+  if (
+    outcome === "continuation-stopped" ||
+    outcome === "triage-stopped" ||
+    outcome === "planning-stopped" ||
+    outcome === "execution-stopped"
+  )
+    return "stopped";
   return "failed";
 }
 

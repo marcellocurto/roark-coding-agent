@@ -1,3 +1,8 @@
+import { GitHubRequestError } from "../github/errors.ts";
+import {
+  continuationResult,
+  submitContinuation,
+} from "../testing/continuations.ts";
 import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
 import {
   writeArtifact,
@@ -41,7 +46,7 @@ const continueOptions = {
   repo: "owner/repo",
   model: "provider/model",
   thinkingLevel: "high",
-  force: false,
+  restart: false,
   yes: true,
   maxFixPasses: 3,
   attempt: 2,
@@ -53,6 +58,51 @@ const continueOptions = {
   remote: "origin",
 } satisfies ContinueCliOptions;
 describe("runAutoContinue", () => {
+  test.each(["planning-stopped", "execution-stopped"] as const)(
+    "%s fetches current feedback before preparing the workspace",
+    async (outcome) => {
+      const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-stopped-"));
+      tempDirs.push(cwd);
+      await installFailingGh(cwd);
+      await runApplicationPromise(
+        Effect.flatMap(AttemptStore, (store) =>
+          store.write(
+            path.join(cwd, ".roark/runs/issue/24"),
+            formatAttemptMetadata({
+              attempt: 2,
+              issueNumber: 24,
+              branch: "roark/issue-24",
+              baseBranch: "main",
+              worktreePath: "/unused",
+              runArtifactPath: ".roark/runs/issue/24/attempts/2",
+              startedAt: "2026-09-09T00:00:00Z",
+              outcome,
+            }),
+          ),
+        ),
+      );
+      let fetched = false;
+      await assertRejects(
+        runApplicationPromise(
+          runAutoContinue(
+            { ...continueOptions, issue: "24", cwd, attempt: 2 },
+            {
+              fetchGitHubIssue: Effect.fnUntraced(function* () {
+                fetched = true;
+                return yield* Effect.fail(
+                  new GitHubRequestError({
+                    message: "latest comments unavailable",
+                  }),
+                );
+              }),
+            },
+          ),
+        ),
+        /latest comments unavailable/,
+      );
+      expect(fetched).toBe(true);
+    },
+  );
   test("already-published attempts return before label preflight or branch work", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-published-"));
     tempDirs.push(cwd);
@@ -345,7 +395,11 @@ describe("runAutoContinue", () => {
           {},
         ).pipe(
           provideTestAgent(
-            Effect.fnUntraced(function* () {
+            Effect.fnUntraced(function* (request) {
+              if (request.display.phaseId === "continuation-review")
+                return yield* Effect.tryPromise(() =>
+                  submitContinuation(request, continuationResult()),
+                );
               yield* Effect.void;
               return yield* Effect.fail(new Error("fix failed after reviews"));
             }),

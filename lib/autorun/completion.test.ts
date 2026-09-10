@@ -1,7 +1,14 @@
+import type { MarkIssueWorkflowStoppedOptions } from "./workflow-stop.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
 import { applicationLayer } from "../runtime/application.ts";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { writeJsonArtifact } from "../workflow/artifacts.ts";
+import { implementationPlanResult } from "../testing/workflow-results.ts";
+import { changeReport } from "../testing/change-reports.ts";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import { completeAutorunWorkflow } from "./completion.ts";
@@ -53,10 +60,104 @@ const attemptMetadata = formatAttemptMetadata({
   startedAt: "2026-05-06T00:00:00.000Z",
 });
 describe("completeAutorunWorkflow", () => {
+  const directories: string[] = [];
+  afterEach(async () => {
+    for (const directory of directories.splice(0))
+      await rm(directory, { recursive: true, force: true });
+  });
+  test.each(["draft-question", "final-blocker", "execution-question"] as const)(
+    "publishes actionable %s stops without invoking the publish gate",
+    async (scenario) => {
+      const runDir = await mkdtemp(
+        path.join(tmpdir(), "roark-completion-stop-"),
+      );
+      directories.push(runDir);
+      const context = { ...workflowContext, runDir };
+      const questions = ["Should existing customer data be retained?"];
+      const artifact =
+        scenario === "draft-question"
+          ? "implementationPlanDraft"
+          : scenario === "final-blocker"
+            ? "implementationPlan"
+            : "implementationLog";
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          artifact,
+          scenario === "execution-question"
+            ? changeReport({ blockingQuestions: questions })
+            : implementationPlanResult(
+                false,
+                scenario === "final-blocker"
+                  ? {
+                      blockingQuestions: [],
+                      externalBlockers: [
+                        "Issue #5 is open; verified dependency must ship first.",
+                      ],
+                    }
+                  : { blockingQuestions: questions },
+              ),
+        ),
+      );
+      let publishCalls = 0;
+      const marked: MarkIssueWorkflowStoppedOptions[] = [];
+      const metadata = { ...attemptMetadata };
+      const outcome = await runApplicationPromise(
+        completeAutorunWorkflow(
+          {
+            workflowResult:
+              scenario === "execution-question"
+                ? { status: "execution-stopped", artifact: "implementationLog" }
+                : {
+                    status: "planning-stopped",
+                    planningArtifact:
+                      scenario === "draft-question"
+                        ? "implementationPlanDraft"
+                        : "implementationPlan",
+                  },
+            options,
+            issue,
+            branchPlan,
+            workflowContext: context,
+            attemptMetadata: metadata,
+            attemptMetadataPath: "attempt.json",
+            recoveryCommand: "roark continue 12 --attempt 1",
+          },
+          {
+            publishGate: Effect.fnUntraced(function* () {
+              publishCalls++;
+              yield* Effect.void;
+              return { outcome: "published" as const, outcomeDetail: null };
+            }),
+            markWorkflowStopped: Effect.fnUntraced(function* (input) {
+              marked.push(input);
+              yield* Effect.void;
+              return { id: 45, marker: input.marker ?? "" };
+            }),
+          },
+        ),
+      );
+      expect(publishCalls).toBe(0);
+      expect(outcome.outcome).toBe(
+        scenario === "execution-question"
+          ? "execution-stopped"
+          : "planning-stopped",
+      );
+      expect(marked).toHaveLength(1);
+      expect(marked[0]).toMatchObject({
+        verdict:
+          scenario === "final-blocker" ? "blocked" : "needs-human-decision",
+        recoveryCommand: "roark continue 12 --attempt 1",
+      });
+      expect(Object.values(metadata.githubComments?.issue ?? {})).toHaveLength(
+        1,
+      );
+    },
+  );
   test("marks triage-stopped and does not run the publish gate", async () => {
     await Promise.resolve();
     let publishCalls = 0;
-    const marked: unknown[] = [];
+    const marked: MarkIssueWorkflowStoppedOptions[] = [];
     const outcome = await Effect.runPromise(
       Effect.gen(function* () {
         return yield* completeAutorunWorkflow(
@@ -78,7 +179,7 @@ describe("completeAutorunWorkflow", () => {
               publishCalls += 1;
               return { outcome: "published" as const, outcomeDetail: null };
             }),
-            markTriageStopped: Effect.fnUntraced(function* (input) {
+            markWorkflowStopped: Effect.fnUntraced(function* (input) {
               yield* Effect.void;
               marked.push(input);
               return undefined;
@@ -98,7 +199,7 @@ describe("completeAutorunWorkflow", () => {
       repo: "owner/repo",
       issueNumber: 12,
       issueUrl: "https://github.com/owner/repo/issues/12",
-      triageVerdict: "blocked",
+      verdict: "blocked",
       removeLabels: ["ready-for-agent", "agent-in-progress", "agent-failed"],
     });
   });
@@ -127,7 +228,7 @@ describe("completeAutorunWorkflow", () => {
               outcomeDetail: "readiness status is missing",
             };
           }),
-          markTriageStopped: Effect.fnUntraced(function* () {
+          markWorkflowStopped: Effect.fnUntraced(function* () {
             yield* Effect.void;
             marked = true;
             return undefined;

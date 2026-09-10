@@ -27,6 +27,10 @@ import {
 import { readArtifact, writeArtifact, writeJsonArtifact } from "./artifacts.ts";
 import { validateAgentArtifact } from "./artifact-validation.ts";
 import {
+  prepareIssueContinuation,
+  type IssueContinuationOptions,
+} from "../issue-continuation/workflow.ts";
+import {
   assertCleanGit,
   capturePreImplementationBaseline,
   resetWorktreeToPreImplementationBaseline,
@@ -39,6 +43,7 @@ import {
   issueArtifactHasRelationshipSnapshot,
   planWorkflowProgression,
   type WorkflowProgressionAction,
+  type WorkflowTerminalStatus,
 } from "./progression.ts";
 import type {
   SinglePhaseCommand,
@@ -56,6 +61,7 @@ import {
   runPlanTask,
   runReviewTask,
   runTriageTask,
+  type ChangeReportRunOptions,
 } from "./tasks.ts";
 export { issueArtifactHasRelationshipSnapshot } from "./progression.ts";
 export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
@@ -211,22 +217,25 @@ export const captureBaselinePhase = Effect.fn("captureBaselinePhase")(
 export const implementationPhase = Effect.fn("implementationPhase")(function* (
   context: WorkflowContext,
   restartPass?: number,
+  executionOptions: ChangeReportRunOptions = {},
 ) {
   restartPass ??= 0;
   const task = implementationTaskForPass(restartPass);
   if (
-    (yield* shouldRegenerateArtifact(context, task.artifact)) ||
-    restartPass > 0
+    context.continuing !== true &&
+    ((yield* shouldRegenerateArtifact(context, task.artifact)) ||
+      restartPass > 0)
   ) {
     yield* assertCleanGit({
       cwd: context.agentCwd,
       yes: context.yes || restartPass > 0,
     });
   }
-  const content = yield* runChangeReportTaskWithForceOverride(
-    context,
+  const content = yield* runChangeReportTask(
+    restartPass > 0 ? { ...context, force: true } : context,
     task,
-    restartPass > 0,
+    undefined,
+    executionOptions,
   );
   if (restartPass > 0) {
     yield* writeArtifact(
@@ -368,22 +377,10 @@ export const readinessPhase = Effect.fn("readinessPhase")(function* (
     },
   );
 });
-export type WorkflowRunResult =
-  | {
-      status: "triage-stopped";
-      triageVerdict: string;
-    }
-  | {
-      status: "planning-stopped";
-    }
-  | {
-      status: "review-blocked";
-    }
-  | {
-      status: "completed";
-    };
+export type WorkflowRunResult = WorkflowTerminalStatus;
 export interface RunFullWorkflowOptions {
   issueSnapshot?: GitHubIssueSnapshot | undefined;
+  continuation?: IssueContinuationOptions | undefined;
 }
 export const runFullWorkflow = Effect.fn("runFullWorkflow")(function* (
   context: WorkflowContext,
@@ -404,6 +401,12 @@ const runFullWorkflowBody = Effect.fn("runFullWorkflowBody")(function* (
   context: WorkflowContext,
   options: RunFullWorkflowOptions,
 ) {
+  if (options.continuation)
+    yield* prepareIssueContinuation(
+      context,
+      options.continuation,
+      options.issueSnapshot,
+    );
   const completedActions: WorkflowProgressionAction[] = [];
   for (;;) {
     const progression = yield* planWorkflowProgression(context, {
@@ -420,6 +423,12 @@ const runFullWorkflowBody = Effect.fn("runFullWorkflowBody")(function* (
       );
     }
     if (next.type === "run") {
+      const reassessExecutionStop =
+        context.force &&
+        next.phase === "implement" &&
+        completedActions.some(
+          (action) => action.type === "run" && action.phase === "plan",
+        );
       const following = progression.actions[1];
       if (
         next.phase === "review-a" &&
@@ -431,7 +440,9 @@ const runFullWorkflowBody = Effect.fn("runFullWorkflowBody")(function* (
         completedActions.push(next, following);
         continue;
       }
-      yield* runWorkflowPhase(context, next.phase, next.pass, options);
+      yield* runWorkflowPhase(context, next.phase, next.pass, options, {
+        reassessExecutionStop,
+      });
       completedActions.push(next);
       continue;
     }
@@ -461,6 +472,7 @@ const runWorkflowPhase = Effect.fn("runWorkflowPhase")(function* (
   phase: WorkflowRunPhase,
   pass?: number,
   options: RunFullWorkflowOptions = {},
+  executionOptions: ChangeReportRunOptions = {},
 ) {
   switch (phase) {
     case "fetch":
@@ -479,7 +491,7 @@ const runWorkflowPhase = Effect.fn("runWorkflowPhase")(function* (
       yield* captureBaselinePhase(context);
       return;
     case "implement":
-      yield* implementationPhase(context, pass ?? 0);
+      yield* implementationPhase(context, pass ?? 0, executionOptions);
       return;
     case "refine-code":
       yield* codeRefinementPhase(context, pass);
@@ -520,18 +532,6 @@ const inferNextReviewPass = Effect.fn("inferNextReviewPass")(function* (
   context: WorkflowContext,
 ) {
   return ((yield* latestCompleteReviewCycle(context)) ?? -1) + 1;
-});
-const runChangeReportTaskWithForceOverride = Effect.fn(
-  "runChangeReportTaskWithForceOverride",
-)(function* (
-  context: WorkflowContext,
-  task: Parameters<typeof runChangeReportTask>[1],
-  force: boolean,
-) {
-  return yield* runChangeReportTask(
-    force ? { ...context, force: true } : context,
-    task,
-  );
 });
 const shouldRegenerateArtifact = Effect.fn("shouldRegenerateArtifact")(
   function* (context: WorkflowContext, artifact: ArtifactRef) {

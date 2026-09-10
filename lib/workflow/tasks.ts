@@ -17,6 +17,7 @@ import { phaseNameForArtifact } from "../observability/observer.ts";
 import type { AgentRunRequest } from "./agent-runner.ts";
 import {
   artifactRelativePath,
+  artifactAgentPath,
   type ArtifactRef,
   baselineResetLogRef,
   fixLogRef,
@@ -53,17 +54,20 @@ import { reviewArtifactDefinition } from "../review/artifact.ts";
 import {
   parseTriageResultJson,
   triageArtifactDefinition,
+  type TriageResult,
 } from "../triage/result.ts";
 import {
   implementationPlanArtifactDefinition,
   parseImplementationPlanResultJson,
   type ImplementationPlanKind,
+  requireImplementationPlanSource,
 } from "../implementation-plan/result.ts";
 import {
   changeReportArtifactDefinition,
   parseChangeReportJson,
   requireAddressedFindingIds,
   type ChangeReport,
+  changeReportStopsExecution,
 } from "../change-report/result.ts";
 import {
   runStructuredArtifact,
@@ -74,6 +78,12 @@ import {
   type AgentOperation,
 } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
+import { readContinuationState } from "../issue-continuation/checkpoint.ts";
+import {
+  readExecutionStop,
+  recordExecutionStop,
+  type ExecutionStopArtifact,
+} from "./execution-stop.ts";
 export interface AgentTask {
   artifact: ArtifactRef;
   label: string;
@@ -88,6 +98,9 @@ export type AgentTaskFailurePhase = "agent-error" | "output-contract";
 export interface AgentTaskRetryOptions {
   delaysMs?: readonly number[] | undefined;
   sleep?: ((ms: number) => Effect.Effect<void>) | undefined;
+}
+export interface ChangeReportRunOptions {
+  reassessExecutionStop?: boolean;
 }
 export type CodeRefinementSource = "initial" | "fix" | "restart";
 export const transientAgentRetryDelaysMs = [0, 60000, 180000] as const;
@@ -130,14 +143,19 @@ const planDraftTask: AgentTask = {
   prerequisites: ["issue", "triage"],
   prompt: (context) => Effect.succeed(planDraftPrompt(context)),
 };
-const planTask: AgentTask = {
-  artifact: "implementationPlan",
-  label: "Implementation plan refinement",
-  fileEditingToolsEnabled: false,
-  thinkingStage: "plan",
-  prerequisites: ["issue", "triage", "implementationPlanDraft"],
-  prompt: (context) => Effect.succeed(planPrompt(context)),
-};
+function planTask(triage: TriageResult): AgentTask {
+  return {
+    artifact: "implementationPlan",
+    label: "Implementation plan acceptance",
+    fileEditingToolsEnabled: false,
+    thinkingStage: "plan",
+    prerequisites:
+      triage.planAction === "draft"
+        ? ["issue", "triage", "implementationPlanDraft"]
+        : ["issue", "triage"],
+    prompt: (context) => Effect.succeed(planPrompt(context, triage.planAction)),
+  };
+}
 export const implementationTask: AgentTask = implementationTaskForPass(0);
 export function implementationTaskForPass(restartPass = 0): AgentTask {
   return {
@@ -283,10 +301,26 @@ export const runTriageTask = Effect.fn("runTriageTask")(function* (
     markdownArtifact: "triageMarkdown",
   });
 });
+const requireProceedingTriage = Effect.fn("requireProceedingTriage")(function* (
+  context: WorkflowContext,
+) {
+  const triage = yield* parseTriageResultJson(
+    yield* readArtifact(context, "triage"),
+  );
+  if (triage.verdict !== "proceed")
+    return yield* Effect.fail(
+      new ArtifactContractError({
+        artifact: "Triage",
+        message: `Triage stopped with ${triage.verdict}. Resolve the issue and rerun triage before continuing.`,
+      }),
+    );
+  return triage;
+});
 export const runPlanDraftTask = Effect.fn("runPlanDraftTask")(function* (
   context: WorkflowContext,
   retryOptions: AgentTaskRetryOptions = {},
 ) {
+  yield* requireProceedingTriage(context);
   return yield* runImplementationPlanTask(
     context,
     planDraftTask,
@@ -298,9 +332,23 @@ export const runPlanTask = Effect.fn("runPlanTask")(function* (
   context: WorkflowContext,
   retryOptions: AgentTaskRetryOptions = {},
 ) {
+  const triage = yield* requireProceedingTriage(context);
+  if (triage.planAction === "draft") {
+    const draft = yield* parseImplementationPlanResultJson(
+      yield* readArtifact(context, "implementationPlanDraft"),
+    );
+    if (!draft.readyForImplementation)
+      return yield* Effect.fail(
+        new ArtifactContractError({
+          artifact: "Implementation plan draft",
+          message:
+            "Draft planning stopped. Resolve its questions or blockers in the issue and run continue.",
+        }),
+      );
+  }
   return yield* runImplementationPlanTask(
     context,
-    planTask,
+    planTask(triage),
     "final",
     retryOptions,
   );
@@ -309,7 +357,77 @@ export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
   context: WorkflowContext,
   task: AgentTask,
   retryOptions: AgentTaskRetryOptions = {},
+  options: ChangeReportRunOptions = {},
 ) {
+  const continuation = yield* readContinuationState(context);
+  if (continuation && continuation.status !== "ready")
+    return yield* Effect.fail(
+      new ArtifactContractError({
+        artifact: "Continuation",
+        message:
+          "Run continue to finish checking the current issue feedback before changing code.",
+      }),
+    );
+  const reassessExecutionStop =
+    task.artifact === "implementationLog" &&
+    options.reassessExecutionStop === true;
+  const activeStop = yield* readExecutionStop(context);
+  if (!reassessExecutionStop && activeStop !== undefined)
+    return yield* Effect.fail(
+      new ArtifactContractError({
+        artifact: "Execution",
+        message:
+          "Execution is stopped. Answer the recorded questions or resolve blockers in the issue, then run continue to check the latest discussion.",
+      }),
+    );
+  const triage = yield* requireProceedingTriage(context);
+  const plan = yield* parseImplementationPlanResultJson(
+    yield* readArtifact(context, "implementationPlan"),
+  );
+  if (!plan.readyForImplementation)
+    return yield* Effect.fail(
+      new ArtifactContractError({
+        artifact: "Implementation plan",
+        message:
+          "Implementation is not authorized by a ready plan. Resolve its questions or blockers and rerun planning.",
+      }),
+    );
+  yield* requireImplementationPlanSource(plan, triage);
+  if (triage.planAction === "draft") {
+    const draft = yield* parseImplementationPlanResultJson(
+      yield* readArtifact(context, "implementationPlanDraft"),
+    );
+    if (!draft.readyForImplementation)
+      return yield* Effect.fail(
+        new ArtifactContractError({
+          artifact: "Implementation plan draft",
+          message:
+            "Draft planning stopped. Resolve its questions or blockers before implementation.",
+        }),
+      );
+  }
+  for (const artifact of task.prerequisites) {
+    if (
+      artifact === "implementationLog" ||
+      (typeof artifact !== "string" &&
+        (artifact.name === "fixLog" || artifact.name === "refinementLog"))
+    ) {
+      const report = yield* parseChangeReportJson(
+        yield* readArtifact(context, artifact),
+      );
+      if (
+        report.blockingQuestions.length > 0 ||
+        report.externalBlockers.length > 0
+      )
+        return yield* Effect.fail(
+          new ArtifactContractError({
+            artifact: "Execution",
+            message:
+              "A prerequisite phase stopped for a question or external blocker. Resolve it in the issue and run continue.",
+          }),
+        );
+    }
+  }
   const presentation = changeReportPresentation(task.artifact);
   const expectedFindingIds = yield* requiredFixFindingIds(
     context,
@@ -328,7 +446,7 @@ export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
     }
     return report;
   });
-  return yield* runStructuredArtifactTask(context, task, retryOptions, {
+  const report = yield* runStructuredArtifactTask(context, task, retryOptions, {
     parse: (content) =>
       parseChangeReportJson(content).pipe(Effect.flatMap(validateForTask)),
     definition: changeReportArtifactDefinition({
@@ -338,7 +456,18 @@ export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
     markdownArtifact: presentation.markdownArtifact,
     retryCompletionInstruction:
       "finish the phase, run validation, and call submit_change_report with the complete structured report",
+    beforePersist: (report) =>
+      changeReportStopsExecution(report)
+        ? recordExecutionStop(context, presentation.artifact)
+        : Effect.void,
   });
+  if (
+    reassessExecutionStop &&
+    activeStop !== undefined &&
+    !changeReportStopsExecution(report)
+  )
+    yield* recordExecutionStop(context, null);
+  return report;
 });
 const runImplementationPlanTask = Effect.fn("runImplementationPlanTask")(
   function* (
@@ -347,9 +476,20 @@ const runImplementationPlanTask = Effect.fn("runImplementationPlanTask")(
     kind: ImplementationPlanKind,
     retryOptions: AgentTaskRetryOptions,
   ) {
+    const triage = yield* requireProceedingTriage(context);
+    const definition = implementationPlanArtifactDefinition(kind);
+    const validate = Effect.fnUntraced(function* (value: unknown) {
+      const plan = yield* definition.validate(value);
+      if (kind === "final")
+        yield* requireImplementationPlanSource(plan, triage);
+      return plan;
+    });
     return yield* runStructuredArtifactTask(context, task, retryOptions, {
-      parse: parseImplementationPlanResultJson,
-      definition: implementationPlanArtifactDefinition(kind),
+      parse: (content) =>
+        parseImplementationPlanResultJson(content).pipe(
+          Effect.flatMap(validate),
+        ),
+      definition: { ...definition, validate },
       markdownArtifact:
         kind === "draft"
           ? "implementationPlanDraftMarkdown"
@@ -367,6 +507,11 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
       definition: StructuredArtifactDefinition<T>;
       markdownArtifact: ArtifactRef;
       retryCompletionInstruction?: string | undefined;
+      beforePersist?:
+        | ((
+            value: T,
+          ) => Effect.Effect<void, PlatformError.PlatformError, ArtifactStore>)
+        | undefined;
     },
   ) {
     const prepared = yield* prepareTaskRun(context, task);
@@ -377,6 +522,7 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
       contract.parse,
     );
     if (existing.reused) {
+      yield* contract.beforePersist?.(existing.value) ?? Effect.void;
       yield* writeArtifact(
         context,
         contract.markdownArtifact,
@@ -391,8 +537,11 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
           prepared.createRequest(),
           contract.definition,
           {
-            writeJson: (content) =>
-              writeArtifact(context, task.artifact, content),
+            writeJson: (content, value) =>
+              Effect.gen(function* () {
+                yield* contract.beforePersist?.(value) ?? Effect.void;
+                yield* writeArtifact(context, task.artifact, content);
+              }),
             writeMarkdown: (content) =>
               writeArtifact(context, contract.markdownArtifact, content),
           },
@@ -438,23 +587,27 @@ function reviewPresentation(
   throw new Error(`${title} does not target a review artifact.`);
 }
 function changeReportPresentation(artifact: ArtifactRef): {
+  artifact: ExecutionStopArtifact;
   markdownArtifact: ArtifactRef;
   title: string;
 } {
   if (artifact === "implementationLog") {
     return {
+      artifact,
       markdownArtifact: "implementationLogMarkdown",
       title: "Implementation Log",
     };
   }
   if (typeof artifact !== "string" && artifact.name === "refinementLog") {
     return {
+      artifact: { name: "refinementLog", pass: artifact.pass },
       markdownArtifact: refinementLogMarkdownRef(artifact.pass),
       title: `Refinement Log Pass ${artifact.pass}`,
     };
   }
   if (typeof artifact !== "string" && artifact.name === "fixLog") {
     return {
+      artifact: { name: "fixLog", pass: artifact.pass },
       markdownArtifact: fixLogMarkdownRef(artifact.pass),
       title: `Fix Log Pass ${artifact.pass}`,
     };
@@ -499,13 +652,19 @@ const prepareTaskRun = Effect.fn("prepareTaskRun")(function* (
   const model = effectiveModelForStage(context.model, task.thinkingStage);
   const display = displayContextForTask(context, task, phase);
   const prompt = yield* task.prompt(context);
+  const continuationContext = (yield* artifactExists(
+    context,
+    "continuationReviewMarkdown",
+  ))
+    ? `\n<continuation_context>Read ${artifactAgentPath(context, "continuationReviewMarkdown")} for the latest confirmed answers and ${artifactAgentPath(context, "continuationInput")} for prior phase reports. Keep completed work, inspect the current diff, and finish the remaining steps. Do not repeat completed edits. If replanning, read the saved prior plan in the history directory recorded in ${artifactAgentPath(context, "continuationInput")}; preserve its useful details.</continuation_context>`
+    : "";
   const observer = context.observer ?? (yield* RunObservation);
   const createRequest = (): AgentRunRequest => ({
     cwd: context.agentCwd,
     model,
     thinkingLevel,
     systemPrompt: sharedSystemPrompt,
-    prompt,
+    prompt: prompt + continuationContext,
     fileEditingToolsEnabled: task.fileEditingToolsEnabled,
     observer,
     display,

@@ -15,7 +15,10 @@ import {
 } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
+import { planWorkflowProgression } from "./progression.ts";
 const readinessDecisionSchema = Schema.Struct({
+  pendingWork: Schema.optional(Schema.Boolean),
+  executionBlocked: Schema.optional(Schema.Boolean),
   status: Schema.Union([
     Schema.Literal("ready-for-pr"),
     Schema.Literal("not-ready"),
@@ -72,6 +75,8 @@ const readinessContract = artifactContract(
   readinessResultSchema.check(
     Schema.makeFilter((parsed) => {
       const expectedStatus: ReadinessStatus =
+        parsed.decision.pendingWork !== true &&
+        parsed.decision.executionBlocked !== true &&
         parsed.decision.triageVerdict === "proceed" &&
         parsed.decision.planReady &&
         parsed.decision.reviewAVerdict === "approve" &&
@@ -100,15 +105,24 @@ export const parseReadinessResultJson = readinessContract.parse;
 
 export const buildReadinessArtifacts = Effect.fn("buildReadinessArtifacts")(
   function* (context: WorkflowContext) {
+    const progression = yield* planWorkflowProgression(context);
+    const stoppedBeforeImplementation =
+      progression.terminalStatus?.status === "continuation-stopped" ||
+      progression.terminalStatus?.status === "triage-stopped" ||
+      progression.terminalStatus?.status === "planning-stopped";
     const triage = (yield* artifactExists(context, "triage"))
       ? yield* parseTriageResultJson(yield* readArtifact(context, "triage"))
       : undefined;
-    const plan = (yield* artifactExists(context, "implementationPlan"))
-      ? yield* parseImplementationPlanResultJson(
-          yield* readArtifact(context, "implementationPlan"),
-        )
-      : undefined;
-    const latestReviewCycle = yield* latestCompleteReviewCycle(context);
+    const plan =
+      !stoppedBeforeImplementation &&
+      (yield* artifactExists(context, "implementationPlan"))
+        ? yield* parseImplementationPlanResultJson(
+            yield* readArtifact(context, "implementationPlan"),
+          )
+        : undefined;
+    const latestReviewCycle = stoppedBeforeImplementation
+      ? undefined
+      : yield* latestCompleteReviewCycle(context);
     const reviewA =
       latestReviewCycle === undefined
         ? undefined
@@ -123,7 +137,16 @@ export const buildReadinessArtifacts = Effect.fn("buildReadinessArtifacts")(
             yield* readArtifact(context, reviewBRef(latestReviewCycle)),
             { allowRestart: true },
           );
-    const decision = decideReadiness({ triage, plan, reviewA, reviewB });
+    const executionBlocked =
+      progression.terminalStatus?.status === "execution-stopped";
+    const decision = decideReadiness({
+      pendingWork: progression.actions.some((action) => action.type === "run"),
+      triage,
+      plan,
+      reviewA,
+      reviewB,
+      executionBlocked,
+    });
     const result: ReadinessResult = {
       version: 2,
       issueNumber: context.issueNumber,
@@ -151,6 +174,8 @@ ${result.runDirectory}
 ## Decision Inputs
 - Triage verdict: ${decision.triageVerdict}
 - Plan ready for implementation: ${decision.planReady ? "yes" : "no"}
+- Workflow steps still to run: ${decision.pendingWork === true ? "yes" : "no"}
+- Execution stopped for questions or blockers: ${decision.executionBlocked === true ? "yes" : "no"}
 - Latest review cycle: ${result.latestReviewCycle ?? "none"}
 - Spec and Correctness verdict: ${decision.reviewAVerdict}
 - Standards and Maintainability verdict: ${decision.reviewBVerdict}

@@ -2,7 +2,7 @@
 title: Concepts
 summary: Workspaces, attempts, phases, gates, and other Roark concepts.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-08-19T07:58:25Z
+lastUpdated: 2026-09-09T07:06:16Z
 ---
 
 ## How a run works
@@ -60,13 +60,35 @@ Attempts are stored under:
 .roark/runs/issue/<issue-number>/attempts/<attempt-number>/
 ```
 
-`roark continue` resumes an attempt by reading this artifact directory and the persistent managed workspace.
+`roark continue` reads the saved reports, managed workspace, and current issue discussion to decide where work should resume. `roark continue <issue> --restart` starts over from the saved baseline and reads the current discussion too.
 
 ## Phase
 
 A phase is one workflow step, such as `fetch`, `triage`, `plan`, `implement`, `review`, `fix`, or `readiness`.
 
 Standalone phase commands are useful for debugging, but most users should prefer `roark do`, `roark auto`, or `roark continue`.
+
+## From the issue to implementation
+
+Roark begins by reading the issue and checking the relevant code. This triage step establishes what needs to change, whether it is already implemented, and whether anything prevents work from starting. Questions that affect that decision are investigated using the code, tests, earlier discussions, and relevant technical documentation.
+
+When the issue includes a plan, Roark checks it against the repository and keeps its agreed decisions, detailed instructions, and required ordering. It records any necessary technical adjustments, such as updating a path after a file has moved. If the issue still needs a plan, Roark drafts one and checks it before implementation.
+
+```mermaid
+flowchart TD
+  triage[Check the issue] -->|Plan already exists| check[Check the plan]
+  triage -->|Needs a plan| draft[Write a plan]
+  draft --> check
+  check --> code[Make the code changes]
+  triage -->|Cannot proceed| stop[Stop and explain what is needed]
+  draft -->|Cannot proceed| stop
+  check -->|Cannot proceed| stop
+  code -->|Cannot proceed| stop
+```
+
+For example, Roark can investigate how login sessions expire by reading the code and library documentation. If a change requires choosing whether to sign out existing users, it looks for that requirement in the issue and project guidance. If those sources do not settle the choice and the issue does not leave it to Roark, it stops and asks for a decision.
+
+A run can also stop because essential information cannot be confirmed, access is missing, or another issue must be completed first. These problems can surface during triage, planning, or implementation. The report explains what remains unresolved and what would allow work to continue.
 
 ## The two reviews
 

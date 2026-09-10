@@ -18,6 +18,11 @@ import {
 
 const expectedStaticFilenames: Record<StaticArtifactName, string> = {
   issue: "issue.md",
+  continuationState: "continuation-state.json",
+  continuationInput: "continuation-input.json",
+  continuationReview: "continuation-review.json",
+  continuationReviewMarkdown: "continuation-review.md",
+  executionStop: "execution-stop.json",
   triage: "triage.json",
   triageMarkdown: "triage.md",
   implementationPlanDraft: "implementation-plan-draft.json",

@@ -6,6 +6,8 @@ export function changeReport(
   overrides: Partial<ChangeReport> = {},
 ): ChangeReport {
   return {
+    blockingQuestions: [],
+    externalBlockers: [],
     summary: "Completed the requested change.",
     changedFiles: [
       {

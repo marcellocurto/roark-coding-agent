@@ -2,12 +2,12 @@
 title: Roark label semantics
 summary: Labels Roark reads, creates, and applies.
 dateCreated: 2026-05-08T06:27:02Z
-lastUpdated: 2026-08-19T07:58:25Z
+lastUpdated: 2026-09-09T06:27:12Z
 ---
 
-## Autorun eligibility
+## Which issues Roark picks up
 
-Autorun is label-gated. An open issue is eligible only when both are true:
+`roark auto` uses labels to choose which open issues to work on. It picks an issue only when both are true:
 
 1. The issue has the configured ready label. The default ready label is `ready-for-agent`.
 2. The issue has none of the configured skip labels.
@@ -16,17 +16,17 @@ Autorun is label-gated. An open issue is eligible only when both are true:
 
 ## Autorun labels
 
-| Label               | Default role                 | Notes                                                                                      | Configurable flag                                                              |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
-| `ready-for-agent`   | Ready label                  | Opts an issue into autorun eligibility when no skip label is present.                      | `--label`                                                                      |
-| `needs-triage`      | Skip/status label            | Prevents autorun until a maintainer approves the issue for agent work.                     | `--skip-label` / `--skip-labels`                                               |
-| `blocked`           | Skip/status label            | Prevents autorun from selecting the issue; also used for terminal blocked triage outcomes. | `--skip-label` / `--skip-labels`                                               |
-| `needs-human`       | Skip/status label            | Prevents autorun from selecting the issue; also used for terminal human-decision outcomes. | `--skip-label` / `--skip-labels`                                               |
-| `triage-rejected`   | Skip/status label            | Prevents autorun from selecting the issue; applied when triage rejects the issue.          | `--skip-label` / `--skip-labels`                                               |
-| `wont-fix`          | Skip label                   | Prevents autorun from selecting the issue.                                                 | `--skip-label` / `--skip-labels`                                               |
-| `agent-in-progress` | Claim label and skip label   | Applied when an agent claims or resumes an issue so concurrent runs skip it.               | `--in-progress-label`; replacements are always added to the effective skip set |
-| `agent-failed`      | Failure label and skip label | Applied when readiness or verification fails.                                              | `--failure-label`; replacements are always added to the effective skip set     |
-| `agent-pr-opened`   | Success label and skip label | Applied after an agent opens a PR.                                                         | `--success-label`; replacements are always added to the effective skip set     |
+| Label               | Default role                 | Notes                                                                             | Configurable flag                                                              |
+| ------------------- | ---------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `ready-for-agent`   | Ready label                  | Marks an issue as ready for Roark, as long as it has no skip labels.              | `--label`                                                                      |
+| `needs-triage`      | Skip/status label            | Roark waits for a maintainer to approve the issue.                                | `--skip-label` / `--skip-labels`                                               |
+| `blocked`           | Skip/status label            | Roark waits for a dependency or another outside problem to be resolved.           | `--skip-label` / `--skip-labels`                                               |
+| `needs-human`       | Skip/status label            | Roark needs information or a decision it could not resolve through investigation. | `--skip-label` / `--skip-labels`                                               |
+| `triage-rejected`   | Skip/status label            | Roark skips the issue because triage decided it should not proceed.               | `--skip-label` / `--skip-labels`                                               |
+| `wont-fix`          | Skip label                   | Roark skips the issue.                                                            | `--skip-label` / `--skip-labels`                                               |
+| `agent-in-progress` | Claim label and skip label   | Roark is working on the issue. Other runs skip it.                                | `--in-progress-label`; replacements are always added to the effective skip set |
+| `agent-failed`      | Failure label and skip label | A review or final check did not pass.                                             | `--failure-label`; replacements are always added to the effective skip set     |
+| `agent-pr-opened`   | Success label and skip label | Roark has opened a PR for the issue.                                              | `--success-label`; replacements are always added to the effective skip set     |
 
 Default skip set: `needs-triage`, `blocked`, `needs-human`, `triage-rejected`, `wont-fix`, `agent-in-progress`, `agent-failed`, `agent-pr-opened`.
 
@@ -61,17 +61,19 @@ Generated issues do not receive `needs-human` by default. That status is reserve
 | `--success-label <label>`     | Sets the label applied after Roark opens a pull request. Defaults to `agent-pr-opened`.                                                                                |
 | `--failure-label <label>`     | Sets the label applied when readiness or verification fails. Defaults to `agent-failed`.                                                                               |
 
-## Lifecycle transitions
+## What happens next
 
-| State                                   | Typical labels                       | What Roark does next                                                   |
-| --------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
-| Ready for automation                    | `ready-for-agent` and no skip labels | Eligible for `roark auto` discovery.                                   |
-| Claimed or resumed                      | `agent-in-progress`                  | Run is in progress; other autorun processes skip it.                   |
-| Published                               | `agent-pr-opened`                    | PR has been opened; future autorun skips it.                           |
-| Failed readiness or verification        | `agent-failed`                       | Operator should inspect artifacts and use `roark continue`.            |
-| Blocked by triage or external condition | `blocked`                            | Autorun skips it until a human changes labels or scope.                |
-| Needs human decision                    | `needs-human`                        | Autorun skips it until a human resolves the decision.                  |
-| Rejected by triage                      | `triage-rejected`                    | Autorun skips it unless the issue is revised and the label is removed. |
+| State                            | Typical labels                       | What Roark does next                                                         |
+| -------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| Ready for automation             | `ready-for-agent` and no skip labels | `roark auto` can pick up the issue.                                          |
+| Claimed or resumed               | `agent-in-progress`                  | Roark continues working. Other runs skip the issue.                          |
+| Published                        | `agent-pr-opened`                    | PR has been opened; future autorun skips it.                                 |
+| Failed readiness or verification | `agent-failed`                       | Read the saved reports, then use `roark continue`.                           |
+| Waiting for other work or access | `blocked`                            | Resolve the blocker, then follow the linked recovery steps.                  |
+| Needs human decision             | `needs-human`                        | Provide the missing information or decision, then follow the recovery steps. |
+| Rejected by triage               | `triage-rejected`                    | Autorun skips it unless the issue is revised and the label is removed.       |
+
+For steps to restart a stopped run, see [Recovery](recovery.md).
 
 An issue has at most one workflow-state label. Each transition removes the old state before applying the new one. Topic labels such as `bug`, `auth`, or `storage` are unaffected.
 

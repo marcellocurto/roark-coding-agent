@@ -1,3 +1,4 @@
+import { rejects as assertRejects } from "node:assert/strict";
 import { runApplicationPromise } from "../runtime/application.ts";
 import * as nativeProgression from "./progression.ts";
 import {
@@ -42,6 +43,163 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 describe("planWorkflowProgression", () => {
+  test("cached implementation and reviews cannot bypass a changed adopted plan source", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context);
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "triage",
+        triageResult("proceed", {
+          planAction: "adopt",
+          planSource: "Issue comment B",
+        }),
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "implementationPlan",
+        implementationPlanResult(true, { source: "Issue comment A" }),
+      ),
+    );
+    await assertRejects(
+      runApplicationPromise(nativeProgression.planWorkflowProgression(context)),
+      /source does not match/,
+    );
+  });
+  test.each(["adopt", "adapt"] as const)(
+    "%s skips drafting and resumes without a draft artifact",
+    async (planAction) => {
+      const context = await tempContext();
+      await runApplicationPromise(
+        writeArtifact(context, "issue", issueArtifact()),
+      );
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          "triage",
+          triageResult("proceed", {
+            planAction,
+            planSource: "Issue body: Plan",
+          }),
+        ),
+      );
+      const pending = await runApplicationPromise(
+        nativeProgression.planWorkflowProgression(context),
+      );
+      expect(pending.actions[0]).toMatchObject({ type: "run", phase: "plan" });
+      expect(
+        pending.actions.some(
+          (action) => action.type === "run" && action.phase === "plan-draft",
+        ),
+      ).toBe(false);
+      await runApplicationPromise(
+        writeJsonArtifact(
+          context,
+          "implementationPlan",
+          implementationPlanResult(true, { source: "Issue body: Plan" }),
+        ),
+      );
+      const resumed = await runApplicationPromise(
+        nativeProgression.planWorkflowProgression(context),
+      );
+      expect(resumed.actions[0]).toMatchObject({
+        type: "run",
+        phase: "capture-baseline",
+      });
+    },
+  );
+  test("a non-ready draft stops before acceptance even with an older ready final plan", async () => {
+    const context = await tempContext();
+    await writeReadyThroughPlan(context, "yes");
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "implementationPlanDraft",
+        implementationPlanResult(false),
+      ),
+    );
+    const result = await runApplicationPromise(
+      nativeProgression.planWorkflowProgression(context, {
+        includePublishGate: true,
+      }),
+    );
+    expect(result.terminalStatus).toEqual({
+      status: "planning-stopped",
+      planningArtifact: "implementationPlanDraft",
+    });
+    expect(result.actions.map((action) => action.type)).toEqual([
+      "write-readiness",
+      "noop",
+    ]);
+  });
+  test("a discovered decision stops execution before refinement and publication", async () => {
+    const context = await tempContext();
+    await writeReadyThroughImplementation(context);
+    await runApplicationPromise(
+      writeJsonArtifact(
+        context,
+        "implementationLog",
+        changeReport({
+          blockingQuestions: ["Should existing sessions be invalidated?"],
+        }),
+      ),
+    );
+    const result = await runApplicationPromise(
+      nativeProgression.planWorkflowProgression(context, {
+        includePublishGate: true,
+      }),
+    );
+    expect(result.terminalStatus).toEqual({
+      status: "execution-stopped",
+      artifact: "implementationLog",
+    });
+    expect(result.actions.map((action) => action.type)).toEqual([
+      "write-readiness",
+      "noop",
+    ]);
+  });
+  test("a partial fix with unanswered questions cannot advance to refinement", async () => {
+    const context = await tempContext();
+    await writeHappyPathThroughReviews(context, "fixes-required");
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        fixLogRef(1),
+        JSON.stringify(
+          changeReport({
+            blockingQuestions: ["Which compatibility policy applies?"],
+          }),
+        ),
+      ),
+    );
+    const result = await runApplicationPromise(
+      nativeProgression.planWorkflowProgression(context),
+    );
+    expect(result.terminalStatus).toEqual({
+      status: "execution-stopped",
+      artifact: fixLogRef(1),
+    });
+  });
+  test("requires an explicit rerun when legacy planning artifacts accompany completed code", async () => {
+    const context = await tempContext();
+    await writeReadyThroughImplementation(context);
+    const {
+      planAction: _action,
+      planSource: _source,
+      ...legacy
+    } = triageResult();
+    await runApplicationPromise(writeJsonArtifact(context, "triage", legacy));
+    await assertRejects(
+      runApplicationPromise(nativeProgression.planWorkflowProgression(context)),
+      /old implementation cannot be reused/,
+    );
+    const forced = await runApplicationPromise(
+      nativeProgression.planWorkflowProgression(context, { force: true }),
+    );
+    expect(forced.actions[0]).toMatchObject({ type: "run", phase: "fetch" });
+  });
   test("plans the initial workflow with plan refinement and code refinement before reviews", async () => {
     const context = await tempContext();
     const progression = await runApplicationPromise(

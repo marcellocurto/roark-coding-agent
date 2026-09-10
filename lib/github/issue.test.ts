@@ -191,8 +191,35 @@ test("issue snapshots retain deleted-author comments and mark malformed relation
           number: 12,
           title: "Issue",
           body: "Blocked by: #7",
-          comments: [{ body: "retained comment", author: null }],
         }),
+      ),
+      writeFile(
+        path.join(cwd, "comments.json"),
+        JSON.stringify([
+          [
+            {
+              id: 1,
+              body: "retained comment",
+              user: null,
+              html_url:
+                "https://github.com/owner/repo/issues/12#issuecomment-1",
+              created_at: "2026-09-09T00:00:00Z",
+              updated_at: "2026-09-09T00:01:00Z",
+            },
+          ],
+          [
+            {
+              id: 42,
+              body: "Keep sessions valid.",
+              user: { login: "maintainer" },
+              author_association: "OWNER",
+              html_url:
+                "https://github.com/owner/repo/issues/12#issuecomment-42",
+              created_at: "2026-09-09T00:00:00Z",
+              updated_at: "2026-09-09T00:02:00Z",
+            },
+          ],
+        ]),
       ),
       writeFile(path.join(cwd, "summary.json"), "{}"),
       writeFile(
@@ -209,6 +236,13 @@ test("issue snapshots retain deleted-author comments and mark malformed relation
     expect(snapshot.issue.comments?.[0]).toMatchObject({
       body: "retained comment",
       author: undefined,
+    });
+    expect(snapshot.issue.comments).toHaveLength(2);
+    expect(snapshot.issue.comments?.[1]).toMatchObject({
+      id: "42",
+      body: "Keep sessions valid.",
+      authorAssociation: "OWNER",
+      updatedAt: "2026-09-09T00:02:00Z",
     });
     expect(snapshot.relationships.nativeDependenciesAvailable).toBe(false);
     expect(snapshot.relationships.unavailableReason).toContain("number");
@@ -234,9 +268,30 @@ test("issue snapshots retain deleted-author comments and mark malformed relation
         JSON.stringify({ number: 7, state: "CLOSED", closed: true }),
       ),
     ]);
+    await writeFile(
+      path.join(cwd, "comments.json"),
+      JSON.stringify([
+        [
+          {
+            id: 42,
+            body: "Edited answer: keep existing sessions valid.",
+            user: { login: "maintainer" },
+            author_association: "OWNER",
+            html_url: "https://github.com/owner/repo/issues/12#issuecomment-42",
+            created_at: "2026-09-09T00:00:00Z",
+            updated_at: "2026-09-09T00:03:00Z",
+          },
+        ],
+      ]),
+    );
     const recovered = await runApplicationPromise(
       fetchGitHubIssue("12", { cwd, repo: "owner/repo" }),
     );
+    expect(recovered.issue.comments?.[0]).toMatchObject({
+      id: "42",
+      body: "Edited answer: keep existing sessions valid.",
+      updatedAt: "2026-09-09T00:03:00Z",
+    });
     expect(recovered.relationships.nativeDependenciesAvailable).toBe(true);
     expect(recovered.relationships.issueDependenciesSummary).toEqual({
       blockedBy: 1,

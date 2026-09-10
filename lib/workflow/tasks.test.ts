@@ -34,6 +34,9 @@ import {
 } from "../testing/workflow-results.ts";
 import { changeReport, submitChangeReport } from "../testing/change-reports.ts";
 import { parseChangeReportJson } from "../change-report/result.ts";
+import { planWorkflowProgression } from "./progression.ts";
+import { buildReadinessArtifacts } from "./readiness.ts";
+import { readExecutionStop } from "./execution-stop.ts";
 const tempDirs: string[] = [];
 afterEach(async () => {
   for (const dir of tempDirs.splice(0))
@@ -64,6 +67,72 @@ async function createContext(
   return context;
 }
 describe("runAgentTask skill loading", () => {
+  test("a verification repair stop survives independent progression and readiness recomputation", async () => {
+    const context = await createContext();
+    await writeReadyThroughPlan(context);
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        "issue",
+        "# Issue\n<github_issue_relationships />\n",
+      ),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "preImplementationBaseline", { head: "abc" }),
+    );
+    await runApplicationPromise(
+      writeJsonArtifact(context, "implementationLog", changeReport()),
+    );
+    await runApplicationPromise(
+      writeArtifact(
+        context,
+        refinementLogRef(0),
+        JSON.stringify(changeReport()),
+      ),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewARef(0), JSON.stringify(reviewResult())),
+    );
+    await runApplicationPromise(
+      writeArtifact(context, reviewBRef(0), JSON.stringify(reviewResult())),
+    );
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      return yield* Effect.tryPromise(() =>
+        submitChangeReport(
+          request,
+          changeReport({
+            blockingQuestions: ["Which compatibility behavior is authorized?"],
+          }),
+        ),
+      );
+    });
+    await runApplicationPromise(
+      nativeTasks
+        .runChangeReportTask(context, fixTask(1))
+        .pipe(provideTestAgent(runner)),
+    );
+    expect(await runApplicationPromise(readExecutionStop(context))).toEqual({
+      name: "fixLog",
+      pass: 1,
+    });
+    expect(
+      (await runApplicationPromise(planWorkflowProgression(context)))
+        .terminalStatus,
+    ).toEqual({
+      status: "execution-stopped",
+      artifact: { name: "fixLog", pass: 1 },
+    });
+    for (let rebuild = 0; rebuild < 2; rebuild++) {
+      const readiness = await runApplicationPromise(
+        buildReadinessArtifacts(context),
+      );
+      expect(readiness.result.decision.executionBlocked).toBe(true);
+      expect(readiness.result.decision.status).toBe("not-ready");
+      await runApplicationPromise(
+        writeJsonArtifact(context, "readiness", readiness.result),
+      );
+    }
+  });
   test("runs agent requests in the explicit agent cwd", async () => {
     const agentCwd = path.join(
       await mkdtemp(path.join(tmpdir(), "roark-agent-cwd-")),
@@ -521,6 +590,7 @@ describe("runAgentTask transient agent retry", () => {
   });
   test("marks retried editing requests after a transient connection failure", async () => {
     const context = await createContext();
+    await writeReadyThroughPlan(context);
     await runApplicationPromise(
       writeJsonArtifact(context, "triage", triageResult()),
     );
