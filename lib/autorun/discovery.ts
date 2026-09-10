@@ -13,7 +13,6 @@ import {
   type GitHubIssueRelationships,
 } from "../github/issue.ts";
 import { ensureRunDir } from "../workflow/artifacts.ts";
-import { assertCleanAutorunGit } from "../workflow/git.ts";
 import { type runFullWorkflow } from "../workflow/phases.ts";
 import { formatAttemptMetadata, type AttemptMetadata } from "./attempts.ts";
 import { AttemptStore } from "./attempts.ts";
@@ -46,7 +45,6 @@ export interface AutoRunInjected {
   resolveGitHubIssueRepo?:
     | GitHub["Service"]["resolveGitHubIssueRepo"]
     | undefined;
-  assertCleanAutorunGit?: typeof assertCleanAutorunGit | undefined;
   getCurrentGitHubLogin?:
     | GitHub["Service"]["getCurrentGitHubLogin"]
     | undefined;
@@ -361,8 +359,6 @@ const runManagedIssueAttempt = Effect.fn("runManagedIssueAttempt")(function* (
   (yield* Presentation).transition("Preparation", `#${issue.number}`, {
     operation: "edit",
   });
-  const preflight = injected.assertCleanAutorunGit ?? assertCleanAutorunGit;
-  yield* preflight({ cwd: options.cwd });
   let claimPlan = createClaimPlan(issue, {
     inProgressLabel: options.inProgressLabel,
     assignee,

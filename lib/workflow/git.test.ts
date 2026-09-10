@@ -9,7 +9,7 @@ afterEach(async () => {
   for (const dir of tempDirs.splice(0))
     await rm(dir, { recursive: true, force: true });
 });
-describe("assertCleanAutorunGit", () => {
+describe("git workspace safety", () => {
   test("ignores dirty files under .roark", async () => {
     const cwd = await initGitRepo();
     await mkdir(path.join(cwd, ".roark/runs"), { recursive: true });
@@ -19,15 +19,15 @@ describe("assertCleanAutorunGit", () => {
       "utf8",
     );
     expect(
-      runApplicationPromise(nativeGit.assertCleanAutorunGit({ cwd })),
+      runApplicationPromise(nativeGit.assertCleanGit({ cwd, yes: false })),
     ).resolves.toBeUndefined();
   });
-  test("refuses dirty files outside .roark without --yes bypass", async () => {
+  test("local workflow refuses dirty files outside .roark without --yes", async () => {
     const cwd = await initGitRepo();
     await writeFile(path.join(cwd, "dirty.txt"), "dirty\n", "utf8");
     expect(
-      runApplicationPromise(nativeGit.assertCleanAutorunGit({ cwd })),
-    ).rejects.toThrow("Autorun needs a clean git working tree");
+      runApplicationPromise(nativeGit.assertCleanGit({ cwd, yes: false })),
+    ).rejects.toThrow("Git working tree has changes outside .roark");
   });
   test("baseline reset restores worktree changes while preserving .roark artifacts", async () => {
     const cwd = await initGitRepo();

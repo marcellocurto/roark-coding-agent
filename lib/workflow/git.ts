@@ -34,19 +34,6 @@ export const assertCleanGit = Effect.fn("assertCleanGit")(function* (context: {
     }),
   );
 });
-export const assertCleanAutorunGit = Effect.fn("assertCleanAutorunGit")(
-  function* (context: { cwd: string }) {
-    const dirtyLines = yield* gitDirtyLinesOutsideRoark(context.cwd);
-    if (dirtyLines.length === 0) return;
-    return yield* Effect.fail(
-      new GitWorkspaceError({
-        message:
-          `Autorun needs a clean git working tree before it can claim issues, switch branches, push, or open PRs. ` +
-          `Commit or stash changes outside .roark, or use 'do <issue>' for local/manual mode.\n\n${dirtyLines.join("\n")}`,
-      }),
-    );
-  },
-);
 export const assertCleanGitTree = Effect.fn("assertCleanGitTree")(
   function* (context: { cwd: string; yes: boolean }) {
     const dirtyLines = yield* gitDirtyLines(context.cwd);
