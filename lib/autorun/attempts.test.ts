@@ -433,3 +433,38 @@ test("adopts legacy references independently without overwriting stable IDs", as
   expect(missing.githubComments?.issue?.["review-a"]).toBeUndefined();
   expect(missing.githubComments?.issue?.["review-b"]?.id).toBe(5);
 });
+
+test("falls back independently within the complete-cycle bound and preserves legacy entries", async () => {
+  const issueDir = await makeIssueDir();
+  const ref = (id: number) => ({
+    id,
+    marker: "legacy",
+    updatedAt: baseInput.startedAt,
+  });
+  const legacy = {
+    "review-a-0": ref(10),
+    "review-a-2": ref(12),
+    "review-b-0": ref(20),
+    "review-b-1": ref(21),
+    "review-b-4": ref(24),
+  };
+  const metadata = formatAttemptMetadata({
+    ...baseInput,
+    githubComments: { issue: { ...legacy } },
+  });
+  adoptLegacyIssueComments(metadata, undefined);
+  expect(metadata.githubComments?.issue?.["review-a"]).toBeUndefined();
+  adoptLegacyIssueComments(metadata, 3);
+  await runApplicationPromise(
+    Effect.gen(function* () {
+      const store = yield* AttemptStore;
+      yield* store.persist(issueDir, metadata);
+      const saved = yield* store.read(issueDir, 2);
+      expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(12);
+      expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(21);
+      for (const [key, value] of Object.entries(legacy)) {
+        expect(saved.githubComments?.issue?.[key]).toEqual(value);
+      }
+    }),
+  );
+});

@@ -59,6 +59,18 @@ export function formatAttemptStartComment(input: {
   ];
   return `${lines.join("\n")}\n`;
 }
+export function formatAttemptResumedComment(input: {
+  issueNumber: number;
+  attempt: number;
+  branchName: string;
+}): string {
+  const marker = buildRoarkMarker({
+    issueNumber: input.issueNumber,
+    attempt: input.attempt,
+    phase: "attempt-status",
+  });
+  return `${marker}\n## Roark attempt ${input.attempt} resumed\n\nWork is in progress in branch \`${input.branchName}\`.\n`;
+}
 export type PublishIssueLedgerCommentFn = typeof publishIssueLedgerComment;
 export const publishPlanningLedgerComments = Effect.fn(
   "publishPlanningLedgerComments",

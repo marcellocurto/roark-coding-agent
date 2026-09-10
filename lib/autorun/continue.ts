@@ -1,4 +1,8 @@
 import { adoptLegacyIssueComments } from "./attempts.ts";
+import {
+  formatAttemptResumedComment,
+  publishIssueLedgerComment,
+} from "./ledger-comments.ts";
 import { latestCompleteReviewCycle } from "../workflow/artifacts.ts";
 import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "./workspace-service.ts";
@@ -216,6 +220,19 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
             restart: options.restart,
             priorOutcome: attemptMetadata.outcome,
           },
+          beforeWorkflow: (metadata) =>
+            publishIssueLedgerComment({
+              cwd: workflowContext.controlCwd,
+              repo: parsed.repo ?? options.repo,
+              issueNumber: metadata.issueNumber,
+              attemptMetadata: metadata,
+              phase: "attempt-status",
+              body: formatAttemptResumedComment({
+                issueNumber: metadata.issueNumber,
+                attempt: metadata.attempt,
+                branchName: metadata.branch,
+              }),
+            }),
           beforeRun: Effect.fnUntraced(function* () {
             yield* workspaces.refreshCopy({
               controlCwd: workflowContext.controlCwd,

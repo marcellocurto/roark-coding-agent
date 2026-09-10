@@ -175,8 +175,14 @@ export function adoptLegacyIssueComments(
     comments["attempt-status"] = { ...comments["attempt-start"] };
   if (cycle === undefined) return;
   for (const role of ["review-a", "review-b"] as const) {
-    const legacy = comments[`${role}-${cycle}`];
-    if (!comments[role] && legacy) comments[role] = { ...legacy };
+    if (comments[role]) continue;
+    for (let previous = cycle; previous >= 0; previous--) {
+      const legacy = comments[`${role}-${previous}`];
+      if (legacy) {
+        comments[role] = { ...legacy };
+        break;
+      }
+    }
   }
 }
 
