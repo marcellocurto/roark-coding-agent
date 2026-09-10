@@ -1,3 +1,5 @@
+import { buildRoarkMarker } from "../github/comments.ts";
+import { recordAttemptIssueComment } from "./attempts.ts";
 import type { WorkspaceFailure } from "./workspace.ts";
 import {
   createFileRunObserver,
@@ -371,7 +373,14 @@ const markWorkflowError = Effect.fn("markWorkflowError")(function* (
     recoveryCommand: publicRecoveryCommand(input, shouldRecoverWithYes(error)),
   });
 
-  yield* markFailed({
+  const ref = yield* markFailed({
+    marker: buildRoarkMarker({
+      issueNumber: issue.number,
+      attempt: attemptMetadata.attempt,
+      phase: "attempt-status",
+    }),
+    existingCommentId:
+      attemptMetadata.githubComments?.issue?.["attempt-status"]?.id,
     cwd: input.gateOptions.cwd,
     repo: input.gateOptions.repo,
     issueNumber: issue.number,
@@ -384,6 +393,13 @@ const markWorkflowError = Effect.fn("markWorkflowError")(function* (
       knownPresent: [input.gateOptions.inProgressLabel],
     }),
   });
+  if (ref)
+    recordAttemptIssueComment(
+      attemptMetadata,
+      "attempt-status",
+      ref,
+      DateTime.formatIso(yield* DateTime.now),
+    );
 });
 
 const resolveIssue = Effect.fn("resolveIssue")(function* (

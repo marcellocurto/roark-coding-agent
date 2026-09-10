@@ -384,6 +384,25 @@ describe("runAutoContinue", () => {
             worktreePath: path.join(cwd, "deleted-worktree"),
             runArtifactPath: workflowContext.runDirRelative,
             startedAt: "2026-05-07T00:00:00.000Z",
+            githubComments: {
+              issue: {
+                "attempt-start": {
+                  id: 501,
+                  marker: "legacy:start",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+                "review-a-0": {
+                  id: 502,
+                  marker: "legacy:a",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+                "review-b-0": {
+                  id: 503,
+                  marker: "legacy:b",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+              },
+            },
           }),
         ),
       ),
@@ -396,10 +415,19 @@ describe("runAutoContinue", () => {
         ).pipe(
           provideTestAgent(
             Effect.fnUntraced(function* (request) {
-              if (request.display.phaseId === "continuation-review")
+              if (request.display.phaseId === "continuation-review") {
+                const saved = yield* Effect.flatMap(AttemptStore, (store) =>
+                  store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+                );
+                expect(
+                  saved.githubComments?.issue?.["attempt-status"]?.id,
+                ).toBe(501);
+                expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(502);
+                expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(503);
                 return yield* Effect.tryPromise(() =>
                   submitContinuation(request, continuationResult()),
                 );
+              }
               yield* Effect.void;
               return yield* Effect.fail(new Error("fix failed after reviews"));
             }),
@@ -416,8 +444,8 @@ describe("runAutoContinue", () => {
     );
     expect(metadata.outcome).toBe("errored");
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
-    expect(metadata.githubComments?.issue?.["review-a-0"]?.id).toBe(4242);
-    expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
+    expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(4242);
+    expect(metadata.githubComments?.issue?.["review-b"]?.id).toBe(4242);
   });
   test("serializes concurrent continues for the same issue across attempts", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-"));

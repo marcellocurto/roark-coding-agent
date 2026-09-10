@@ -1,3 +1,5 @@
+import { adoptLegacyIssueComments } from "./attempts.ts";
+import { latestCompleteReviewCycle } from "../workflow/artifacts.ts";
 import { GitHubRequestError } from "../github/errors.ts";
 import { Workspace } from "./workspace-service.ts";
 import { GitHub } from "../github/service.ts";
@@ -127,6 +129,11 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
           },
         );
         yield* ensureRunDir(workflowContext);
+        adoptLegacyIssueComments(
+          attemptMetadata,
+          yield* latestCompleteReviewCycle(workflowContext),
+        );
+        yield* (yield* AttemptStore).persist(issueDir, attemptMetadata);
         if (attemptMetadata.workspace) {
           (yield* Presentation).line(
             `Reusing workspace for branch ${branchPlan.branchName}`,

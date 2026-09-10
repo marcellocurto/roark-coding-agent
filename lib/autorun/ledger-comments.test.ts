@@ -1,3 +1,5 @@
+import { GitHub } from "../github/service.ts";
+import { readArtifact } from "../workflow/artifacts.ts";
 import {
   writeJsonArtifact,
   writeArtifact,
@@ -12,10 +14,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
-import {
-  recordAttemptIssueComment,
-  formatAttemptMetadata,
-} from "./attempts.ts";
+import { formatAttemptMetadata } from "./attempts.ts";
 import {
   formatReadinessLedgerComment,
   publishPlanningLedgerComments,
@@ -43,7 +42,7 @@ describe("autorun ledger comment publishing", () => {
       artifactContent: `# PR Readiness\n\nTOKEN=secret\n/Users/alice/private\n${evidence}`,
       recoveryCommand: "roark continue 24 --repo owner/repo --attempt 2",
     });
-    expect(body).toBe(`<!-- roark:issue=24 attempt=2 phase=readiness -->
+    expect(body).toBe(`<!-- roark:issue=24 attempt=2 phase=attempt-status -->
 
 ## Recovery
 
@@ -144,7 +143,7 @@ ${evidence}
     );
     expect(published[1]?.body).not.toContain("TOKEN=secret");
   });
-  test("publishes existing Review A/B artifacts through the injected ledger publisher", async () => {
+  test("updates the same review IDs across three passes without changing history", async () => {
     await Promise.resolve();
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));
     tempDirs.push(cwd);
@@ -199,35 +198,76 @@ ${evidence}
       phase: string;
       body: string;
     }[] = [];
-    await runApplicationPromise(
-      publishReviewLedgerComments(
-        {
-          cwd,
-          repo: "owner/repo",
-          issue: { number: 24, title: "Ledger comments" },
-          workflowContext,
-          attemptMetadata,
-        },
-        {
-          publishIssueLedgerComment: Effect.fnUntraced(function* (input) {
-            yield* Effect.void;
-            published.push({ phase: input.phase, body: input.body });
-            recordAttemptIssueComment(
-              input.attemptMetadata,
-              input.phase,
-              {
-                id: input.phase === "review-a-0" ? 101 : 102,
-                marker: `marker:${input.phase}`,
-              },
-              "2026-05-07T00:01:00.000Z",
-            );
-          }),
-        },
-      ),
+    const remote = new Map<number, string>();
+    const originals = await runApplicationPromise(
+      Effect.gen(function* () {
+        return [
+          yield* readArtifact(workflowContext, reviewARef(0)),
+          yield* readArtifact(workflowContext, reviewBRef(0)),
+        ];
+      }),
     );
+    for (let pass = 0; pass <= 2; pass++) {
+      await runApplicationPromise(
+        Effect.gen(function* () {
+          if (pass > 0) {
+            yield* writeArtifact(
+              workflowContext,
+              reviewARef(pass),
+              originals[0] ?? "",
+            );
+            yield* writeArtifact(
+              workflowContext,
+              reviewBRef(pass),
+              originals[1] ?? "",
+            );
+          }
+          const github = yield* GitHub;
+          yield* publishReviewLedgerComments({
+            cwd,
+            repo: "owner/repo",
+            issue: { number: 24, title: "Ledger comments" },
+            workflowContext,
+            attemptMetadata,
+          }).pipe(
+            Effect.provideService(GitHub, {
+              ...github,
+              postOrUpdateIssueCommentByMarker: (input) =>
+                Effect.sync(() => {
+                  const id = input.existingCommentId ?? 101 + remote.size;
+                  expect(input.body.match(/<!-- roark:/g)).toHaveLength(1);
+                  expect(input.body.startsWith(input.marker)).toBe(true);
+                  remote.set(id, input.body);
+                  if (pass === 0)
+                    published.push({
+                      phase: input.marker.includes("phase=review-a")
+                        ? "review-a"
+                        : "review-b",
+                      body: input.body,
+                    });
+                  return { id, marker: input.marker };
+                }),
+            }),
+          );
+          expect(yield* readArtifact(workflowContext, reviewARef(0))).toBe(
+            originals[0] ?? "",
+          );
+          expect(yield* readArtifact(workflowContext, reviewBRef(0))).toBe(
+            originals[1] ?? "",
+          );
+        }),
+      );
+    }
+    expect(remote.size).toBe(2);
+    expect(remote.get(101)).toContain("Review A pass 2");
+    expect(remote.get(102)).toContain("Review B pass 2");
+    expect(Object.keys(attemptMetadata.githubComments?.issue ?? {})).toEqual([
+      "review-a",
+      "review-b",
+    ]);
     expect(published.map(({ phase }) => phase)).toEqual([
-      "review-a-0",
-      "review-b-0",
+      "review-a",
+      "review-b",
     ]);
     expect(published[0]?.body).toContain(
       "Unique review A evidence at [local path redacted]",
@@ -237,8 +277,8 @@ ${evidence}
     );
     expect(published[0]?.body).not.toContain("/Users/alice/private");
     expect(published[1]?.body).not.toContain("TOKEN=secret");
-    expect(attemptMetadata.githubComments?.issue?.["review-a-0"]?.id).toBe(101);
-    expect(attemptMetadata.githubComments?.issue?.["review-b-0"]?.id).toBe(102);
+    expect(attemptMetadata.githubComments?.issue?.["review-a"]?.id).toBe(101);
+    expect(attemptMetadata.githubComments?.issue?.["review-b"]?.id).toBe(102);
   });
   test("does not publish unnumbered review JSON files", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-ledger-comments-"));

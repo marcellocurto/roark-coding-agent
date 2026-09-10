@@ -15,7 +15,11 @@ import {
 import { readArtifact } from "../workflow/artifacts.ts";
 import { validateAgentArtifact } from "../workflow/artifact-validation.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
-import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
+import {
+  recordAttemptIssueComment,
+  type AttemptMetadata,
+  type AttemptIssueCommentPhase,
+} from "./attempts.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import type { AutorunIssueCandidate } from "./selection.ts";
 import {
@@ -23,7 +27,7 @@ import {
   parseReviewResultJson,
   type ReviewFindingSource,
 } from "../review/result.ts";
-export type LedgerCommentPhase = string;
+export type LedgerCommentPhase = AttemptIssueCommentPhase;
 export interface LedgerCommentArtifactInput {
   issueNumber: number;
   attempt: number;
@@ -44,7 +48,7 @@ export function formatAttemptStartComment(input: {
   const marker = buildRoarkMarker({
     issueNumber: input.issueNumber,
     attempt: input.attempt,
-    phase: "attempt-start",
+    phase: "attempt-status",
   });
   const actor = input.assignee ? `@${input.assignee}` : "Roark";
   const lines = [
@@ -120,17 +124,15 @@ export const publishReviewLedgerComments = Effect.fn(
   yield* publishReviewLedgerComment({
     ...input,
     artifact: reviewARef(latestCycle),
-    phase: `review-a-${latestCycle}`,
+    phase: "review-a",
     title: `Review A pass ${latestCycle}`,
-    markerPhase: "review-a",
     publishLedgerComment,
   });
   yield* publishReviewLedgerComment({
     ...input,
     artifact: reviewBRef(latestCycle),
-    phase: `review-b-${latestCycle}`,
+    phase: "review-b",
     title: `Review B pass ${latestCycle}`,
-    markerPhase: "review-b",
     publishLedgerComment,
   });
 });
@@ -208,7 +210,7 @@ export function formatReadinessLedgerComment(
   const marker = buildRoarkMarker({
     issueNumber: input.issueNumber,
     attempt: input.attempt,
-    phase: "readiness",
+    phase: "attempt-status",
   });
   const lines = [marker];
   if (input.recoveryCommand) {
@@ -227,19 +229,16 @@ export const formatReviewLedgerComment = Effect.fn("formatReviewLedgerComment")(
   function* (input: {
     issueNumber: number;
     attempt: number;
-    phase: string;
-    markerPhase?: "review-a" | "review-b" | undefined;
+    phase: LedgerCommentPhase;
     title: string;
     artifactContent: string;
   }) {
     const marker = buildRoarkMarker({
       issueNumber: input.issueNumber,
       attempt: input.attempt,
-      phase: input.markerPhase ?? input.phase,
+      phase: input.phase,
     });
-    const source: ReviewFindingSource = (
-      input.markerPhase ?? input.phase
-    ).startsWith("review-a")
+    const source: ReviewFindingSource = input.phase.startsWith("review-a")
       ? "review-a"
       : "review-b";
     const review = yield* parseReviewResultJson(input.artifactContent, {
@@ -259,7 +258,7 @@ export function formatPrCreatedComment(input: {
   const marker = buildRoarkMarker({
     issueNumber: input.issueNumber,
     attempt: input.attempt,
-    phase: "pr-created",
+    phase: "attempt-status",
   });
   const lines = [
     marker,
@@ -278,7 +277,7 @@ const publishArtifactLedgerComment = Effect.fn("publishArtifactLedgerComment")(
     attemptMetadata: AttemptMetadata;
     artifact: ArtifactRef;
     renderedArtifact: ArtifactRef;
-    phase: string;
+    phase: LedgerCommentPhase;
     attemptMetadataPath?: string | undefined;
     formatBody: (artifactContent: string) => string;
     publishLedgerComment: PublishIssueLedgerCommentFn;
@@ -317,8 +316,7 @@ const publishReviewLedgerComment = Effect.fn("publishReviewLedgerComment")(
     workflowContext: WorkflowContext;
     attemptMetadata: AttemptMetadata;
     artifact: ArtifactRef;
-    phase: string;
-    markerPhase?: "review-a" | "review-b" | undefined;
+    phase: LedgerCommentPhase;
     title: string;
     publishLedgerComment: PublishIssueLedgerCommentFn;
   }) {
@@ -336,7 +334,6 @@ const publishReviewLedgerComment = Effect.fn("publishReviewLedgerComment")(
       issueNumber: input.issue.number,
       attempt: input.attemptMetadata.attempt,
       phase: input.phase,
-      markerPhase: input.markerPhase,
       title: input.title,
       artifactContent,
     });

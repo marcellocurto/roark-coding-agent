@@ -1,6 +1,7 @@
 import { Schema, Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import {
+  adoptLegacyIssueComments,
   AttemptStore,
   attemptArtifactRelativePath,
   attemptDir,
@@ -388,4 +389,47 @@ describe("updateAttemptIndex", () => {
     );
     expect(result).toHaveLength(1);
   });
+});
+
+test("adopts legacy references independently without overwriting stable IDs", async () => {
+  const issueDir = await makeIssueDir();
+  const ref = (id: number) => ({
+    id,
+    marker: "legacy",
+    updatedAt: baseInput.startedAt,
+  });
+  const metadata = formatAttemptMetadata({
+    ...baseInput,
+    githubComments: {
+      issue: {
+        "attempt-start": ref(1),
+        "review-a-0": ref(2),
+        "review-b-0": ref(3),
+        "review-a-1": ref(4),
+        "review-b-1": ref(5),
+        "review-a-2": ref(6),
+        "review-b": ref(7),
+      },
+    },
+  });
+  adoptLegacyIssueComments(metadata, 1);
+  await runApplicationPromise(
+    Effect.gen(function* () {
+      const store = yield* AttemptStore;
+      yield* store.persist(issueDir, metadata);
+      const saved = yield* store.read(issueDir, 2);
+      adoptLegacyIssueComments(saved, 2);
+      expect(saved.githubComments?.issue?.["attempt-status"]?.id).toBe(1);
+      expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(4);
+      expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(7);
+      expect(saved.githubComments?.issue?.["review-a-0"]?.id).toBe(2);
+    }),
+  );
+  const missing = formatAttemptMetadata({
+    ...baseInput,
+    githubComments: { issue: { "review-b-1": ref(5) } },
+  });
+  adoptLegacyIssueComments(missing, 1);
+  expect(missing.githubComments?.issue?.["review-a"]).toBeUndefined();
+  expect(missing.githubComments?.issue?.["review-b"]?.id).toBe(5);
 });
