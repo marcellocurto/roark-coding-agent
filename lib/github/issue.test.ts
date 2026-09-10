@@ -1,4 +1,11 @@
-import { chmod, copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  copyFile,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { runApplicationPromise } from "../runtime/application.ts";
@@ -307,6 +314,115 @@ test("issue snapshots retain deleted-author comments and mark malformed relation
   } finally {
     if (previousPath === undefined) delete process.env["PATH"];
     else process.env["PATH"] = previousPath;
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  [
+    "explicit Enterprise host routes issue comments",
+    "ghe.example/owner/repo",
+    "owner/repo",
+    ["--hostname", "ghe.example"],
+  ],
+  [
+    "unqualified comments preserve ambient host",
+    "owner/repo",
+    "owner/repo",
+    [],
+  ],
+  [
+    "placeholder comments preserve ambient host",
+    undefined,
+    "{owner}/{repo}",
+    [],
+  ],
+] as const)("%s", async (_name, repo, endpointRepo, hostArgs) => {
+  const cwd = await mkdtemp(path.join(tmpdir(), "roark-comment-routing-"));
+  const previousPath = process.env["PATH"];
+  const previousHost = process.env["GH_HOST"];
+  try {
+    await copyFile(
+      new URL("../testing/fixtures/github-issue-responses.sh", import.meta.url),
+      path.join(cwd, "gh"),
+    );
+    await chmod(path.join(cwd, "gh"), 0o755);
+    await writeFile(
+      path.join(cwd, "issue.json"),
+      JSON.stringify({ number: 12, title: "Issue", body: "" }),
+    );
+    await writeFile(
+      path.join(cwd, "comments.json"),
+      JSON.stringify([
+        [
+          {
+            id: 1,
+            body: null,
+            user: null,
+            html_url: "https://ghe.example/owner/repo/issues/12#issuecomment-1",
+            created_at: "2026-09-09T00:00:00Z",
+            updated_at: "2026-09-09T00:01:00Z",
+            author_association: "NONE",
+          },
+        ],
+        [
+          {
+            id: 42,
+            body: "Answer",
+            user: { login: "maintainer" },
+            html_url:
+              "https://ghe.example/owner/repo/issues/12#issuecomment-42",
+            created_at: "2026-09-09T00:00:00Z",
+            updated_at: "2026-09-09T00:02:00Z",
+            author_association: "OWNER",
+          },
+        ],
+      ]),
+    );
+    process.env["PATH"] = `${cwd}${path.delimiter}${previousPath ?? ""}`;
+    process.env["GH_HOST"] = "ambient.example";
+    const snapshot = await runApplicationPromise(
+      fetchGitHubIssue("12", { cwd, repo }),
+    );
+    expect(
+      (await readFile(path.join(cwd, "comment-argv"), "utf8"))
+        .trim()
+        .split("\n"),
+    ).toEqual([
+      "api",
+      `repos/${endpointRepo}/issues/12/comments`,
+      "--paginate",
+      "--slurp",
+      ...hostArgs,
+    ]);
+    expect(await readFile(path.join(cwd, "comment-host"), "utf8")).toBe(
+      "ambient.example",
+    );
+    expect(snapshot.issue.comments).toEqual([
+      {
+        id: "1",
+        body: "",
+        author: undefined,
+        url: "https://ghe.example/owner/repo/issues/12#issuecomment-1",
+        createdAt: "2026-09-09T00:00:00Z",
+        updatedAt: "2026-09-09T00:01:00Z",
+        authorAssociation: "NONE",
+      },
+      {
+        id: "42",
+        body: "Answer",
+        author: { login: "maintainer" },
+        url: "https://ghe.example/owner/repo/issues/12#issuecomment-42",
+        createdAt: "2026-09-09T00:00:00Z",
+        updatedAt: "2026-09-09T00:02:00Z",
+        authorAssociation: "OWNER",
+      },
+    ]);
+  } finally {
+    if (previousPath === undefined) delete process.env["PATH"];
+    else process.env["PATH"] = previousPath;
+    if (previousHost === undefined) delete process.env["GH_HOST"];
+    else process.env["GH_HOST"] = previousHost;
     await rm(cwd, { recursive: true, force: true });
   }
 });
