@@ -2,7 +2,7 @@
 title: Quickstart
 summary: Install Roark and use it on your first issue.
 dateCreated: 2026-05-08T07:00:00Z
-lastUpdated: 2026-08-19T07:58:25Z
+lastUpdated: 2026-09-10T00:00:00Z
 ---
 
 ## Prerequisites
@@ -19,10 +19,11 @@ You need:
 
 - Bun 1.4.2 or newer on your `PATH`
 - a GitHub checkout for the target repository
-- a clean control checkout
 - `gh` authenticated as a user or bot with issue, pull request, and branch push permissions
 - a verification command that can run non-interactively
 - any required ignored local files available in the control checkout
+
+You can keep local changes in your control checkout while autorun works in a separate clone. New issue branches start from the configured remote base branch; local edits and unpushed commits are not included. If an existing issue workspace has unfinished changes, use `roark continue <issue>` to resume it.
 
 Roark uses `gh` for GitHub operations and runs shell commands in local workspaces. Read [Security and secrets](security-and-secrets.md) before using it on a public repository or shared machine.
 

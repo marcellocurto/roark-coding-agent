@@ -5,13 +5,13 @@ import * as nativePhases from "../workflow/phases.ts";
 import { AttemptStore } from "./attempts.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { WorkspaceError } from "./workspace.ts";
-import { GitWorkspaceError } from "../workflow/git.ts";
 import { Effect } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { runProcessOrThrow } from "../cli/process.ts";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { type AutoCliOptions } from "../cli/args.ts";
@@ -24,7 +24,8 @@ import {
   defaultAutorunSkipLabels,
 } from "./selection.ts";
 import { defaultAutorunVerifyCommand } from "./verification.ts";
-import { runAutoDiscovery } from "./discovery.ts";
+import { runAutoDiscovery, type AutoRunInjected } from "./discovery.ts";
+import { defaultWorkspaceConfig } from "./workspace.ts";
 const tempDirs: string[] = [];
 const noOpLabelContract = {
   ensureAutorunLabelContract: Effect.fnUntraced(function* () {
@@ -36,6 +37,112 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 describe("runAutoDiscovery", () => {
+  test.each(["targeted", "discovery"])(
+    "%s auto uses remote main without disturbing a dirty control checkout",
+    async (mode) => {
+      const root = await mkdtemp(path.join(tmpdir(), "roark-dirty-control-"));
+      tempDirs.push(root);
+      const cwd = path.join(root, "control");
+      const remote = path.join(root, "remote.git");
+      const git = (args: string[]) =>
+        runApplicationPromise(runProcessOrThrow(["git", ...args], { cwd }));
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "init", "-b", "main", cwd], { cwd: root }),
+      );
+      await git(["config", "user.name", "Roark Test"]);
+      await git(["config", "user.email", "roark@example.com"]);
+      await writeFile(path.join(cwd, "tracked.txt"), "remote baseline\n");
+      await git(["add", "."]);
+      await git(["commit", "-m", "initial"]);
+      const remoteHead = (await git(["rev-parse", "HEAD"])).trim();
+      await git(["clone", "--bare", cwd, remote]);
+      await git(["remote", "add", "origin", remote]);
+      await writeFile(path.join(cwd, "local-only.txt"), "unpushed\n");
+      await git(["add", "."]);
+      await git(["commit", "-m", "local only"]);
+      const localHead = await git(["rev-parse", "HEAD"]);
+      await writeFile(path.join(cwd, "tracked.txt"), "staged edit\n");
+      await git(["add", "tracked.txt"]);
+      await writeFile(path.join(cwd, "tracked.txt"), "unstaged edit\n");
+      await writeFile(path.join(cwd, "untracked.txt"), "keep me\n");
+      const stagedDiff = await git(["diff", "--cached"]);
+      const unstagedDiff = await git(["diff"]);
+      let claims = 0;
+      let workspacePath = "";
+      const options: AutoCliOptions = {
+        ...baseOptions(cwd),
+        issue: mode === "targeted" ? "29" : undefined,
+        workspace: {
+          ...defaultWorkspaceConfig,
+          root: path.join(root, "managed"),
+        },
+      };
+      const injected: AutoRunInjected = {
+        ...noOpLabelContract,
+        listOpenGitHubIssues: () =>
+          Effect.succeed([
+            issue(29, "2026-01-01T00:00:00Z", [defaultAutorunReadyLabel]),
+          ]),
+        resolveGitHubIssueRepo: () => Effect.succeed("owner/repo"),
+        fetchGitHubIssueRelationships: () =>
+          Effect.succeed(dependencyClearRelationships(29)),
+        fetchGitHubIssue: () =>
+          Effect.succeed(fetchedGitHubIssue(29, [defaultAutorunReadyLabel])),
+        claimGitHubIssue: () =>
+          Effect.sync(() => {
+            claims += 1;
+          }),
+        publishIssueLedgerComment: () => Effect.void,
+        runFullWorkflow: Effect.fnUntraced(function* (context) {
+          workspacePath = context.agentCwd;
+          expect(workspacePath).not.toBe(cwd);
+          expect(
+            (yield* runProcessOrThrow(["git", "rev-parse", "HEAD"], {
+              cwd: workspacePath,
+            })).trim(),
+          ).toBe(remoteHead);
+          expect(
+            (yield* runProcessOrThrow(["git", "status", "--porcelain"], {
+              cwd: workspacePath,
+            })).trim(),
+          ).toBe("");
+          return { status: "completed" as const };
+        }),
+        completeAutorunWorkflow: () =>
+          Effect.succeed({
+            outcome: "published" as const,
+            outcomeDetail: null,
+          }),
+      };
+      const result = await runApplicationPromise(
+        runAutoDiscovery(options, injected),
+      );
+      expect(result.attempts).toHaveLength(1);
+      expect(claims).toBe(1);
+      expect(await git(["branch", "--show-current"])).toBe("main\n");
+      expect(await git(["rev-parse", "HEAD"])).toBe(localHead);
+      expect(await git(["diff", "--cached"])).toBe(stagedDiff);
+      expect(await git(["diff"])).toBe(unstagedDiff);
+      expect(await readFile(path.join(cwd, "untracked.txt"), "utf8")).toBe(
+        "keep me\n",
+      );
+
+      await writeFile(
+        path.join(workspacePath, "unfinished.txt"),
+        "recover me\n",
+      );
+      await assertRejects(
+        runApplicationPromise(runAutoDiscovery(options, injected)),
+        (error: unknown) =>
+          error instanceof WorkspaceError &&
+          error.message.includes("has uncommitted changes"),
+      );
+      expect(claims).toBe(1);
+      expect(
+        await readFile(path.join(workspacePath, "unfinished.txt"), "utf8"),
+      ).toBe("recover me\n");
+    },
+  );
   test("discovery auto still lists and selects eligible issues", async () => {
     let listed = false;
     const logs = await captureLogs(
@@ -353,7 +460,7 @@ describe("runAutoDiscovery", () => {
   });
   test("discovery auto fails closed when native dependency data is unavailable", async () => {
     await Promise.resolve();
-    let preflighted = false;
+    let workspacePrepared = false;
     let claimed = false;
     await assertRejects(
       runApplicationPromise(
@@ -381,10 +488,11 @@ describe("runAutoDiscovery", () => {
                 }
               );
             }),
-            assertCleanAutorunGit: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              preflighted = true;
-              return undefined;
+            prepareCloneWorkspace: Effect.fnUntraced(function* () {
+              workspacePrepared = true;
+              return yield* Effect.die(
+                new Error("Workspace must not be prepared"),
+              );
             }),
             claimGitHubIssue: Effect.fnUntraced(function* () {
               yield* Effect.void;
@@ -400,7 +508,7 @@ describe("runAutoDiscovery", () => {
           "Could not verify native GitHub dependencies for issue #1: GitHub dependency API unavailable",
         ),
     );
-    expect(preflighted).toBe(false);
+    expect(workspacePrepared).toBe(false);
     expect(claimed).toBe(false);
   });
   test("targeted auto ensures labels before fetching the requested issue", async () => {
@@ -435,7 +543,7 @@ describe("runAutoDiscovery", () => {
   test("targeted auto refuses skip labels before claim", async () => {
     await Promise.resolve();
     let claimed = false;
-    let preflighted = false;
+    let workspacePrepared = false;
     await assertRejects(
       runApplicationPromise(
         runAutoDiscovery(
@@ -448,10 +556,11 @@ describe("runAutoDiscovery", () => {
                 fetchedGitHubIssue(29, ["agent-in-progress"])
               );
             }),
-            assertCleanAutorunGit: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              preflighted = true;
-              return undefined;
+            prepareCloneWorkspace: Effect.fnUntraced(function* () {
+              workspacePrepared = true;
+              return yield* Effect.die(
+                new Error("Workspace must not be prepared"),
+              );
             }),
             claimGitHubIssue: Effect.fnUntraced(function* () {
               yield* Effect.void;
@@ -465,42 +574,8 @@ describe("runAutoDiscovery", () => {
         error instanceof Error &&
         error.message.includes("Issue #29 has skip label agent-in-progress"),
     );
-    expect(preflighted).toBe(false);
+    expect(workspacePrepared).toBe(false);
     expect(claimed).toBe(false);
-  });
-  test("dirty autorun preflight runs before claim", async () => {
-    await Promise.resolve();
-    const order: string[] = [];
-    await assertRejects(
-      runApplicationPromise(
-        runAutoDiscovery(
-          { ...baseOptions(), issue: "29" },
-          {
-            ...noOpLabelContract,
-            fetchGitHubIssue: Effect.fnUntraced(function* () {
-              return (
-                yield* Effect.void, fetchedGitHubIssue(29, ["ready-for-agent"])
-              );
-            }),
-            assertCleanAutorunGit: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              order.push("preflight");
-              return yield* Effect.fail(
-                new GitWorkspaceError({ message: "dirty worktree" }),
-              );
-            }),
-            claimGitHubIssue: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              order.push("claim");
-              return undefined;
-            }),
-          },
-        ),
-      ),
-      (error: unknown) =>
-        error instanceof Error && error.message.includes("dirty worktree"),
-    );
-    expect(order).toEqual(["preflight"]);
   });
   test("targeted auto rechecks labels after workspace setup and skips before claim without beforeRun", async () => {
     await Promise.resolve();
@@ -531,11 +606,6 @@ describe("runAutoDiscovery", () => {
               ? fetchedGitHubIssue(29, [])
               : fetchedGitHubIssue(29, ["agent-in-progress"]);
           }),
-          assertCleanAutorunGit: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            calls.push("preflight");
-            return undefined;
-          }),
           prepareCloneWorkspace: Effect.fnUntraced(function* () {
             yield* Effect.void;
             calls.push("workspace");
@@ -562,7 +632,7 @@ describe("runAutoDiscovery", () => {
         },
       ),
     );
-    expect(calls).toEqual(["preflight", "workspace"]);
+    expect(calls).toEqual(["workspace"]);
   });
   test("targeted auto uses clone workspace metadata, beforeRun hook, and the managed pipeline", async () => {
     await Promise.resolve();
@@ -595,11 +665,6 @@ describe("runAutoDiscovery", () => {
               ["ready-for-agent"],
               fetchCount === 1 ? "Initial issue title" : "Fresh issue title",
             );
-          }),
-          assertCleanAutorunGit: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            calls.push("preflight");
-            return undefined;
           }),
           claimGitHubIssue: Effect.fnUntraced(function* (input) {
             yield* Effect.void;
@@ -661,7 +726,6 @@ describe("runAutoDiscovery", () => {
       ).pipe(Effect.provide(fixedWallClock("2026-05-07T00:00:00.000Z"))),
     );
     expect(calls).toEqual([
-      "preflight",
       "workspace:roark/issue-29",
       "claim:roark/issue-29",
       "ledger",
@@ -708,10 +772,6 @@ describe("runAutoDiscovery", () => {
           fetchGitHubIssue: Effect.fnUntraced(function* () {
             return (yield* Effect.void, fetchedGitHubIssue(29, []));
           }),
-          assertCleanAutorunGit: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            return undefined;
-          }),
           prepareCloneWorkspace: Effect.fnUntraced(function* () {
             enteredFirst();
             yield* Effect.promise(() => release);
@@ -731,10 +791,6 @@ describe("runAutoDiscovery", () => {
             ...noOpLabelContract,
             fetchGitHubIssue: Effect.fnUntraced(function* () {
               return (yield* Effect.void, fetchedGitHubIssue(29, []));
-            }),
-            assertCleanAutorunGit: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              return undefined;
             }),
             prepareCloneWorkspace: Effect.fnUntraced(function* () {
               yield* Effect.void;
@@ -775,10 +831,6 @@ describe("runAutoDiscovery", () => {
           fetchGitHubIssue: Effect.fnUntraced(function* () {
             return (yield* Effect.void, fetchedGitHubIssue(29, []));
           }),
-          assertCleanAutorunGit: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            return undefined;
-          }),
           prepareCloneWorkspace: Effect.fnUntraced(function* () {
             enteredFirst();
             yield* Effect.promise(() => release);
@@ -798,10 +850,6 @@ describe("runAutoDiscovery", () => {
             ...noOpLabelContract,
             fetchGitHubIssue: Effect.fnUntraced(function* () {
               return (yield* Effect.void, fetchedGitHubIssue(30, []));
-            }),
-            assertCleanAutorunGit: Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              return undefined;
             }),
             prepareCloneWorkspace: Effect.fnUntraced(function* () {
               yield* Effect.void;
