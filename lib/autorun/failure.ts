@@ -137,7 +137,7 @@ export const markIssueFailed = Effect.fn("markIssueFailed")(function* (
         existingCommentId: options.existingCommentId,
       });
     }
-    yield* (yield* GitHub).postIssueComment({
+    return yield* (yield* GitHub).postIssueComment({
       cwd: options.cwd,
       repo: options.repo,
       issueNumber: options.issueNumber,

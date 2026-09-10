@@ -1,3 +1,8 @@
+import { GitHub } from "../github/service.ts";
+import { presentAutorunOutcome } from "../../roark.ts";
+import { completeAutorunWorkflow } from "./completion.ts";
+import { Presenter } from "../presentation/presenter.ts";
+import { runWithPresenter } from "../testing/presentation.ts";
 import { fixedWallClock } from "../testing/clock.ts";
 import { AttemptStore, formatAttemptMetadata } from "./attempts.ts";
 import {
@@ -49,6 +54,88 @@ afterEach(async () => {
   );
 });
 describe("runAutorunAttemptLifecycle", () => {
+  test.each([true, false])(
+    "continued blocked attempts expose current report publication=%s",
+    async (published) => {
+      const fixture = await createFixture();
+      fixture.workflowContext.continuing = true;
+      const issueUrl = "https://github.com/owner/repo/issues/44";
+      fixture.attemptMetadata.githubComments = {
+        issue: {
+          implementation: {
+            id: 8,
+            url: `${issueUrl}#issuecomment-8`,
+            marker: "old",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      };
+      await runApplicationPromise(
+        writeJsonArtifact(
+          fixture.workflowContext,
+          "implementationLog",
+          changeReport({
+            externalBlockers: [
+              "Package validation failed: unavailable effect/ByteSize dependency.",
+            ],
+          }),
+        ),
+      );
+      let output = "";
+      await runWithPresenter(
+        new Presenter({
+          stream: {
+            isTTY: false,
+            write(chunk) {
+              output += chunk;
+            },
+          },
+        }),
+        Effect.gen(function* () {
+          const result = yield* runAutorunAttemptLifecycle(
+            {
+              ...fixture,
+              issue: { number: 44, title: "Lifecycle", url: issueUrl },
+            },
+            {
+              runFullWorkflow: () =>
+                Effect.succeed({
+                  status: "execution-stopped",
+                  artifact: "implementationLog",
+                }),
+              completeAutorunWorkflow: (input) =>
+                completeAutorunWorkflow(input, {
+                  markWorkflowStopped: () =>
+                    Effect.succeed(
+                      published
+                        ? {
+                            id: 9,
+                            url: `${issueUrl}#issuecomment-9`,
+                            marker: "current",
+                          }
+                        : undefined,
+                    ),
+                }),
+            },
+          );
+          yield* presentAutorunOutcome(result);
+        }),
+      );
+      expect(output).toContain(
+        "reason: Package validation failed: unavailable effect/ByteSize dependency.",
+      );
+      expect(output).toContain(
+        `${issueUrl}${published ? "#issuecomment-9" : ""}\n`,
+      );
+      expect(output).not.toContain("#issuecomment-8");
+      expect(output).toContain(
+        `${fixture.workflowContext.runDirRelative}/implementation-log.json`,
+      );
+      expect(output.includes("Could not post the report to GitHub")).toBe(
+        !published,
+      );
+    },
+  );
   test("marks attempts in-progress before workflow and records terminal completion outcomes", async () => {
     await Promise.resolve();
     const fixture = await createFixture();
@@ -91,6 +178,14 @@ describe("runAutorunAttemptLifecycle", () => {
               {
                 outcome: "failed-verification" as const,
                 outcomeDetail: "verification failed",
+                report: {
+                  published: false,
+                  issueUrl: undefined,
+                  commentUrl: undefined,
+                  reason: "verification failed",
+                  artifactPath: `${fixture.workflowContext.runDirRelative}/verification.md`,
+                  runDirectory: fixture.workflowContext.runDirRelative,
+                },
               }
             );
           }),
@@ -408,6 +503,15 @@ describe("runAutorunAttemptLifecycle", () => {
       ),
     );
     const comments: string[] = [];
+    let output = "";
+    const presenter = new Presenter({
+      stream: {
+        isTTY: false,
+        write(chunk) {
+          output += chunk;
+        },
+      },
+    });
     const error = new AgentTaskRunError({
       artifact: "implementationLog",
       label: "Implementation",
@@ -415,7 +519,8 @@ describe("runAutorunAttemptLifecycle", () => {
       originalError: new Error("missing Summary section"),
     });
     await assertRejects(
-      runApplicationPromise(
+      runWithPresenter(
+        presenter,
         runAutorunAttemptLifecycle(
           {
             ...fixture,
@@ -433,17 +538,30 @@ describe("runAutorunAttemptLifecycle", () => {
             publishReviewLedgerComments: Effect.fnUntraced(function* () {
               yield* Effect.void;
             }),
-            markIssueFailed: Effect.fnUntraced(function* (options) {
-              yield* Effect.void;
-              comments.push(options.comment);
-              expect(options.removeLabels).toEqual(["busy"]);
-              return undefined;
-            }),
             finalizeAttemptObservability: Effect.fnUntraced(function* () {
               yield* Effect.void;
             }),
           },
-        ).pipe(Effect.provide(fixedWallClock("2026-05-07T02:00:00.000Z"))),
+        ).pipe(
+          Effect.provide(fixedWallClock("2026-05-07T02:00:00.000Z")),
+          Effect.updateService(GitHub, (github) => ({
+            ...github,
+            addIssueLabel: () => Effect.void,
+            removeIssueLabel: ({ label }) =>
+              Effect.sync(() => {
+                expect(label).toBe("busy");
+              }),
+            postIssueComment: ({ body }) =>
+              Effect.sync(() => {
+                comments.push(body);
+                return {
+                  id: 99,
+                  url: "https://github.com/owner/repo/issues/44#issuecomment-99",
+                  marker: "",
+                };
+              }),
+          })),
+        ),
       ),
       (error: unknown) =>
         error instanceof Error &&
@@ -454,6 +572,10 @@ describe("runAutorunAttemptLifecycle", () => {
     const terminal = await runApplicationPromise(
       Effect.flatMap(AttemptStore, (store) => store.read(fixture.issueDir, 1)),
     );
+    expect(output).toContain(
+      "https://github.com/owner/repo/issues/44#issuecomment-99\n",
+    );
+    expect(terminal.githubComments?.issue?.["output-contract"]?.id).toBe(99);
     expect(terminal.outcome).toBe("failed-output-contract");
     expect(terminal.outcomeDetail).toBe(
       "Implementation failed: missing Summary section",
@@ -701,6 +823,14 @@ test("attempt finalization persists metadata and observability even when afterRu
           Effect.succeed({
             outcome: "failed-readiness",
             outcomeDetail: "not ready",
+            report: {
+              published: false,
+              issueUrl: undefined,
+              commentUrl: undefined,
+              reason: "not ready",
+              artifactPath: `${fixture.workflowContext.runDirRelative}/readiness.json`,
+              runDirectory: fixture.workflowContext.runDirRelative,
+            },
           }),
         finalizeAttemptObservability: () => {
           finalized = true;

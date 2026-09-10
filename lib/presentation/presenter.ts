@@ -13,6 +13,15 @@ import {
   type TerminalStream,
 } from "./terminal.ts";
 
+export interface OutcomeReport {
+  reason?: string | undefined;
+  issueUrl?: string | undefined;
+  commentUrl?: string | undefined;
+  published: boolean;
+  artifactPath: string;
+  runDirectory: string;
+}
+
 export type AgentOperation =
   | "inspect"
   | "edit"
@@ -382,6 +391,22 @@ export class Presenter {
       undefined,
       this.identity?.repository,
     );
+  }
+
+  outcomeReport(report: OutcomeReport): void {
+    // Keep report destinations intact in narrow terminals and redirected logs.
+    const detail = (label: string, value: string) =>
+      this.stream.write(`  ${label}: ${sanitizeTerminalLine(value)}\n`);
+    if (report.reason) detail("reason", report.reason);
+    if (report.commentUrl) detail("details", report.commentUrl);
+    else if (report.issueUrl) detail("issue", report.issueUrl);
+    if (!report.published)
+      detail(
+        "report",
+        "Could not post the report to GitHub. See the local report below.",
+      );
+    detail("local report", report.artifactPath);
+    detail("artifacts", report.runDirectory);
   }
 
   recovery(command: string): void {

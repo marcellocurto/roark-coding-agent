@@ -1,3 +1,4 @@
+import type { OutcomeReport } from "../presentation/presenter.ts";
 import type { WorkspaceFailure } from "./workspace.ts";
 import {
   createFileRunObserver,
@@ -37,6 +38,7 @@ import { finalizeAttemptObservability } from "./observability.ts";
 import {
   attemptMetadataRelativePath,
   formatAttemptMetadata,
+  recordAttemptIssueComment,
   type AttemptMetadata,
   type AttemptOutcome,
 } from "./attempts.ts";
@@ -105,6 +107,7 @@ export interface AutorunAttemptResult {
   issueNumber: number;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
+  report?: OutcomeReport;
 }
 
 export interface RunAutorunAttemptLifecycleInjected {
@@ -208,6 +211,9 @@ export const runAutorunAttemptLifecycle = Effect.fn(
           issueNumber: input.attemptMetadata.issueNumber,
           outcome,
           outcomeDetail,
+          ...("report" in terminalOutcome
+            ? { report: terminalOutcome.report }
+            : {}),
         };
       }),
     ),
@@ -371,7 +377,7 @@ const markWorkflowError = Effect.fn("markWorkflowError")(function* (
     recoveryCommand: publicRecoveryCommand(input, shouldRecoverWithYes(error)),
   });
 
-  yield* markFailed({
+  const ref = yield* markFailed({
     cwd: input.gateOptions.cwd,
     repo: input.gateOptions.repo,
     issueNumber: issue.number,
@@ -383,6 +389,21 @@ const markWorkflowError = Effect.fn("markWorkflowError")(function* (
       nextLabel: input.gateOptions.failureLabel,
       knownPresent: [input.gateOptions.inProgressLabel],
     }),
+  });
+  if (ref)
+    recordAttemptIssueComment(
+      attemptMetadata,
+      phase,
+      ref,
+      DateTime.formatIso(yield* DateTime.now),
+    );
+  (yield* Presentation).outcomeReport({
+    reason: formatError(error),
+    issueUrl: issue.url,
+    commentUrl: ref?.url,
+    published: ref !== undefined,
+    artifactPath: errorArtifact?.path ?? attemptMetadataPath,
+    runDirectory: input.workflowContext.runDirRelative,
   });
 });
 

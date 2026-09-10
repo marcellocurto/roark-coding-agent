@@ -1,3 +1,4 @@
+import type { OutcomeReport } from "../presentation/presenter.ts";
 import {
   parseContinuationResult,
   formatContinuationReview,
@@ -5,7 +6,11 @@ import {
 import { DateTime } from "effect";
 import { Effect } from "effect";
 import { type WorkflowContext } from "../workflow/artifacts.ts";
-import { readArtifact } from "../workflow/artifacts.ts";
+import {
+  artifactRelativePath,
+  artifactExists,
+  readArtifact,
+} from "../workflow/artifacts.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
 import type { WorkflowRunResult } from "../workflow/phases.ts";
 import { recordAttemptIssueComment, type AttemptMetadata } from "./attempts.ts";
@@ -32,7 +37,7 @@ import {
   formatChangeReportMarkdown,
   parseChangeReportJson,
 } from "../change-report/result.ts";
-import type { TriageVerdict } from "../triage/result.ts";
+import { parseTriageResultJson, type TriageVerdict } from "../triage/result.ts";
 import { labelsToRemoveForAutorunTransition } from "./labels.ts";
 export type AutorunCompletionOutcome =
   | PublishGateOutcome
@@ -43,6 +48,7 @@ export type AutorunCompletionOutcome =
         | "execution-stopped"
         | "continuation-stopped";
       outcomeDetail: string | null;
+      report?: OutcomeReport;
     };
 export interface CompleteAutorunWorkflowInput {
   workflowResult: WorkflowRunResult;
@@ -116,6 +122,14 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
       return {
         outcome: result.status,
         outcomeDetail: `${phase} verdict is "${verdict}"`,
+        report: {
+          reason: stop.reason,
+          issueUrl: input.issue.url,
+          commentUrl: ref?.url,
+          published: ref !== undefined,
+          artifactPath: stop.artifactPath,
+          runDirectory: input.workflowContext.runDirRelative,
+        },
       } satisfies AutorunCompletionOutcome;
     }
     yield* publishPlanning(
@@ -192,14 +206,27 @@ const workflowStopDetails = Effect.fn("workflowStopDetails")(function* (
           ? ("needs-human-decision" as const)
           : ("blocked" as const),
       artifactContent: formatContinuationReview(review),
+      reason:
+        review.blockingQuestions[0] ??
+        review.externalBlockers[0] ??
+        review.resolutions.find((item) => item.status === "unresolved")
+          ?.question ??
+        review.summary,
+      artifactPath: artifactRelativePath(context, "continuationReview"),
     };
   }
-  if (result.status === "triage-stopped")
+  if (result.status === "triage-stopped") {
+    const triage = (yield* artifactExists(context, "triage"))
+      ? yield* parseTriageResultJson(yield* readArtifact(context, "triage"))
+      : undefined;
     return {
       phase: "triage",
       verdict: result.triageVerdict,
+      reason: triage?.blockingQuestions[0] ?? triage?.reasoning,
+      artifactPath: artifactRelativePath(context, "triage"),
       artifactContent: yield* readArtifactIfExists(context, "triageMarkdown"),
     };
+  }
   if (result.status === "planning-stopped") {
     const artifact = result.planningArtifact ?? "implementationPlan";
     const plan = yield* parseImplementationPlanResultJson(
@@ -211,6 +238,8 @@ const workflowStopDetails = Effect.fn("workflowStopDetails")(function* (
           ? "implementation-plan-draft"
           : "implementation-plan",
       verdict: stopVerdict(plan),
+      reason: plan.blockingQuestions[0] ?? plan.externalBlockers[0],
+      artifactPath: artifactRelativePath(context, artifact),
       artifactContent: formatImplementationPlanMarkdown(
         plan,
         artifact === "implementationPlanDraft" ? "draft" : "final",
@@ -226,6 +255,11 @@ const workflowStopDetails = Effect.fn("workflowStopDetails")(function* (
         ? "implementation"
         : `${result.artifact.name}-${result.artifact.pass}`,
     verdict: stopVerdict(report),
+    reason:
+      report.blockingQuestions[0] ??
+      report.externalBlockers[0] ??
+      report.summary,
+    artifactPath: artifactRelativePath(context, result.artifact),
     artifactContent: formatChangeReportMarkdown(report, "Execution Stopped"),
   };
 });

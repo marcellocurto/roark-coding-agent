@@ -193,6 +193,7 @@ export const presentAutorunOutcome = Effect.fn("presentAutorunOutcome")(
       `#${result.issueNumber}`,
       result.outcomeDetail ?? result.outcome,
     );
+    if (result.report) presentation.outcomeReport(result.report);
   },
 );
 export function workflowOutcomeStatus(
