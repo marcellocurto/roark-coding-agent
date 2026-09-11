@@ -1,6 +1,8 @@
 import { GitHub } from "../github/service.ts";
 import { GitHubRequestError } from "../github/errors.ts";
 import { presentAutorunOutcome } from "../../roark.ts";
+import { publishIssueLedgerComment } from "./ledger-comments.ts";
+import type { AttemptMetadata } from "./attempts.ts";
 import { Schema, Effect, PlatformError } from "effect";
 import {
   readArtifact,
@@ -48,8 +50,18 @@ describe("verification repair planning", () => {
     "failure reports preserve current GitHub publication=%s",
     async (published) => {
       const context = await tempContext(1);
-      const metadata = attemptMetadata(context);
+      const metadata: AttemptMetadata = attemptMetadata(context);
       const issueUrl = "https://github.com/owner/repo/issues/1";
+      metadata.githubComments = {
+        issue: {
+          "attempt-status": {
+            id: 98,
+            url: `${issueUrl}#issuecomment-98`,
+            marker: "old",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      };
       await runApplicationPromise(
         writeArtifact(
           context,
@@ -104,21 +116,28 @@ describe("verification repair planning", () => {
             ...github,
             addIssueLabel: () => Effect.void,
             removeIssueLabel: () => Effect.void,
-            postOrUpdateIssueCommentByMarker: () =>
-              published
+            postOrUpdateIssueCommentByMarker: (input) => {
+              expect(input.existingCommentId).toBe(98);
+              expect(input.marker).toContain("phase=attempt-status");
+              return published
                 ? Effect.succeed({
                     id: 99,
                     url: `${issueUrl}#issuecomment-99`,
-                    marker: "verification",
+                    marker: input.marker,
                   })
                 : Effect.fail(
                     new GitHubRequestError({ message: "GitHub unavailable" }),
-                  ),
+                  );
+            },
           })),
         ),
       );
       expect(output).toContain(
         `${issueUrl}${published ? "#issuecomment-99" : ""}\n`,
+      );
+      expect(output).not.toContain("#issuecomment-98");
+      expect(metadata.githubComments.issue?.["attempt-status"]?.id).toBe(
+        published ? 99 : 98,
       );
       expect(output).toContain("reason: Dependency command unavailable");
       expect(output).toContain(`${context.runDirRelative}/verification.md\n`);
@@ -975,3 +994,67 @@ function failedVerification(
 function structuredReview(findings: ReviewFinding[] = []): string {
   return JSON.stringify(reviewResult(findings));
 }
+
+test("terminal readiness and PR publication replace the same attempt status", async () => {
+  const context = await tempContext(0);
+  const metadata: AttemptMetadata = attemptMetadata(context);
+  const remote = new Map<number, string>();
+  await runApplicationPromise(
+    Effect.gen(function* () {
+      const github = yield* GitHub;
+      const input = {
+        options: publishGateOptions(context),
+        issue: { number: 1, title: "Issue" },
+        branchPlan: {
+          issueNumber: 1,
+          branchName: "roark/issue-1",
+          baseBranch: "main",
+        },
+        workflowContext: context,
+        attemptMetadata: metadata,
+        attemptMetadataPath: "attempt.json",
+        recoveryCommand: "roark continue 1",
+      };
+      const run = () =>
+        runPublishGate(
+          input,
+          successfulPublicationDependencies({ publishIssueLedgerComment }),
+        ).pipe(
+          Effect.provideService(GitHub, {
+            ...github,
+            addIssueLabel: () => Effect.void,
+            removeIssueLabel: () => Effect.void,
+            postOrUpdateIssueCommentByMarker: (options) =>
+              Effect.sync(() => {
+                const id = options.existingCommentId ?? remote.size + 401;
+                remote.set(id, options.body);
+                expect(options.marker).toContain("phase=attempt-status");
+                return { id, marker: options.marker };
+              }),
+          }),
+        );
+      expect((yield* run()).outcome).toBe("failed-readiness");
+      expect(remote.get(401)).toContain("readiness");
+      expect(remote.get(401)).toContain("roark continue 1");
+      yield* writeJsonArtifact(
+        context,
+        "readiness",
+        readinessResult("ready-for-pr"),
+      );
+      yield* writeArtifact(
+        context,
+        "readinessMarkdown",
+        "## Ready\n\nTOKEN=secret",
+      );
+      expect((yield* run()).outcome).toBe("published");
+      expect(remote.size).toBe(1);
+      expect(remote.get(401)).toContain(
+        "https://github.com/owner/repo/pull/10",
+      );
+      expect(remote.get(401)).toContain("TOKEN=[redacted]");
+      expect(Object.keys(metadata.githubComments?.issue ?? {})).toEqual([
+        "attempt-status",
+      ]);
+    }),
+  );
+});

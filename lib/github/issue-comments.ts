@@ -16,13 +16,17 @@ const decodePages = Schema.decodeUnknownEffect(
 );
 export const fetchIssueComments = Effect.fn("GitHub.fetchIssueComments")(
   function* (input: { cwd: string; repo: string; issueNumber: string }) {
+    const parts = input.repo.split("/");
+    const hostname = parts.length === 3 ? parts[0] : undefined;
+    const repo = parts.length === 3 ? parts.slice(1).join("/") : input.repo;
     const raw = yield* runProcessOrThrow(
       [
         "gh",
         "api",
-        `repos/${input.repo}/issues/${input.issueNumber}/comments`,
+        `repos/${repo}/issues/${input.issueNumber}/comments`,
         "--paginate",
         "--slurp",
+        ...(hostname ? ["--hostname", hostname] : []),
       ],
       { cwd: input.cwd, label: "gh api issue comments" },
     );

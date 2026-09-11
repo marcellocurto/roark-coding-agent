@@ -1,4 +1,5 @@
 import type { OutcomeReport } from "../presentation/presenter.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 import {
   parseContinuationResult,
   formatContinuationReview,
@@ -21,6 +22,7 @@ import {
   type PublishGateOutcome,
 } from "./publish-flow.ts";
 import {
+  publishIssueLedgerComment,
   publishPlanningLedgerComments,
   publishReviewLedgerComments,
 } from "./ledger-comments.ts";
@@ -86,10 +88,26 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
     ) {
       const stop = yield* workflowStopDetails(input.workflowContext, result);
       const { phase, verdict, artifactContent } = stop;
+      if (
+        phase === "triage" ||
+        phase === "implementation-plan" ||
+        phase === "implementation-plan-draft"
+      ) {
+        yield* publishIssueLedgerComment({
+          cwd: input.options.cwd,
+          repo: input.options.repo,
+          issueNumber: input.issue.number,
+          attemptMetadata: input.attemptMetadata,
+          phase: phase === "triage" ? "triage" : "implementation-plan",
+          body: artifactContent?.trim()
+            ? sanitizePublicMarkdown(artifactContent)
+            : `## ${phase} stopped\n\nVerdict: ${verdict}`,
+        });
+      }
       const marker = buildRoarkMarker({
         issueNumber: input.issue.number,
         attempt: input.attemptMetadata.attempt,
-        phase,
+        phase: "attempt-status",
       });
       const ref = yield* markWorkflowStopped({
         cwd: input.options.cwd,
@@ -97,7 +115,7 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
         issueNumber: input.issue.number,
         issueUrl: input.issue.url,
         verdict,
-        artifactContent,
+        artifactContent: `## ${phase} stopped\n\nVerdict: ${verdict}\n\n${artifactContent ?? ""}`,
         recoveryCommand: input.recoveryCommand,
         removeLabels: labelsToRemoveForAutorunTransition({
           issueLabels: input.issue.labels,
@@ -110,12 +128,12 @@ export const completeAutorunWorkflow = Effect.fn("completeAutorunWorkflow")(
         }),
         marker,
         existingCommentId:
-          input.attemptMetadata.githubComments?.issue?.[phase]?.id,
+          input.attemptMetadata.githubComments?.issue?.["attempt-status"]?.id,
       });
       if (ref !== undefined)
         recordAttemptIssueComment(
           input.attemptMetadata,
-          phase,
+          "attempt-status",
           ref,
           DateTime.formatIso(yield* DateTime.now),
         );

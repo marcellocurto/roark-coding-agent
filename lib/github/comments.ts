@@ -39,7 +39,8 @@ export function ensureCommentStartsWithMarker(
   body: string,
   marker: string,
 ): string {
-  return body.startsWith(marker) ? body : `${marker}\n${body}`;
+  const content = body.replace(/^(?:<!-- roark:[^\r\n]*? -->[\r\n]*)+/, "");
+  return `${marker}\n${content}`;
 }
 export function formatBoundedMarkdownDetails(
   summary: string,

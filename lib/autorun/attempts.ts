@@ -158,9 +158,37 @@ export function formatAttemptMetadata(
   };
 }
 
+export type AttemptIssueCommentPhase =
+  | "attempt-status"
+  | "triage"
+  | "implementation-plan"
+  | "review-a"
+  | "review-b";
+
+export function adoptLegacyIssueComments(
+  metadata: AttemptMetadata,
+  cycle: number | undefined,
+): void {
+  const comments = metadata.githubComments?.issue;
+  if (!comments) return;
+  if (!comments["attempt-status"] && comments["attempt-start"])
+    comments["attempt-status"] = { ...comments["attempt-start"] };
+  if (cycle === undefined) return;
+  for (const role of ["review-a", "review-b"] as const) {
+    if (comments[role]) continue;
+    for (let previous = cycle; previous >= 0; previous--) {
+      const legacy = comments[`${role}-${previous}`];
+      if (legacy) {
+        comments[role] = { ...legacy };
+        break;
+      }
+    }
+  }
+}
+
 export function recordAttemptIssueComment(
   metadata: AttemptMetadata,
-  phase: string,
+  phase: AttemptIssueCommentPhase,
   ref: { id: number; url?: string | undefined; marker: string },
   updatedAt: Date | string,
 ): AttemptMetadata {

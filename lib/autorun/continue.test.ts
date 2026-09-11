@@ -14,10 +14,17 @@ import {
 } from "../workflow/artifacts.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { provideTestAgent } from "../testing/agents.ts";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { type ContinueCliOptions } from "../cli/args.ts";
@@ -30,6 +37,11 @@ import {
   triageResult,
 } from "../testing/workflow-results.ts";
 import { changeReport } from "../testing/change-reports.ts";
+const decodeRemoteComments = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Record(Schema.String, Schema.Struct({ body: Schema.String })),
+  ),
+);
 const tempDirs: string[] = [];
 const originalPath = process.env["PATH"];
 afterEach(async () => {
@@ -272,14 +284,14 @@ describe("runAutoContinue", () => {
     expect(metadata.workspace?.path).toBe(workspacePath);
     expect(metadata.outcome).toBe("errored");
   });
-  test("records Review A/B issue comments when a later workflow phase fails", async () => {
+  test("refreshes resumed status and reuses earlier review IDs across repeated continuation", async () => {
     await Promise.resolve();
     const cwd = await mkdtemp(
       path.join(tmpdir(), "roark-continue-error-ledger-"),
     );
     tempDirs.push(cwd);
     await initGitRepo(cwd, "roark/issue-24");
-    await installFakeGh(cwd);
+    await installFakeGh(cwd, true);
     const workflowContext: WorkflowContext = {
       controlCwd: cwd,
       agentCwd: cwd,
@@ -372,6 +384,11 @@ describe("runAutoContinue", () => {
         JSON.stringify(reviewResult()),
       ),
     );
+    for (const ref of [reviewARef(1), reviewBRef(1)]) {
+      await runApplicationPromise(
+        writeArtifact(workflowContext, ref, JSON.stringify(reviewResult())),
+      );
+    }
     await runApplicationPromise(
       Effect.flatMap(AttemptStore, (store) =>
         store.write(
@@ -384,40 +401,99 @@ describe("runAutoContinue", () => {
             worktreePath: path.join(cwd, "deleted-worktree"),
             runArtifactPath: workflowContext.runDirRelative,
             startedAt: "2026-05-07T00:00:00.000Z",
+            githubComments: {
+              issue: {
+                "attempt-start": {
+                  id: 501,
+                  marker: "legacy:start",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+                "review-a-0": {
+                  id: 502,
+                  marker: "legacy:a",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+                "review-b-0": {
+                  id: 503,
+                  marker: "legacy:b",
+                  updatedAt: "2026-05-07T00:00:00.000Z",
+                },
+              },
+            },
           }),
         ),
       ),
     );
-    await assertRejects(
-      runApplicationPromise(
-        runAutoContinue(
-          { ...continueOptions, issue: "24", cwd, attempt: 2 },
-          {},
-        ).pipe(
-          provideTestAgent(
-            Effect.fnUntraced(function* (request) {
-              if (request.display.phaseId === "continuation-review")
-                return yield* Effect.tryPromise(() =>
-                  submitContinuation(request, continuationResult()),
+    for (let continuation = 0; continuation < 2; continuation++) {
+      await assertRejects(
+        runApplicationPromise(
+          runAutoContinue(
+            { ...continueOptions, issue: "24", cwd, attempt: 2 },
+            {},
+          ).pipe(
+            provideTestAgent(
+              Effect.fnUntraced(function* (request) {
+                if (request.display.phaseId === "continuation-review") {
+                  const saved = yield* Effect.flatMap(AttemptStore, (store) =>
+                    store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+                  );
+                  const remote = decodeRemoteComments(
+                    yield* Effect.tryPromise(() =>
+                      readFile(path.join(cwd, ".git/comments.json"), "utf8"),
+                    ),
+                  );
+                  expect(remote["501"]?.body).toContain("in progress");
+                  expect(remote["501"]?.body).toContain("roark/issue-24");
+                  expect(remote["501"]?.body).not.toContain("roark continue");
+                  expect(
+                    saved.githubComments?.issue?.["attempt-status"]?.marker,
+                  ).toContain("phase=attempt-status");
+                  expect(
+                    saved.githubComments?.issue?.["attempt-status"]?.id,
+                  ).toBe(501);
+                  expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(
+                    502,
+                  );
+                  expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(
+                    503,
+                  );
+                  return yield* Effect.tryPromise(() =>
+                    submitContinuation(request, continuationResult()),
+                  );
+                }
+                yield* Effect.void;
+                return yield* Effect.fail(
+                  new Error("fix failed after reviews"),
                 );
-              yield* Effect.void;
-              return yield* Effect.fail(new Error("fix failed after reviews"));
-            }),
+              }),
+            ),
           ),
         ),
-      ),
-      (error: unknown) =>
-        error instanceof Error && error.message.includes("Fix pass 1 failed"),
-    );
+        (error: unknown) =>
+          error instanceof Error && error.message.includes("Fix pass 1 failed"),
+      );
+    }
     const metadata = await runApplicationPromise(
       Effect.flatMap(AttemptStore, (store) =>
         store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
       ),
     );
+    const remote = decodeRemoteComments(
+      await readFile(path.join(cwd, ".git/comments.json"), "utf8"),
+    );
+    for (const phase of ["attempt-status", "review-a", "review-b"]) {
+      expect(
+        Object.values(remote).filter((comment) =>
+          comment.body.includes(`phase=${phase} -->`),
+        ),
+      ).toHaveLength(1);
+    }
+    expect(remote["502"]?.body).toContain("Review A pass 1");
+    expect(remote["503"]?.body).toContain("Review B pass 1");
     expect(metadata.outcome).toBe("errored");
     expect(metadata.worktreePath).toBe(autorunWorktreePath(cwd, 24));
-    expect(metadata.githubComments?.issue?.["review-a-0"]?.id).toBe(4242);
-    expect(metadata.githubComments?.issue?.["review-b-0"]?.id).toBe(4242);
+    expect(metadata.githubComments?.issue?.["review-a"]?.id).toBe(502);
+    expect(metadata.githubComments?.issue?.["review-b"]?.id).toBe(503);
   });
   test("serializes concurrent continues for the same issue across attempts", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "roark-continue-lock-"));
@@ -588,7 +664,48 @@ exit 99
   await chmod(path.join(binDir, "gh"), 0o755);
   process.env["PATH"] = `${binDir}${path.delimiter}${originalPath ?? ""}`;
 }
-async function installFakeGh(cwd: string): Promise<void> {
+async function installFakeGh(cwd: string, stateful = false): Promise<void> {
+  if (stateful) {
+    const statePath = path.join(cwd, ".git/comments.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        Object.fromEntries(
+          [501, 502, 503].map((id) => [
+            id,
+            {
+              id,
+              body: "Stopped. Run roark continue",
+              user: { login: "roark" },
+            },
+          ]),
+        ),
+      ),
+    );
+    const scriptPath = path.join(cwd, ".git/comments.cjs");
+    await writeFile(
+      scriptPath,
+      `
+const fs = require("node:fs");
+const file = ${JSON.stringify(statePath)};
+const comments = JSON.parse(fs.readFileSync(file, "utf8"));
+const args = process.argv.slice(2);
+const endpoint = args[1];
+if (endpoint === "user") { console.log("roark"); process.exit(0); }
+const method = args[args.indexOf("--method") + 1];
+let result;
+if (method === "PATCH" || method === "POST") {
+  const id = method === "PATCH" ? Number(endpoint.split("/").pop()) : Math.max(...Object.keys(comments).map(Number)) + 1;
+  result = { id, body: args.find(a => a.startsWith("body=")).slice(5), user: { login: "roark" } };
+  comments[id] = result;
+  fs.writeFileSync(file, JSON.stringify(comments));
+} else if (args.includes("--paginate")) result = [Object.values(comments)];
+else result = comments[endpoint.split("/").pop()];
+const decorate = c => ({ ...c, html_url: "https://github.com/owner/repo/issues/24#issuecomment-" + c.id, created_at: "2026-05-07T00:00:00Z", updated_at: "2026-05-07T00:00:00Z" });
+console.log(JSON.stringify(Array.isArray(result) ? result.map(page => page.map(decorate)) : decorate(result)));
+`,
+    );
+  }
   const binDir = path.join(cwd, "bin");
   await mkdir(binDir, { recursive: true });
   await writeFile(
@@ -599,6 +716,7 @@ if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   exit 0
 fi
 if [ "$1" = "api" ]; then
+  ${stateful ? `exec "${process.execPath}" "${path.join(cwd, ".git/comments.cjs")}" "$@"` : ""}
   if [ "$3" = "--paginate" ]; then
     printf '[]\\n'
     exit 0

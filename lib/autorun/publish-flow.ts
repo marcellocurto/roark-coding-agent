@@ -1,4 +1,5 @@
 import type { OutcomeReport } from "../presentation/presenter.ts";
+import { sanitizePublicMarkdown } from "./public-output.ts";
 import { DateTime } from "effect";
 import { Workspace } from "./workspace-service.ts";
 import { Presentation } from "../runtime/services.ts";
@@ -180,24 +181,15 @@ export const runPublishGate = Effect.fn("runPublishGate")(function* (
       repo: options.repo,
       issueNumber: issue.number,
       attemptMetadata,
-      phase: "readiness",
-      body: formatReadinessLedgerComment({
-        issueNumber: issue.number,
-        attempt: attemptMetadata.attempt,
-        artifactContent: readinessMarkdown ?? "",
-      }),
-    });
-    yield* publishLedger({
-      cwd: options.cwd,
-      repo: options.repo,
-      issueNumber: issue.number,
-      attemptMetadata,
-      phase: "pr-created",
-      body: formatPrCreatedComment({
-        issueNumber: issue.number,
-        attempt: attemptMetadata.attempt,
-        prUrl: publishedPr.url,
-      }),
+      phase: "attempt-status",
+      body:
+        formatPrCreatedComment({
+          issueNumber: issue.number,
+          attempt: attemptMetadata.attempt,
+          prUrl: publishedPr.url,
+        }) +
+        "\n" +
+        sanitizePublicMarkdown(readinessMarkdown ?? ""),
     });
     let issueCreationResults: IssueCreationResults | undefined;
     yield* Effect.gen(function* () {
@@ -298,21 +290,6 @@ export const runPublishGate = Effect.fn("runPublishGate")(function* (
     (yield* Presentation).line(
       `ACTION user action required: ${classification.recoveryGuidance ?? decision.reason}`,
     );
-  }
-  if (decision.phase === "verification") {
-    yield* publishLedger({
-      cwd: options.cwd,
-      repo: options.repo,
-      issueNumber: issue.number,
-      attemptMetadata,
-      phase: "readiness",
-      body: formatReadinessLedgerComment({
-        issueNumber: issue.number,
-        attempt: attemptMetadata.attempt,
-        artifactContent: readinessMarkdown ?? "",
-        recoveryCommand,
-      }),
-    });
   }
   const report = yield* nonPublish({
     options,
@@ -430,7 +407,9 @@ export const handleNonPublish = Effect.fn("handleNonPublish")(
         ? formatReadinessLedgerComment({
             issueNumber: issue.number,
             attempt: attemptMetadata.attempt,
-            artifactContent: artifactContent ?? "",
+            artifactContent: artifactContent?.trim()
+              ? artifactContent
+              : `## ${decision.phase} stopped\n\n${decision.reason}`,
             recoveryCommand,
           })
         : formatFailureComment({
@@ -447,7 +426,7 @@ export const handleNonPublish = Effect.fn("handleNonPublish")(
     const marker = buildRoarkMarker({
       issueNumber: issue.number,
       attempt: attemptMetadata.attempt,
-      phase: decision.phase,
+      phase: "attempt-status",
     });
     const ref = yield* markIssueFailed({
       cwd: options.cwd,
@@ -463,12 +442,12 @@ export const handleNonPublish = Effect.fn("handleNonPublish")(
       }),
       marker,
       existingCommentId:
-        attemptMetadata.githubComments?.issue?.[decision.phase]?.id,
+        attemptMetadata.githubComments?.issue?.["attempt-status"]?.id,
     });
     if (ref)
       recordAttemptIssueComment(
         attemptMetadata,
-        decision.phase,
+        "attempt-status",
         ref,
         DateTime.formatIso(yield* DateTime.now),
       );

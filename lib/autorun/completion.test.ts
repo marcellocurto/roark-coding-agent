@@ -1,10 +1,9 @@
 import { presentAutorunOutcome } from "../../roark.ts";
 import { Presenter } from "../presentation/presenter.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
-import type { MarkIssueWorkflowStoppedOptions } from "./workflow-stop.ts";
+import { GitHub } from "../github/service.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
-import { applicationLayer } from "../runtime/application.ts";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -62,6 +61,43 @@ const attemptMetadata = formatAttemptMetadata({
   runArtifactPath: ".roark/runs/issue/12/attempts/1",
   startedAt: "2026-05-06T00:00:00.000Z",
 });
+const fakeGitHub = Effect.fnUntraced(function* () {
+  const github = yield* GitHub;
+  const comments: { id: number; marker: string; body: string }[] = [];
+  const added: string[] = [];
+  const removed: string[] = [];
+  return {
+    comments,
+    added,
+    removed,
+    service: {
+      ...github,
+      postOrUpdateIssueCommentByMarker: (
+        input: Parameters<typeof github.postOrUpdateIssueCommentByMarker>[0],
+      ) =>
+        Effect.sync(() => {
+          const id = 45 + comments.length;
+          const ref = {
+            id,
+            marker: input.marker,
+            url: `https://github.com/owner/repo/issues/12#issuecomment-${id}`,
+          };
+          comments.push({ ...ref, body: input.body });
+          return ref;
+        }),
+      addIssueLabel: (input: Parameters<typeof github.addIssueLabel>[0]) =>
+        Effect.sync(() => {
+          added.push(input.label);
+        }),
+      removeIssueLabel: (
+        input: Parameters<typeof github.removeIssueLabel>[0],
+      ) =>
+        Effect.sync(() => {
+          removed.push(input.label);
+        }),
+    },
+  };
+});
 describe("completeAutorunWorkflow", () => {
   const directories: string[] = [];
   afterEach(async () => {
@@ -103,7 +139,7 @@ describe("completeAutorunWorkflow", () => {
         ),
       );
       let publishCalls = 0;
-      const marked: MarkIssueWorkflowStoppedOptions[] = [];
+      const remote = await runApplicationPromise(fakeGitHub());
       const metadata = { ...attemptMetadata };
       const outcome = await runApplicationPromise(
         completeAutorunWorkflow(
@@ -132,17 +168,8 @@ describe("completeAutorunWorkflow", () => {
               yield* Effect.void;
               return { outcome: "published" as const, outcomeDetail: null };
             }),
-            markWorkflowStopped: Effect.fnUntraced(function* (input) {
-              marked.push(input);
-              yield* Effect.void;
-              return {
-                id: 45,
-                url: "https://github.com/owner/repo/issues/12#issuecomment-45",
-                marker: input.marker ?? "",
-              };
-            }),
           },
-        ),
+        ).pipe(Effect.provideService(GitHub, remote.service)),
       );
       if (outcome.outcome === "verification-needs-fix")
         throw new Error("Stop scheduled repair");
@@ -162,7 +189,7 @@ describe("completeAutorunWorkflow", () => {
         presentAutorunOutcome({ issueNumber: 12, ...outcome }),
       );
       expect(output).toContain(
-        "https://github.com/owner/repo/issues/12#issuecomment-45\n",
+        `https://github.com/owner/repo/issues/12#issuecomment-${scenario === "execution-question" ? 45 : 46}\n`,
       );
       expect(output).toContain(
         scenario === "final-blocker"
@@ -176,22 +203,39 @@ describe("completeAutorunWorkflow", () => {
           ? "execution-stopped"
           : "planning-stopped",
       );
-      expect(marked).toHaveLength(1);
-      expect(marked[0]).toMatchObject({
-        verdict:
-          scenario === "final-blocker" ? "blocked" : "needs-human-decision",
-        recoveryCommand: "roark continue 12 --attempt 1",
-      });
-      expect(Object.values(metadata.githubComments?.issue ?? {})).toHaveLength(
-        1,
+      expect(remote.added).toEqual([
+        scenario === "final-blocker" ? "blocked" : "needs-human",
+      ]);
+      expect(remote.removed).toEqual([
+        "ready-for-agent",
+        "agent-in-progress",
+        "agent-failed",
+      ]);
+      expect(remote.comments.at(-1)?.body).toContain(
+        "roark continue 12 --attempt 1",
       );
+      const phases =
+        scenario === "execution-question"
+          ? ["attempt-status"]
+          : ["implementation-plan", "attempt-status"];
+      expect(Object.keys(metadata.githubComments?.issue ?? {})).toEqual(phases);
+      for (const [index, phase] of phases.entries()) {
+        expect(metadata.githubComments?.issue?.[phase]).toMatchObject({
+          id: 45 + index,
+          marker: `<!-- roark:issue=12 attempt=1 phase=${phase} -->`,
+        });
+        expect(remote.comments[index]?.marker).toBe(
+          `<!-- roark:issue=12 attempt=1 phase=${phase} -->`,
+        );
+      }
     },
   );
   test("marks triage-stopped and does not run the publish gate", async () => {
     await Promise.resolve();
     let publishCalls = 0;
-    const marked: MarkIssueWorkflowStoppedOptions[] = [];
-    const outcome = await Effect.runPromise(
+    const remote = await runApplicationPromise(fakeGitHub());
+    const metadata = { ...attemptMetadata };
+    const outcome = await runApplicationPromise(
       Effect.gen(function* () {
         return yield* completeAutorunWorkflow(
           {
@@ -203,7 +247,7 @@ describe("completeAutorunWorkflow", () => {
             issue,
             branchPlan,
             workflowContext,
-            attemptMetadata,
+            attemptMetadata: metadata,
             attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
           },
           {
@@ -212,29 +256,32 @@ describe("completeAutorunWorkflow", () => {
               publishCalls += 1;
               return { outcome: "published" as const, outcomeDetail: null };
             }),
-            markWorkflowStopped: Effect.fnUntraced(function* (input) {
-              yield* Effect.void;
-              marked.push(input);
-              return undefined;
-            }),
           },
         );
-      }).pipe(Effect.provide(applicationLayer)),
+      }).pipe(Effect.provideService(GitHub, remote.service)),
     );
     expect(outcome).toMatchObject({
       outcome: "triage-stopped",
       outcomeDetail: 'triage verdict is "blocked"',
     });
     expect(publishCalls).toBe(0);
-    expect(marked).toHaveLength(1);
-    expect(marked[0]).toMatchObject({
-      cwd: "/repo",
-      repo: "owner/repo",
-      issueNumber: 12,
-      issueUrl: "https://github.com/owner/repo/issues/12",
-      verdict: "blocked",
-      removeLabels: ["ready-for-agent", "agent-in-progress", "agent-failed"],
-    });
+    expect(remote.added).toEqual(["blocked"]);
+    expect(remote.removed).toEqual([
+      "ready-for-agent",
+      "agent-in-progress",
+      "agent-failed",
+    ]);
+    expect(Object.keys(metadata.githubComments?.issue ?? {})).toEqual([
+      "triage",
+      "attempt-status",
+    ]);
+    for (const [index, phase] of ["triage", "attempt-status"].entries()) {
+      expect(metadata.githubComments?.issue?.[phase]).toMatchObject({
+        id: 45 + index,
+        marker: `<!-- roark:issue=12 attempt=1 phase=${phase} -->`,
+      });
+      expect(remote.comments[index]?.body).toContain("blocked");
+    }
   });
   test("delegates completed workflow results to the publish gate unchanged", async () => {
     await Promise.resolve();

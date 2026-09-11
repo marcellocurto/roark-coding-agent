@@ -338,3 +338,29 @@ test.each(["not json", "{}", '[[{"id":"wrong"}]]'])(
     );
   },
 );
+
+test("normalizes conflicting leading markers without removing quoted or embedded comments", () => {
+  const canonical = buildRoarkMarker({
+    issueNumber: 145,
+    attempt: 1,
+    phase: "review-a",
+  });
+  const old = buildRoarkMarker({
+    issueNumber: 145,
+    attempt: 1,
+    phase: "review-a-1",
+  });
+  const content = `## Review A pass 1\n\n> ${old}\n<!-- other: keep -->\n`;
+  expect(
+    ensureCommentStartsWithMarker(
+      `${old}\n${canonical}\n${content}`,
+      canonical,
+    ),
+  ).toBe(`${canonical}\n${content}`);
+  expect(
+    ensureCommentStartsWithMarker(
+      `${canonical}\n${canonical}\n${content}`,
+      canonical,
+    ),
+  ).toBe(`${canonical}\n${content}`);
+});

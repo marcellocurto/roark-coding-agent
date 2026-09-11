@@ -482,7 +482,7 @@ const runManagedIssueAttempt = Effect.fn("runManagedIssueAttempt")(function* (
           repo: options.repo,
           issueNumber: workflowIssue.number,
           attemptMetadata: metadata,
-          phase: "attempt-start",
+          phase: "attempt-status",
           body: formatAttemptStartComment({
             issueNumber: workflowIssue.number,
             attempt,
