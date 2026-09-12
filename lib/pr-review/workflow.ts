@@ -9,8 +9,7 @@ import path from "node:path";
 import type { ReviewPrCliOptions } from "../cli/args.ts";
 import {
   classifyVerificationFailure,
-  formatCompleteVerificationArtifact,
-  formatVerificationArtifact,
+  writeVerificationArtifacts,
   type VerificationResult,
 } from "../autorun/verification.ts";
 import { runVerification } from "../autorun/verification.ts";
@@ -34,7 +33,7 @@ import {
 } from "../review/contract.ts";
 import { type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import { type PrReviewContext } from "./artifacts.ts";
 import {
   createPrReviewContext,
@@ -137,16 +136,12 @@ export const runPrReview = Effect.fn("runPrReview")(function* (
         pass: context.generation,
       },
     });
-    yield* writePrReviewInputArtifact(
-      context,
-      "verification.md",
-      formatVerificationArtifact(verification),
-    );
-    yield* writePrReviewArtifact(
-      context,
-      "verification-full.md",
-      formatCompleteVerificationArtifact(verification),
-    );
+    yield* writeVerificationArtifacts(verification, {
+      writeSummary: (content) =>
+        writePrReviewInputArtifact(context, "verification.md", content),
+      writeFull: (content) =>
+        writePrReviewArtifact(context, "verification-full.md", content),
+    });
     (yield* Presentation).artifact(
       path.join(context.reviewDirRelative, "verification.md"),
     );
@@ -357,19 +352,19 @@ const runReviewer = Effect.fn("runReviewer")(function* (
   return yield* runPresentedPhase(
     display,
     Effect.fnUntraced(function* () {
-      const markdown = (yield* (yield* AgentExecution).run({
-        cwd: context.agentCwd,
-        model: effectiveModelForStage(context.model, stage),
-        thinkingLevel: context.thinkingConfig[stage],
-        systemPrompt: sharedSystemPrompt,
-        prompt: prReviewPrompt({
-          context,
-          comparison: prepared.comparison,
-          lens,
+      const markdown = (yield* (yield* AgentExecution).run(
+        createAgentRunRequest(context, stage, {
+          cwd: context.agentCwd,
+          systemPrompt: sharedSystemPrompt,
+          prompt: prReviewPrompt({
+            context,
+            comparison: prepared.comparison,
+            lens,
+          }),
+          fileEditingToolsEnabled: false,
+          display,
         }),
-        fileEditingToolsEnabled: false,
-        display,
-      })).trim();
+      )).trim();
       if (!markdown)
         return yield* Effect.fail(
           new PrReviewError({

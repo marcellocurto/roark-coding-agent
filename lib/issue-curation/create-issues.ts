@@ -23,7 +23,7 @@ import {
 import { issueDraftArtifactDefinition } from "../issue-publishing/artifact.ts";
 import { type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import {
   artifactAgentPath,
   artifactRelativePath,
@@ -279,10 +279,8 @@ const authorAndPublishIssues = Effect.fn("authorAndPublishIssues")(
       const renderDrafts = (drafts: IssueDraftCollection) =>
         renderIssueDrafts(drafts, itemsById, localRoots);
       const artifact = yield* runStructuredArtifact(
-        {
+        createAgentRunRequest(context, "issuePublishing", {
           cwd: context.agentCwd,
-          model: effectiveModelForStage(context.model, "issuePublishing"),
-          thinkingLevel: context.thinkingConfig.issuePublishing,
           systemPrompt: issuePublishingSystemPrompt(),
           prompt: issuePublishingPrompt({
             context,
@@ -298,7 +296,7 @@ const authorAndPublishIssues = Effect.fn("authorAndPublishIssues")(
           fileEditingToolsEnabled: false,
           observer: yield* RunObservation,
           display,
-        },
+        }),
         issueDraftArtifactDefinition({
           expectedPlanItemIds: creatable.map((item) => item.planItemId),
           formatMarkdown: (drafts) =>

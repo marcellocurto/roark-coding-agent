@@ -1,34 +1,31 @@
+import {
+  isChangeReportArtifact,
+  isReviewArtifact,
+  artifactMarkdownSibling,
+  artifactIdentity,
+  formatArtifactRef,
+} from "./artifact-catalog.ts";
 import { ArtifactContractError } from "../structured-output/contract.ts";
 import { Presentation } from "../runtime/services.ts";
-import {
-  Cause,
-  Effect,
-  Exit,
-  Schedule,
-  Schema,
-  type PlatformError,
-} from "effect";
-import { AgentExecution } from "../runtime/services.ts";
+import { Cause, Effect, Exit, Schema, type PlatformError } from "effect";
 import { type ArtifactStore } from "./artifact-store.ts";
 import { RunObservation } from "../observability/observer.ts";
 import type { WorkflowThinkingStage } from "./thinking.ts";
-import { effectiveModelForStage } from "./model-routing.ts";
 import { phaseNameForArtifact } from "../observability/observer.ts";
-import type { AgentRunRequest } from "./agent-runner.ts";
+import {
+  createAgentRunRequest,
+  type AgentRetryOptions,
+} from "./agent-runner.ts";
 import {
   artifactRelativePath,
   artifactAgentPath,
   type ArtifactRef,
   baselineResetLogRef,
   fixLogRef,
-  fixLogMarkdownRef,
   implementationRestartLogRef,
   refinementLogRef,
-  refinementLogMarkdownRef,
   reviewARef,
-  reviewAMarkdownRef,
   reviewBRef,
-  reviewBMarkdownRef,
   type WorkflowContext,
 } from "./artifacts.ts";
 import { artifactExists, requireArtifacts } from "./artifacts.ts";
@@ -44,7 +41,6 @@ import {
   sharedSystemPrompt,
   triagePrompt,
 } from "../prompts/workflow-prompts.ts";
-import { isTransientAgentConnectionError } from "./transient-agent-errors.ts";
 import {
   normalizeReviewPair,
   parseReviewResultJson,
@@ -95,15 +91,10 @@ export interface AgentTask {
   ) => Effect.Effect<string, PlatformError.PlatformError, ArtifactStore>;
 }
 export type AgentTaskFailurePhase = "agent-error" | "output-contract";
-export interface AgentTaskRetryOptions {
-  delaysMs?: readonly number[] | undefined;
-  sleep?: ((ms: number) => Effect.Effect<void>) | undefined;
-}
 export interface ChangeReportRunOptions {
   reassessExecutionStop?: boolean;
 }
 export type CodeRefinementSource = "initial" | "fix" | "restart";
-export const transientAgentRetryDelaysMs = [0, 60000, 180000] as const;
 export class AgentTaskRunError extends Schema.TaggedError<AgentTaskRunError>()(
   "AgentTaskRunError",
   {
@@ -156,7 +147,6 @@ function planTask(triage: TriageResult): AgentTask {
     prompt: (context) => Effect.succeed(planPrompt(context, triage.planAction)),
   };
 }
-export const implementationTask: AgentTask = implementationTaskForPass(0);
 export function implementationTaskForPass(restartPass = 0): AgentTask {
   return {
     artifact: "implementationLog",
@@ -217,8 +207,6 @@ function codeRefinementPrerequisites(
     ];
   return [...shared, fixLogRef(pass)];
 }
-export const reviewATask: AgentTask = reviewATaskForPass(0);
-export const reviewBTask: AgentTask = reviewBTaskForPass(0);
 export function reviewATaskForPass(pass = 0): AgentTask {
   return {
     artifact: reviewARef(pass),
@@ -278,7 +266,7 @@ export function fixTask(pass: number): AgentTask {
 export const runReviewTask = Effect.fn("runReviewTask")(function* (
   context: WorkflowContext,
   task: AgentTask,
-  retryOptions: AgentTaskRetryOptions = {},
+  retryOptions: AgentRetryOptions = {},
 ) {
   const presentation = reviewPresentation(task.artifact, task.label);
   return yield* runStructuredArtifactTask(context, task, retryOptions, {
@@ -293,7 +281,7 @@ export const runReviewTask = Effect.fn("runReviewTask")(function* (
 });
 export const runTriageTask = Effect.fn("runTriageTask")(function* (
   context: WorkflowContext,
-  retryOptions: AgentTaskRetryOptions = {},
+  retryOptions: AgentRetryOptions = {},
 ) {
   return yield* runStructuredArtifactTask(context, triageTask, retryOptions, {
     parse: parseTriageResultJson,
@@ -318,7 +306,7 @@ const requireProceedingTriage = Effect.fn("requireProceedingTriage")(function* (
 });
 export const runPlanDraftTask = Effect.fn("runPlanDraftTask")(function* (
   context: WorkflowContext,
-  retryOptions: AgentTaskRetryOptions = {},
+  retryOptions: AgentRetryOptions = {},
 ) {
   yield* requireProceedingTriage(context);
   return yield* runImplementationPlanTask(
@@ -330,7 +318,7 @@ export const runPlanDraftTask = Effect.fn("runPlanDraftTask")(function* (
 });
 export const runPlanTask = Effect.fn("runPlanTask")(function* (
   context: WorkflowContext,
-  retryOptions: AgentTaskRetryOptions = {},
+  retryOptions: AgentRetryOptions = {},
 ) {
   const triage = yield* requireProceedingTriage(context);
   if (triage.planAction === "draft") {
@@ -356,7 +344,7 @@ export const runPlanTask = Effect.fn("runPlanTask")(function* (
 export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
   context: WorkflowContext,
   task: AgentTask,
-  retryOptions: AgentTaskRetryOptions = {},
+  retryOptions: AgentRetryOptions = {},
   options: ChangeReportRunOptions = {},
 ) {
   const continuation = yield* readContinuationState(context);
@@ -407,11 +395,7 @@ export const runChangeReportTask = Effect.fn("runChangeReportTask")(function* (
       );
   }
   for (const artifact of task.prerequisites) {
-    if (
-      artifact === "implementationLog" ||
-      (typeof artifact !== "string" &&
-        (artifact.name === "fixLog" || artifact.name === "refinementLog"))
-    ) {
+    if (isChangeReportArtifact(artifact)) {
       const report = yield* parseChangeReportJson(
         yield* readArtifact(context, artifact),
       );
@@ -474,7 +458,7 @@ const runImplementationPlanTask = Effect.fn("runImplementationPlanTask")(
     context: WorkflowContext,
     task: AgentTask,
     kind: ImplementationPlanKind,
-    retryOptions: AgentTaskRetryOptions,
+    retryOptions: AgentRetryOptions,
   ) {
     const triage = yield* requireProceedingTriage(context);
     const definition = implementationPlanArtifactDefinition(kind);
@@ -501,7 +485,7 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
   function* <T>(
     context: WorkflowContext,
     task: AgentTask,
-    retryOptions: AgentTaskRetryOptions,
+    retryOptions: AgentRetryOptions,
     contract: {
       parse: (content: string) => Effect.Effect<T, ArtifactContractError>;
       definition: StructuredArtifactDefinition<T>;
@@ -532,9 +516,8 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
     }
     return yield* executeTaskLifecycle(context, task, prepared, {
       run: Effect.fnUntraced(function* () {
-        const baseAgent = yield* AgentExecution;
         const artifact = yield* runStructuredArtifact(
-          prepared.createRequest(),
+          prepared.request,
           contract.definition,
           {
             writeJson: (content, value) =>
@@ -545,16 +528,10 @@ const runStructuredArtifactTask = Effect.fn("runStructuredArtifactTask")(
             writeMarkdown: (content) =>
               writeArtifact(context, contract.markdownArtifact, content),
           },
-        ).pipe(
-          Effect.provideService(AgentExecution, {
-            run: (request) =>
-              runAgentRequestWithTransientRetries(
-                request,
-                task,
-                retryOptions,
-                contract.retryCompletionInstruction,
-              ).pipe(Effect.provideService(AgentExecution, baseAgent)),
-          }),
+          {
+            ...retryOptions,
+            completionInstruction: contract.retryCompletionInstruction,
+          },
         );
         return artifact.value;
       }),
@@ -572,49 +549,35 @@ function reviewPresentation(
   markdownArtifact: ArtifactRef;
   source: ReviewFindingSource;
 } {
-  if (typeof artifact !== "string" && artifact.name === "reviewA") {
-    return {
-      markdownArtifact: reviewAMarkdownRef(artifact.pass),
-      source: "review-a",
-    };
-  }
-  if (typeof artifact !== "string" && artifact.name === "reviewB") {
-    return {
-      markdownArtifact: reviewBMarkdownRef(artifact.pass),
-      source: "review-b",
-    };
-  }
-  throw new Error(`${title} does not target a review artifact.`);
+  if (!isReviewArtifact(artifact))
+    throw new Error(`${title} does not target a review artifact.`);
+  const markdownArtifact = artifactMarkdownSibling(artifact);
+  if (markdownArtifact === undefined)
+    throw new Error(`${title} has no Markdown companion.`);
+  return {
+    markdownArtifact,
+    source: artifact.name === "reviewA" ? "review-a" : "review-b",
+  };
 }
 function changeReportPresentation(artifact: ArtifactRef): {
   artifact: ExecutionStopArtifact;
   markdownArtifact: ArtifactRef;
   title: string;
 } {
-  if (artifact === "implementationLog") {
-    return {
-      artifact,
-      markdownArtifact: "implementationLogMarkdown",
-      title: "Implementation Log",
-    };
-  }
-  if (typeof artifact !== "string" && artifact.name === "refinementLog") {
-    return {
-      artifact: { name: "refinementLog", pass: artifact.pass },
-      markdownArtifact: refinementLogMarkdownRef(artifact.pass),
-      title: `Refinement Log Pass ${artifact.pass}`,
-    };
-  }
-  if (typeof artifact !== "string" && artifact.name === "fixLog") {
-    return {
-      artifact: { name: "fixLog", pass: artifact.pass },
-      markdownArtifact: fixLogMarkdownRef(artifact.pass),
-      title: `Fix Log Pass ${artifact.pass}`,
-    };
-  }
-  throw new Error(
-    `Artifact ${typeof artifact === "string" ? artifact : `${artifact.name}-${artifact.pass}`} is not a change report.`,
-  );
+  if (!isChangeReportArtifact(artifact))
+    throw new Error(
+      `Artifact ${formatArtifactRef(artifact)} is not a change report.`,
+    );
+  const markdownArtifact = artifactMarkdownSibling(artifact);
+  if (markdownArtifact === undefined)
+    throw new Error(
+      `Artifact ${artifactIdentity(artifact).displayName} has no Markdown companion.`,
+    );
+  return {
+    artifact,
+    markdownArtifact,
+    title: artifactIdentity(artifact).displayName,
+  };
 }
 const requiredFixFindingIds = Effect.fn("requiredFixFindingIds")(function* (
   context: WorkflowContext,
@@ -648,8 +611,6 @@ const prepareTaskRun = Effect.fn("prepareTaskRun")(function* (
 ) {
   yield* requireArtifacts(context, ...task.prerequisites);
   const phase = phaseNameForArtifact(task.artifact);
-  const thinkingLevel = thinkingLevelForTask(context, task);
-  const model = effectiveModelForStage(context.model, task.thinkingStage);
   const display = displayContextForTask(context, task, phase);
   const prompt = yield* task.prompt(context);
   const continuationContext = (yield* artifactExists(
@@ -659,17 +620,22 @@ const prepareTaskRun = Effect.fn("prepareTaskRun")(function* (
     ? `\n<continuation_context>Read ${artifactAgentPath(context, "continuationReviewMarkdown")} for the latest confirmed answers and ${artifactAgentPath(context, "continuationInput")} for prior phase reports. Keep completed work, inspect the current diff, and finish the remaining steps. Do not repeat completed edits. If replanning, read the saved prior plan in the history directory recorded in ${artifactAgentPath(context, "continuationInput")}; preserve its useful details.</continuation_context>`
     : "";
   const observer = yield* RunObservation;
-  const createRequest = (): AgentRunRequest => ({
+  const request = createAgentRunRequest(context, task.thinkingStage, {
     cwd: context.agentCwd,
-    model,
-    thinkingLevel,
     systemPrompt: sharedSystemPrompt,
     prompt: prompt + continuationContext,
     fileEditingToolsEnabled: task.fileEditingToolsEnabled,
     observer,
     display,
   });
-  return { phase, thinkingLevel, model, display, createRequest, observer };
+  return {
+    phase,
+    thinkingLevel: request.thinkingLevel,
+    model: request.model,
+    display,
+    request,
+    observer,
+  };
 });
 type PreparedTaskRun = Effect.Success<ReturnType<typeof prepareTaskRun>>;
 const reuseTaskArtifact = Effect.fn("reuseTaskArtifact")(function* <T>(
@@ -775,62 +741,6 @@ const executeTaskLifecycle = Effect.fn("executeTaskLifecycle")(function* <
     },
   );
 });
-const runAgentRequestWithTransientRetries = Effect.fn(
-  "runAgentRequestWithTransientRetries",
-)(function* (
-  request: AgentRunRequest,
-  task: AgentTask,
-  options: AgentTaskRetryOptions,
-  completionInstruction?: string,
-) {
-  const agent = yield* AgentExecution;
-  const presentation = yield* Presentation;
-  const delays = options.delaysMs ?? transientAgentRetryDelaysMs;
-  let attemptIndex = 0;
-  const schedule = Schedule.recurs(delays.length).pipe(
-    Schedule.while(({ input }) =>
-      Effect.succeed(isTransientAgentConnectionError(input)),
-    ),
-    Schedule.tap(({ attempt, input }) =>
-      Effect.sync(() => {
-        presentation.warning(
-          `WARNING ${task.label}: transient agent connection error: ${formatError(input)}; retry ${attempt}/${delays.length} ${formatRetryDelay(delays[attempt - 1] ?? 0)}.`,
-        );
-      }),
-    ),
-    Schedule.addDelay(({ attempt }) => {
-      const delay = delays[attempt - 1] ?? 0;
-      return options.sleep && delay > 0
-        ? options.sleep(delay).pipe(Effect.as(0))
-        : Effect.succeed(delay);
-    }),
-  );
-  return yield* Effect.suspend(() => {
-    const next =
-      attemptIndex++ === 0
-        ? request
-        : withTransientConnectionRetryPrompt(
-            request,
-            task,
-            completionInstruction,
-          );
-    return agent.run(next);
-  }).pipe(Effect.retry(schedule));
-});
-function withTransientConnectionRetryPrompt(
-  request: AgentRunRequest,
-  task: AgentTask,
-  completionInstruction?: string,
-): AgentRunRequest {
-  if (!task.fileEditingToolsEnabled) return request;
-  return {
-    ...request,
-    prompt: `${request.prompt}\n\n<transient_connection_retry>\nA previous invocation of this same phase failed because the provider/harness connection ended.\nIt may have already modified files in the working tree.\nInspect the current diff before editing, preserve useful completed work, avoid duplicate changes, ${completionInstruction ?? "finish the phase and complete its required output contract"}.\n</transient_connection_retry>`,
-  };
-}
-function thinkingLevelForTask(context: WorkflowContext, task: AgentTask) {
-  return context.thinkingConfig[task.thinkingStage];
-}
 function displayContextForTask(
   context: WorkflowContext,
   task: AgentTask,
@@ -853,18 +763,6 @@ function operationForTask(task: AgentTask): AgentOperation {
   if (task.thinkingStage === "reviewA" || task.thinkingStage === "reviewB")
     return "review";
   return task.fileEditingToolsEnabled ? "edit" : "inspect";
-}
-function formatRetryDelay(delayMs: number): string {
-  if (delayMs <= 0) return "immediately";
-  if (delayMs % 60000 === 0) {
-    const minutes = delayMs / 60000;
-    return `in ${minutes} minute${minutes === 1 ? "" : "s"}`;
-  }
-  if (delayMs % 1000 === 0) {
-    const seconds = delayMs / 1000;
-    return `in ${seconds} second${seconds === 1 ? "" : "s"}`;
-  }
-  return `in ${delayMs}ms`;
 }
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;

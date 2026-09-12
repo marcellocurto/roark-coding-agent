@@ -53,6 +53,7 @@ describe("runStructuredArtifact", () => {
     async (outcome) => {
       const writes: string[] = [];
       let agentFinished = false;
+      let invocations = 0;
       await runApplicationPromise(
         Effect.gen(function* () {
           const accepted = yield* Deferred.make<undefined>();
@@ -63,6 +64,7 @@ describe("runStructuredArtifact", () => {
               request,
               Effect.fnUntraced(
                 function* (request) {
+                  invocations++;
                   const tool = request.customTools?.find(
                     (tool) => tool.name === "submit_example",
                   );
@@ -83,7 +85,7 @@ describe("runStructuredArtifact", () => {
                   yield* Deferred.await(finish);
                   if (outcome === "failure")
                     return yield* Effect.fail(
-                      new Error("agent failed after submission"),
+                      new Error("fetch failed after submission"),
                     );
                   return "";
                 },
@@ -121,13 +123,14 @@ describe("runStructuredArtifact", () => {
           else yield* Deferred.succeed(finish, undefined);
           const exit = yield* Fiber.await(running);
           expect(agentFinished).toBe(true);
+          expect(invocations).toBe(1);
           expect(Exit.isSuccess(exit)).toBe(outcome === "success");
           if (Exit.isFailure(exit)) {
             if (outcome === "interrupt")
               expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
             else
               expect(Cause.pretty(exit.cause)).toContain(
-                "agent failed after submission",
+                "fetch failed after submission",
               );
           }
           expect(writes).toEqual(

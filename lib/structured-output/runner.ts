@@ -2,7 +2,11 @@ import { Cause, Deferred, Effect, Exit, Schema, Semaphore } from "effect";
 import { AgentExecution } from "../runtime/services.ts";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { ArtifactContractError } from "./contract.ts";
-import type { AgentRunRequest } from "../workflow/agent-runner.ts";
+import {
+  type AgentRunRequest,
+  type AgentRetryOptions,
+  runAgentRequestWithTransientRetries,
+} from "../workflow/agent-runner.ts";
 
 export interface StructuredArtifactDefinition<T> {
   toolName: string;
@@ -28,6 +32,7 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
     request: AgentRunRequest,
     definition: StructuredArtifactDefinition<T>,
     writers: StructuredArtifactWriters<T, E, R>,
+    retryOptions?: AgentRetryOptions,
   ) {
     const agent = yield* AgentExecution;
     // Preserve ambient services across the SDK's Promise callback boundary.
@@ -84,12 +89,15 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
       },
     });
 
-    yield* agent
-      .run({
-        ...request,
-        customTools: [...(request.customTools ?? []), submit],
-      })
-      .pipe(Effect.raceFirst(Deferred.await(defect)));
+    const submittedRequest = {
+      ...request,
+      customTools: [...(request.customTools ?? []), submit],
+    };
+    const run =
+      retryOptions === undefined
+        ? agent.run(submittedRequest)
+        : runAgentRequestWithTransientRetries(submittedRequest, retryOptions);
+    yield* run.pipe(Effect.raceFirst(Deferred.await(defect)));
     if (submitted === undefined) {
       return yield* Effect.fail(
         new ArtifactContractError({

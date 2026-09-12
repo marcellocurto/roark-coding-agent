@@ -1,3 +1,4 @@
+import { getCurrentGitHubLogin } from "./gh.ts";
 import * as publishing from "./pr-publishing.ts";
 import { Context, Effect, Layer } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner";
@@ -11,7 +12,7 @@ const operations = {
   createPullRequest: publishing.createPullRequest,
   updatePullRequest: publishing.updatePullRequest,
   listOpenGitHubIssues: issue.listOpenGitHubIssues,
-  getCurrentGitHubLogin: issue.getCurrentGitHubLogin,
+  getCurrentGitHubLogin,
   claimGitHubIssue: issue.claimGitHubIssue,
   transitionGitHubIssueLabels: issue.transitionGitHubIssueLabels,
   fetchGitHubIssue: issue.fetchGitHubIssue,

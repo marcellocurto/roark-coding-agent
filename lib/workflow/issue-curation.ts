@@ -1,3 +1,4 @@
+import { isReviewArtifact } from "./artifact-catalog.ts";
 import { DateTime, Effect, Schema } from "effect";
 import path from "node:path";
 import {
@@ -453,13 +454,9 @@ const readOptionalArtifact = Effect.fn("readOptionalArtifact")(function* (
   warnings: string[],
 ) {
   if (!(yield* artifactExists(context, artifact))) {
-    if (isReviewArtifact(artifact, "reviewA"))
+    if (isReviewArtifact(artifact))
       warnings.push(
-        `${artifactDisplayPath(context, artifact)} is missing; treating Review Agent A findings as empty.`,
-      );
-    if (isReviewArtifact(artifact, "reviewB"))
-      warnings.push(
-        `${artifactDisplayPath(context, artifact)} is missing; treating Review Agent B findings as empty.`,
+        `${artifactDisplayPath(context, artifact)} is missing; treating Review Agent ${artifact.name === "reviewA" ? "A" : "B"} findings as empty.`,
       );
     return undefined;
   }
@@ -486,12 +483,6 @@ const latestReviewArtifacts = Effect.fn("latestReviewArtifacts")(function* (
     reviewB: reviewBRef(latestReviewCycle),
   };
 });
-function isReviewArtifact(
-  artifact: ArtifactRef,
-  name: "reviewA" | "reviewB",
-): boolean {
-  return typeof artifact !== "string" && artifact.name === name;
-}
 function artifactDisplayPath(
   context: WorkflowContext,
   artifact: ArtifactRef,

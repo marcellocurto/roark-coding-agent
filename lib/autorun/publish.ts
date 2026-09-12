@@ -17,7 +17,7 @@ import {
 } from "../pr-publishing/result.ts";
 import { type AgentDisplayContext } from "../presentation/presenter.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import {
   artifactRelativePath,
   fixLogRef,
@@ -288,13 +288,8 @@ const authorAndPublishPullRequest = Effect.fn("authorAndPublishPullRequest")(
       baseBranch: input.branchPlan.baseBranch,
     });
     const artifact = yield* runStructuredArtifact(
-      {
+      createAgentRunRequest(input.workflowContext, "issuePublishing", {
         cwd: input.workflowContext.controlCwd,
-        model: effectiveModelForStage(
-          input.workflowContext.model,
-          "issuePublishing",
-        ),
-        thinkingLevel: input.workflowContext.thinkingConfig.issuePublishing,
         systemPrompt: prPublishingSystemPrompt(),
         prompt: prCreatePrompt({
           context: input.workflowContext,
@@ -313,7 +308,7 @@ const authorAndPublishPullRequest = Effect.fn("authorAndPublishPullRequest")(
         fileEditingToolsEnabled: false,
         observer: yield* RunObservation,
         display,
-      },
+      }),
       prDraftArtifactDefinition({
         renderingContext,
         localRoots: [
