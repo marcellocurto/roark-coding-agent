@@ -63,9 +63,7 @@ export const runPrReview = Effect.fn("runPrReview")(function* (
     repo: options.repo,
     prNumber: options.prNumber,
   });
-  yield* Effect.try(() => {
-    validateReviewablePr(initial);
-  });
+  yield* validateReviewablePr(initial);
   (yield* Presentation).transition(
     "Review preparation",
     `PR #${initial.pr.number}`,
@@ -305,16 +303,18 @@ export const runPrReview = Effect.fn("runPrReview")(function* (
     stale: false,
   };
 }, Effect.scoped);
-function validateReviewablePr(feedback: PullRequestFeedback): void {
+const validateReviewablePr = Effect.fn("validateReviewablePr")(function* (
+  feedback: PullRequestFeedback,
+) {
   if (feedback.pr.state !== "OPEN")
-    throw new PrReviewError({
+    return yield* new PrReviewError({
       message: `PR #${feedback.pr.number} must be open. Current state: ${feedback.pr.state}.`,
     });
   if (!feedback.pr.baseRefOid || !feedback.pr.headRefOid)
-    throw new PrReviewError({
+    return yield* new PrReviewError({
       message: `PR #${feedback.pr.number} metadata did not include immutable base and head commit identifiers.`,
     });
-}
+});
 function prIdentityChanges(
   initial: PullRequestFeedback,
   latest: PullRequestFeedback,

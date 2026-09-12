@@ -37,6 +37,59 @@ afterEach(async () => {
   );
 });
 describe("CLI lifecycle services", () => {
+  test.each([
+    { command: "auto", target: undefined, expectedTarget: "auto" },
+    { command: "do", target: "#95", expectedTarget: "#95" },
+  ])(
+    "reports a menu-selected $command failure and closes its transition",
+    async ({ command, target, expectedTarget }) => {
+      let output = "";
+      const stream = {
+        isTTY: false,
+        write(chunk: string) {
+          output += chunk;
+        },
+      };
+      const presentation = new Presenter({ stream, errorStream: stream });
+      const notices: ExitNotificationRequest[] = [];
+      const code = await Effect.runPromise(
+        runCli([]).pipe(
+          Effect.provideService(CommandExecution, {
+            execute: () =>
+              Effect.sync(() => {
+                presentation.run({ command, target });
+                presentation.transition("Preparation");
+              }).pipe(
+                Effect.andThen(Effect.fail(new Error("preparation failed"))),
+              ),
+          }),
+          Effect.provideService(ExitNotifications, {
+            send: (request) =>
+              Effect.sync(() => {
+                notices.push(request);
+              }),
+            deliver: () => Effect.void,
+          }),
+          Effect.provideService(Presentation, presentation),
+          Effect.provide(applicationLayer),
+        ),
+      );
+      expect(code).toBe(1);
+      expect(
+        output
+          .split("\n")
+          .filter((line) => line === `FAILED ${expectedTarget} · run failed`),
+      ).toHaveLength(1);
+      expect(output).toContain(
+        `FAILED ${target ?? "Roark"} · Preparation · failed`,
+      );
+      expect(output).toContain("preparation failed");
+      expect(notices).toEqual([{ argv: [], succeeded: false }]);
+      output = "";
+      presentation.transition("Next operation");
+      expect(output).not.toContain("Preparation");
+    },
+  );
   test.each([false, true])(
     "verification defects bypass ordinary CLI failure handling (expected failure: %s)",
     async (withFailure) => {
