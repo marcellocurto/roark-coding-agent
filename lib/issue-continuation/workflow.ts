@@ -1,3 +1,4 @@
+import { RunObservation } from "../observability/observer.ts";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Effect, FileSystem } from "effect";
@@ -256,6 +257,7 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
         return result;
       }),
     };
+    const observer = yield* RunObservation;
     const assessment = yield* runPresentedPhase(
       display,
       () =>
@@ -267,7 +269,7 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
             systemPrompt: sharedSystemPrompt,
             prompt: continuationPrompt(context),
             fileEditingToolsEnabled: false,
-            observer: context.observer,
+            observer,
             display,
           },
           checkedDefinition,

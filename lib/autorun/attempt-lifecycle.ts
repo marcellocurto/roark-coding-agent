@@ -130,10 +130,7 @@ export const runAutorunAttemptLifecycle = Effect.fn(
   input: RunAutorunAttemptLifecycleInput,
   injected: RunAutorunAttemptLifecycleInjected = {},
 ) {
-  const observer =
-    input.workflowContext.observer ??
-    (yield* createFileRunObserver(input.workflowContext));
-  input = { ...input, workflowContext: { ...input.workflowContext, observer } };
+  const observer = yield* createFileRunObserver(input.workflowContext);
   const runWorkflow = injected.runFullWorkflow ?? runFullWorkflow;
   const completeWorkflow =
     injected.completeAutorunWorkflow ?? completeAutorunWorkflow;

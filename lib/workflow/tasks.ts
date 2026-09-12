@@ -658,7 +658,7 @@ const prepareTaskRun = Effect.fn("prepareTaskRun")(function* (
   ))
     ? `\n<continuation_context>Read ${artifactAgentPath(context, "continuationReviewMarkdown")} for the latest confirmed answers and ${artifactAgentPath(context, "continuationInput")} for prior phase reports. Keep completed work, inspect the current diff, and finish the remaining steps. Do not repeat completed edits. If replanning, read the saved prior plan in the history directory recorded in ${artifactAgentPath(context, "continuationInput")}; preserve its useful details.</continuation_context>`
     : "";
-  const observer = context.observer ?? (yield* RunObservation);
+  const observer = yield* RunObservation;
   const createRequest = (): AgentRunRequest => ({
     cwd: context.agentCwd,
     model,

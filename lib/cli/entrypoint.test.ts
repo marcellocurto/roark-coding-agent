@@ -28,6 +28,7 @@ import {
   workflowOutcomeStatus,
 } from "../../roark.ts";
 import { Presenter } from "../presentation/presenter.ts";
+import { readRunSummary } from "../observability/summary.ts";
 const projectRoot = path.resolve(import.meta.dir, "../..");
 const entrypoint = path.join(projectRoot, "roark.ts");
 const tempDirs: string[] = [];
@@ -37,6 +38,23 @@ afterEach(async () => {
   );
 });
 describe("CLI lifecycle services", () => {
+  test("standalone issue commands persist their own run and phase observations", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-observed-command-"));
+    tempDirs.push(cwd);
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "--quiet", cwd]),
+    );
+    await runWithPresenter(
+      new Presenter({ stream: { isTTY: false, write: () => undefined } }),
+      main(["readiness", "12", "--cwd", cwd, "--repo", "owner/repo"]),
+    );
+    const summary = await runApplicationPromise(
+      readRunSummary(path.join(cwd, ".roark/runs/issue/12/summary.json")),
+    );
+    expect(summary?.issueNumber).toBe("12");
+    expect(summary?.status).toBe("completed");
+    expect(summary?.phases["readiness"]?.status).toBe("completed");
+  });
   test.each([
     { command: "auto", target: undefined, expectedTarget: "auto" },
     { command: "do", target: "#95", expectedTarget: "#95" },

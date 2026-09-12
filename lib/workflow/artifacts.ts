@@ -3,7 +3,6 @@ import { ArtifactStore } from "./artifact-store.ts";
 import { Presentation } from "../runtime/services.ts";
 import path from "node:path";
 import type { IssueCliOptions, ThinkingLevel } from "../cli/args.ts";
-import type { RunObserver } from "../observability/observer.ts";
 import {
   getWorkflowThinkingConfig,
   type ThinkingProfileName,
@@ -61,7 +60,6 @@ export interface WorkflowContext {
   yes: boolean;
   maxFixPasses: number;
   fixPass?: number | undefined;
-  observer?: RunObserver | undefined;
 }
 export function createWorkflowContext(
   options: IssueCliOptions,

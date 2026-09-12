@@ -621,9 +621,9 @@ const failedVerificationInputLines = Effect.fn("failedVerificationInputLines")(
 );
 const failedVerificationArtifact = Effect.fn("failedVerificationArtifact")(
   function* (context: WorkflowContext, pass: number) {
+    // The generic verification report may describe a failure repaired in an earlier pass.
     const archived = verificationBeforeFixRef(pass);
     if (yield* artifactExists(context, archived)) return archived;
-    if (yield* artifactExists(context, "verification")) return "verification";
     return undefined;
   },
 );

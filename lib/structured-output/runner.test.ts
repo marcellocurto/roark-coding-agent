@@ -1,10 +1,11 @@
 import type { ApplicationServices } from "../runtime/application.ts";
 import type { Scope } from "effect";
-import { Cause, Exit, Effect } from "effect";
+import { Cause, Clock, Deferred, Exit, Effect, Fiber } from "effect";
 import { Schema } from "effect";
 import { toolContext } from "../testing/tool-context.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { provideTestAgent, type AgentRunner } from "../testing/agents.ts";
+import { fixedWallClock } from "../testing/clock.ts";
 import { type AgentRunRequest } from "../workflow/agent-runner.ts";
 import {
   runStructuredArtifact,
@@ -47,7 +48,170 @@ const request: AgentRunRequest = {
   },
 };
 describe("runStructuredArtifact", () => {
-  test("accepts one terminating submission and persists matching JSON and Markdown", async () => {
+  test.each(["success", "failure", "interrupt"] as const)(
+    "waits for the agent after submission before persisting: %s",
+    async (outcome) => {
+      const writes: string[] = [];
+      let agentFinished = false;
+      await runApplicationPromise(
+        Effect.gen(function* () {
+          const accepted = yield* Deferred.make<undefined>();
+          const finish = yield* Deferred.make<undefined>();
+          const schema = Schema.Struct({ summary: Schema.String });
+          const running = yield* Effect.forkScoped(
+            runTestArtifact(
+              request,
+              Effect.fnUntraced(
+                function* (request) {
+                  const tool = request.customTools?.find(
+                    (tool) => tool.name === "submit_example",
+                  );
+                  if (!tool)
+                    return yield* Effect.die(new Error("missing tool"));
+                  yield* Effect.tryPromise({
+                    try: () =>
+                      tool.execute(
+                        "submit",
+                        { summary: "accepted" },
+                        undefined,
+                        undefined,
+                        toolContext,
+                      ),
+                    catch: (error) => error,
+                  });
+                  yield* Deferred.succeed(accepted, undefined);
+                  yield* Deferred.await(finish);
+                  if (outcome === "failure")
+                    return yield* Effect.fail(
+                      new Error("agent failed after submission"),
+                    );
+                  return "";
+                },
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    agentFinished = true;
+                  }),
+                ),
+              ),
+              {
+                toolName: "submit_example",
+                label: "Example",
+                noun: "example",
+                parameters: schema,
+                validate: artifactContract("Example", schema).decode,
+                formatMarkdown: (value) => value.summary,
+              },
+              {
+                writeMarkdown: () =>
+                  Effect.sync(() => {
+                    expect(agentFinished).toBe(true);
+                    writes.push("markdown");
+                  }),
+                writeJson: () =>
+                  Effect.sync(() => {
+                    writes.push("json");
+                  }),
+              },
+            ),
+          );
+          yield* Deferred.await(accepted);
+          expect(agentFinished).toBe(false);
+          expect(writes).toEqual([]);
+          if (outcome === "interrupt") yield* Fiber.interrupt(running);
+          else yield* Deferred.succeed(finish, undefined);
+          const exit = yield* Fiber.await(running);
+          expect(agentFinished).toBe(true);
+          expect(Exit.isSuccess(exit)).toBe(outcome === "success");
+          if (Exit.isFailure(exit)) {
+            if (outcome === "interrupt")
+              expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+            else
+              expect(Cause.pretty(exit.cause)).toContain(
+                "agent failed after submission",
+              );
+          }
+          expect(writes).toEqual(
+            outcome === "success" ? ["markdown", "json"] : [],
+          );
+        }).pipe(Effect.scoped),
+      );
+    },
+  );
+  test("aborting a tool call interrupts validation and writes no artifacts even when the SDK handles the rejection", async () => {
+    const controller = new AbortController();
+    let validationFinished = false;
+    let writes = 0;
+    try {
+      await runApplicationPromise(
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<undefined>();
+          const running = yield* Effect.forkScoped(
+            runTestArtifact(
+              request,
+              Effect.fnUntraced(function* (request) {
+                const tool = request.customTools?.find(
+                  (tool) => tool.name === "submit_example",
+                );
+                if (!tool) return yield* Effect.die(new Error("missing tool"));
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    tool.execute(
+                      "submit",
+                      { summary: "accepted" },
+                      controller.signal,
+                      undefined,
+                      toolContext,
+                    ),
+                  catch: (error) => error,
+                }).pipe(
+                  Effect.catch(() => Effect.never),
+                  Effect.as(""),
+                );
+              }),
+              {
+                toolName: "submit_example",
+                label: "Example",
+                noun: "example",
+                parameters: Schema.Struct({ summary: Schema.String }),
+                validate: () =>
+                  Deferred.succeed(started, undefined).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        validationFinished = true;
+                      }),
+                    ),
+                  ),
+                formatMarkdown: () => "unused",
+              },
+              {
+                writeMarkdown: () =>
+                  Effect.sync(() => {
+                    writes++;
+                  }),
+                writeJson: () =>
+                  Effect.sync(() => {
+                    writes++;
+                  }),
+              },
+            ),
+          );
+          yield* Deferred.await(started);
+          controller.abort();
+          const exit = yield* Fiber.await(running);
+          expect(Exit.isFailure(exit)).toBe(true);
+          if (Exit.isFailure(exit))
+            expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+          expect(validationFinished).toBe(true);
+          expect(writes).toBe(0);
+        }).pipe(Effect.scoped),
+      );
+    } finally {
+      controller.abort();
+    }
+  });
+  test("validates with the caller's clock and persists matching JSON and Markdown", async () => {
+    let validationTime: number | undefined;
     const written: {
       json?: string;
       markdown?: string;
@@ -81,10 +245,13 @@ describe("runStructuredArtifact", () => {
           label: "Example",
           noun: "example",
           parameters: Schema.Struct({ summary: Schema.NonEmptyString }),
-          validate: artifactContract(
-            "Example",
-            Schema.Struct({ summary: Schema.String }),
-          ).decode,
+          validate: Effect.fnUntraced(function* (value) {
+            validationTime = yield* Clock.currentTimeMillis;
+            return yield* artifactContract(
+              "Example",
+              Schema.Struct({ summary: Schema.String }),
+            ).decode(value);
+          }),
           formatMarkdown: (value) => `# Example\n\n${value.summary}\n`,
         },
         {
@@ -99,8 +266,9 @@ describe("runStructuredArtifact", () => {
             return yield* Effect.void;
           }),
         },
-      ),
+      ).pipe(Effect.provide(fixedWallClock("2000-01-01T00:00:00.000Z"))),
     );
+    expect(validationTime).toBe(946684800000);
     expect(result).toEqual({
       value: { summary: "accepted" },
       markdown: "# Example\n\naccepted\n",

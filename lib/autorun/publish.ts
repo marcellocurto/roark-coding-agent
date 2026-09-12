@@ -1,3 +1,4 @@
+import { RunObservation } from "../observability/observer.ts";
 import { GitHub } from "../github/service.ts";
 import { readArtifact } from "../workflow/artifacts.ts";
 import { Presentation } from "../runtime/services.ts";
@@ -310,7 +311,7 @@ const authorAndPublishPullRequest = Effect.fn("authorAndPublishPullRequest")(
           changedFiles,
         }),
         fileEditingToolsEnabled: false,
-        observer: input.workflowContext.observer,
+        observer: yield* RunObservation,
         display,
       },
       prDraftArtifactDefinition({

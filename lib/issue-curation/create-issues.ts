@@ -1,3 +1,4 @@
+import { RunObservation } from "../observability/observer.ts";
 import {
   readIssueCurationPlan,
   readExistingCreatedEntries,
@@ -295,7 +296,7 @@ const authorAndPublishIssues = Effect.fn("authorAndPublishIssues")(
             })),
           }),
           fileEditingToolsEnabled: false,
-          observer: context.observer,
+          observer: yield* RunObservation,
           display,
         },
         issueDraftArtifactDefinition({

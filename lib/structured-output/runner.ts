@@ -30,6 +30,8 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
     writers: StructuredArtifactWriters<T, E, R>,
   ) {
     const agent = yield* AgentExecution;
+    // Preserve ambient services across the SDK's Promise callback boundary.
+    const runValidation = Effect.runPromiseExitWith(yield* Effect.context());
     let submitted: T | undefined;
     const defect = yield* Deferred.make<never, ArtifactContractError>();
     const submission = yield* Semaphore.make(1);
@@ -45,7 +47,7 @@ export const runStructuredArtifact = Effect.fn("runStructuredArtifact")(
       ],
       parameters: { ...document.schema, $defs: document.definitions },
       async execute(_toolCallId, params, signal) {
-        const exit = await Effect.runPromiseExit(
+        const exit = await runValidation(
           submission.withPermit(
             Effect.gen(function* () {
               if (submitted !== undefined) {

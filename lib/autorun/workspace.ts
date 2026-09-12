@@ -136,6 +136,7 @@ const WorkspaceLockOwner = Schema.Struct({
 const decodeLockOwner = Schema.decodeUnknownEffect(
   Schema.fromJsonString(WorkspaceLockOwner),
 );
+const ownerlessLockGraceMs = 5_000;
 
 export class WorkspaceError extends Schema.TaggedError<WorkspaceError>()(
   "WorkspaceError",
@@ -1396,9 +1397,19 @@ const readWorkspaceLockOwner = Effect.fnUntraced(function* (lockDir: string) {
     .pipe(Effect.flatMap(decodeLockOwner), Effect.option);
 });
 const removeStaleWorkspaceLock = Effect.fnUntraced(function* (lockDir: string) {
+  const fs = yield* FileSystem.FileSystem;
   const owner = yield* readWorkspaceLockOwner(lockDir);
-  if (Option.isNone(owner) || isProcessAlive(owner.value.pid)) return false;
-  yield* (yield* FileSystem.FileSystem).remove(lockDir, {
+  if (Option.isSome(owner)) {
+    if (isProcessAlive(owner.value.pid)) return false;
+  } else {
+    // Allow a new owner time to write its identity after creating the directory.
+    const info = yield* fs.stat(lockDir).pipe(Effect.option);
+    if (Option.isNone(info) || Option.isNone(info.value.mtime)) return false;
+    const age =
+      (yield* Clock.currentTimeMillis) - info.value.mtime.value.getTime();
+    if (age < ownerlessLockGraceMs) return false;
+  }
+  yield* fs.remove(lockDir, {
     recursive: true,
     force: true,
   });

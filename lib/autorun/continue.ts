@@ -37,23 +37,11 @@ import {
   type PreparedWorkspace,
 } from "./workspace.ts";
 
-import { type prepareCloneWorkspace } from "./workspace.ts";
 export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
   options: ContinueCliOptions,
-  injected: {
-    prepareCloneWorkspace?: typeof prepareCloneWorkspace | undefined;
-    ensureAutorunLabelContract?: typeof ensureAutorunLabelContract | undefined;
-    fetchGitHubIssue?: GitHub["Service"]["fetchGitHubIssue"] | undefined;
-    transitionGitHubIssueLabels?:
-      | GitHub["Service"]["transitionGitHubIssueLabels"]
-      | undefined;
-  } = {},
 ) {
   const workspaces = yield* Workspace;
-  const prepareWorkspace =
-    injected.prepareCloneWorkspace ?? workspaces.prepareClone;
-  const ensureLabels =
-    injected.ensureAutorunLabelContract ?? ensureAutorunLabelContract;
+  const github = yield* GitHub;
   const cwd = path.resolve(options.cwd);
   const parsed = yield* Effect.try({
     try: () => parseIssueRef(options.issue, options.repo),
@@ -98,13 +86,11 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
           );
           return attemptResult(attemptMetadata);
         }
-        const fetchIssue =
-          injected.fetchGitHubIssue ?? (yield* GitHub).fetchGitHubIssue;
-        const fetched = yield* fetchIssue(options.issue, {
+        const fetched = yield* github.fetchGitHubIssue(options.issue, {
           cwd,
           repo: parsed.repo ?? options.repo,
         });
-        yield* ensureLabels({
+        yield* ensureAutorunLabelContract({
           cwd,
           repo: parsed.repo ?? options.repo,
           readyLabel: options.readyLabel,
@@ -142,7 +128,7 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
           (yield* Presentation).line(
             `Reusing workspace for branch ${branchPlan.branchName}`,
           );
-          preparedWorkspace = yield* prepareWorkspace({
+          preparedWorkspace = yield* workspaces.prepareClone({
             controlCwd: cwd,
             repo: parsed.repo ?? options.repo,
             issueNumber: attemptMetadata.issueNumber,
@@ -182,10 +168,7 @@ export const runAutoContinue = Effect.fn("runAutoContinue")(function* (
         });
         workflowContext = { ...workflowContext, continuing: !options.restart };
         const currentIssue = toIssueCandidate(fetched.issue);
-        const transitionLabels =
-          injected.transitionGitHubIssueLabels ??
-          (yield* GitHub).transitionGitHubIssueLabels;
-        yield* transitionLabels({
+        yield* github.transitionGitHubIssueLabels({
           cwd,
           repo: parsed.repo ?? options.repo,
           issueNumber: attemptMetadata.issueNumber,

@@ -357,7 +357,7 @@ export const resolveGitHubIssueRepo = Effect.fn(
   cwd: string;
   explicitRepo?: string | undefined;
   issueUrl?: string | undefined;
-}): Effect.fn.Return<string | undefined, GitHubError, GitHubRequirements> {
+}) {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;

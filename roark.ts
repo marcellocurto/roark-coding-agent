@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
+import {
+  createFileRunObserver,
+  RunObservation,
+} from "./lib/observability/observer.ts";
 import { fileURLToPath } from "node:url";
 import * as nativeWorkspace from "./lib/autorun/workspace.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
@@ -154,11 +158,14 @@ export const main = Effect.fn("main")(function* (
         message: cause instanceof Error ? cause.message : String(cause),
       }),
   });
+  const observer = yield* createFileRunObserver(context);
   presentation.line(`Run directory: ${context.runDirRelative}`);
   if (parsed.command === "do") {
     for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n"))
       presentation.line(line);
-    const result = yield* nativePhases.runFullWorkflow(context, {});
+    const result = yield* nativePhases
+      .runFullWorkflow(context, {})
+      .pipe(Effect.provideService(RunObservation, observer));
     yield* printDoLocalModeReadyMessageIfReady(context, (message) => {
       presentation.line(message);
     });
@@ -168,7 +175,9 @@ export const main = Effect.fn("main")(function* (
       result.status,
     );
   } else {
-    yield* nativePhases.runSinglePhase(context, parsed.command);
+    yield* nativePhases
+      .runSinglePhase(context, parsed.command)
+      .pipe(Effect.provideService(RunObservation, observer));
     presentation.outcome(
       "SUCCESS",
       `#${context.issueNumber}`,
