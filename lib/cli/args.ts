@@ -411,7 +411,7 @@ Options:
   --thinking <level>     Override thinking level for agent-backed phases (off|minimal|low|medium|high|xhigh|max).
   --fast                 Use the fast workflow thinking profile (cannot combine with --thinking or --deep).
   --deep                 Use the deep workflow thinking profile (cannot combine with --thinking or --fast).
-  --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue. Defaults to ${defaultMaxFixPasses}.
+  --max-fix-passes <n>   Maximum automatic fix/review cycles for auto/do/continue/revise-pr. Defaults to ${defaultMaxFixPasses}.
   --fix-pass <n>         Pass number for a standalone fix.
   --attempt <n>          Issue/continue/status commands only: use a specific autorun attempt directory.
   --all                  Status command only: summarize all known issue runs.

@@ -29,8 +29,6 @@ const ambiguityPolicy = `<ambiguity_policy>
 const minimalChangePolicy = `<minimal_change_policy>
     <instruction>Match the size of the solution to the request. Keep small tasks simple. Make larger changes when the task needs them.</instruction>
     <instruction>Choose the simplest complete design that meets the request and repository rules. Have a clear reason for every file you change and every abstraction, dependency, schema, stored state, setting, or public interface you add.</instruction>
-    <instruction>Do not add code to enforce guidance unless the request asks you to enforce it.</instruction>
-    <instruction>If editing an existing prompt is enough to improve the requested agent behavior, keep the change in that prompt.</instruction>
     <instruction>Complete large changes when the issue or code shows they are needed, and explain why. Size alone is not a reason to ask for permission. Stop when an important requirement is unclear or you need a decision you are not allowed to make.</instruction>
   </minimal_change_policy>`;
 const testQualityPolicy = `<test_quality_policy>
@@ -54,10 +52,10 @@ export const sharedSystemPrompt = `<system_prompt>
   ${testQualityPolicy}
   ${ambiguityPolicy}
   <untrusted_issue_content_policy>${untrustedIssueContentPolicy}</untrusted_issue_content_policy>
-  <artifact_style>Keep plans and reports short, but include what the reader needs to understand your decisions. Prefer bullets. Use None, Not applicable, or Not run for empty sections.</artifact_style>
-  <execution_stop_policy>In every step that changes code, put important unanswered questions in blockingQuestions. Put confirmed outside blockers in externalBlockers. Stop before making a decision you are not allowed to make. If you stop partway through, keep the completed work and report only findings you actually handled. Notes in remainingConcerns or deviations do not replace a stop.</execution_stop_policy>
-  <output_contract>Return only the requested Markdown unless this step requires a submission tool. If it does, call that tool to finish the step and do not return Markdown.</output_contract>
+  <artifact_style>Keep plans and reports short, but include what the reader needs to understand your decisions. Prefer bullets.</artifact_style>
+  <output_contract>When a submission tool is provided, finish by calling it and do not return Markdown or prose afterward. Otherwise, return only the requested Markdown.</output_contract>
 </system_prompt>`;
+const executionStopPolicy = `  <execution_stop_policy>In every step that changes code, put important unanswered questions in blockingQuestions. Put confirmed outside blockers in externalBlockers. Stop before making a decision you are not allowed to make. If you stop partway through, keep the completed work and report only findings you actually handled. Notes in remainingConcerns or deviations do not replace a stop.</execution_stop_policy>`;
 const doNotBroadenScopeInstruction = "Do not broaden scope.";
 const doNotEditWorkflowArtifactsInstruction =
   "Do not edit .roark workflow artifacts.";
@@ -153,7 +151,7 @@ function renderWorkflowPhase(config: WorkflowPhasePrompt): string {
 ${config.inputs.join("\n")}
   </inputs>
 ${config.blocks.join("\n")}
-  <output_contract format="${config.outputFormat ?? "markdown"}" section_guidance="preferred">
+  <output_contract format="${config.outputFormat ?? "markdown"}">
 ${config.outputContract}
   </output_contract>
 </workflow_phase>`;
@@ -344,6 +342,7 @@ export function implementationPrompt(
       ...restartReviewInputLines(context, restartPass),
     ],
     blocks: [
+      executionStopPolicy,
       bugFeedbackLoopPolicy,
       tddPolicy,
       renderInstructions([
@@ -500,6 +499,7 @@ export const codeRefinementPrompt = Effect.fn("codeRefinementPrompt")(
         "    <current_git_diff />",
       ],
       blocks: [
+        executionStopPolicy,
         tddPolicy,
         codeSmellPolicy,
         codeRefinementSmellLens,
@@ -510,9 +510,9 @@ export const codeRefinementPrompt = Effect.fn("codeRefinementPrompt")(
           "Keep the required behavior and public API promises. Add behavior, dependencies, public interfaces, settings, migrations, or design abstractions only when the issue, plan, or earlier review requires them.",
           "Prefer clear names and a code path that is easy to follow. Extract or split helpers only when that makes the behavior clearly easier to understand or test.",
           "Do not broaden scope, address unrelated suggestions, or edit .roark workflow artifacts.",
-          'In Behavior Risk Decisions, name the file or behavior involved. Explain what improved, or why the more complex code is still needed. Do not just say "behavior preserved" without explaining why.',
+          'In deviations, name the file or behavior involved. Explain what improved, or why the more complex code is still needed. Do not just say "behavior preserved" without explaining why.',
           "Run checks that fit the changes you made. If no code changed, report the relevant checks already run. Rerun them only when there is a reason. If a check cannot run, explain why.",
-          "Call submit_change_report with the refinement report. Use deviations to explain important choices about simplification, names, behavior risks, or following the plan. Leave addressedFindingIds empty; the fix step reports which review findings it handled.",
+          "Call submit_change_report with the refinement report. Leave addressedFindingIds empty; the fix step reports which review findings it handled.",
         ]),
       ],
       outputFormat: "structured-tool",
@@ -543,6 +543,7 @@ export const fixPrompt = Effect.fn("fixPrompt")(function* (
       ...(yield* failedVerificationInputLines(context, pass)),
     ],
     blocks: [
+      executionStopPolicy,
       bugFeedbackLoopPolicy,
       renderInstructions([
         "Fix only unresolved findings marked <value>must-fix-current</value> with an empty blockedBy list. Also address any failed verification report listed in the inputs.",

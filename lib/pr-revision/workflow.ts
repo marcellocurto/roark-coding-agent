@@ -7,7 +7,6 @@ import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { type RevisePrCliOptions } from "../cli/args.ts";
 import { type WorkflowThinkingStage } from "../workflow/thinking.ts";
 import { createAgentRunRequest } from "../workflow/agent-runner.ts";
-import { artifactOutcome } from "../workflow/markdown-token.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
 import {
   classifyVerificationFailure,
@@ -451,6 +450,7 @@ const runRevisionArtifactPhase = Effect.fn("runRevisionArtifactPhase")(
       pass?: number | undefined;
     },
     definition: StructuredArtifactDefinition<T>,
+    outcomeFor?: (value: T) => string,
   ) {
     const display = revisionDisplay(context, input, input.operation);
     const artifact = yield* runPresentedPhase(
@@ -477,7 +477,7 @@ const runRevisionArtifactPhase = Effect.fn("runRevisionArtifactPhase")(
           },
         ),
       (result) => ({
-        outcome: artifactOutcome(result.markdown),
+        outcome: outcomeFor?.(result.value) ?? "completed",
         artifact: display.expectedArtifact,
       }),
     );
@@ -522,6 +522,7 @@ const runRevisionPlanPhase = Effect.fn("runRevisionPlanPhase")(function* (
     revisionPlanArtifactDefinition(
       new Set(feedbackSources.map((source) => source.id)),
     ),
+    (plan) => plan.status,
   );
 });
 const runRevisionReviewAgent = Effect.fn("runRevisionReviewAgent")(function* (
@@ -542,6 +543,7 @@ const runRevisionReviewAgent = Effect.fn("runRevisionReviewAgent")(function* (
       title: input.label,
       source: "revision-review",
     }),
+    reviewDisposition,
   );
 });
 function revisionDisplay(

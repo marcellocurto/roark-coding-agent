@@ -68,26 +68,26 @@ Phase commands are most useful for debugging. For normal work, prefer `do`, `aut
 
 ## Common options
 
-| Option                  | Applies to                     | Purpose                                                                                                                                                        |
-| ----------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--repo <owner/repo>`   | GitHub-backed commands         | Repository for `gh` issue and PR commands.                                                                                                                     |
-| `--cwd <path>`          | Most commands                  | Repository working directory. Defaults to current directory.                                                                                                   |
-| `--out <path>`          | Workflow commands              | Runs directory. Defaults to `.roark/runs`.                                                                                                                     |
-| `--model <provider/id>` | Agent-backed phases            | Optional Pi model override, for example `anthropic/claude-sonnet-4-5`.                                                                                         |
-| `--thinking <level>`    | Agent-backed phases            | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Unsupported levels are clamped by Pi to a supported level and reported. |
-| `--fast`                | Agent-backed phases            | Use the fast thinking profile. Cannot combine with `--deep` or `--thinking`.                                                                                   |
-| `--deep`                | Agent-backed phases            | Use the deep thinking profile. Cannot combine with `--fast` or `--thinking`.                                                                                   |
-| `--max-fix-passes <n>`  | `auto`, `do`, `continue`       | Maximum automatic fix/review cycles. Defaults to `3`.                                                                                                          |
-| `--fix-pass <n>`        | `fix`                          | Fix pass number.                                                                                                                                               |
-| `--attempt <n>`         | issue, `continue`, `status`    | Use a specific autorun attempt directory.                                                                                                                      |
-| `--all`                 | `status`                       | Summarize all known issue runs.                                                                                                                                |
-| `--restart`             | `continue`                     | Start over from the saved baseline, using the current issue and all comments.                                                                                  |
-| `--force`               | standalone phases, PR revision | Re-run phases or continue past supported dirty-tree preflights.                                                                                                |
-| `--yes`                 | supported mutation paths       | Continue past supported prompts or approve `create-issues` mutations.                                                                                          |
-| `--verbose`             | long-running agent commands    | Show completed agent responses and detailed tool statistics.                                                                                                   |
-| `--no-title`            | long-running agent commands    | Disable Roark terminal-title management.                                                                                                                       |
-| `-v`, `--version`       | top-level only                 | Print the installed Roark version.                                                                                                                             |
-| `-h`, `--help`          | all commands                   | Show help.                                                                                                                                                     |
+| Option                  | Applies to                            | Purpose                                                                                                                                                        |
+| ----------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--repo <owner/repo>`   | GitHub-backed commands                | Repository for `gh` issue and PR commands.                                                                                                                     |
+| `--cwd <path>`          | Most commands                         | Repository working directory. Defaults to current directory.                                                                                                   |
+| `--out <path>`          | Workflow commands                     | Runs directory. Defaults to `.roark/runs`.                                                                                                                     |
+| `--model <provider/id>` | Agent-backed phases                   | Optional Pi model override, for example `anthropic/claude-sonnet-4-5`.                                                                                         |
+| `--thinking <level>`    | Agent-backed phases                   | Thinking level override: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Unsupported levels are clamped by Pi to a supported level and reported. |
+| `--fast`                | Agent-backed phases                   | Use the fast thinking profile. Cannot combine with `--deep` or `--thinking`.                                                                                   |
+| `--deep`                | Agent-backed phases                   | Use the deep thinking profile. Cannot combine with `--fast` or `--thinking`.                                                                                   |
+| `--max-fix-passes <n>`  | `auto`, `do`, `continue`, `revise-pr` | Maximum automatic fix/review cycles. Defaults to `3`.                                                                                                          |
+| `--fix-pass <n>`        | `fix`                                 | Fix pass number.                                                                                                                                               |
+| `--attempt <n>`         | issue, `continue`, `status`           | Use a specific autorun attempt directory.                                                                                                                      |
+| `--all`                 | `status`                              | Summarize all known issue runs.                                                                                                                                |
+| `--restart`             | `continue`                            | Start over from the saved baseline, using the current issue and all comments.                                                                                  |
+| `--force`               | standalone phases, workspace removal  | Re-run phase artifacts or allow removal of dirty managed workspaces.                                                                                           |
+| `--yes`                 | supported mutation paths              | Bypass supported dirty-tree preflights, continue past supported prompts, or approve `create-issues` mutations.                                                 |
+| `--verbose`             | long-running agent commands           | Show completed agent responses and detailed tool statistics.                                                                                                   |
+| `--no-title`            | long-running agent commands           | Disable Roark terminal-title management.                                                                                                                       |
+| `-v`, `--version`       | top-level only                        | Print the installed Roark version.                                                                                                                             |
+| `-h`, `--help`          | all commands                          | Show help.                                                                                                                                                     |
 
 ## Models and thinking profiles
 
@@ -146,11 +146,12 @@ Paths are relative to the repository or run directory when possible. Interactive
 
 ## PR revision options
 
-| Option           | Purpose                                           |
-| ---------------- | ------------------------------------------------- |
-| `--verify <cmd>` | Verification command before pushing the revision. |
-| `--no-comment`   | Do not post the terminal PR summary comment.      |
-| `--force`        | Continue past supported dirty git preflight.      |
+| Option                 | Purpose                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------ |
+| `--verify <cmd>`       | Verification command before pushing the revision.                              |
+| `--no-comment`         | Do not post the terminal PR summary comment.                                   |
+| `--max-fix-passes <n>` | Maximum shared budget for review and verification fix passes. Defaults to `3`. |
+| `--yes`                | Continue past the dirty-tree preflight.                                        |
 
 ## Workspace options
 
