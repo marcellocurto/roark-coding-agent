@@ -1,8 +1,17 @@
 import { rejects as assertRejects } from "node:assert/strict";
 import { runApplicationPromise } from "../runtime/application.ts";
 import * as nativeProgression from "./progression.ts";
+import { runFullWorkflow } from "./phases.ts";
+import { main } from "../../roark.ts";
+import { runProcessOrThrow } from "../cli/process.ts";
+import { runWithPresenter } from "../testing/presentation.ts";
+import { Presenter } from "../presentation/presenter.ts";
+import { parseRunSummary } from "../observability/summary.ts";
+import { parseReadinessResultJson } from "./readiness.ts";
+import { decidePublish } from "../autorun/publish-gate.ts";
 import {
   writeArtifact,
+  readArtifact,
   writeJsonArtifact,
   baselineResetLogRef,
   createWorkflowContext,
@@ -13,7 +22,7 @@ import {
   reviewBRef,
   type WorkflowContext,
 } from "./artifacts.ts";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
@@ -43,6 +52,126 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 describe("planWorkflowProgression", () => {
+  test.each([
+    {
+      verdict: "fixes-required",
+      status: "fix-budget-exhausted",
+      presentation: "STOPPED",
+      summary: "stopped",
+      readiness: "not-ready",
+      publish: false,
+    },
+    {
+      verdict: "restart-required",
+      status: "fix-budget-exhausted",
+      presentation: "STOPPED",
+      summary: "stopped",
+      readiness: "not-ready",
+      publish: false,
+    },
+    {
+      verdict: "approve",
+      status: "completed",
+      presentation: "SUCCESS",
+      summary: "completed",
+      readiness: "ready-for-pr",
+      publish: true,
+    },
+  ])(
+    "reports $verdict at the final permitted pass consistently",
+    async (scenario) => {
+      const context = await tempContext(1);
+      await writeHappyPathThroughReviews(context, "fixes-required");
+      await runApplicationPromise(
+        writeArtifact(context, fixLogRef(1), JSON.stringify(changeReport())),
+      );
+      await runApplicationPromise(
+        writeArtifact(
+          context,
+          refinementLogRef(1),
+          JSON.stringify(changeReport()),
+        ),
+      );
+      await runApplicationPromise(
+        writeArtifact(
+          context,
+          reviewARef(1),
+          structuredReview(scenario.verdict),
+        ),
+      );
+      await runApplicationPromise(
+        writeArtifact(context, reviewBRef(1), structuredReview("approve")),
+      );
+
+      const progression = await runApplicationPromise(
+        nativeProgression.planWorkflowProgression(context, {
+          includePublishGate: true,
+        }),
+      );
+      expect(progression.actions.map((action) => action.type)).toEqual([
+        "write-readiness",
+        "publish-gate",
+      ]);
+      const result = await runApplicationPromise(runFullWorkflow(context));
+      expect(result).toEqual({ status: scenario.status });
+      await runApplicationPromise(
+        runProcessOrThrow(["git", "init", "--quiet"], {
+          cwd: context.controlCwd,
+        }),
+      );
+      let output = "";
+      await runWithPresenter(
+        new Presenter({
+          stream: {
+            isTTY: false,
+            write(chunk) {
+              output += chunk;
+            },
+          },
+        }),
+        main([
+          "do",
+          "43",
+          "--cwd",
+          context.controlCwd,
+          "--repo",
+          "owner/repo",
+          "--attempt",
+          "1",
+          "--max-fix-passes",
+          "1",
+        ]),
+      );
+      expect(
+        output
+          .split("\n")
+          .filter((line) => /^(SUCCESS|STOPPED) #43/.test(line)),
+      ).toEqual([`${scenario.presentation} #43 · ${scenario.status}`]);
+      const summary = parseRunSummary(
+        await readFile(path.join(context.runDir, "summary.json"), "utf8"),
+      );
+      expect(summary.status).toBe(scenario.summary);
+      const readiness = await runApplicationPromise(
+        parseReadinessResultJson(
+          await runApplicationPromise(readArtifact(context, "readiness")),
+        ),
+      );
+      expect(readiness.latestReviewCycle).toBe(1);
+      expect(readiness.decision.status).toBe(scenario.readiness);
+      expect(
+        decidePublish({
+          readinessStatus: readiness.decision.status,
+          verification: {
+            ok: true,
+            command: "bun test",
+            exitCode: 0,
+            stdout: "",
+            stderr: "",
+          },
+        }).publish,
+      ).toBe(scenario.publish);
+    },
+  );
   test("cached implementation and reviews cannot bypass a changed adopted plan source", async () => {
     const context = await tempContext();
     await writeHappyPathThroughReviews(context);

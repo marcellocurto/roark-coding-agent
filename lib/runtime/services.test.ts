@@ -29,10 +29,36 @@ import {
   requireArtifacts,
 } from "../workflow/artifacts.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { GitHub, gitHubLayer } from "../github/service.ts";
+import { GitHub } from "../github/service.ts";
+import { fixedWallClock } from "../testing/clock.ts";
 const silentPresenter = () =>
   new Presenter({ stream: { isTTY: false, write: () => undefined } });
 describe("application service boundaries", () => {
+  test("GitHub binds its dependencies without capturing the caller's clock", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const github = yield* GitHub;
+        return yield* github
+          .fetchGitHubIssueRelationships({
+            cwd: "/repo",
+            issueNumber: "12",
+            body: "",
+          })
+          .pipe(Effect.provide(fixedWallClock("2001-01-01T00:00:00.000Z")));
+      }).pipe(
+        Effect.provide(GitHub.layer),
+        Effect.provide(fixedWallClock("2000-01-01T00:00:00.000Z")),
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.die(new Error("No repository lookup should run.")),
+          ),
+        ),
+        Effect.provideService(Presentation, silentPresenter()),
+      ),
+    );
+    expect(result.fetchedAt).toBe("2001-01-01T00:00:00.000Z");
+  });
   test("agent callers use the supplied service without constructing a Pi session", async () => {
     const output = await Effect.runPromise(
       Effect.gen(function* () {
@@ -130,7 +156,7 @@ describe("application service boundaries", () => {
         Effect.flatMap(GitHub, (github) =>
           github.resolveGitHubIssueRepo({ cwd: process.cwd() }),
         ).pipe(
-          Effect.provide(gitHubLayer),
+          Effect.provide(GitHub.layer),
           Effect.provideService(
             ChildProcessSpawner.ChildProcessSpawner,
             spawner,

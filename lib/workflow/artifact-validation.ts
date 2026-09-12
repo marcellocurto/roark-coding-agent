@@ -1,6 +1,11 @@
 import { Effect } from "effect";
 import type { ArtifactContractError } from "../structured-output/contract.ts";
-import { artifactContract, type ArtifactRef } from "./artifact-catalog.ts";
+import {
+  artifactContract,
+  isReviewArtifact,
+  isChangeReportArtifact,
+  type ArtifactRef,
+} from "./artifact-catalog.ts";
 import { parseReviewResultJson } from "../review/result.ts";
 import { parseTriageResultJson } from "../triage/result.ts";
 import { parseImplementationPlanResultJson } from "../implementation-plan/result.ts";
@@ -59,21 +64,6 @@ function validateStructured(
       onSuccess: ok,
       onFailure: (error) => invalid(error.message),
     }),
-  );
-}
-
-function isReviewArtifact(artifact: ArtifactRef): boolean {
-  return (
-    typeof artifact !== "string" &&
-    (artifact.name === "reviewA" || artifact.name === "reviewB")
-  );
-}
-
-function isChangeReportArtifact(artifact: ArtifactRef): boolean {
-  return (
-    artifact === "implementationLog" ||
-    (typeof artifact !== "string" &&
-      (artifact.name === "fixLog" || artifact.name === "refinementLog"))
   );
 }
 

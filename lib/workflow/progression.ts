@@ -69,6 +69,9 @@ export type WorkflowTerminalStatus =
       status: "review-blocked";
     }
   | {
+      status: "fix-budget-exhausted";
+    }
+  | {
       status: "completed";
     };
 export interface WorkflowProgressionPlan {
@@ -546,7 +549,7 @@ function maxPassesReached(
       readiness("maximum fix/restart passes reached"),
       ...publishGate(options, "publish gate records non-publish"),
     ],
-    { status: "completed" },
+    { status: "fix-budget-exhausted" },
   );
 }
 function pending(

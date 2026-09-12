@@ -4,7 +4,7 @@ import {
   WorkspaceCommandError,
   defaultWorkspaceConfig,
 } from "../autorun/workspace.ts";
-import { runPrReview } from "./workflow.ts";
+import { PrReviewError, runPrReview } from "./workflow.ts";
 import {
   runApplicationPromise,
   applicationLayer,
@@ -26,6 +26,61 @@ import { type PullRequestFeedback } from "../github/pr.ts";
 import { type AgentRunRequest } from "../workflow/agent-runner.ts";
 import { type TerminalStream } from "../presentation/terminal.ts";
 describe("runPrReview", () => {
+  test.each([
+    { state: "CLOSED", baseRefOid: "base123", headRefOid: "head123" },
+    { state: "MERGED", baseRefOid: "base123", headRefOid: "head123" },
+    { state: "OPEN", baseRefOid: "", headRefOid: "head123" },
+    { state: "OPEN", baseRefOid: "base123", headRefOid: "" },
+  ])(
+    "rejects unreviewable PR metadata before preparing a workspace: %j",
+    async (metadata) => {
+      const feedback = reviewFeedback();
+      let prepared = false;
+      const exit = await runApplicationPromise(
+        runPrReview({
+          command: "review-pr",
+          prNumber: 12,
+          cwd: "/tmp/control",
+          outDir: ".roark/runs",
+          repo: "owner/repo",
+          verifyCommand: "true",
+          comment: false,
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: () =>
+              Effect.succeed({
+                ...feedback,
+                pr: { ...feedback.pr, ...metadata },
+              }),
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrReview: () =>
+              Effect.sync(() => {
+                prepared = true;
+                throw new Error(
+                  "An unreviewable PR must not prepare a workspace.",
+                );
+              }),
+          })),
+          Effect.exit,
+        ),
+      );
+      expect(prepared).toBe(false);
+      const message =
+        metadata.state === "OPEN"
+          ? "PR #12 metadata did not include immutable base and head commit identifiers."
+          : `PR #12 must be open. Current state: ${metadata.state}.`;
+      expect(Exit.isFailure(exit)).toBe(true);
+      if (Exit.isFailure(exit)) {
+        expect(Cause.hasDies(exit.cause)).toBe(false);
+        const error = Cause.squash(exit.cause);
+        expect(error).toBeInstanceOf(PrReviewError);
+        expect(error).toHaveProperty("message", message);
+      }
+    },
+  );
   test("sets the preparation title while workspace preparation is pending", async () => {
     let output = "";
     const stream: TerminalStream = {

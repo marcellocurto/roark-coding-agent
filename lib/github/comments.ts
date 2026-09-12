@@ -1,3 +1,4 @@
+import { getCurrentGitHubRepository, getCurrentGitHubLogin } from "./gh.ts";
 import { GitHubRequestError } from "./errors.ts";
 import { GitHubResponseError } from "./errors.ts";
 import { Array as Arr, Effect, Option, Schema } from "effect";
@@ -117,20 +118,6 @@ export function truncateGitHubIssueComment(body: string): string {
     end += character.length;
   }
   return body;
-}
-export function buildCurrentRepoArgv(): string[] {
-  return [
-    "gh",
-    "repo",
-    "view",
-    "--json",
-    "nameWithOwner",
-    "--jq",
-    ".nameWithOwner",
-  ];
-}
-export function buildCurrentCommentAuthorArgv(): string[] {
-  return ["gh", "api", "user", "--jq", ".login"];
 }
 export const githubCommentAuthorSchema = Schema.Struct({
   login: Schema.optional(Schema.NullOr(Schema.String)),
@@ -278,10 +265,10 @@ export const postOrUpdateIssueCommentByMarker = Effect.fn(
     buildListIssueCommentsArgv({ repo, issueNumber: options.issueNumber }),
     { cwd: options.cwd, label: "gh api issue comments list" },
   );
-  const currentAuthor = (yield* runProcessOrThrow(
-    buildCurrentCommentAuthorArgv(),
-    { cwd: options.cwd, label: "gh api current comment author" },
-  )).trim();
+  const currentAuthor = yield* getCurrentGitHubLogin({
+    cwd: options.cwd,
+    label: "gh api current comment author",
+  });
   if (!currentAuthor)
     return yield* Effect.fail(
       new GitHubRequestError({
@@ -315,11 +302,7 @@ const resolveCommentRepo = Effect.fn("GitHub.resolveCommentRepo")(
     repo?: string | undefined;
   }): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
     if (options.repo) return options.repo;
-    const stdout = yield* runProcessOrThrow(buildCurrentRepoArgv(), {
-      cwd: options.cwd,
-      label: "gh repo view",
-    });
-    const repo = stdout.trim();
+    const repo = yield* getCurrentGitHubRepository(options);
     if (!repo)
       return yield* Effect.fail(
         new GitHubRequestError({

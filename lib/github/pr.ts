@@ -1,3 +1,4 @@
+import { getCurrentGitHubRepository } from "./gh.ts";
 import {
   githubCommentAuthorSchema,
   parseRestCommentPages,
@@ -166,14 +167,7 @@ export const resolvePullRequestRepo = Effect.fn(
   repo?: string | undefined;
 }): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
   if (options.repo) return options.repo;
-  const stdout = yield* runProcessOrThrow(
-    ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-    {
-      cwd: options.cwd,
-      label: "gh repo view",
-    },
-  );
-  const repo = stdout.trim();
+  const repo = yield* getCurrentGitHubRepository(options);
   if (!repo)
     return yield* Effect.fail(
       new GitHubRequestError({

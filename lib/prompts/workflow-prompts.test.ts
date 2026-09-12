@@ -124,50 +124,83 @@ describe("fix and refinement prompt inputs", () => {
     expect(prompt).toContain('<artifact kind="implementation_restart_log">');
     expect(prompt).not.toContain('<artifact kind="fix_log">');
   });
-  test("fix and subsequent workflow prompts include failed verification when present", async () => {
-    const runDir = await mkdtemp(
-      path.join(tmpdir(), "roark-prompt-verification-"),
-    );
-    tempDirs.push(runDir);
-    const verificationContext = {
-      ...context,
-      controlCwd: runDir,
-      agentCwd: runDir,
-      outDir: path.join(runDir, ".roark/runs"),
-      runDir,
-      runDirRelative: ".",
-    } satisfies WorkflowContext;
-    await runApplicationPromise(
-      writeArtifact(
-        verificationContext,
-        verificationBeforeFixRef(1),
-        "# Verification\n\n## Exit Code\n1\n",
-      ),
-    );
-    expect(
+  test.each([0, 1])(
+    "workflow prompts use only their pass's verification archive despite generic verification exit %i",
+    async (exitCode) => {
+      const runDir = await mkdtemp(
+        path.join(tmpdir(), "roark-prompt-verification-"),
+      );
+      tempDirs.push(runDir);
+      const verificationContext = {
+        ...context,
+        controlCwd: runDir,
+        agentCwd: runDir,
+        outDir: path.join(runDir, ".roark/runs"),
+        runDir,
+        runDirRelative: ".",
+        maxFixPasses: 2,
+      } satisfies WorkflowContext;
       await runApplicationPromise(
-        nativeWorkflowPrompts.fixPrompt(verificationContext, 1),
-      ),
-    ).toContain(
-      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
-    );
-    expect(
+        writeArtifact(
+          verificationContext,
+          verificationBeforeFixRef(1),
+          "# Verification\n\n## Exit Code\n1\n",
+        ),
+      );
       await runApplicationPromise(
+        writeArtifact(
+          verificationContext,
+          "verification",
+          `# Verification\n\n## Exit Code\n${exitCode}\n`,
+        ),
+      );
+      expect(
+        await runApplicationPromise(
+          nativeWorkflowPrompts.fixPrompt(verificationContext, 1),
+        ),
+      ).toContain(
+        '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+      );
+      expect(
+        await runApplicationPromise(
+          nativeWorkflowPrompts.codeRefinementPrompt(
+            verificationContext,
+            1,
+            "fix",
+          ),
+        ),
+      ).toContain(
+        '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+      );
+      expect(
+        await runApplicationPromise(
+          nativeWorkflowPrompts.reviewAPrompt(verificationContext, 1),
+        ),
+      ).toContain(
+        '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+      );
+      expect(
+        await runApplicationPromise(
+          nativeWorkflowPrompts.reviewBPrompt(verificationContext, 1),
+        ),
+      ).toContain(
+        '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
+      );
+      const nextPassPrompts = [
+        nativeWorkflowPrompts.fixPrompt(verificationContext, 2),
         nativeWorkflowPrompts.codeRefinementPrompt(
           verificationContext,
-          1,
+          2,
           "fix",
         ),
-      ),
-    ).toContain(
-      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
-    );
-    expect(
-      await runApplicationPromise(
-        nativeWorkflowPrompts.reviewAPrompt(verificationContext, 1),
-      ),
-    ).toContain(
-      '<artifact kind="failed_verification">verification-before-fix-1.md</artifact>',
-    );
-  });
+        nativeWorkflowPrompts.reviewAPrompt(verificationContext, 2),
+        nativeWorkflowPrompts.reviewBPrompt(verificationContext, 2),
+      ];
+      for (const prompt of nextPassPrompts) {
+        const content = await runApplicationPromise(prompt);
+        expect(content).not.toContain('kind="failed_verification"');
+        expect(content).not.toContain("verification-before-fix-1.md");
+      }
+    },
+  );
 });

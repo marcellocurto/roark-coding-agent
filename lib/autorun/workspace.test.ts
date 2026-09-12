@@ -20,6 +20,8 @@ import {
 } from "../runtime/application.ts";
 import { rejects as assertRejects } from "node:assert/strict";
 import { Workspace } from "./workspace-service.ts";
+import { fixedWallClock } from "../testing/clock.ts";
+import { existsSync } from "node:fs";
 import * as nativeWorkspace from "./workspace.ts";
 import { Presentation } from "../runtime/services.ts";
 import { runWithPresenter } from "../testing/presentation.ts";
@@ -34,6 +36,7 @@ import {
   rm,
   stat,
   symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -593,7 +596,54 @@ describe("managed clone workspaces", () => {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
-  test("PR revision workspace preparation refuses an active lock", async () => {
+  test.each([
+    { ageMs: 4999, reclaimed: false },
+    { ageMs: 5000, reclaimed: true },
+  ])(
+    "PR revision workspace ownerless lock at $ageMs ms is reclaimed=$reclaimed",
+    async ({ ageMs, reclaimed }) => {
+      const fixture = await createPrRevisionWorkspaceFixture(
+        "roark-pr-workspace-ownerless-",
+      );
+      try {
+        await mkdir(fixture.lockDir, { recursive: true });
+        const createdAt = new Date("2000-01-01T00:00:00.000Z");
+        await utimes(fixture.lockDir, createdAt, createdAt);
+        const exit = await runApplicationPromise(
+          Effect.gen(function* () {
+            yield* nativeWorkspace.preparePrRevisionWorkspace({
+              ...fixture.prepareInput,
+              runner: adaptRunner(fixture.prepareInput.runner),
+            });
+            const owner = yield* Effect.promise(() =>
+              readWorkspaceLockOwner(fixture.lockDir),
+            );
+            expect(owner.pid).toBe(process.pid);
+            expect(owner.token).toBeString();
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              fixedWallClock(
+                new Date(createdAt.getTime() + ageMs).toISOString(),
+              ),
+            ),
+            Effect.exit,
+          ),
+        );
+        expect(Exit.isSuccess(exit)).toBe(reclaimed);
+        if (!reclaimed && Exit.isFailure(exit)) {
+          expect(Cause.squash(exit.cause)).toBeInstanceOf(
+            nativeWorkspace.WorkspaceError,
+          );
+          expect(Cause.pretty(exit.cause)).toContain("already locked");
+        }
+        expect(existsSync(fixture.lockDir)).toBe(!reclaimed);
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
+      }
+    },
+  );
+  test("PR revision workspace preparation refuses an active lock even when its directory is old", async () => {
     const fixture = await createPrRevisionWorkspaceFixture(
       "roark-pr-workspace-active-lock-",
     );
@@ -602,6 +652,8 @@ describe("managed clone workspaces", () => {
       | undefined;
     try {
       prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
+      const old = new Date("2000-01-01T00:00:00.000Z");
+      await utimes(fixture.lockDir, old, old);
       let error: unknown;
       try {
         await preparePrRevisionWorkspace(fixture.prepareInput);
@@ -613,6 +665,35 @@ describe("managed clone workspaces", () => {
         "already locked",
       );
       expect((await lstat(fixture.lockDir)).isDirectory()).toBe(true);
+    } finally {
+      await prepared?.releaseLock();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+  test("PR revision workspace release preserves a replacement owner's lock", async () => {
+    const fixture = await createPrRevisionWorkspaceFixture(
+      "roark-pr-workspace-replaced-lock-",
+    );
+    let prepared:
+      | Awaited<ReturnType<typeof preparePrRevisionWorkspace>>
+      | undefined;
+    try {
+      prepared = await preparePrRevisionWorkspace(fixture.prepareInput);
+      const replacementOwner = {
+        token: "replacement-token",
+        pid: process.pid,
+        createdAt: "2000-01-01T00:00:00.000Z",
+      };
+      await writeFile(
+        path.join(fixture.lockDir, "owner.json"),
+        JSON.stringify(replacementOwner),
+      );
+      await prepared.releaseLock();
+      prepared = undefined;
+      expect(existsSync(fixture.lockDir)).toBe(true);
+      expect(await readWorkspaceLockOwner(fixture.lockDir)).toEqual(
+        replacementOwner,
+      );
     } finally {
       await prepared?.releaseLock();
       await rm(fixture.root, { recursive: true, force: true });

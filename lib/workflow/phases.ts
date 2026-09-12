@@ -4,7 +4,6 @@ import { Cause, Effect, Exit, FileSystem } from "effect";
 import { RunObservation } from "../observability/observer.ts";
 import path from "node:path";
 import { type GitHubIssueSnapshot } from "../github/issue.ts";
-import { createFileRunObserver } from "../observability/observer.ts";
 import {
   type AgentDisplayContext,
   type AgentOperation,
@@ -68,6 +67,7 @@ export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
   context: WorkflowContext,
   suppliedSnapshot?: GitHubIssueSnapshot,
 ) {
+  const observer = yield* RunObservation;
   const display = deterministicDisplay(
     context,
     "fetch",
@@ -86,14 +86,12 @@ export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
       ) {
         const existingIssue = yield* readArtifact(context, "issue");
         if (issueArtifactHasRelationshipSnapshot(existingIssue)) {
-          yield* (
-            context.observer?.phaseCompleted({
-              phase: "fetch",
-              label: "Fetch issue",
-              artifact: "issue",
-              reused: true,
-            }) ?? Effect.void
-          );
+          yield* observer.phaseCompleted({
+            phase: "fetch",
+            label: "Fetch issue",
+            artifact: "issue",
+            reused: true,
+          });
           outcome = "reused";
           return existingIssue;
         }
@@ -106,13 +104,11 @@ export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
           ? `Using fresh pre-claim snapshot for issue #${context.issueNumber}`
           : `Fetching issue #${context.issueNumber}`,
       );
-      yield* (
-        context.observer?.phaseStarted({
-          phase: "fetch",
-          label: "Fetch issue",
-          artifact: "issue",
-        }) ?? Effect.void
-      );
+      yield* observer.phaseStarted({
+        phase: "fetch",
+        label: "Fetch issue",
+        artifact: "issue",
+      });
       const result =
         suppliedSnapshot ??
         (yield* (yield* GitHub).fetchGitHubIssue(context.issueInput, {
@@ -132,19 +128,17 @@ export const fetchIssuePhase = Effect.fn("fetchIssuePhase")(function* (
         issue: result.issue,
         relationships: result.relationships,
       });
-      yield* (
-        context.observer?.phaseCompleted({
-          phase: "fetch",
-          label: "Fetch issue",
-          artifact: "issue",
-        }) ?? Effect.void
-      );
+      yield* observer.phaseCompleted({
+        phase: "fetch",
+        label: "Fetch issue",
+        artifact: "issue",
+      });
       return issueArtifact;
     }),
     () => ({ outcome, artifact: "issue.md" }),
     {
       onError: (error) =>
-        context.observer?.phaseFailed({
+        observer.phaseFailed({
           phase: "fetch",
           label: "Fetch issue",
           artifact: "issue",
@@ -336,6 +330,7 @@ export const resetBaselinePhase = Effect.fn("resetBaselinePhase")(function* (
 export const readinessPhase = Effect.fn("readinessPhase")(function* (
   context: WorkflowContext,
 ) {
+  const observer = yield* RunObservation;
   const display = deterministicDisplay(
     context,
     "readiness",
@@ -343,32 +338,28 @@ export const readinessPhase = Effect.fn("readinessPhase")(function* (
     "readiness.md",
     "inspect",
   );
-  yield* (
-    context.observer?.phaseStarted({
-      phase: "readiness",
-      label: "Readiness",
-      artifact: "readiness",
-    }) ?? Effect.void
-  );
+  yield* observer.phaseStarted({
+    phase: "readiness",
+    label: "Readiness",
+    artifact: "readiness",
+  });
   return yield* runPresentedPhase(
     display,
     Effect.fnUntraced(function* () {
       const readiness = yield* buildReadinessArtifacts(context);
       yield* writeJsonArtifact(context, "readiness", readiness.result);
       yield* writeArtifact(context, "readinessMarkdown", readiness.markdown);
-      yield* (
-        context.observer?.phaseCompleted({
-          phase: "readiness",
-          label: "Readiness",
-          artifact: "readiness",
-        }) ?? Effect.void
-      );
+      yield* observer.phaseCompleted({
+        phase: "readiness",
+        label: "Readiness",
+        artifact: "readiness",
+      });
       return readiness.markdown;
     }),
     () => ({ outcome: "generated", artifact: "readiness.md" }),
     {
       onError: (error) =>
-        context.observer?.phaseFailed({
+        observer.phaseFailed({
           phase: "readiness",
           label: "Readiness",
           artifact: "readiness",
@@ -386,10 +377,9 @@ export const runFullWorkflow = Effect.fn("runFullWorkflow")(function* (
   context: WorkflowContext,
   options: RunFullWorkflowOptions = {},
 ) {
-  const observer = context.observer ?? (yield* createFileRunObserver(context));
+  const observer = yield* RunObservation;
   yield* observer.runStarted({ command: "do" });
-  return yield* runFullWorkflowBody({ ...context, observer }, options).pipe(
-    Effect.provideService(RunObservation, observer),
+  return yield* runFullWorkflowBody(context, options).pipe(
     Effect.onExit((exit) =>
       Exit.isSuccess(exit)
         ? observer.runCompleted({ status: exit.value.status })
@@ -577,30 +567,28 @@ export const runSinglePhase = Effect.fn("runSinglePhase")(function* (
   context: WorkflowContext,
   phase: SinglePhaseCommand,
 ) {
-  const observer = context.observer ?? (yield* createFileRunObserver(context));
-  const current = { ...context, observer };
+  const observer = yield* RunObservation;
   yield* observer.runStarted({ command: phase });
   return yield* Effect.gen(function* () {
     if (phase === "review")
       yield* reviewPhase(
-        current,
-        context.fixPass ?? (yield* inferNextReviewPass(current)),
+        context,
+        context.fixPass ?? (yield* inferNextReviewPass(context)),
       );
-    else if (phase === "readiness") yield* readinessPhase(current);
+    else if (phase === "readiness") yield* readinessPhase(context);
     else if (phase === "curate-issues") {
-      yield* assertAttemptSelectedWhenAttemptsExist(current, phase);
-      yield* issueCurationPhase(current);
+      yield* assertAttemptSelectedWhenAttemptsExist(context, phase);
+      yield* issueCurationPhase(context);
     } else if (phase === "create-issues") {
-      yield* assertAttemptSelectedWhenAttemptsExist(current, phase);
-      yield* createIssuesPhase(current);
+      yield* assertAttemptSelectedWhenAttemptsExist(context, phase);
+      yield* createIssuesPhase(context);
     } else
       yield* runWorkflowPhase(
-        current,
+        context,
         phase,
-        yield* standalonePhasePass(current, phase),
+        yield* standalonePhasePass(context, phase),
       );
   }).pipe(
-    Effect.provideService(RunObservation, observer),
     Effect.onExit((exit) =>
       Exit.isSuccess(exit)
         ? observer.runCompleted({ status: "completed" })

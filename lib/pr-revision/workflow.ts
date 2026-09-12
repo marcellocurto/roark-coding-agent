@@ -6,13 +6,11 @@ import path from "node:path";
 import { runProcess, runProcessOrThrow } from "../cli/process.ts";
 import { type RevisePrCliOptions } from "../cli/args.ts";
 import { type WorkflowThinkingStage } from "../workflow/thinking.ts";
-import { effectiveModelForStage } from "../workflow/model-routing.ts";
-import { artifactOutcome } from "../workflow/markdown-token.ts";
+import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import { buildCommitArgv } from "../autorun/publish.ts";
 import {
   classifyVerificationFailure,
-  formatCompleteVerificationArtifact,
-  formatVerificationArtifact,
+  writeVerificationArtifacts,
   verificationFailureReason,
   type VerificationResult,
   runVerification,
@@ -58,7 +56,10 @@ import {
   revisionFeedbackDispositions,
   revisionExecutionArtifactDefinition,
 } from "./execution.ts";
-import { runStructuredArtifact } from "../structured-output/runner.ts";
+import {
+  runStructuredArtifact,
+  type StructuredArtifactDefinition,
+} from "../structured-output/runner.ts";
 export type PrRevisionOutcome =
   | "no-action-needed"
   | "needs-human"
@@ -280,16 +281,12 @@ export const runPrRevision = Effect.fn("runPrRevision")(function* (
         ...(fixPassesUsed > 0 ? { pass: fixPassesUsed } : {}),
       },
     });
-    yield* writePrRevisionArtifact(
-      context,
-      "verification.md",
-      formatVerificationArtifact(verification),
-    );
-    yield* writePrRevisionArtifact(
-      context,
-      "verification-full.md",
-      formatCompleteVerificationArtifact(verification),
-    );
+    yield* writeVerificationArtifacts(verification, {
+      writeSummary: (content) =>
+        writePrRevisionArtifact(context, "verification.md", content),
+      writeFull: (content) =>
+        writePrRevisionArtifact(context, "verification-full.md", content),
+    });
     (yield* Presentation).artifact(
       prRevisionArtifactRelativePath(context, "verification.md"),
     );
@@ -331,16 +328,20 @@ export const runPrRevision = Effect.fn("runPrRevision")(function* (
       `Verification repair will run as fix pass ${pass}`,
     );
     const verificationBeforeFixArtifact = `verification-before-fix-${pass}.md`;
-    yield* writePrRevisionArtifact(
-      context,
-      verificationBeforeFixArtifact,
-      formatVerificationArtifact(verification),
-    );
-    yield* writePrRevisionArtifact(
-      context,
-      `verification-before-fix-${pass}-full.md`,
-      formatCompleteVerificationArtifact(verification),
-    );
+    yield* writeVerificationArtifacts(verification, {
+      writeSummary: (content) =>
+        writePrRevisionArtifact(
+          context,
+          verificationBeforeFixArtifact,
+          content,
+        ),
+      writeFull: (content) =>
+        writePrRevisionArtifact(
+          context,
+          `verification-before-fix-${pass}-full.md`,
+          content,
+        ),
+    });
     (yield* Presentation).artifact(
       prRevisionArtifactRelativePath(context, verificationBeforeFixArtifact),
     );
@@ -436,6 +437,53 @@ export const runPrRevision = Effect.fn("runPrRevision")(function* (
     verification,
   } satisfies PrRevisionResult;
 }, Effect.scoped);
+const runRevisionArtifactPhase = Effect.fn("runRevisionArtifactPhase")(
+  function* <T>(
+    context: PrRevisionContext,
+    input: {
+      phaseId: string;
+      label: string;
+      artifact: string;
+      thinkingStage: WorkflowThinkingStage;
+      operation: AgentDisplayContext["operation"];
+      prompt: string;
+      pass?: number | undefined;
+    },
+    definition: StructuredArtifactDefinition<T>,
+    outcomeFor?: (value: T) => string,
+  ) {
+    const display = revisionDisplay(context, input, input.operation);
+    const artifact = yield* runPresentedPhase(
+      display,
+      () =>
+        runStructuredArtifact(
+          createAgentRunRequest(context, input.thinkingStage, {
+            cwd: context.agentCwd,
+            systemPrompt: sharedSystemPrompt,
+            prompt: input.prompt,
+            fileEditingToolsEnabled: input.operation === "edit",
+            display,
+          }),
+          definition,
+          {
+            writeJson: (content) =>
+              writePrRevisionArtifact(context, input.artifact, content),
+            writeMarkdown: (content) =>
+              writePrRevisionArtifact(
+                context,
+                input.artifact.replace(/\.json$/, ".md"),
+                content,
+              ),
+          },
+        ),
+      (result) => ({
+        outcome: outcomeFor?.(result.value) ?? "completed",
+        artifact: display.expectedArtifact,
+      }),
+    );
+    return artifact.value;
+  },
+);
 const runRevisionExecutionPhase = Effect.fn("runRevisionExecutionPhase")(
   function* (
     context: PrRevisionContext,
@@ -450,81 +498,32 @@ const runRevisionExecutionPhase = Effect.fn("runRevisionExecutionPhase")(
       pass?: number | undefined;
     },
   ) {
-    const display = revisionDisplay(context, input, "edit");
-    const artifact = yield* runPresentedPhase(
-      display,
-      () =>
-        runStructuredArtifact(
-          {
-            cwd: context.agentCwd,
-            model: effectiveModelForStage(context.model, input.thinkingStage),
-            thinkingLevel: context.thinkingConfig[input.thinkingStage],
-            systemPrompt: sharedSystemPrompt,
-            prompt: input.prompt,
-            fileEditingToolsEnabled: true,
-            display,
-          },
-          revisionExecutionArtifactDefinition(input.title, input.plan),
-          {
-            writeJson: (content) =>
-              writePrRevisionArtifact(context, input.artifact, content),
-            writeMarkdown: (content) =>
-              writePrRevisionArtifact(
-                context,
-                input.artifact.replace(/\.json$/, ".md"),
-                content,
-              ),
-          },
-        ),
-      (result) => ({
-        outcome: artifactOutcome(result.markdown),
-        artifact: display.expectedArtifact,
-      }),
-      undefined,
+    return yield* runRevisionArtifactPhase(
+      context,
+      { ...input, operation: "edit" },
+      revisionExecutionArtifactDefinition(input.title, input.plan),
     );
-    return artifact.value;
   },
 );
 const runRevisionPlanPhase = Effect.fn("runRevisionPlanPhase")(function* (
   context: PrRevisionContext,
   feedbackSources: readonly RevisionFeedbackSource[],
 ) {
-  const input = {
-    phaseId: "revision-plan",
-    label: "Revision plan",
-    artifact: "revision-plan.json",
-  };
-  const display = revisionDisplay(context, input, "inspect");
-  const artifact = yield* runPresentedPhase(
-    display,
-    () =>
-      runStructuredArtifact(
-        {
-          cwd: context.agentCwd,
-          model: effectiveModelForStage(context.model, "revisionPlan"),
-          thinkingLevel: context.thinkingConfig.revisionPlan,
-          systemPrompt: sharedSystemPrompt,
-          prompt: revisionPlanPrompt(context),
-          fileEditingToolsEnabled: false,
-          display,
-        },
-        revisionPlanArtifactDefinition(
-          new Set(feedbackSources.map((source) => source.id)),
-        ),
-        {
-          writeJson: (content) =>
-            writePrRevisionArtifact(context, "revision-plan.json", content),
-          writeMarkdown: (content) =>
-            writePrRevisionArtifact(context, "revision-plan.md", content),
-        },
-      ),
-    (result) => ({
-      outcome: artifactOutcome(result.markdown),
-      artifact: display.expectedArtifact,
-    }),
-    undefined,
+  return yield* runRevisionArtifactPhase(
+    context,
+    {
+      phaseId: "revision-plan",
+      label: "Revision plan",
+      artifact: "revision-plan.json",
+      thinkingStage: "revisionPlan",
+      operation: "inspect",
+      prompt: revisionPlanPrompt(context),
+    },
+    revisionPlanArtifactDefinition(
+      new Set(feedbackSources.map((source) => source.id)),
+    ),
+    (plan) => plan.status,
   );
-  return artifact.value;
 });
 const runRevisionReviewAgent = Effect.fn("runRevisionReviewAgent")(function* (
   context: PrRevisionContext,
@@ -536,43 +535,16 @@ const runRevisionReviewAgent = Effect.fn("runRevisionReviewAgent")(function* (
     pass?: number | undefined;
   },
 ) {
-  const display = revisionDisplay(context, input, "review");
-  const artifact = yield* runPresentedPhase(
-    display,
-    () =>
-      runStructuredArtifact(
-        {
-          cwd: context.agentCwd,
-          model: effectiveModelForStage(context.model, "revisionReview"),
-          thinkingLevel: context.thinkingConfig.revisionReview,
-          systemPrompt: sharedSystemPrompt,
-          prompt: input.prompt,
-          fileEditingToolsEnabled: false,
-          display,
-        },
-        reviewArtifactDefinition({
-          allowRestart: false,
-          title: input.label,
-          source: "revision-review",
-        }),
-        {
-          writeJson: (content) =>
-            writePrRevisionArtifact(context, input.artifact, content),
-          writeMarkdown: (content) =>
-            writePrRevisionArtifact(
-              context,
-              input.artifact.replace(/\.json$/, ".md"),
-              content,
-            ),
-        },
-      ),
-    (result) => ({
-      outcome: artifactOutcome(result.markdown),
-      artifact: display.expectedArtifact,
+  return yield* runRevisionArtifactPhase(
+    context,
+    { ...input, thinkingStage: "revisionReview", operation: "review" },
+    reviewArtifactDefinition({
+      allowRestart: false,
+      title: input.label,
+      source: "revision-review",
     }),
-    undefined,
+    reviewDisposition,
   );
-  return artifact.value;
 });
 function revisionDisplay(
   context: PrRevisionContext,

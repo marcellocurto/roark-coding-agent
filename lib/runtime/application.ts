@@ -10,17 +10,14 @@ import {
   type IssuePublishing,
   issuePublishingLayer,
 } from "../issue-publishing/service.ts";
-import {
-  type RunObservation,
-  runObservationLayer,
-} from "../observability/observer.ts";
+import { RunObservation } from "../observability/observer.ts";
 import { type AttemptStore, attemptStoreLayer } from "../autorun/attempts.ts";
 import {
   type ArtifactStore,
   artifactStoreLayer,
 } from "../workflow/artifact-store.ts";
 import { agentExecutionLayer } from "../pi/agent.ts";
-import { type GitHub, gitHubLayer } from "../github/service.ts";
+import { GitHub } from "../github/service.ts";
 import {
   type Presentation,
   type AgentExecution,
@@ -41,14 +38,13 @@ export const applicationServicesLayer = Layer.suspend(() =>
     ),
     verificationLayer,
     workspaceLayer,
-    revisionReportingLayer.pipe(Layer.provide(gitHubLayer)),
-    gitHubLayer,
+    revisionReportingLayer,
     agentExecutionLayer,
     artifactStoreLayer,
     attemptStoreLayer,
-    runObservationLayer,
-    issuePublishingLayer.pipe(Layer.provide(gitHubLayer)),
-  ),
+    RunObservation.layer,
+    issuePublishingLayer,
+  ).pipe(Layer.provideMerge(GitHub.layer)),
 );
 export const applicationLayer = Layer.suspend(() =>
   applicationServicesLayer.pipe(

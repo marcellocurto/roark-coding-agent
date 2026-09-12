@@ -38,6 +38,23 @@ function context(cwd: string, attempt?: number): WorkflowContext {
   });
 }
 describe("observability event writing", () => {
+  test("a file observer retains its filesystem without freezing the clock at construction", async () => {
+    const runContext = context(await tempDir());
+    const observer = await runApplicationPromise(
+      createFileRunObserver(runContext).pipe(
+        Effect.provide(fixedWallClock("2000-01-01T00:00:00.000Z")),
+      ),
+    );
+    await runApplicationPromise(
+      observer
+        .runStarted({})
+        .pipe(Effect.provide(fixedWallClock("2001-01-01T00:00:00.000Z"))),
+    );
+    const summary = await runApplicationPromise(
+      readRunSummary(path.join(runContext.runDir, "summary.json")),
+    );
+    expect(summary?.startedAt).toBe("2001-01-01T00:00:00.000Z");
+  });
   test("appends sanitized JSONL events", async () => {
     const cwd = await tempDir();
     const runDir = path.join(cwd, ".roark/runs/issue/42");

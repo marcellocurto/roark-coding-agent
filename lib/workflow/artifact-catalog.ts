@@ -1,61 +1,39 @@
-export type StaticArtifactName =
-  | "issue"
-  | "triage"
-  | "executionStop"
-  | "continuationState"
-  | "continuationInput"
-  | "continuationReview"
-  | "continuationReviewMarkdown"
-  | "triageMarkdown"
-  | "implementationPlanDraft"
-  | "implementationPlanDraftMarkdown"
-  | "implementationPlan"
-  | "implementationPlanMarkdown"
-  | "preImplementationBaseline"
-  | "implementationLog"
-  | "implementationLogMarkdown"
-  | "prDraft"
-  | "prDraftMarkdown"
-  | "readiness"
-  | "readinessMarkdown"
-  | "verification"
-  | "verificationFull"
-  | "metadata"
-  | "issueCurationPlan"
-  | "issueDrafts"
-  | "issueDraftsMarkdown"
-  | "issueCreationResults";
-
-export type NumberedArtifactName =
-  | "fixLog"
-  | "fixLogMarkdown"
-  | "verificationBeforeFix"
-  | "verificationBeforeFixFull"
-  | "implementationRestartLog"
-  | "refinementLog"
-  | "refinementLogMarkdown"
-  | "reviewA"
-  | "reviewB"
-  | "reviewAMarkdown"
-  | "reviewBMarkdown"
-  | "baselineResetLog";
-
-export type ArtifactRef =
-  | StaticArtifactName
-  | { name: NumberedArtifactName; pass: number };
-
-export interface StaticArtifactDefinition {
-  readonly name: StaticArtifactName;
+export type ArtifactFamily = "review" | "change-report";
+interface StaticArtifactMetadata {
+  readonly name: string;
   readonly filename: string;
   readonly displayName: string;
+  readonly family?: ArtifactFamily;
+  readonly markdownSibling?: string;
 }
-
-export interface NumberedArtifactDefinition {
-  readonly name: NumberedArtifactName;
+interface NumberedArtifactMetadata {
+  readonly name: string;
   readonly filenamePrefix: string;
   readonly filenameSuffix?: string;
   readonly displayName: string;
-  readonly extension?: "md" | "json" | undefined;
+  readonly extension?: "md" | "json";
+  readonly family?: ArtifactFamily;
+  readonly markdownSibling?: string;
+  readonly requiredHeadingPrefix?: string;
+}
+export type StaticArtifactName = (typeof STATIC_ARTIFACTS)[number]["name"];
+export type NumberedArtifactName = (typeof NUMBERED_ARTIFACTS)[number]["name"];
+export type ArtifactRef =
+  | StaticArtifactName
+  | { name: NumberedArtifactName; pass: number };
+export interface StaticArtifactDefinition extends Omit<
+  StaticArtifactMetadata,
+  "name" | "markdownSibling"
+> {
+  readonly name: StaticArtifactName;
+  readonly markdownSibling?: StaticArtifactName;
+}
+export interface NumberedArtifactDefinition extends Omit<
+  NumberedArtifactMetadata,
+  "name" | "markdownSibling"
+> {
+  readonly name: NumberedArtifactName;
+  readonly markdownSibling?: NumberedArtifactName;
 }
 
 export interface ArtifactIdentity {
@@ -70,7 +48,7 @@ export interface ArtifactContract {
   readonly requiredHeading?: string;
 }
 
-export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
+export const STATIC_ARTIFACTS = [
   {
     name: "continuationState",
     filename: "continuation-state.json",
@@ -130,6 +108,8 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
   },
   {
     name: "implementationLog",
+    family: "change-report",
+    markdownSibling: "implementationLogMarkdown",
     filename: "implementation-log.json",
     displayName: "Implementation Log",
   },
@@ -181,11 +161,13 @@ export const STATIC_ARTIFACTS: readonly StaticArtifactDefinition[] = [
     filename: "issue-creation-results.json",
     displayName: "Issue Creation Results",
   },
-] as const;
+] as const satisfies readonly StaticArtifactMetadata[];
 
-export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
+export const NUMBERED_ARTIFACTS = [
   {
     name: "fixLog",
+    family: "change-report",
+    markdownSibling: "fixLogMarkdown",
     filenamePrefix: "fix-log",
     displayName: "Fix Log",
     extension: "json",
@@ -208,11 +190,14 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   },
   {
     name: "implementationRestartLog",
+    requiredHeadingPrefix: "Implementation Restart Log",
     filenamePrefix: "implementation-restart-log",
     displayName: "Implementation Restart Log",
   },
   {
     name: "refinementLog",
+    family: "change-report",
+    markdownSibling: "refinementLogMarkdown",
     filenamePrefix: "refinement-log",
     displayName: "Refinement Log",
     extension: "json",
@@ -224,12 +209,16 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   },
   {
     name: "reviewA",
+    family: "review",
+    markdownSibling: "reviewAMarkdown",
     filenamePrefix: "review-a",
     displayName: "Review A",
     extension: "json",
   },
   {
     name: "reviewB",
+    family: "review",
+    markdownSibling: "reviewBMarkdown",
     filenamePrefix: "review-b",
     displayName: "Review B",
     extension: "json",
@@ -246,10 +235,11 @@ export const NUMBERED_ARTIFACTS: readonly NumberedArtifactDefinition[] = [
   },
   {
     name: "baselineResetLog",
+    requiredHeadingPrefix: "Baseline Reset",
     filenamePrefix: "baseline-reset",
     displayName: "Baseline Reset",
   },
-] as const;
+] as const satisfies readonly NumberedArtifactMetadata[];
 
 export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] =
   [
@@ -263,50 +253,60 @@ export const ISSUE_CURATION_STATIC_ARTIFACT_REFS: readonly StaticArtifactName[] 
     "verification",
   ] as const;
 
+const staticDefinitions = new Map<StaticArtifactName, StaticArtifactDefinition>(
+  STATIC_ARTIFACTS.map((artifact) => [artifact.name, artifact]),
+);
+const numberedDefinitions = new Map<
+  NumberedArtifactName,
+  NumberedArtifactDefinition
+>(NUMBERED_ARTIFACTS.map((artifact) => [artifact.name, artifact]));
+
 function staticArtifactByName(
   name: StaticArtifactName,
 ): StaticArtifactDefinition {
-  const definition = STATIC_ARTIFACTS.find(
-    (artifact) => artifact.name === name,
-  );
+  const definition = staticDefinitions.get(name);
   if (!definition) throw new Error(`Unknown static artifact: ${name}`);
   return definition;
 }
-
 function numberedArtifactByName(
   name: NumberedArtifactName,
 ): NumberedArtifactDefinition {
-  const definition = NUMBERED_ARTIFACTS.find(
-    (artifact) => artifact.name === name,
-  );
+  const definition = numberedDefinitions.get(name);
   if (!definition) throw new Error(`Unknown numbered artifact: ${name}`);
   return definition;
 }
+type ArtifactOfFamily<F extends ArtifactFamily> =
+  | Extract<(typeof STATIC_ARTIFACTS)[number], { family: F }>["name"]
+  | {
+      name: Extract<(typeof NUMBERED_ARTIFACTS)[number], { family: F }>["name"];
+      pass: number;
+    };
 
-const staticContracts: Partial<Record<StaticArtifactName, ArtifactContract>> =
-  {};
-
-const numberedContracts: Record<
-  NumberedArtifactName,
-  (pass: number) => ArtifactContract
-> = {
-  fixLog: () => ({}),
-  fixLogMarkdown: () => ({}),
-  verificationBeforeFix: () => ({}),
-  verificationBeforeFixFull: () => ({}),
-  implementationRestartLog: (pass) => ({
-    requiredHeading: `Implementation Restart Log Pass ${pass}`,
-  }),
-  refinementLog: () => ({}),
-  refinementLogMarkdown: () => ({}),
-  reviewA: () => ({}),
-  reviewB: () => ({}),
-  reviewAMarkdown: () => ({}),
-  reviewBMarkdown: () => ({}),
-  baselineResetLog: (pass) => ({
-    requiredHeading: `Baseline Reset Pass ${pass}`,
-  }),
-};
+export function artifactFamily(
+  artifact: ArtifactRef,
+): ArtifactFamily | undefined {
+  return typeof artifact === "string"
+    ? staticArtifactByName(artifact).family
+    : numberedArtifactByName(artifact.name).family;
+}
+export function isReviewArtifact(
+  artifact: ArtifactRef | undefined,
+): artifact is ArtifactOfFamily<"review"> {
+  return artifact !== undefined && artifactFamily(artifact) === "review";
+}
+export function isChangeReportArtifact(
+  artifact: ArtifactRef | undefined,
+): artifact is ArtifactOfFamily<"change-report"> {
+  return artifact !== undefined && artifactFamily(artifact) === "change-report";
+}
+export function artifactMarkdownSibling(
+  artifact: ArtifactRef,
+): ArtifactRef | undefined {
+  if (typeof artifact === "string")
+    return staticArtifactByName(artifact).markdownSibling;
+  const name = numberedArtifactByName(artifact.name).markdownSibling;
+  return name === undefined ? undefined : { name, pass: artifact.pass };
+}
 
 export function fixLogRef(pass: number): { name: "fixLog"; pass: number } {
   return { name: "fixLog", pass };
@@ -395,6 +395,25 @@ export function artifactIdentity(artifact: ArtifactRef): ArtifactIdentity {
 export function artifactContract(
   artifact: ArtifactRef,
 ): ArtifactContract | undefined {
-  if (typeof artifact === "string") return staticContracts[artifact];
-  return numberedContracts[artifact.name](artifact.pass);
+  if (typeof artifact === "string") return undefined;
+  const prefix = numberedArtifactByName(artifact.name).requiredHeadingPrefix;
+  return prefix === undefined
+    ? {}
+    : { requiredHeading: `${prefix} Pass ${artifact.pass}` };
+}
+
+export function artifactFromFilename(
+  filename: string,
+): ArtifactRef | undefined {
+  const fixed = STATIC_ARTIFACTS.find((item) => item.filename === filename);
+  if (fixed) return fixed.name;
+  for (const item of numberedDefinitions.values()) {
+    const prefix = `${item.filenamePrefix}-`;
+    const suffix = `${item.filenameSuffix ?? ""}.${item.extension ?? "md"}`;
+    if (!filename.startsWith(prefix) || !filename.endsWith(suffix)) continue;
+    const pass = filename.slice(prefix.length, -suffix.length);
+    if (/^\d+$/.test(pass) && Number.isSafeInteger(Number(pass)))
+      return { name: item.name, pass: Number(pass) };
+  }
+  return undefined;
 }
