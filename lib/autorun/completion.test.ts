@@ -1,3 +1,6 @@
+import { presentAutorunOutcome } from "../../roark.ts";
+import { Presenter } from "../presentation/presenter.ts";
+import { runWithPresenter } from "../testing/presentation.ts";
 import { GitHub } from "../github/service.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
@@ -73,7 +76,12 @@ const fakeGitHub = Effect.fnUntraced(function* () {
         input: Parameters<typeof github.postOrUpdateIssueCommentByMarker>[0],
       ) =>
         Effect.sync(() => {
-          const ref = { id: 45 + comments.length, marker: input.marker };
+          const id = 45 + comments.length;
+          const ref = {
+            id,
+            marker: input.marker,
+            url: `https://github.com/owner/repo/issues/12#issuecomment-${id}`,
+          };
           comments.push({ ...ref, body: input.body });
           return ref;
         }),
@@ -163,6 +171,32 @@ describe("completeAutorunWorkflow", () => {
           },
         ).pipe(Effect.provideService(GitHub, remote.service)),
       );
+      if (outcome.outcome === "verification-needs-fix")
+        throw new Error("Stop scheduled repair");
+      let output = "";
+      await runWithPresenter(
+        new Presenter({
+          stream: {
+            isTTY: true,
+            columns: 40,
+            write(chunk) {
+              output += chunk;
+            },
+          },
+          env: { TERM: "xterm" },
+          titleEnabled: false,
+        }),
+        presentAutorunOutcome({ issueNumber: 12, ...outcome }),
+      );
+      expect(output).toContain(
+        `https://github.com/owner/repo/issues/12#issuecomment-${scenario === "execution-question" ? 45 : 46}\n`,
+      );
+      expect(output).toContain(
+        scenario === "final-blocker"
+          ? "Issue #5 is open; verified dependency must ship first."
+          : "Should existing customer data be retained?",
+      );
+      expect(output).toContain(context.runDirRelative);
       expect(publishCalls).toBe(0);
       expect(outcome.outcome).toBe(
         scenario === "execution-question"
@@ -226,7 +260,7 @@ describe("completeAutorunWorkflow", () => {
         );
       }).pipe(Effect.provideService(GitHub, remote.service)),
     );
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       outcome: "triage-stopped",
       outcomeDetail: 'triage verdict is "blocked"',
     });
@@ -272,6 +306,14 @@ describe("completeAutorunWorkflow", () => {
             return {
               outcome: "failed-readiness" as const,
               outcomeDetail: "readiness status is missing",
+              report: {
+                published: false,
+                issueUrl: issue.url,
+                commentUrl: undefined,
+                reason: "readiness status is missing",
+                artifactPath: `${workflowContext.runDirRelative}/readiness.json`,
+                runDirectory: workflowContext.runDirRelative,
+              },
             };
           }),
           markWorkflowStopped: Effect.fnUntraced(function* () {
@@ -282,7 +324,7 @@ describe("completeAutorunWorkflow", () => {
         },
       ),
     );
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       outcome: "failed-readiness",
       outcomeDetail: "readiness status is missing",
     });

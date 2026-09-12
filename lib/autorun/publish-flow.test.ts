@@ -1,4 +1,6 @@
 import { GitHub } from "../github/service.ts";
+import { GitHubRequestError } from "../github/errors.ts";
+import { presentAutorunOutcome } from "../../roark.ts";
 import { publishIssueLedgerComment } from "./ledger-comments.ts";
 import type { AttemptMetadata } from "./attempts.ts";
 import { Schema, Effect, PlatformError } from "effect";
@@ -26,6 +28,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { getWorkflowThinkingConfig } from "../workflow/thinking.ts";
 import {
+  handleNonPublish,
   createReviewerIssuesAfterPr,
   planVerificationRepair,
   runPublishGate,
@@ -43,6 +46,106 @@ afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
 });
 describe("verification repair planning", () => {
+  test.each([true, false])(
+    "failure reports preserve current GitHub publication=%s",
+    async (published) => {
+      const context = await tempContext(1);
+      const metadata: AttemptMetadata = attemptMetadata(context);
+      const issueUrl = "https://github.com/owner/repo/issues/1";
+      metadata.githubComments = {
+        issue: {
+          "attempt-status": {
+            id: 98,
+            url: `${issueUrl}#issuecomment-98`,
+            marker: "old",
+            updatedAt: "2026-01-01T00:00:00Z",
+          },
+        },
+      };
+      await runApplicationPromise(
+        writeArtifact(
+          context,
+          "verification",
+          "# Verification\n\nDependency command unavailable",
+        ),
+      );
+      let output = "";
+      await runWithPresenter(
+        new Presenter({
+          stream: {
+            isTTY: true,
+            columns: 40,
+            write(chunk) {
+              output += chunk;
+            },
+          },
+          env: { TERM: "xterm" },
+          titleEnabled: false,
+        }),
+        Effect.gen(function* () {
+          const report = yield* handleNonPublish({
+            options: {
+              cwd: context.controlCwd,
+              repo: "owner/repo",
+              verifyCommand: "bun test",
+              failureLabel: "failed",
+              successLabel: "done",
+              inProgressLabel: "busy",
+              remote: "origin",
+              baseBranch: "main",
+            },
+            issue: { number: 1, title: "Issue", url: issueUrl },
+            workflowContext: context,
+            attemptMetadata: metadata,
+            attemptMetadataPath: `${context.runDirRelative}/attempt.json`,
+            decision: {
+              publish: false,
+              phase: "verification",
+              reason: "Dependency command unavailable",
+              artifactPath: "verification.md",
+            },
+          });
+          yield* presentAutorunOutcome({
+            issueNumber: 1,
+            outcome: "failed-verification",
+            outcomeDetail: "Verification failed",
+            report,
+          });
+        }).pipe(
+          Effect.updateService(GitHub, (github) => ({
+            ...github,
+            addIssueLabel: () => Effect.void,
+            removeIssueLabel: () => Effect.void,
+            postOrUpdateIssueCommentByMarker: (input) => {
+              expect(input.existingCommentId).toBe(98);
+              expect(input.marker).toContain("phase=attempt-status");
+              return published
+                ? Effect.succeed({
+                    id: 99,
+                    url: `${issueUrl}#issuecomment-99`,
+                    marker: input.marker,
+                  })
+                : Effect.fail(
+                    new GitHubRequestError({ message: "GitHub unavailable" }),
+                  );
+            },
+          })),
+        ),
+      );
+      expect(output).toContain(
+        `${issueUrl}${published ? "#issuecomment-99" : ""}\n`,
+      );
+      expect(output).not.toContain("#issuecomment-98");
+      expect(metadata.githubComments.issue?.["attempt-status"]?.id).toBe(
+        published ? 99 : 98,
+      );
+      expect(output).toContain("reason: Dependency command unavailable");
+      expect(output).toContain(`${context.runDirRelative}/verification.md\n`);
+      expect(output.includes("Could not post the report to GitHub")).toBe(
+        !published,
+      );
+    },
+  );
   test("archives failed verification and schedules the next shared fix pass", async () => {
     const context = await tempContext(2);
     const repair = await runApplicationPromise(
@@ -381,9 +484,19 @@ describe("verification repair planning", () => {
           attemptMetadataPath: ".roark/runs/issue/1/attempts/1/attempt.json",
         },
         {
-          handleNonPublish: Effect.fnUntraced(function* () {
+          handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
             yield* Effect.void;
-            return undefined;
+            return {
+              published: false,
+              artifactPath: path.join(
+                context.runDirRelative,
+                decision.artifactPath,
+              ),
+              runDirectory: context.runDirRelative,
+              issueUrl: undefined,
+              commentUrl: undefined,
+              reason: decision.reason,
+            };
           }),
           postPrIssueCreation: Effect.fnUntraced(function* () {
             yield* Effect.void;
@@ -464,9 +577,19 @@ describe("verification repair planning", () => {
             yield* Effect.void;
             return undefined;
           }),
-          handleNonPublish: Effect.fnUntraced(function* () {
+          handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
             yield* Effect.void;
-            return undefined;
+            return {
+              published: false,
+              artifactPath: path.join(
+                context.runDirRelative,
+                decision.artifactPath,
+              ),
+              runDirectory: context.runDirRelative,
+              issueUrl: undefined,
+              commentUrl: undefined,
+              reason: decision.reason,
+            };
           }),
           postPrIssueCreation: Effect.fnUntraced(function* () {
             yield* Effect.void;
@@ -730,11 +853,21 @@ describe("verification repair planning", () => {
             handleNonPublish: Effect.fnUntraced(function* ({ decision }) {
               yield* Effect.void;
               failureComment = decision.reason;
-              return undefined;
+              return {
+                published: false,
+                artifactPath: path.join(
+                  context.runDirRelative,
+                  decision.artifactPath,
+                ),
+                runDirectory: context.runDirRelative,
+                issueUrl: undefined,
+                commentUrl: undefined,
+                reason: decision.reason,
+              };
             }),
           },
         );
-        expect(outcome).toEqual({
+        expect(outcome).toMatchObject({
           outcome: "failed-verification" as const,
           outcomeDetail:
             "verification command exited 127 because a required command was not found. Install dependencies in the verification workspace or configure hooks.beforeVerify, for example: bun install --frozen-lockfile.",

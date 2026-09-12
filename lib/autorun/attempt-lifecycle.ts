@@ -1,5 +1,5 @@
+import type { OutcomeReport } from "../presentation/presenter.ts";
 import { buildRoarkMarker } from "../github/comments.ts";
-import { recordAttemptIssueComment } from "./attempts.ts";
 import type { WorkspaceFailure } from "./workspace.ts";
 import {
   createFileRunObserver,
@@ -39,6 +39,7 @@ import { finalizeAttemptObservability } from "./observability.ts";
 import {
   attemptMetadataRelativePath,
   formatAttemptMetadata,
+  recordAttemptIssueComment,
   type AttemptMetadata,
   type AttemptOutcome,
 } from "./attempts.ts";
@@ -107,6 +108,7 @@ export interface AutorunAttemptResult {
   issueNumber: number;
   outcome: AttemptOutcome;
   outcomeDetail: string | null;
+  report?: OutcomeReport;
 }
 
 export interface RunAutorunAttemptLifecycleInjected {
@@ -210,6 +212,9 @@ export const runAutorunAttemptLifecycle = Effect.fn(
           issueNumber: input.attemptMetadata.issueNumber,
           outcome,
           outcomeDetail,
+          ...("report" in terminalOutcome
+            ? { report: terminalOutcome.report }
+            : {}),
         };
       }),
     ),
@@ -400,6 +405,14 @@ const markWorkflowError = Effect.fn("markWorkflowError")(function* (
       ref,
       DateTime.formatIso(yield* DateTime.now),
     );
+  (yield* Presentation).outcomeReport({
+    reason: formatError(error),
+    issueUrl: issue.url,
+    commentUrl: ref?.url,
+    published: ref !== undefined,
+    artifactPath: errorArtifact?.path ?? attemptMetadataPath,
+    runDirectory: input.workflowContext.runDirRelative,
+  });
 });
 
 const resolveIssue = Effect.fn("resolveIssue")(function* (

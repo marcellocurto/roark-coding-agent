@@ -1,3 +1,4 @@
+import type { OutcomeReport } from "../presentation/presenter.ts";
 import { sanitizePublicMarkdown } from "./public-output.ts";
 import { DateTime } from "effect";
 import { Workspace } from "./workspace-service.ts";
@@ -63,6 +64,7 @@ export type PublishGateOutcome =
   | {
       outcome: "published" | "failed-readiness" | "failed-verification";
       outcomeDetail: string | null;
+      report?: OutcomeReport;
     }
   | {
       outcome: "verification-needs-fix";
@@ -289,7 +291,7 @@ export const runPublishGate = Effect.fn("runPublishGate")(function* (
       `ACTION user action required: ${classification.recoveryGuidance ?? decision.reason}`,
     );
   }
-  yield* nonPublish({
+  const report = yield* nonPublish({
     options,
     issue,
     workflowContext,
@@ -304,6 +306,7 @@ export const runPublishGate = Effect.fn("runPublishGate")(function* (
         ? "failed-verification"
         : "failed-readiness",
     outcomeDetail: decision.reason,
+    report,
   } satisfies PublishGateOutcome;
 });
 export const createReviewerIssuesAfterPr = Effect.fn(
@@ -448,6 +451,14 @@ export const handleNonPublish = Effect.fn("handleNonPublish")(
         ref,
         DateTime.formatIso(yield* DateTime.now),
       );
+    return {
+      issueUrl: issue.url,
+      commentUrl: ref?.url,
+      published: ref !== undefined,
+      reason: decision.reason,
+      artifactPath,
+      runDirectory: workflowContext.runDirRelative,
+    } satisfies OutcomeReport;
   },
 );
 const readReadinessResult = Effect.fn("readReadinessResult")(function* (
