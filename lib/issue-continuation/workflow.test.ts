@@ -290,9 +290,16 @@ test("a comment that does not answer the question keeps the run stopped", async 
       .terminalStatus,
   ).toEqual(result);
 });
-test.each([true, false])(
-  "preserves verification evidence when extending the fix budget (full report: %s)",
-  async (hasFullReport) => {
+test.each([
+  { hasFullReport: true, explicit: false, staleArchive: false },
+  { hasFullReport: false, explicit: false, staleArchive: false },
+  { hasFullReport: true, explicit: true, staleArchive: false },
+  { hasFullReport: true, explicit: true, staleArchive: true },
+  { hasFullReport: false, explicit: true, staleArchive: true },
+])(
+  "preserves current verification evidence for a resumed fix (%j)",
+  async ({ hasFullReport, explicit, staleArchive }) => {
+    const resumedPass = explicit ? 1 : 2;
     const { context } = await fixture();
     context.maxFixPasses = 1;
     await runApplicationPromise(
@@ -345,10 +352,31 @@ test.each([true, false])(
     expect(summary).not.toContain("Earlier diagnostic");
     if (!hasFullReport)
       await rm(path.join(context.runDir, "verification-full.md"));
+    if (staleArchive) {
+      await runApplicationPromise(
+        writeArtifact(
+          context,
+          verificationBeforeFixRef(resumedPass),
+          "Old failure",
+        ),
+      );
+      await runApplicationPromise(
+        writeArtifact(
+          context,
+          verificationBeforeFixFullRef(resumedPass),
+          "Old full failure",
+        ),
+      );
+    }
     context.maxFixPasses = 2;
     const runner: AgentRunner = Effect.fnUntraced(function* (request) {
       return yield* Effect.tryPromise(() =>
-        submitContinuation(request, continuationResult()),
+        submitContinuation(
+          request,
+          continuationResult(
+            explicit ? { resumeFrom: "fix", pass: resumedPass } : {},
+          ),
+        ),
       );
     });
     await runApplicationPromise(
@@ -367,26 +395,28 @@ test.each([true, false])(
     ).toMatchObject({
       type: "run",
       phase: "fix",
-      pass: 2,
+      pass: resumedPass,
     });
-    expect(await runApplicationPromise(fixPrompt(context, 2))).toContain(
-      `<artifact kind="failed_verification">${context.runDirRelative}/verification-before-fix-2.md</artifact>`,
+    expect(
+      await runApplicationPromise(fixPrompt(context, resumedPass)),
+    ).toContain(
+      `<artifact kind="failed_verification">${context.runDirRelative}/verification-before-fix-${resumedPass}.md</artifact>`,
     );
     expect(
       await runApplicationPromise(
-        readArtifact(context, verificationBeforeFixRef(2)),
+        readArtifact(context, verificationBeforeFixRef(resumedPass)),
       ),
     ).toBe(summary);
     if (hasFullReport) {
       expect(
         await runApplicationPromise(
-          readArtifact(context, verificationBeforeFixFullRef(2)),
+          readArtifact(context, verificationBeforeFixFullRef(resumedPass)),
         ),
       ).toBe(full);
     } else {
       expect(
         await runApplicationPromise(
-          artifactExists(context, verificationBeforeFixFullRef(2)),
+          artifactExists(context, verificationBeforeFixFullRef(resumedPass)),
         ),
       ).toBe(false);
     }

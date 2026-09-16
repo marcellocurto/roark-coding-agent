@@ -371,25 +371,28 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
       const next = (yield* planContinuation(context, {
         attemptOutcome: options.priorOutcome,
       }))[0];
-      if (next?.type === "run" && next.phase === "fix") {
-        const pass = next.pass ?? 1;
-        const verificationReplacements: Record<string, string> = {};
-        // Bind the original evidence to this repair in the durable checkpoint.
-        // The summary can be truncated, so preserve the full report separately.
-        for (const [source, target] of [
-          ["verification", verificationBeforeFixRef(pass)],
-          ["verificationFull", verificationBeforeFixFullRef(pass)],
-        ] as const) {
-          const content = saved[artifactFilename(source)];
-          if (content !== undefined)
-            verificationReplacements[artifactFilename(target)] = content;
-        }
-        ready = {
-          ...ready,
-          resumeFrom: "fix",
-          pass,
-          replacements: { ...ready.replacements, ...verificationReplacements },
-        };
+      if (next?.type === "run" && next.phase === "fix")
+        ready = { ...ready, resumeFrom: "fix", pass: next.pass ?? 1 };
+    }
+    if (
+      options.priorOutcome === "failed-verification" &&
+      ready.resumeFrom === "fix" &&
+      ready.pass !== null
+    ) {
+      // Bind current evidence to the selected repair in the durable checkpoint,
+      // including explicit resumptions of a pass with an older failure archive.
+      for (const [source, target] of [
+        ["verification", verificationBeforeFixRef(ready.pass)],
+        ["verificationFull", verificationBeforeFixFullRef(ready.pass)],
+      ] as const) {
+        const filename = artifactFilename(target);
+        const content = saved[artifactFilename(source)];
+        ready.invalidated.push(filename);
+        if (content !== undefined)
+          ready = {
+            ...ready,
+            replacements: { ...ready.replacements, [filename]: content },
+          };
       }
     }
     yield* writeContinuationState(context, ready);
