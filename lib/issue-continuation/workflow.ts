@@ -27,6 +27,8 @@ import { runPresentedPhase } from "../presentation/phase.ts";
 import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import {
   artifactFilename,
+  verificationBeforeFixRef,
+  verificationBeforeFixFullRef,
   writeArtifact,
   writeJsonArtifact,
   type WorkflowContext,
@@ -370,7 +372,24 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
         attemptOutcome: options.priorOutcome,
       }))[0];
       if (next?.type === "run" && next.phase === "fix") {
-        ready = { ...ready, resumeFrom: "fix", pass: next.pass ?? 1 };
+        const pass = next.pass ?? 1;
+        const verificationReplacements: Record<string, string> = {};
+        // Bind the original evidence to this repair in the durable checkpoint.
+        // The summary can be truncated, so preserve the full report separately.
+        for (const [source, target] of [
+          ["verification", verificationBeforeFixRef(pass)],
+          ["verificationFull", verificationBeforeFixFullRef(pass)],
+        ] as const) {
+          const content = saved[artifactFilename(source)];
+          if (content !== undefined)
+            verificationReplacements[artifactFilename(target)] = content;
+        }
+        ready = {
+          ...ready,
+          resumeFrom: "fix",
+          pass,
+          replacements: { ...ready.replacements, ...verificationReplacements },
+        };
       }
     }
     yield* writeContinuationState(context, ready);

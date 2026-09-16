@@ -17,7 +17,11 @@ import {
   reviewARef,
   reviewBRef,
   verificationBeforeFixRef,
+  verificationBeforeFixFullRef,
 } from "../workflow/artifacts.ts";
+import { fixPrompt } from "../prompts/workflow-prompts.ts";
+import { planVerificationRepair } from "../autorun/publish-flow.ts";
+import { writeVerificationArtifact } from "../autorun/verification.ts";
 import { runFullWorkflow } from "../workflow/phases.ts";
 import { planWorkflowProgression } from "../workflow/progression.ts";
 import { buildReadinessArtifacts } from "../workflow/readiness.ts";
@@ -286,6 +290,108 @@ test("a comment that does not answer the question keeps the run stopped", async 
       .terminalStatus,
   ).toEqual(result);
 });
+test.each([true, false])(
+  "preserves verification evidence when extending the fix budget (full report: %s)",
+  async (hasFullReport) => {
+    const { context } = await fixture();
+    context.maxFixPasses = 1;
+    await runApplicationPromise(
+      Effect.gen(function* () {
+        yield* writeJsonArtifact(context, "implementationLog", changeReport());
+        for (const pass of [0, 1]) {
+          if (pass > 0)
+            yield* writeArtifact(
+              context,
+              fixLogRef(pass),
+              JSON.stringify(changeReport()),
+            );
+          yield* writeArtifact(
+            context,
+            refinementLogRef(pass),
+            JSON.stringify(changeReport()),
+          );
+          yield* writeArtifact(
+            context,
+            reviewARef(pass),
+            JSON.stringify(reviewResult()),
+          );
+          yield* writeArtifact(
+            context,
+            reviewBRef(pass),
+            JSON.stringify(reviewResult()),
+          );
+        }
+        const failure = {
+          ok: false,
+          command: "bun test session.test.ts",
+          exitCode: 1,
+          stdout: "Earlier diagnostic\n" + "output\n".repeat(1000),
+          stderr: "Expected existing sessions to remain valid",
+        };
+        yield* writeVerificationArtifact(context, failure);
+        expect(yield* planVerificationRepair(context, failure)).toBeUndefined();
+        expect(
+          yield* artifactExists(context, verificationBeforeFixRef(2)),
+        ).toBe(false);
+      }),
+    );
+    const summary = await runApplicationPromise(
+      readArtifact(context, "verification"),
+    );
+    const full = await runApplicationPromise(
+      readArtifact(context, "verificationFull"),
+    );
+    expect(full).toContain("Earlier diagnostic");
+    expect(summary).not.toContain("Earlier diagnostic");
+    if (!hasFullReport)
+      await rm(path.join(context.runDir, "verification-full.md"));
+    context.maxFixPasses = 2;
+    const runner: AgentRunner = Effect.fnUntraced(function* (request) {
+      return yield* Effect.tryPromise(() =>
+        submitContinuation(request, continuationResult()),
+      );
+    });
+    await runApplicationPromise(
+      prepareIssueContinuation(
+        context,
+        {
+          restart: false,
+          priorOutcome: "failed-verification",
+        },
+        snapshot,
+      ).pipe(provideTestAgent(runner)),
+    );
+    expect(
+      (await runApplicationPromise(planWorkflowProgression(context)))
+        .actions[0],
+    ).toMatchObject({
+      type: "run",
+      phase: "fix",
+      pass: 2,
+    });
+    expect(await runApplicationPromise(fixPrompt(context, 2))).toContain(
+      `<artifact kind="failed_verification">${context.runDirRelative}/verification-before-fix-2.md</artifact>`,
+    );
+    expect(
+      await runApplicationPromise(
+        readArtifact(context, verificationBeforeFixRef(2)),
+      ),
+    ).toBe(summary);
+    if (hasFullReport) {
+      expect(
+        await runApplicationPromise(
+          readArtifact(context, verificationBeforeFixFullRef(2)),
+        ),
+      ).toBe(full);
+    } else {
+      expect(
+        await runApplicationPromise(
+          artifactExists(context, verificationBeforeFixFullRef(2)),
+        ),
+      ).toBe(false);
+    }
+  },
+);
 test("resumes the stopped verification fix pass after an earlier approved review", async () => {
   const { context } = await fixture();
   await runApplicationPromise(
