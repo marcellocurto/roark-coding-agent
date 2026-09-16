@@ -3,7 +3,7 @@ import {
   DateTime,
   Context,
   Effect,
-  type FileSystem,
+  FileSystem,
   Layer,
   Semaphore,
 } from "effect";
@@ -111,7 +111,10 @@ export function createNoopRunObserver(): RunObserver {
 
 export const createFileRunObserver = Effect.fn("createFileRunObserver")(
   function* (context: WorkflowContext) {
-    const services = yield* Effect.context<FileSystem.FileSystem>();
+    const services = Context.make(
+      FileSystem.FileSystem,
+      yield* FileSystem.FileSystem,
+    );
     const writer = yield* createEventWriter(context.runDir);
     const semaphore = yield* Semaphore.make(1);
     const observer = createRunObserver(context, writer);
@@ -476,8 +479,10 @@ export function phaseNameForArtifact(artifact: ArtifactRef): string {
 export class RunObservation extends Context.Service<
   RunObservation,
   RunObserver
->()("roark/observability/RunObservation") {}
-export const runObservationLayer = Layer.succeed(
-  RunObservation,
-  createNoopRunObserver(),
-);
+>()("roark/observability/RunObservation") {
+  // Issue-run entrypoints supply a file observer; other commands need no run log.
+  static readonly layer = Layer.succeed(
+    RunObservation,
+    createNoopRunObserver(),
+  );
+}

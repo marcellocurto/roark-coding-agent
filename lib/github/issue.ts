@@ -1,3 +1,4 @@
+import { getCurrentGitHubRepository } from "./gh.ts";
 import { GitHubRequestError, GitHubResponseError } from "./errors.ts";
 import { DateTime, Effect, Schema } from "effect";
 import type { GitHubError, GitHubRequirements } from "./errors.ts";
@@ -180,16 +181,6 @@ export const listOpenGitHubIssues = Effect.fn("GitHub.listOpenGitHubIssues")(
     );
   },
 );
-export const getCurrentGitHubLogin = Effect.fn("GitHub.getCurrentGitHubLogin")(
-  function* (options: {
-    cwd: string;
-  }): Effect.fn.Return<string, GitHubError, GitHubRequirements> {
-    return (yield* runProcessOrThrow(["gh", "api", "user", "--jq", ".login"], {
-      cwd: options.cwd,
-      label: "gh api user",
-    })).trim();
-  },
-);
 export const claimGitHubIssue = Effect.fn("GitHub.claimGitHubIssue")(
   function* (options: {
     cwd: string;
@@ -357,31 +348,13 @@ export const resolveGitHubIssueRepo = Effect.fn(
   cwd: string;
   explicitRepo?: string | undefined;
   issueUrl?: string | undefined;
-}): Effect.fn.Return<string | undefined, GitHubError, GitHubRequirements> {
+}) {
   if (options.explicitRepo) return options.explicitRepo;
   const fromUrl = repoFromIssueUrl(options.issueUrl);
   if (fromUrl) return fromUrl;
-  return yield* Effect.gen(function* () {
-    return (
-      (yield* runProcessOrThrow(
-        [
-          "gh",
-          "repo",
-          "view",
-          "--json",
-          "nameWithOwner",
-          "--jq",
-          ".nameWithOwner",
-        ],
-        { cwd: options.cwd, label: "gh repo view" },
-      )).trim() || undefined
-    );
-  }).pipe(
-    Effect.catch(() =>
-      Effect.sync(() => {
-        return undefined;
-      }),
-    ),
+  return yield* getCurrentGitHubRepository(options).pipe(
+    Effect.map((repo) => repo || undefined),
+    Effect.catch(() => Effect.succeed(undefined)),
   );
 });
 export const fetchGitHubIssueRelationships = Effect.fn(

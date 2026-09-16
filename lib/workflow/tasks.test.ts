@@ -22,9 +22,9 @@ import {
   AgentTaskRunError,
   codeRefinementTask,
   fixTask,
-  implementationTask,
-  reviewATask,
-  reviewBTask,
+  implementationTaskForPass,
+  reviewATaskForPass,
+  reviewBTaskForPass,
 } from "./tasks.ts";
 import { reviewResult, submitReview } from "../testing/reviews.ts";
 import {
@@ -244,7 +244,11 @@ describe("runAgentTask thinking profiles", () => {
     });
     await runApplicationPromise(
       nativeTasks
-        .runChangeReportTask(context, implementationTask, toNativeRetry({}))
+        .runChangeReportTask(
+          context,
+          implementationTaskForPass(0),
+          toNativeRetry({}),
+        )
         .pipe(provideTestAgent(runner)),
     );
     await runApplicationPromise(
@@ -254,12 +258,12 @@ describe("runAgentTask thinking profiles", () => {
     );
     await runApplicationPromise(
       nativeTasks
-        .runReviewTask(context, reviewATask, toNativeRetry({}))
+        .runReviewTask(context, reviewATaskForPass(0), toNativeRetry({}))
         .pipe(provideTestAgent(runner)),
     );
     await runApplicationPromise(
       nativeTasks
-        .runReviewTask(context, reviewBTask, toNativeRetry({}))
+        .runReviewTask(context, reviewBTaskForPass(0), toNativeRetry({}))
         .pipe(provideTestAgent(runner)),
     );
     await runApplicationPromise(
@@ -394,7 +398,11 @@ describe("structured task failures", () => {
     try {
       await runApplicationPromise(
         nativeTasks
-          .runChangeReportTask(context, implementationTask, toNativeRetry({}))
+          .runChangeReportTask(
+            context,
+            implementationTaskForPass(0),
+            toNativeRetry({}),
+          )
           .pipe(
             provideTestAgent(
               Effect.fnUntraced(function* () {
@@ -440,14 +448,18 @@ describe("runReviewTask failures", () => {
     let thrown: unknown;
     try {
       await runApplicationPromise(
-        nativeTasks.runReviewTask(context, reviewATask, toNativeRetry({})).pipe(
-          provideTestAgent(
-            Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              return yield* Effect.fail(new Error("provider quota exhausted"));
-            }),
+        nativeTasks
+          .runReviewTask(context, reviewATaskForPass(0), toNativeRetry({}))
+          .pipe(
+            provideTestAgent(
+              Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return yield* Effect.fail(
+                  new Error("provider quota exhausted"),
+                );
+              }),
+            ),
           ),
-        ),
       );
     } catch (error) {
       thrown = error;
@@ -478,14 +490,16 @@ describe("runReviewTask failures", () => {
     let thrown: unknown;
     try {
       await runApplicationPromise(
-        nativeTasks.runReviewTask(context, reviewATask, toNativeRetry({})).pipe(
-          provideTestAgent(
-            Effect.fnUntraced(function* () {
-              yield* Effect.void;
-              return "Looks good.";
-            }),
+        nativeTasks
+          .runReviewTask(context, reviewATaskForPass(0), toNativeRetry({}))
+          .pipe(
+            provideTestAgent(
+              Effect.fnUntraced(function* () {
+                yield* Effect.void;
+                return "Looks good.";
+              }),
+            ),
           ),
-        ),
       );
     } catch (error) {
       thrown = error;
@@ -621,7 +635,7 @@ describe("runAgentTask transient agent retry", () => {
         nativeTasks
           .runChangeReportTask(
             context,
-            implementationTask,
+            implementationTaskForPass(0),
             toNativeRetry({
               delaysMs: [0, 60000, 180000],
               sleep: async () => {

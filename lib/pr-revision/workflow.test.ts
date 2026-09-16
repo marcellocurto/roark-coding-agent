@@ -156,6 +156,110 @@ function freshReviewComment(): string {
   ].join("\n");
 }
 describe("runPrRevision", () => {
+  test.each(["approve", "fixes-required", "blocked"] as const)(
+    "presents structured revision outcomes for %s without interpreting report headings",
+    async (disposition) => {
+      const control = await tempGitRepo();
+      const { prepareWorkspace } = await isolatedWorkspace();
+      let output = "";
+      const result = await runWithPresenter(
+        new Presenter({
+          stream: {
+            isTTY: false,
+            write(chunk) {
+              output += chunk;
+            },
+          },
+        }),
+        runPrRevision(options(control, { comment: false })).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            fetchPullRequestFeedback: () => Effect.succeed(feedback()),
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            preparePrRevision: prepareWorkspace,
+          })),
+          Effect.provideService(RevisionReporting, {
+            postSummary: () => Effect.void,
+          }),
+          Effect.provideService(Verification, {
+            execute: ({ command }) =>
+              Effect.succeed({
+                command,
+                ok: false,
+                exitCode: 127,
+                stdout: "",
+                stderr: "sh: missing-command: command not found",
+              }),
+          }),
+          provideTestAgent(
+            Effect.fnUntraced(function* (request) {
+              if (request.display.phaseId === "pr-revision-revision-plan")
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitRevisionPlan(
+                      request,
+                      revisionPlanResult(
+                        "revise",
+                        disposition === "approve"
+                          ? {
+                              additionalSections: [
+                                { heading: "Verdict", items: ["needs-human"] },
+                              ],
+                            }
+                          : {},
+                      ),
+                    ),
+                  catch: (error) => error,
+                });
+              if (request.fileEditingToolsEnabled)
+                return yield* Effect.tryPromise({
+                  try: () =>
+                    submitRevisionExecution(
+                      request,
+                      revisionExecutionResult(
+                        disposition === "fixes-required"
+                          ? {
+                              summary:
+                                "Completed the requested work.\n\n## Status\nneeds-human",
+                            }
+                          : {},
+                      ),
+                    ),
+                  catch: (error) => error,
+                });
+              const findings =
+                disposition === "approve"
+                  ? []
+                  : [
+                      reviewFinding(
+                        disposition === "blocked"
+                          ? "external-blocker"
+                          : "must-fix-current",
+                      ),
+                    ];
+              return yield* Effect.tryPromise({
+                try: () => submitReview(request, reviewResult(findings)),
+                catch: (error) => error,
+              });
+            }),
+          ),
+        ),
+      );
+      expect(result.planStatus).toBe("revise");
+      expect(result.reviewVerdict).toBe(disposition);
+      expect(output).toContain(
+        "DONE PR #12 · Revision plan · revision 1 · revise ·",
+      );
+      expect(output).toContain(
+        "DONE PR #12 · Revision implementation · revision 1 · completed ·",
+      );
+      expect(output).toContain(
+        `DONE PR #12 · Revision review · revision 1 · ${disposition} ·`,
+      );
+    },
+  );
   test("sets the preparation title while workspace preparation is pending", async () => {
     const cwd = process.cwd();
     let output = "";

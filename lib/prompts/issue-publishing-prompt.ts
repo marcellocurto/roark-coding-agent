@@ -41,7 +41,7 @@ ${allowedItemsJson}
     <instruction>Read \`${escapedSourcePlanPath}\` and submit exactly one structured draft for every allowed planItemId above.</instruction>
     <instruction>Write the final issue title and content from the structured context in the curation plan: source issue, related PR, reviewer finding IDs, classification, evidence, impact, recommended handling, non-goals, and run artifacts.</instruction>
     <instruction>Use simple technical language in simpleSummary. Explain what the issue is, why it matters, and what should happen next.</instruction>
-    <instruction>Do not copy proposedBody as final content. It is legacy display text, not machine authority.</instruction>
+    <instruction>Do not copy proposedBody as final content. It is a preliminary issue-body draft, not machine authority.</instruction>
     <instruction>Do not invent facts, severity, requirements, labels, relationships, acceptance criteria, blockers, or implementation details. Empty arrays are valid when there is nothing truthful to add.</instruction>
     <instruction>Prefer one small vertical slice with a complete, independently verifiable outcome. For a genuinely wide migration, describe expand, migrate, and contract stages in that order.</instruction>
     <instruction>Use outcome-focused acceptance criteria. Avoid prescribed file paths, code snippets, or generic restatements.</instruction>

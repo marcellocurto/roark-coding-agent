@@ -2,28 +2,12 @@ import { Effect, FileSystem, Schema } from "effect";
 import path from "node:path";
 import { artifactContract } from "../structured-output/contract.ts";
 import {
-  STATIC_ARTIFACTS,
-  NUMBERED_ARTIFACTS,
+  artifactFromFilename,
   type ArtifactRef,
 } from "../workflow/artifact-catalog.ts";
 import type { WorkflowContext } from "../workflow/artifacts.ts";
 import { continuationPhaseSchema, type ContinuationPhase } from "./result.ts";
 
-export function artifactFromFilename(
-  filename: string,
-): ArtifactRef | undefined {
-  const fixed = STATIC_ARTIFACTS.find((item) => item.filename === filename);
-  if (fixed) return fixed.name;
-  for (const item of NUMBERED_ARTIFACTS) {
-    const prefix = `${item.filenamePrefix}-`;
-    const suffix = `${item.filenameSuffix ?? ""}.${item.extension ?? "md"}`;
-    if (!filename.startsWith(prefix) || !filename.endsWith(suffix)) continue;
-    const pass = filename.slice(prefix.length, -suffix.length);
-    if (/^\d+$/.test(pass) && Number.isSafeInteger(Number(pass)))
-      return { name: item.name, pass: Number(pass) };
-  }
-  return undefined;
-}
 const filenameSchema = Schema.String.check(
   Schema.makeFilter((value) =>
     artifactFromFilename(value) === undefined

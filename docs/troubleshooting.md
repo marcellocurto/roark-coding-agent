@@ -170,7 +170,7 @@ Inspect `summary.json`, `verification.md`, command output, and GitHub auth state
 `revise-pr` does not commit when:
 
 - all feedback is already addressed
-- all actionable feedback is classified `needs-human`, `non-blocking`, or `invalid/stale`
+- all actionable feedback is classified `needs-human`, `non-blocking`, or `invalid-stale`
 - verification fails
 - the working tree is dirty and preflight refuses to continue
 

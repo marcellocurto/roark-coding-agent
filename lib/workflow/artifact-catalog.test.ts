@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { Effect } from "effect";
+import { validateAgentArtifact } from "./artifact-validation.ts";
 import {
   artifactFilename,
+  artifactFromFilename,
+  artifactMarkdownSibling,
+  type ArtifactRef,
   fixLogRef,
   fixLogMarkdownRef,
   formatArtifactRef,
@@ -46,6 +51,45 @@ const expectedStaticFilenames: Record<StaticArtifactName, string> = {
 };
 
 describe("artifact catalog", () => {
+  test.each([
+    { canonical: "implementationLog", markdown: "implementationLogMarkdown" },
+    {
+      canonical: { name: "fixLog", pass: 2 },
+      markdown: { name: "fixLogMarkdown", pass: 2 },
+    },
+    {
+      canonical: { name: "refinementLog", pass: 2 },
+      markdown: { name: "refinementLogMarkdown", pass: 2 },
+    },
+    {
+      canonical: { name: "reviewA", pass: 2 },
+      markdown: { name: "reviewAMarkdown", pass: 2 },
+    },
+    {
+      canonical: { name: "reviewB", pass: 2 },
+      markdown: { name: "reviewBMarkdown", pass: 2 },
+    },
+  ] satisfies { canonical: ArtifactRef; markdown: ArtifactRef }[])(
+    "keeps structured artifacts distinct from Markdown companions: %j",
+    async ({ canonical, markdown }) => {
+      const humanReport = "# Report\n\n## Summary\nCompleted the phase.\n";
+      expect(artifactMarkdownSibling(canonical)).toEqual(markdown);
+      expect(artifactFromFilename(artifactFilename(canonical))).toEqual(
+        canonical,
+      );
+      expect(artifactFromFilename(artifactFilename(markdown))).toEqual(
+        markdown,
+      );
+      expect(
+        (await Effect.runPromise(validateAgentArtifact(canonical, humanReport)))
+          .ok,
+      ).toBe(false);
+      expect(
+        (await Effect.runPromise(validateAgentArtifact(markdown, humanReport)))
+          .ok,
+      ).toBe(true);
+    },
+  );
   test("resolves persisted static artifact filenames", () => {
     for (const [name, filename] of Object.entries(expectedStaticFilenames)) {
       const definition = STATIC_ARTIFACTS.find(

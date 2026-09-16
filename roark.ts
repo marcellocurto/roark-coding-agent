@@ -1,10 +1,15 @@
 #!/usr/bin/env bun
+import {
+  createFileRunObserver,
+  RunObservation,
+} from "./lib/observability/observer.ts";
 import { fileURLToPath } from "node:url";
 import * as nativeWorkspace from "./lib/autorun/workspace.ts";
 import { runAutoDiscovery } from "./lib/autorun/discovery.ts";
 import { runAutoContinue } from "./lib/autorun/continue.ts";
 import { runPrReview } from "./lib/pr-review/workflow.ts";
 import * as nativePhases from "./lib/workflow/phases.ts";
+import type { WorkflowTerminalStatus } from "./lib/workflow/progression.ts";
 import {
   CommandExecution,
   ExitNotifications,
@@ -153,11 +158,14 @@ export const main = Effect.fn("main")(function* (
         message: cause instanceof Error ? cause.message : String(cause),
       }),
   });
+  const observer = yield* createFileRunObserver(context);
   presentation.line(`Run directory: ${context.runDirRelative}`);
   if (parsed.command === "do") {
     for (const line of formatDoLocalModeStartMessage(parsed.issue).split("\n"))
       presentation.line(line);
-    const result = yield* nativePhases.runFullWorkflow(context, {});
+    const result = yield* nativePhases
+      .runFullWorkflow(context, {})
+      .pipe(Effect.provideService(RunObservation, observer));
     yield* printDoLocalModeReadyMessageIfReady(context, (message) => {
       presentation.line(message);
     });
@@ -167,7 +175,9 @@ export const main = Effect.fn("main")(function* (
       result.status,
     );
   } else {
-    yield* nativePhases.runSinglePhase(context, parsed.command);
+    yield* nativePhases
+      .runSinglePhase(context, parsed.command)
+      .pipe(Effect.provideService(RunObservation, observer));
     presentation.outcome(
       "SUCCESS",
       `#${context.issueNumber}`,
@@ -197,13 +207,7 @@ export const presentAutorunOutcome = Effect.fn("presentAutorunOutcome")(
   },
 );
 export function workflowOutcomeStatus(
-  status:
-    | "completed"
-    | "continuation-stopped"
-    | "triage-stopped"
-    | "planning-stopped"
-    | "execution-stopped"
-    | "review-blocked",
+  status: WorkflowTerminalStatus["status"],
 ): "SUCCESS" | "BLOCKED" | "STOPPED" {
   if (status === "completed") return "SUCCESS";
   if (status === "review-blocked") return "BLOCKED";
@@ -269,7 +273,6 @@ export const runCli = Effect.fn("runCli")(function* (
   const commands = yield* CommandExecution;
   const presentation = yield* Presentation;
   const notifications = yield* ExitNotifications;
-  const longRunning = isLongRunningCommand(argv[0]);
   const exitCode = yield* commands.execute(argv).pipe(
     Effect.as(0),
     Effect.catchCauseIf(
@@ -277,10 +280,12 @@ export const runCli = Effect.fn("runCli")(function* (
       (cause) =>
         Effect.sync(() => {
           const error = Cause.squash(cause);
-          if (longRunning)
+          const command = presentation.currentCommand() ?? argv[0];
+          if (isLongRunningCommand(command))
             presentation.outcome(
               "FAILED",
-              presentation.currentTarget() ?? displayArgvTarget(argv),
+              presentation.currentTarget() ??
+                (argv.length === 0 ? command : displayArgvTarget(argv)),
               "run failed",
             );
           presentation.error(

@@ -1,3 +1,5 @@
+import { GitHub } from "../github/service.ts";
+import { Workspace } from "./workspace-service.ts";
 import { GitHubRequestError } from "../github/errors.ts";
 import {
   continuationResult,
@@ -96,9 +98,14 @@ describe("runAutoContinue", () => {
       let fetched = false;
       await assertRejects(
         runApplicationPromise(
-          runAutoContinue(
-            { ...continueOptions, issue: "24", cwd, attempt: 2 },
-            {
+          runAutoContinue({
+            ...continueOptions,
+            issue: "24",
+            cwd,
+            attempt: 2,
+          }).pipe(
+            Effect.updateService(GitHub, (service) => ({
+              ...service,
               fetchGitHubIssue: Effect.fnUntraced(function* () {
                 fetched = true;
                 return yield* Effect.fail(
@@ -107,7 +114,7 @@ describe("runAutoContinue", () => {
                   }),
                 );
               }),
-            },
+            })),
           ),
         ),
         /latest comments unavailable/,
@@ -196,37 +203,22 @@ describe("runAutoContinue", () => {
     const calls: string[] = [];
     await assertRejects(
       runApplicationPromise(
-        runAutoContinue(
-          {
-            ...continueOptions,
-            issue: "24",
-            cwd,
-            attempt: 2,
-            hooks: {
-              timeoutMs: 1000,
-              beforeRun: "printf before > before-run.txt",
-            },
+        runAutoContinue({
+          ...continueOptions,
+          issue: "24",
+          cwd,
+          attempt: 2,
+          hooks: {
+            timeoutMs: 1000,
+            beforeRun: "printf before > before-run.txt",
           },
-          {
-            ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            ensureGitHubLabels: Effect.fnUntraced(function* () {
               return (
                 yield* Effect.void, { existing: [], missing: [], created: [] }
               );
-            }),
-            prepareCloneWorkspace: Effect.fnUntraced(function* (input) {
-              yield* Effect.void;
-              calls.push(`prepare:${input.workspacePath ?? ""}`);
-              expect(input.mode).toBe("continue");
-              expect(input.workspacePath).toBe(workspacePath);
-              return {
-                path: workspacePath,
-                metadata: {
-                  path: workspacePath,
-                  strategy: "clone" as const,
-                  cloneRemote: "upstream",
-                  createdNow: false,
-                },
-              };
             }),
             fetchGitHubIssue: Effect.fnUntraced(function* () {
               return (
@@ -250,15 +242,38 @@ describe("runAutoContinue", () => {
                 }
               );
             }),
-            transitionGitHubIssueLabels: Effect.fnUntraced(function* (input) {
+            transitionGitHubIssueLabels: Effect.fnUntraced(function* (
+              input: Parameters<
+                GitHub["Service"]["transitionGitHubIssueLabels"]
+              >[0],
+            ) {
               yield* Effect.void;
               calls.push("transition");
               expect(input.nextLabel).toBe("busy");
               expect(input.removeLabels).toEqual(["failed", "ready-for-agent"]);
               return undefined;
             }),
-          },
-        ).pipe(
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            prepareClone: Effect.fnUntraced(function* (
+              input: Parameters<Workspace["Service"]["prepareClone"]>[0],
+            ) {
+              yield* Effect.void;
+              calls.push(`prepare:${input.workspacePath ?? ""}`);
+              expect(input.mode).toBe("continue");
+              expect(input.workspacePath).toBe(workspacePath);
+              return {
+                path: workspacePath,
+                metadata: {
+                  path: workspacePath,
+                  strategy: "clone" as const,
+                  cloneRemote: "upstream",
+                  createdNow: false,
+                },
+              };
+            }),
+          })),
           provideTestAgent(
             Effect.fnUntraced(function* () {
               yield* Effect.void;
@@ -427,47 +442,46 @@ describe("runAutoContinue", () => {
     for (let continuation = 0; continuation < 2; continuation++) {
       await assertRejects(
         runApplicationPromise(
-          runAutoContinue(
-            { ...continueOptions, issue: "24", cwd, attempt: 2 },
-            {},
-          ).pipe(
-            provideTestAgent(
-              Effect.fnUntraced(function* (request) {
-                if (request.display.phaseId === "continuation-review") {
-                  const saved = yield* Effect.flatMap(AttemptStore, (store) =>
-                    store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+          runAutoContinue({ ...continueOptions, issue: "24", cwd, attempt: 2 })
+            .pipe()
+            .pipe(
+              provideTestAgent(
+                Effect.fnUntraced(function* (request) {
+                  if (request.display.phaseId === "continuation-review") {
+                    const saved = yield* Effect.flatMap(AttemptStore, (store) =>
+                      store.read(path.join(cwd, ".roark/runs/issue/24"), 2),
+                    );
+                    const remote = decodeRemoteComments(
+                      yield* Effect.tryPromise(() =>
+                        readFile(path.join(cwd, ".git/comments.json"), "utf8"),
+                      ),
+                    );
+                    expect(remote["501"]?.body).toContain("in progress");
+                    expect(remote["501"]?.body).toContain("roark/issue-24");
+                    expect(remote["501"]?.body).not.toContain("roark continue");
+                    expect(
+                      saved.githubComments?.issue?.["attempt-status"]?.marker,
+                    ).toContain("phase=attempt-status");
+                    expect(
+                      saved.githubComments?.issue?.["attempt-status"]?.id,
+                    ).toBe(501);
+                    expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(
+                      502,
+                    );
+                    expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(
+                      503,
+                    );
+                    return yield* Effect.tryPromise(() =>
+                      submitContinuation(request, continuationResult()),
+                    );
+                  }
+                  yield* Effect.void;
+                  return yield* Effect.fail(
+                    new Error("fix failed after reviews"),
                   );
-                  const remote = decodeRemoteComments(
-                    yield* Effect.tryPromise(() =>
-                      readFile(path.join(cwd, ".git/comments.json"), "utf8"),
-                    ),
-                  );
-                  expect(remote["501"]?.body).toContain("in progress");
-                  expect(remote["501"]?.body).toContain("roark/issue-24");
-                  expect(remote["501"]?.body).not.toContain("roark continue");
-                  expect(
-                    saved.githubComments?.issue?.["attempt-status"]?.marker,
-                  ).toContain("phase=attempt-status");
-                  expect(
-                    saved.githubComments?.issue?.["attempt-status"]?.id,
-                  ).toBe(501);
-                  expect(saved.githubComments?.issue?.["review-a"]?.id).toBe(
-                    502,
-                  );
-                  expect(saved.githubComments?.issue?.["review-b"]?.id).toBe(
-                    503,
-                  );
-                  return yield* Effect.tryPromise(() =>
-                    submitContinuation(request, continuationResult()),
-                  );
-                }
-                yield* Effect.void;
-                return yield* Effect.fail(
-                  new Error("fix failed after reviews"),
-                );
-              }),
+                }),
+              ),
             ),
-          ),
         ),
         (error: unknown) =>
           error instanceof Error && error.message.includes("Fix pass 1 failed"),
@@ -554,11 +568,13 @@ describe("runAutoContinue", () => {
     const release = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const injected = {
-      ensureAutorunLabelContract: Effect.fnUntraced(function* () {
+    const githubOverrides = {
+      ensureGitHubLabels: Effect.fnUntraced(function* () {
         return (yield* Effect.void, { existing: [], missing: [], created: [] });
       }),
-      prepareCloneWorkspace: Effect.fnUntraced(function* () {
+    };
+    const workspaceOverrides = {
+      prepareClone: Effect.fnUntraced(function* () {
         yield* Effect.void;
         return {
           path: workspacePath,
@@ -572,12 +588,20 @@ describe("runAutoContinue", () => {
       }),
     };
     const first = runApplicationPromise(
-      runAutoContinue(
-        { ...continueOptions, issue: "24", cwd, attempt: 2 },
-        {
-          ...injected,
-        },
-      ).pipe(
+      runAutoContinue({
+        ...continueOptions,
+        issue: "24",
+        cwd,
+        attempt: 2,
+      }).pipe(
+        Effect.updateService(GitHub, (service) => ({
+          ...service,
+          ...githubOverrides,
+        })),
+        Effect.updateService(Workspace, (service) => ({
+          ...service,
+          ...workspaceOverrides,
+        })),
         provideTestAgent(
           Effect.fnUntraced(function* () {
             enteredFirst();
@@ -593,12 +617,20 @@ describe("runAutoContinue", () => {
     await firstEntered;
     await assertRejects(
       runApplicationPromise(
-        runAutoContinue(
-          { ...continueOptions, issue: "24", cwd, attempt: 3 },
-          {
-            ...injected,
-          },
-        ).pipe(
+        runAutoContinue({
+          ...continueOptions,
+          issue: "24",
+          cwd,
+          attempt: 3,
+        }).pipe(
+          Effect.updateService(GitHub, (service) => ({
+            ...service,
+            ...githubOverrides,
+          })),
+          Effect.updateService(Workspace, (service) => ({
+            ...service,
+            ...workspaceOverrides,
+          })),
           provideTestAgent(
             Effect.fnUntraced(function* () {
               yield* Effect.void;

@@ -1,3 +1,4 @@
+import { buildCurrentRepoArgv, buildCurrentUserArgv } from "./gh.ts";
 import { GitHubResponseError } from "./errors.ts";
 import { runApplicationPromise } from "../runtime/application.ts";
 import { Effect } from "effect";
@@ -14,8 +15,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
-  buildCurrentRepoArgv,
-  buildCurrentCommentAuthorArgv,
   buildListIssueCommentsArgv,
   buildPostIssueCommentArgv,
   buildRoarkMarker,
@@ -103,7 +102,7 @@ describe("GitHub comment helpers", () => {
       "--jq",
       ".nameWithOwner",
     ]);
-    expect(buildCurrentCommentAuthorArgv()).toEqual([
+    expect(buildCurrentUserArgv()).toEqual([
       "gh",
       "api",
       "user",

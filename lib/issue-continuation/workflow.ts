@@ -1,3 +1,9 @@
+import {
+  artifactFromFilename,
+  isReviewArtifact,
+  isChangeReportArtifact,
+} from "../workflow/artifact-catalog.ts";
+import { RunObservation } from "../observability/observer.ts";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Effect, FileSystem } from "effect";
@@ -18,9 +24,11 @@ import { ArtifactContractError } from "../structured-output/contract.ts";
 import { formatGitHubIssueArtifact } from "../prompts/github-issue-artifact.ts";
 import { sharedSystemPrompt } from "../prompts/workflow-prompts.ts";
 import { runPresentedPhase } from "../presentation/phase.ts";
-import { effectiveModelForStage } from "../workflow/model-routing.ts";
+import { createAgentRunRequest } from "../workflow/agent-runner.ts";
 import {
   artifactFilename,
+  verificationBeforeFixRef,
+  verificationBeforeFixFullRef,
   writeArtifact,
   writeJsonArtifact,
   type WorkflowContext,
@@ -29,7 +37,6 @@ import { readExecutionStop } from "../workflow/execution-stop.ts";
 import {
   archiveContinuation,
   applyContinuation,
-  artifactFromFilename,
   continuationHistoryDir,
   invalidatedArtifacts,
   readContinuationState,
@@ -256,20 +263,19 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
         return result;
       }),
     };
+    const observer = yield* RunObservation;
     const assessment = yield* runPresentedPhase(
       display,
       () =>
         runStructuredArtifact(
-          {
+          createAgentRunRequest(context, "plan", {
             cwd: context.agentCwd,
-            model: effectiveModelForStage(context.model, "plan"),
-            thinkingLevel: context.thinkingConfig.plan,
             systemPrompt: sharedSystemPrompt,
             prompt: continuationPrompt(context),
             fileEditingToolsEnabled: false,
-            observer: context.observer,
+            observer,
             display,
-          },
+          }),
           checkedDefinition,
           {
             writeJson: (content) =>
@@ -366,7 +372,24 @@ export const prepareIssueContinuation = Effect.fn("prepareIssueContinuation")(
         attemptOutcome: options.priorOutcome,
       }))[0];
       if (next?.type === "run" && next.phase === "fix") {
-        ready = { ...ready, resumeFrom: "fix", pass: next.pass ?? 1 };
+        const pass = next.pass ?? 1;
+        const verificationReplacements: Record<string, string> = {};
+        // Bind the original evidence to this repair in the durable checkpoint.
+        // The summary can be truncated, so preserve the full report separately.
+        for (const [source, target] of [
+          ["verification", verificationBeforeFixRef(pass)],
+          ["verificationFull", verificationBeforeFixFullRef(pass)],
+        ] as const) {
+          const content = saved[artifactFilename(source)];
+          if (content !== undefined)
+            verificationReplacements[artifactFilename(target)] = content;
+        }
+        ready = {
+          ...ready,
+          resumeFrom: "fix",
+          pass,
+          replacements: { ...ready.replacements, ...verificationReplacements },
+        };
       }
     }
     yield* writeContinuationState(context, ready);
@@ -384,10 +407,7 @@ const savedQuestions = Effect.fn("savedContinuationQuestions")(function* (
   );
   const reviewPasses = Object.keys(saved).flatMap((filename) => {
     const artifact = artifactFromFilename(filename);
-    return typeof artifact === "object" &&
-      (artifact.name === "reviewA" || artifact.name === "reviewB")
-      ? [artifact.pass]
-      : [];
+    return isReviewArtifact(artifact) ? [artifact.pass] : [];
   });
   const latestReviewPass = Math.max(-1, ...reviewPasses);
   const triageContent = saved["triage.json"];
@@ -431,11 +451,7 @@ const savedQuestions = Effect.fn("savedContinuationQuestions")(function* (
           ? []
           : [...result.blockingQuestions, ...result.externalBlockers];
       }
-      if (
-        artifact === "implementationLog" ||
-        (typeof artifact === "object" &&
-          (artifact.name === "fixLog" || artifact.name === "refinementLog"))
-      ) {
+      if (isChangeReportArtifact(artifact)) {
         if (activeStop !== undefined && activeStop !== filename) return [];
         const result = yield* parseChangeReportJson(content);
         const unresolved = [
@@ -445,11 +461,7 @@ const savedQuestions = Effect.fn("savedContinuationQuestions")(function* (
         if (unresolved.length > 0) stoppedFiles.add(filename);
         return unresolved;
       }
-      if (
-        typeof artifact === "object" &&
-        (artifact.name === "reviewA" || artifact.name === "reviewB") &&
-        artifact.pass === latestReviewPass
-      ) {
+      if (isReviewArtifact(artifact) && artifact.pass === latestReviewPass) {
         const result = yield* parseReviewResultJson(content, {
           allowRestart: true,
         });

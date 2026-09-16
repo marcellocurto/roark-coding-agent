@@ -137,6 +137,10 @@ export class Presenter {
     return this.identity?.target;
   }
 
+  currentCommand(): string | undefined {
+    return this.identity?.command;
+  }
+
   transition(
     phase: string,
     target = this.identity?.target ?? "Roark",

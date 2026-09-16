@@ -283,51 +283,56 @@ describe("completeAutorunWorkflow", () => {
       expect(remote.comments[index]?.body).toContain("blocked");
     }
   });
-  test("delegates completed workflow results to the publish gate unchanged", async () => {
-    await Promise.resolve();
-    let marked = false;
-    const outcome = await runApplicationPromise(
-      completeAutorunWorkflow(
-        {
-          workflowResult: { status: "completed" },
-          options,
-          issue,
-          branchPlan,
-          workflowContext,
-          attemptMetadata,
-          attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
-          recoveryCommand: "roark continue 12 --attempt 1",
-        },
-        {
-          publishGate: Effect.fnUntraced(function* (input) {
-            yield* Effect.void;
-            expect(input.issue).toBe(issue);
-            expect(input.recoveryCommand).toBe("roark continue 12 --attempt 1");
-            return {
-              outcome: "failed-readiness" as const,
-              outcomeDetail: "readiness status is missing",
-              report: {
-                published: false,
-                issueUrl: issue.url,
-                commentUrl: undefined,
-                reason: "readiness status is missing",
-                artifactPath: `${workflowContext.runDirRelative}/readiness.json`,
-                runDirectory: workflowContext.runDirRelative,
-              },
-            };
-          }),
-          markWorkflowStopped: Effect.fnUntraced(function* () {
-            yield* Effect.void;
-            marked = true;
-            return undefined;
-          }),
-        },
-      ),
-    );
-    expect(outcome).toMatchObject({
-      outcome: "failed-readiness",
-      outcomeDetail: "readiness status is missing",
-    });
-    expect(marked).toBe(false);
-  });
+  test.each(["completed", "fix-budget-exhausted"] as const)(
+    "delegates %s workflow results to the publish gate unchanged",
+    async (status) => {
+      await Promise.resolve();
+      let marked = false;
+      const outcome = await runApplicationPromise(
+        completeAutorunWorkflow(
+          {
+            workflowResult: { status },
+            options,
+            issue,
+            branchPlan,
+            workflowContext,
+            attemptMetadata,
+            attemptMetadataPath: ".roark/runs/issue/12/attempts/1/attempt.json",
+            recoveryCommand: "roark continue 12 --attempt 1",
+          },
+          {
+            publishGate: Effect.fnUntraced(function* (input) {
+              yield* Effect.void;
+              expect(input.issue).toBe(issue);
+              expect(input.recoveryCommand).toBe(
+                "roark continue 12 --attempt 1",
+              );
+              return {
+                outcome: "failed-readiness" as const,
+                outcomeDetail: "readiness status is missing",
+                report: {
+                  published: false,
+                  issueUrl: issue.url,
+                  commentUrl: undefined,
+                  reason: "readiness status is missing",
+                  artifactPath: `${workflowContext.runDirRelative}/readiness.json`,
+                  runDirectory: workflowContext.runDirRelative,
+                },
+              };
+            }),
+            markWorkflowStopped: Effect.fnUntraced(function* () {
+              yield* Effect.void;
+              marked = true;
+              return undefined;
+            }),
+          },
+        ),
+      );
+      expect(outcome).toMatchObject({
+        outcome: "failed-readiness",
+        outcomeDetail: "readiness status is missing",
+      });
+      expect(marked).toBe(false);
+    },
+  );
 });

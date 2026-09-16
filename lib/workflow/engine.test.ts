@@ -5,10 +5,13 @@ import { AgentExecution, Presentation } from "../runtime/services.ts";
 import { applicationLayer } from "../runtime/application.ts";
 import { AgentExecutionError } from "../pi/agent.ts";
 import { Presenter } from "../presentation/presenter.ts";
-import { createNoopRunObserver } from "../observability/observer.ts";
+import {
+  createNoopRunObserver,
+  RunObservation,
+} from "../observability/observer.ts";
 import { ArtifactStore } from "./artifact-store.ts";
 import { createWorkflowContext } from "./artifacts.ts";
-import { runSinglePhase } from "./phases.ts";
+import { runSinglePhase, runFullWorkflow } from "./phases.ts";
 import { AgentTaskRunError, runTriageTask } from "./tasks.ts";
 
 const store = ArtifactStore.of({
@@ -17,8 +20,8 @@ const store = ArtifactStore.of({
   read: () => Effect.succeed("issue content"),
   write: () => Effect.void,
 });
-const context = () => ({
-  ...createWorkflowContext({
+const context = () =>
+  createWorkflowContext({
     command: "do",
     issue: "1",
     cwd: process.cwd(),
@@ -26,41 +29,56 @@ const context = () => ({
     force: true,
     yes: true,
     maxFixPasses: 1,
-  }),
-  observer: createNoopRunObserver(),
-});
+  });
 const presentation = new Presenter({
   stream: { isTTY: false, write: () => undefined },
 });
 
-test("native phase orchestration preserves defects and records failed lifecycle events", async () => {
-  const defect = new Error("agent defect");
-  const events: string[] = [];
-  const current = context();
-  current.observer.phaseFailed = () =>
-    Effect.sync(() => {
-      events.push("phase failed");
-    });
-  current.observer.runFailed = (error) =>
-    Effect.sync(() => {
-      expect(error).toBe(defect);
-      events.push("run failed");
-    });
-  const exit = await Effect.runPromiseExit(
-    runSinglePhase(current, "triage").pipe(
-      Effect.provideService(AgentExecution, { run: () => Effect.die(defect) }),
-      Effect.provideService(ArtifactStore, store),
-      Effect.provideService(Presentation, presentation),
-      Effect.provide(applicationLayer),
-    ),
-  );
-  expect(Exit.isFailure(exit)).toBe(true);
-  if (Exit.isFailure(exit)) {
-    expect(Cause.hasDies(exit.cause)).toBe(true);
-    expect(Cause.hasFails(exit.cause)).toBe(false);
-  }
-  expect(events).toEqual(["phase failed", "run failed"]);
-});
+test.each(["phase", "workflow"])(
+  "native %s orchestration uses the supplied observer and preserves defects",
+  async (kind) => {
+    const defect = new Error("agent defect");
+    const events: string[] = [];
+    const current = context();
+    const observer = createNoopRunObserver();
+    observer.phaseFailed = () =>
+      Effect.sync(() => {
+        events.push("phase failed");
+      });
+    observer.runFailed = (error) =>
+      Effect.sync(() => {
+        expect(error).toBe(defect);
+        events.push("run failed");
+      });
+    const exit = await Effect.runPromiseExit(
+      (kind === "phase"
+        ? runSinglePhase(current, "triage")
+        : runFullWorkflow(current)
+      ).pipe(
+        Effect.provideService(RunObservation, observer),
+        Effect.provideService(AgentExecution, {
+          run: () => Effect.die(defect),
+        }),
+        Effect.provideService(
+          ArtifactStore,
+          kind === "phase"
+            ? store
+            : { ...store, exists: () => Effect.die(defect) },
+        ),
+        Effect.provideService(Presentation, presentation),
+        Effect.provide(applicationLayer),
+      ),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(Cause.hasDies(exit.cause)).toBe(true);
+      expect(Cause.hasFails(exit.cause)).toBe(false);
+    }
+    expect(events).toEqual(
+      kind === "phase" ? ["phase failed", "run failed"] : ["run failed"],
+    );
+  },
+);
 
 test("native workflow interruption joins agent cleanup before recording final failure", async () => {
   const started = Deferred.makeUnsafe<undefined>();
@@ -69,17 +87,19 @@ test("native workflow interruption joins agent cleanup before recording final fa
   const events: string[] = [];
   const controller = new AbortController();
   const current = context();
-  current.observer.phaseFailed = () =>
+  const observer = createNoopRunObserver();
+  observer.phaseFailed = () =>
     Effect.sync(() => {
       events.push("phase failed");
     });
-  current.observer.runFailed = () =>
+  observer.runFailed = () =>
     Effect.sync(() => {
       events.push("run failed");
     });
   let finished = false;
   const running = Effect.runPromiseExit(
     runSinglePhase(current, "triage").pipe(
+      Effect.provideService(RunObservation, observer),
       Effect.provideService(AgentExecution, {
         run: () =>
           Deferred.succeed(started, undefined).pipe(

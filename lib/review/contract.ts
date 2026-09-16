@@ -63,7 +63,7 @@ export const correctnessReviewLens: ReviewLensDefinition = {
     "For every spec finding, cite the authoritative requirement and explain how the diff is missing, partial, incorrect, or extra.",
   ],
   requiredFixesPolicy:
-    "Required Fixes must be limited to <value>must-fix-current</value> defects: correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current review subject.",
+    "Require changes only for correctness bugs, missed acceptance criteria, regressions, or missing validation of changed behavior that block approval for the current review subject.",
   extraConstraints: [],
 };
 
@@ -90,6 +90,6 @@ export const maintainabilityReviewLens: ReviewLensDefinition = {
     "Skip formatting, style, and mechanical concerns already enforced by configured linting, formatting, typechecking, or other tooling.",
   ],
   requiredFixesPolicy:
-    "Required Fixes must cite a <value>must-fix-current</value> concrete maintainability harm and a concrete remediation that blocks approval for the current review subject.",
+    "Require changes only for a concrete maintainability harm that blocks approval for the current review subject. Cite the harm and a concrete remediation.",
   extraConstraints: ["Do not read Review Agent A's output."],
 };

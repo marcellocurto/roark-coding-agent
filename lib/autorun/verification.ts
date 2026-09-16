@@ -232,18 +232,27 @@ ${formatOutput(result.stderr)}
 `;
 }
 
+export const writeVerificationArtifacts = Effect.fn(
+  "writeVerificationArtifacts",
+)(function* <E, R>(
+  result: VerificationResult,
+  writers: {
+    writeSummary: (content: string) => Effect.Effect<void, E, R>;
+    writeFull: (content: string) => Effect.Effect<void, E, R>;
+  },
+) {
+  yield* writers.writeSummary(formatVerificationArtifact(result));
+  yield* writers.writeFull(formatCompleteVerificationArtifact(result));
+});
+
 export const writeVerificationArtifact = Effect.fn("writeVerificationArtifact")(
   function* (context: WorkflowContext, result: VerificationResult) {
-    yield* writeArtifact(
-      context,
-      "verification",
-      formatVerificationArtifact(result),
-    );
-    yield* writeArtifact(
-      context,
-      "verificationFull",
-      formatCompleteVerificationArtifact(result),
-    );
+    yield* writeVerificationArtifacts(result, {
+      writeSummary: (content) =>
+        writeArtifact(context, "verification", content),
+      writeFull: (content) =>
+        writeArtifact(context, "verificationFull", content),
+    });
   },
   Effect.uninterruptible,
 );
@@ -255,16 +264,12 @@ export const writeVerificationBeforeFixArtifact = Effect.fn(
   pass: number,
   result: VerificationResult,
 ) {
-  yield* writeArtifact(
-    context,
-    verificationBeforeFixRef(pass),
-    formatVerificationArtifact(result),
-  );
-  yield* writeArtifact(
-    context,
-    verificationBeforeFixFullRef(pass),
-    formatCompleteVerificationArtifact(result),
-  );
+  yield* writeVerificationArtifacts(result, {
+    writeSummary: (content) =>
+      writeArtifact(context, verificationBeforeFixRef(pass), content),
+    writeFull: (content) =>
+      writeArtifact(context, verificationBeforeFixFullRef(pass), content),
+  });
 }, Effect.uninterruptible);
 
 export function classifyVerificationFailure(

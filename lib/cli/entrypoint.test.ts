@@ -28,6 +28,7 @@ import {
   workflowOutcomeStatus,
 } from "../../roark.ts";
 import { Presenter } from "../presentation/presenter.ts";
+import { readRunSummary } from "../observability/summary.ts";
 const projectRoot = path.resolve(import.meta.dir, "../..");
 const entrypoint = path.join(projectRoot, "roark.ts");
 const tempDirs: string[] = [];
@@ -37,6 +38,76 @@ afterEach(async () => {
   );
 });
 describe("CLI lifecycle services", () => {
+  test("standalone issue commands persist their own run and phase observations", async () => {
+    const cwd = await mkdtemp(path.join(tmpdir(), "roark-observed-command-"));
+    tempDirs.push(cwd);
+    await runApplicationPromise(
+      runProcessOrThrow(["git", "init", "--quiet", cwd]),
+    );
+    await runWithPresenter(
+      new Presenter({ stream: { isTTY: false, write: () => undefined } }),
+      main(["readiness", "12", "--cwd", cwd, "--repo", "owner/repo"]),
+    );
+    const summary = await runApplicationPromise(
+      readRunSummary(path.join(cwd, ".roark/runs/issue/12/summary.json")),
+    );
+    expect(summary?.issueNumber).toBe("12");
+    expect(summary?.status).toBe("completed");
+    expect(summary?.phases["readiness"]?.status).toBe("completed");
+  });
+  test.each([
+    { command: "auto", target: undefined, expectedTarget: "auto" },
+    { command: "do", target: "#95", expectedTarget: "#95" },
+  ])(
+    "reports a menu-selected $command failure and closes its transition",
+    async ({ command, target, expectedTarget }) => {
+      let output = "";
+      const stream = {
+        isTTY: false,
+        write(chunk: string) {
+          output += chunk;
+        },
+      };
+      const presentation = new Presenter({ stream, errorStream: stream });
+      const notices: ExitNotificationRequest[] = [];
+      const code = await Effect.runPromise(
+        runCli([]).pipe(
+          Effect.provideService(CommandExecution, {
+            execute: () =>
+              Effect.sync(() => {
+                presentation.run({ command, target });
+                presentation.transition("Preparation");
+              }).pipe(
+                Effect.andThen(Effect.fail(new Error("preparation failed"))),
+              ),
+          }),
+          Effect.provideService(ExitNotifications, {
+            send: (request) =>
+              Effect.sync(() => {
+                notices.push(request);
+              }),
+            deliver: () => Effect.void,
+          }),
+          Effect.provideService(Presentation, presentation),
+          Effect.provide(applicationLayer),
+        ),
+      );
+      expect(code).toBe(1);
+      expect(
+        output
+          .split("\n")
+          .filter((line) => line === `FAILED ${expectedTarget} · run failed`),
+      ).toHaveLength(1);
+      expect(output).toContain(
+        `FAILED ${target ?? "Roark"} · Preparation · failed`,
+      );
+      expect(output).toContain("preparation failed");
+      expect(notices).toEqual([{ argv: [], succeeded: false }]);
+      output = "";
+      presentation.transition("Next operation");
+      expect(output).not.toContain("Preparation");
+    },
+  );
   test.each([false, true])(
     "verification defects bypass ordinary CLI failure handling (expected failure: %s)",
     async (withFailure) => {

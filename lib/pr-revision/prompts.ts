@@ -14,7 +14,7 @@ Classify every relevant unresolved/current feedback item as exactly one of:
 - already-addressed
 - needs-human
 - non-blocking
-- invalid/stale
+- invalid-stale
 
 If any item needs human clarification/decision before code changes, set status needs-human.
 If there are no must-fix-current items and no needs-human items, set status no-action-needed.
@@ -44,15 +44,21 @@ export function revisionImplementationPrompt(
 You are implementing PR #${context.prNumber} revision ${context.revision}${pass > 0 ? ` fix pass ${pass}` : ""}.
 Use ${context.agentRevisionDirRelative}/revision-plan.json as the canonical revision plan.
 ${priorReviewInput}
-Apply only planner-classified must-fix-current items and repair any verification failure captured for this fix pass. Do not implement non-blocking, invalid/stale, already-addressed, or needs-human items.
+Apply only planner-classified must-fix-current items and repair any verification failure captured for this fix pass. Do not implement non-blocking, invalid-stale, already-addressed, or needs-human items.
 Keep scope minimal and inspect the current diff before editing.
 
 Complete this phase only by calling submit_revision_execution with:
 - summary: a concise account of the completed work
-- feedbackDispositions: exactly one final disposition for every feedbackItems id in revision-plan.json, using addressed or skipped for must-fix-current items and the classification-compatible status for all other items, paired with concrete details
+- feedbackDispositions: exactly one final disposition for every feedbackItems id in revision-plan.json, paired with concrete details explaining the resolution or why work remains
 - changedFiles: repository-relative paths paired with what changed
 - validation: exact commands with passed, failed, or not-run status and observed details
 - additionalSections: material problem-specific discoveries, tradeoffs, or context that do not fit the standard fields; choose each heading freely
+
+Choose each feedbackDispositions status from the item's planning classification:
+- must-fix-current: addressed when the requested fix is complete; skipped when it remains unaddressed, with a concrete reason in details
+- already-addressed: already-addressed
+- needs-human: needs-human
+- non-blocking or invalid-stale: not-actionable
 
 On fix passes, carry forward the disposition for every planned feedback id; do not report only the work performed in the latest pass.
 Additional sections are non-routing context. Every planned feedback item must still appear exactly once in feedbackDispositions.
