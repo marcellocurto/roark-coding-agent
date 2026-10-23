@@ -57,7 +57,7 @@
     "@effect/vitest": "workspace:^",
     "@types/node": "^26.2.0",
     "effect": "workspace:^",
-    "vite": "^8.2.2",
+    "vite": "^8.2.4",
     "vitest": "^4.1.11"
   }
 }
